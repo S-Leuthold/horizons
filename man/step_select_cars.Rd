@@ -53,13 +53,16 @@ For best results, this step should be applied \emph{after} spectral preprocessin
 derivatives) and \emph{before} PCA or model fitting. CARS is particularly effective for
 identifying minimal wavelength sets that maintain predictive performance.
 
-CARS runs on at most 150 cluster representatives of the selected columns
-(correlation clustering), after dropping near-constant columns, for 50
-iterations. Each iteration fits a PLS
-model of up to five components on a Monte Carlo sample of 80\% of the rows,
-weighted by the bands' accumulated importance, and scores it by its
-leave-one-out RMSEP at its best number of components; the bands kept then
-shrink on an exponential schedule to two. The step returns the set of
+CARS runs as published (Li et al. 2009) on at most 150 cluster
+representatives of the selected columns (correlation clustering), after
+dropping near-constant columns, for 50 iterations. Each iteration fits a
+PLS model of up to five components on a Monte Carlo sample of 80\% of the
+rows and scores it by its leave-one-out RMSEP at its best number of
+components. The fit's coefficients weight the bands afresh: an
+exponentially decreasing function keeps the most heavily weighted (from
+every band down to two over the iterations), and adaptive reweighted
+sampling draws among those, by weight and with replacement, as many times
+as there are bands, keeping the bands drawn. The step returns the set of
 bands the lowest score was measured on (#106), each kept representative
 bringing its whole cluster. The trained step records this in its \code{cars}
 element: the bands it selected from, the representatives, each

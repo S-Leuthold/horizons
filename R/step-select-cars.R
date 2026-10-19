@@ -30,13 +30,16 @@
 #' derivatives) and *before* PCA or model fitting. CARS is particularly effective for
 #' identifying minimal wavelength sets that maintain predictive performance.
 #'
-#' CARS runs on at most 150 cluster representatives of the selected columns
-#' (correlation clustering), after dropping near-constant columns, for 50
-#' iterations. Each iteration fits a PLS
-#' model of up to five components on a Monte Carlo sample of 80% of the rows,
-#' weighted by the bands' accumulated importance, and scores it by its
-#' leave-one-out RMSEP at its best number of components; the bands kept then
-#' shrink on an exponential schedule to two. The step returns the set of
+#' CARS runs as published (Li et al. 2009) on at most 150 cluster
+#' representatives of the selected columns (correlation clustering), after
+#' dropping near-constant columns, for 50 iterations. Each iteration fits a
+#' PLS model of up to five components on a Monte Carlo sample of 80% of the
+#' rows and scores it by its leave-one-out RMSEP at its best number of
+#' components. The fit's coefficients weight the bands afresh: an
+#' exponentially decreasing function keeps the most heavily weighted (from
+#' every band down to two over the iterations), and adaptive reweighted
+#' sampling draws among those, by weight and with replacement, as many times
+#' as there are bands, keeping the bands drawn. The step returns the set of
 #' bands the lowest score was measured on (#106), each kept representative
 #' bringing its whole cluster. The trained step records this in its `cars`
 #' element: the bands it selected from, the representatives, each
@@ -184,11 +187,15 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
   ## Stage 3: Run CARS
   ## ---------------------------------------------------------------------------
-  ## Each iteration fits a weighted PLS on a Monte Carlo sample of the rows,
-  ## using the bands entering it, scores that fit, and eliminates down to a
-  ## retention schedule that shrinks exponentially to two bands. The step
-  ## returns the set the lowest score was measured on (#106): the set entering
-  ## that iteration, kept as the loop runs, not a rerun with new draws.
+  ## The published method (Li et al. 2009; libPLS's carspls). Each iteration
+  ## fits a PLS model on a Monte Carlo sample of the rows, using the bands
+  ## entering it, and scores the fit. Its coefficients weight the bands
+  ## afresh: the exponentially decreasing function keeps the K most heavily
+  ## weighted (EDF), and adaptive reweighted sampling draws as many times as
+  ## there are bands, with replacement, by weight among those K, keeping the
+  ## bands drawn (ARS). The step returns the set the lowest score was
+  ## measured on (#106): the set entering that iteration, every band of
+  ## which its fit was given.
 
   n_iterations <- 50
   mc_ratio     <- 0.8
@@ -199,7 +206,6 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   decay     <- exp(log(2 / n_vars) / (n_iterations - 1))
 
   selected <- seq_len(n_vars)
-  weights  <- rep(1, n_vars)
   sets     <- vector("list", n_iterations)
   scores   <- rep(NA_real_, n_iterations)
 
@@ -207,29 +213,29 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
     sets[[iter]] <- selected
 
-    ## The schedule keeps at least two bands, so every set entering an
-    ## iteration has two or more
+    ## EDF's count: from every band down to two over the iterations
     n_keep     <- min(max(2, floor(n_vars * decay^(iter - 1))), length(selected))
     mc_samples <- sample(n_samples, floor(n_samples * mc_ratio))
 
-    X_weighted <- sweep(reduced_mat[mc_samples, selected, drop = FALSE], 2,
-                        weights[selected], "*")
-    pls_data   <- as.data.frame(X_weighted)
+    pls_data   <- as.data.frame(reduced_mat[mc_samples, selected, drop = FALSE])
     pls_data$y <- outcome_vec[mc_samples]
 
-    n_comp  <- min(n_components, ncol(X_weighted) - 1)
+    ### ARS can leave a single band, which PLS fits with one component.
+    n_comp  <- max(1, min(n_components, length(selected) - 1))
     pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp, validation = "LOO")
 
     ## The cross-validated RMSEP at the best number of components, the
-    ## published score (Li et al. 2009); the intercept-only model is left out
+    ## published score; the intercept-only model is left out
     scores[iter] <- min(pls::RMSEP(pls_fit, estimate = "CV", intercept = FALSE)$val)
 
-    ### coef() on a pls fit is a bands x 1 x 1 array.
-    importance <- abs(as.vector(stats::coef(pls_fit, ncomp = n_comp)))
+    ## Weights from this fit's coefficients alone (coef() on a pls fit is a
+    ## bands x 1 x 1 array)
+    w <- abs(as.vector(stats::coef(pls_fit, ncomp = n_comp)))
+    w <- w / sum(w)
 
-    weights[selected] <- weights[selected] * importance
-    threshold         <- sort(importance, decreasing = TRUE)[n_keep]
-    selected          <- selected[importance >= threshold]
+    edf      <- order(w, decreasing = TRUE)[seq_len(n_keep)]
+    drawn    <- edf[sample.int(length(edf), n_vars, replace = TRUE, prob = w[edf])]
+    selected <- selected[sort(unique(drawn))]
 
   }
 

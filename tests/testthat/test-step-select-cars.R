@@ -133,8 +133,8 @@ describe("step_select_cars() selects", {
     skip_if_not_installed("pls")
 
     ## Over seeds 1 to 20 (the recipe built under the seed, as here) both
-    ## signal bands survive at every seed, with 3 to 40 bands kept (median
-    ## 21); at seed 1 the set is pinned below.
+    ## signal bands survive at every seed, with 2 to 8 bands kept (median 3);
+    ## at seed 1 the set is pinned below.
     d <- cars_signal_data()
 
     prepped  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))
@@ -142,10 +142,7 @@ describe("step_select_cars() selects", {
 
     expect_true(all(c("wn_3980", "wn_3950") %in% selected))
     expect_lt(length(selected), 40L)
-    expect_setequal(selected, paste0("wn_", c(3922, 3926, 3928, 3930, 3932, 3934, 3936, 3938,
-                                              3944, 3946, 3948, 3950, 3956, 3958, 3960, 3964,
-                                              3968, 3972, 3974, 3978, 3980, 3990, 3994, 3996,
-                                              3998, 4000)))
+    expect_setequal(selected, paste0("wn_", c(3926, 3938, 3940, 3950, 3954, 3978, 3980, 4000)))
 
   })
 
@@ -234,6 +231,113 @@ describe("step_select_cars() returns the set it scored (#106)", {
 
     expect_true(any(with_intercept < components))
     expect_equal(rec$scores, components)
+
+  })
+
+})
+
+
+describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
+
+  ## Each iteration's fit and the bands it was given, at seed 1
+  cars_traced <- function(seed = 1) {
+
+    seen <- list()
+    fits <- list()
+    real <- pls::plsr
+    local_mocked_bindings(plsr = function(formula, data, ...) {
+      fit <- real(formula, data = data, ...)
+      seen[[length(seen) + 1L]] <<- setdiff(names(data), "y")
+      fits[[length(fits) + 1L]] <<- list(fit = fit, data = data)
+      fit
+    }, .package = "pls")
+
+    d    <- cars_signal_data()
+    step <- withr::with_seed(seed, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+
+    list(step = step, seen = seen, fits = fits)
+
+  }
+
+  it("returns no band its scoring fit gave no weight", {
+
+    skip_if_not_installed("pls")
+
+    tr     <- cars_traced()
+    chosen <- tr$fits[[tr$step$cars$iteration]]
+    bands  <- setdiff(names(chosen$data), "y")
+    coefs  <- abs(as.vector(stats::coef(chosen$fit, ncomp = chosen$fit$ncomp)))
+
+    sds    <- vapply(chosen$data[bands], stats::sd, numeric(1))
+
+    ## The fit is given the bands as they are, so none is shrunk towards
+    ## nothing; a running product of weights drove most to 1e-80 and below
+    expect_setequal(tr$step$selected_vars, bands)
+    expect_gt(min(sds) / max(sds), 1e-6)
+    expect_gt(min(coefs) / max(coefs), 1e-6)
+
+  })
+
+  it("shrinks the set every iteration within the exponential schedule, drawing from the bands it had", {
+
+    skip_if_not_installed("pls")
+
+    tr    <- cars_traced()
+    decay <- exp(log(2 / 40) / 49)
+    sizes <- lengths(tr$seen)
+
+    for (i in seq_len(length(tr$seen) - 1L)) {
+
+      n_keep <- max(2, floor(40 * decay^(i - 1)))
+
+      expect_true(all(tr$seen[[i + 1L]] %in% tr$seen[[i]]), label = paste("iteration", i))
+      expect_lte(sizes[i + 1L], min(n_keep, sizes[i]), label = paste("iteration", i))
+
+    }
+
+  })
+
+  it("draws, at every iteration, as many times as there are bands, as carspls does", {
+
+    skip_if_not_installed("pls")
+
+    d     <- cars_signal_data()
+    real  <- base::sample.int
+    draws <- integer(0)
+
+    ## The Monte Carlo row samples draw without weights; the adaptive
+    ## reweighted sampling draws by weight, with replacement
+    local_mocked_bindings(sample.int = function(n, size = n, replace = FALSE, prob = NULL, ...) {
+      if (!is.null(prob)) draws <<- c(draws, if (isTRUE(replace)) size else NA_integer_)
+      real(n, size, replace, prob, ...)
+    }, .package = "base")
+
+    withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))
+
+    expect_length(draws, 50L)
+    expect_true(all(draws %in% 40L))
+
+  })
+
+  it("draws the same bands under the same seed, and others under another", {
+
+    skip_if_not_installed("pls")
+
+    d    <- cars_signal_data()
+    prep <- function(seed) {
+      withr::with_seed(seed, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+    }
+
+    a <- prep(1)
+    b <- prep(1)
+
+    expect_identical(a$selected_vars, b$selected_vars)
+    expect_identical(a$cars, b$cars)
+
+    ## The draws differ by seed: of seeds 2 to 4, at least one keeps a set
+    ## other than seed 1's
+    others <- lapply(2:4, function(s) sort(prep(s)$selected_vars))
+    expect_false(all(vapply(others, identical, logical(1), sort(a$selected_vars))))
 
   })
 
