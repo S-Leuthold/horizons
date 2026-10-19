@@ -561,6 +561,19 @@ describe("step_select_boruta() with too few bands to select from", {
     expect_identical(w$step, "step_select_boruta")
     expect_output(print(step), "Too few bands to run Boruta, so the 1 left were kept")
 
+    ## The record has every field a run's has, its settings among them
+    expect_identical(step$boruta$n_kept, 1L)
+    expect_identical(step$boruta$n_constant, 49L)
+    expect_identical(step$boruta$max_runs, 25L)
+    expect_identical(step$boruta$num_trees, 250L)
+
+    full <- boruta_signal_data()
+    local_mocked_bindings(Boruta = mock_boruta_deciding(function(nm) rep("Confirmed", length(nm))),
+                          .package = "Boruta")
+    ran <- recipes::prep(boruta_recipe(full), training = full)$steps[[1]]$boruta
+
+    expect_setequal(names(step$boruta), names(ran))
+
   })
 
 })

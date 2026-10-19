@@ -169,6 +169,10 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   outcome_vec  <- training[[x$outcome]]
   spectra_mat  <- as.matrix(training[, col_names, drop = FALSE])
 
+  ## Boruta's run and forest settings, defined once for both records
+  max_runs  <- 25L
+  num_trees <- 250L
+
   ## ---------------------------------------------------------------------------
   ## Stage 2: Variance filtering and clustering
   ## ---------------------------------------------------------------------------
@@ -198,11 +202,12 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
                            n_rejected   = 0L,
                            decision     = NULL,
                            runs         = 0L,
-                           max_runs     = 25L,
-                           num_trees    = 250L,
+                           max_runs     = max_runs,
+                           num_trees    = num_trees,
                            mtry         = NA_integer_,
                            mtry_by_run  = integer(0),
                            retained_all = FALSE,
+                           n_kept       = length(col_names_filtered),
                            skipped      = TRUE),
       skip          = x$skip,
       id            = x$id
@@ -229,8 +234,6 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## to Boruta() as `ntree` or `mtry` would do nothing unless the importance
   ## source read them.
 
-  max_runs     <- 25L
-  num_trees    <- 250L
   n_features   <- ncol(reduced_mat)
   optimal_mtry <- min(max(5, round(sqrt(n_features) * 2)), n_features - 1)
 
