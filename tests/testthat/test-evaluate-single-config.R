@@ -1598,17 +1598,6 @@ describe("evaluate_single_config() - a PLS config", {
 
 })
 
-## Boruta, mocked to reject every attribute it is given, so the step keeps
-## every band and records it
-mock_boruta_rejecting <- function(x, y, ...) {
-
-  decision <- factor(rep("Rejected", ncol(x)), levels = c("Tentative", "Confirmed", "Rejected"))
-  names(decision) <- colnames(x)
-
-  structure(list(finalDecision = decision), class = "Boruta")
-
-}
-
 describe("evaluate_single_config() - a selection step's warning comes from the final fit's recipe", {
 
   it("raises Boruta keeping every band once, for every model, read from the final fit", {

@@ -1,7 +1,7 @@
 # ensemble() - the meta-learner as one unit / says in its own words that the meta-learner could not be built, and when CV+ could not be calibrated
 
     Code
-      ensemble(ens_fitted(), method = "penalized", optimize = FALSE, compute_uq = FALSE)
+      ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE)
     Condition
       Error in `ensemble()`:
       ! The penalized ensemble could not be built: its meta-learner failed.
@@ -11,7 +11,7 @@
 ---
 
     Code
-      invisible(ensemble(ens_fitted(), method = "weighted", optimize = FALSE))
+      invisible(ensemble(fitted, method = "weighted", optimize = FALSE))
     Condition
       Warning:
       Prediction intervals (CV+) were not computed: CV+ fold models failed: a fold refit failed

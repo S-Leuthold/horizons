@@ -313,6 +313,31 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
 
   })
 
+  it("keeps, as each next set, exactly the bands its weighted draw picked from the pool", {
+
+    skip_if_not_installed("pls")
+
+    tr <- cars_traced()
+
+    ## The pool is the top bands by this fit's weight; the next set is the
+    ## bands the reweighted sampling drew from it, each once, in their order
+    for (i in seq_len(49L)) {
+
+      fit  <- tr$fits[[i]]$fit
+      w    <- abs(as.vector(stats::coef(fit, ncomp = fit$ncomp)))
+      pool <- order(w, decreasing = TRUE)[seq_len(tr$pools[i])]
+
+      expect_identical(tr$seen[[i + 1L]], tr$seen[[i]][sort(unique(pool[tr$draws[[i]]]))],
+                       label = paste("iteration", i))
+
+    }
+
+    ## Drawn with replacement, it leaves pooled bands out: at some iteration
+    ## the next set is smaller than the pool it was drawn from
+    expect_true(any(lengths(tr$seen)[-1] < tr$pools[-50]))
+
+  })
+
   it("cuts after each fit to the share the next iteration may hold, as carspls does", {
 
     skip_if_not_installed("pls")

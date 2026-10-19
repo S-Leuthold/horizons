@@ -315,6 +315,7 @@ describe("fit_ensemble_uq() - coverage", {
     ## The guardrail added after the 7%-coverage bug: a bundle whose own
     ## diagnostic sits more than 0.15 from the level still ships, with a warning
     ens_ref <- ens_built("weighted")
+    fitted  <- ens_fitted()
     bundle  <- ens_ref$ensemble$uq
 
     bundle$oof_coverage <- 0.60
@@ -330,7 +331,7 @@ describe("fit_ensemble_uq() - coverage", {
     ## at the end
     bundle$oof_coverage <- 0.60
     w <- expect_warning(
-      ens <- suppressWarnings(ensemble(ens_fitted(), method = "weighted", optimize = FALSE),
+      ens <- suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE),
                               classes = "simpleWarning"),
       "is far from the target level", class = "horizons_warning_quality"
     )
@@ -717,12 +718,14 @@ describe("ensemble UQ - degradation and gates", {
 
     ## UQ never fails the ensemble: a gate or a fold refit that fails leaves
     ## $ensemble$uq empty, the log says why, and one skipped warning is raised
+    fitted <- ens_fitted()
+
     local_mocked_bindings(fit_uq_fold_models = function(...) stop("a fold refit failed"))
 
     for (verbose in c(FALSE, TRUE)) {
 
       out <- utils::capture.output(run <- collect_warnings(
-        ensemble(ens_fitted(), method = "weighted", optimize = FALSE,
+        ensemble(fitted, method = "weighted", optimize = FALSE,
                  control = control_horizons(verbose = verbose)),
         "Prediction intervals \\(CV\\+\\) were not computed"
       ))
@@ -750,12 +753,14 @@ describe("ensemble UQ - degradation and gates", {
 
   it("stops the call when an invariant breaks inside the CV+ calibration", {
 
+    fitted <- ens_fitted()
+
     local_mocked_bindings(fit_uq_fold_models = function(...) {
       abort_horizons("a broken invariant", kind = "internal")
     })
 
     expect_error(
-      suppressWarnings(ensemble(ens_fitted(), method = "weighted", optimize = FALSE)),
+      suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE)),
       class = "horizons_error_internal"
     )
 

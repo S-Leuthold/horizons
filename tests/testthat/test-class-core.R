@@ -1475,6 +1475,27 @@ test_that("validate_horizons_ensemble accepts an improvement of NA, which no ran
 
 })
 
+test_that("validate_horizons_ensemble refuses warnings that are not character, or a contract without the key", {
+
+  obj <- make_valid_ensemble()
+
+  bad <- obj
+  bad$ensemble$warnings <- 1
+  err <- expect_error(validate_horizons_ensemble(bad), class = "horizons_error_validation")
+  expect_true(any(grepl("ensemble$warnings must be NULL or character", err$findings, fixed = TRUE)))
+
+  gone <- obj
+  gone$ensemble$warnings <- NULL
+  err <- expect_error(validate_horizons_ensemble(gone), class = "horizons_error_validation")
+  expect_true(any(grepl("warnings", err$findings, fixed = TRUE)))
+
+  ## Character is accepted
+  kept <- obj
+  kept$ensemble["warnings"] <- list("A line of the ensemble's own.")
+  expect_identical(validate_horizons_ensemble(kept), kept)
+
+})
+
 test_that("validate_horizons_ensemble tolerates NULL oof_predictions and uq", {
 
   ## Arrange. `[<-` with list(NULL) sets the value to NULL while KEEPING the

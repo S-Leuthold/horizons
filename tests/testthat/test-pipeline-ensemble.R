@@ -516,6 +516,53 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
+  it("keeps only the chosen candidate's tune warnings when it tunes, and says when it cannot tell them apart (#109)", {
+
+    fitted <- ens_fitted()
+
+    ## Each of the grid's ten model stages (one per mixture; penalty is a
+    ## submodel) leaves a warning of its own on the first fold, named by a
+    ## letter (the warnings shown group texts that differ only in their
+    ## numbers), and the choice is fixed at a mixture of 1
+    real_grid <- tune::tune_grid
+    local_mocked_bindings(tune_grid = function(...) {
+      res <- real_grid(...)
+      res$.notes[[1]] <- dplyr::bind_rows(res$.notes[[1]], tibble::tibble(
+        location = sprintf("preprocessor 1/1, model %d/10", 1:10),
+        type     = "warning",
+        note     = paste("stage", LETTERS[1:10], "warned"),
+        trace    = rep(list(NULL), 10)
+      ))
+      res
+    }, .package = "tune")
+
+    local_mocked_bindings(select_complete = function(results, metric, n_folds, debug = FALSE) {
+      cm <- tune::collect_metrics(results)
+      utils::head(cm[cm$mixture == 1, c("penalty", "mixture", ".config")], 1)
+    })
+
+    build <- function() {
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = TRUE, compute_uq = FALSE))
+    }
+
+    expect_length(grep("stage [A-J] warned", build()$ensemble$warnings), 1L)
+
+    ## When tune's grid schedule cannot be read, every stage's warning is
+    ## kept (the lines shown are capped, so more than the chosen one's is
+    ## enough), and the ensemble's warnings say why, as a configuration's row
+    ## does
+    local_mocked_bindings(grid_model_stages = function(...) {
+      stop("tune's grid schedule has no model_stage column", call. = FALSE)
+    })
+
+    warnings <- build()$ensemble$warnings
+
+    expect_gt(length(grep("stage [A-J] warned", warnings)), 1L)
+    expect_true(paste0("The warnings of every grid candidate are shown, not only the chosen one's: ",
+                       "tune's grid schedule has no model_stage column.") %in% warnings)
+
+  })
+
   it("keeps the warnings tune noted for the meta-learner in the ensemble's warnings", {
 
     fitted <- ens_fitted()
@@ -561,34 +608,20 @@ describe("ensemble() - the meta-learner as one unit", {
 
   it("says in its own words that the meta-learner could not be built, and when CV+ could not be calibrated", {
 
+    fitted <- ens_fitted()
+
     local_mocked_bindings(extract_weights_penalized = function(...) stop("the weights broke"))
 
     expect_snapshot(
-      ensemble(ens_fitted(), method = "penalized", optimize = FALSE, compute_uq = FALSE),
+      ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE),
       error = TRUE
     )
 
     local_mocked_bindings(fit_uq_fold_models = function(...) stop("a fold refit failed"))
 
     expect_snapshot(
-      invisible(ensemble(ens_fitted(), method = "weighted", optimize = FALSE))
+      invisible(ensemble(fitted, method = "weighted", optimize = FALSE))
     )
-
-  })
-
-  it("refuses an ensemble whose warnings are not character, or that lacks the key", {
-
-    ens <- ens_built("weighted")
-
-    bad <- ens
-    bad$ensemble$warnings <- 1
-    err <- expect_error(validate_horizons_ensemble(bad), class = "horizons_error_validation")
-    expect_true(any(grepl("ensemble$warnings must be NULL or character", err$findings, fixed = TRUE)))
-
-    gone <- ens
-    gone$ensemble$warnings <- NULL
-    err <- expect_error(validate_horizons_ensemble(gone), class = "horizons_error_validation")
-    expect_true(any(grepl("warnings", err$findings, fixed = TRUE)))
 
   })
 
