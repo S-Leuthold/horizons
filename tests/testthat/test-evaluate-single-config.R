@@ -826,6 +826,19 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
   })
 
+  it("raises a Ctrl-C during the search again once tune has returned, rather than keeping the iterations before it", {
+
+    ## tune's on.exit() return cancels the interrupt's unwind as it does an
+    ## error's, so without the record the search's first iteration came back
+    ## as the configuration's result
+    local_mocked_bindings(pred_gp = gp_fails_at(2L, rlang::interrupt), .package = "tune")
+
+    got <- tryCatch(run(grid_size = 2), interrupt = function(i) "interrupted")
+
+    expect_identical(got, "interrupted")
+
+  })
+
   it("stops under debug when a candidate the search proposed fails in every fold", {
 
     ## The engine fails on every Bayesian candidate and on none of the grid's:

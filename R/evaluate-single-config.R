@@ -309,6 +309,11 @@ evaluate_single_config <- function(config_row,
     ## death is read from that text (worker_death_warning()) and stops the
     ## run as systemic once tune_bayes() has returned, as a death in the grid
     ## stage does.
+    ##
+    ## The same on.exit() return swallows a Ctrl-C during the search, so the
+    ## interrupt is recorded as it arrives and raised again once tune has
+    ## returned: the search the user stopped is not kept as a result, nor
+    ## its configuration checkpointed as complete.
 
     final_tune_results <- grid_results
     n_dropped          <- 0L
@@ -327,6 +332,7 @@ evaluate_single_config <- function(config_row,
         stopped     <- NULL
         all_failed  <- NULL
         worker_died <- NULL
+        interrupted <- FALSE
 
         read_log <- function(m) {
           text <- cli::ansi_strip(conditionMessage(m))
@@ -366,13 +372,16 @@ evaluate_single_config <- function(config_row,
               ),
               message = read_log
             )),
-            warning = read_warning,
-            error   = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e)
+            warning   = read_warning,
+            error     = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e),
+            interrupt = function(i) interrupted <<- TRUE
           ),
           ## An error tune did not recover from (before its loop starts):
           ## recorded above, nothing to keep
           error = function(e) NULL
         )
+
+        if (interrupted) rlang::interrupt()
 
         if (!is.null(worker_died)) {
 
