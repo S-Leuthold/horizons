@@ -18,11 +18,13 @@ cluster_spectral_predictors(
 \item{method}{Character. Clustering method: either \code{"correlation"} or \code{"euclidean"}.}
 }
 \value{
-A list with three elements:
+A list with four elements:
 \describe{
 \item{reduced_mat}{A data frame with one representative column per cluster.}
 \item{cluster_map}{A named list mapping representative wavenumbers to all members of their cluster.}
 \item{selected_vars}{Character vector of retained wavenumber names.}
+\item{clustered}{Logical. \code{FALSE} when there were fewer bands than \code{k},
+so each band is its own representative; the caller records it.}
 }
 }
 \description{

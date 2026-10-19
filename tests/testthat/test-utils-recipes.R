@@ -1050,8 +1050,7 @@ build_step_prepped <- function(step) {
   d   <- step_data()
   rec <- step_recipe(step, d)
 
-  ## CARS says, as a message, that it clusters fewer columns than it asks
-  ## for; a fixture's build must be quiet.
+  ## A fixture's build must be quiet.
   set.seed(1)
   prepped <- suppressMessages(recipes::prep(rec, training = d))
 

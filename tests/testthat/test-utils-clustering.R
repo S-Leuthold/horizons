@@ -51,11 +51,15 @@ describe("cluster_spectral_predictors() clusters", {
 
   })
 
-  it("returns every band, each its own cluster, when k is at least the band count", {
+  it("returns every band, each its own cluster, when k is at least the band count, and says so in its result", {
 
-    m   <- band_families()
-    res <- suppressMessages(cluster_spectral_predictors(m, k = 10))
+    m <- band_families()
 
+    ## Said in the result, which the caller records, not on the console
+    expect_no_message(res <- cluster_spectral_predictors(m, k = 10))
+
+    expect_false(res$clustered)
+    expect_true(cluster_spectral_predictors(m, k = 2)$clustered)
     expect_identical(res$selected_vars, colnames(m))
     expect_identical(names(res$cluster_map), colnames(m))
     expect_identical(unname(unlist(res$cluster_map)), colnames(m))

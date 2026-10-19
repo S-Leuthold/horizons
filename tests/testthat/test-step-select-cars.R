@@ -91,8 +91,6 @@ describe("step_select_cars() refuses input it cannot use", {
                              skip = TRUE) |>
       step_select_cars(dplyr::matches("^spec[0-9]+$"), outcome = "SOC")
 
-    ## CARS says, as a message, that it clusters fewer columns than it asks
-    ## for.
     prepped  <- suppressMessages(recipes::prep(rec, training = d))
     selected <- prepped$steps[[2]]$selected_vars
 
@@ -628,6 +626,7 @@ describe("step_select_cars() and near-constant bands", {
     expect_identical(step$cars$n_constant, 1L)
     expect_identical(step$cars$n_bands, 159L)
     expect_identical(step$cars$n_representatives, 150L)
+    expect_true(step$cars$clustered)
     expect_false("wn_3900" %in% step$selected_vars)
     expect_gt(length(step$selected_vars), 0L)
     expect_output(print(step), "1 near-constant band dropped before clustering", fixed = TRUE)
@@ -747,13 +746,19 @@ describe("step_select_cars()'s tidy() and print() (#109)", {
 
     skip_if_not_installed("pls")
 
-    d     <- cars_signal_data()
-    step  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+    d <- cars_signal_data()
+
+    ## Forty bands, fewer than the 150 representatives: recorded and printed,
+    ## not said on the console at every prep
+    expect_no_message(step <- withr::with_seed(1, recipes::prep(cars_recipe(d), training = d))$steps[[1]])
+    expect_false(step$cars$clustered)
+
     lines <- utils::capture.output(print(step))
 
-    expect_length(lines, 3L)
+    expect_length(lines, 4L)
     expect_identical(lines[2], "\u2022 Outcome column: SOC")
     expect_identical(lines[3], paste0("\u2022 ", length(step$selected_vars), " wavenumbers retained after CARS"))
+    expect_identical(lines[4], "\u2022 Fewer bands than 150, so each band was its own representative")
 
   })
 

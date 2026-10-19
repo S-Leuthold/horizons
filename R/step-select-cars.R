@@ -51,8 +51,10 @@
 #' rows it is fitted on, less one. The step returns the set with the lowest score (#106), the first
 #' on ties, each kept representative bringing its whole cluster. The trained
 #' step records this in its `cars` element: the bands it selected from
-#' (`n_bands`), the near-constant bands it dropped before (`n_constant`), the
-#' representatives (`n_representatives`), the `path` (a tibble, one row per
+#' (`n_bands`), the near-constant bands it dropped before (`n_constant`),
+#' whether they were clustered (`clustered`, `FALSE` with fewer than 150, when
+#' each band is its own representative), the representatives
+#' (`n_representatives`), the `path` (a tibble, one row per
 #' iteration: its `representatives` and `bands`, `rmsecv`, its standard error
 #' across the folds `se`, and the component count `ncomp`), the iteration
 #' chosen, the bands kept, `retained_all` (always `FALSE`: CARS always
@@ -192,6 +194,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
       selected_vars = kept,
       cars          = list(n_bands           = length(kept),
                            n_constant        = n_constant,
+                           clustered         = FALSE,
                            n_representatives = NA_integer_,
                            path              = NULL,
                            iteration         = NA_integer_,
@@ -302,6 +305,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   cars_record <- list(n_bands           = ncol(spectra_mat),
                       n_constant        = n_constant,
+                      clustered         = cluster_result$clustered,
                       n_representatives = n_vars,
                       path              = path,
                       iteration         = best,
@@ -458,6 +462,9 @@ print.step_select_cars <- function(x,
   if (x$trained) {
     cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS"), "\n", sep = "")
     print_constant_bands(x$cars)
+    if (isFALSE(x$cars$clustered) && !isTRUE(x$cars$skipped)) {
+      cat("\u2022 Fewer bands than 150, so each band was its own representative\n")
+    }
     if (isTRUE(x$cars$skipped)) print_selection_skipped(x)
   } else {
     cat("\u2022 Step not yet trained\n")

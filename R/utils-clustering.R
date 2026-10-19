@@ -11,11 +11,13 @@
 #' @param k Integer. Number of clusters to retain (e.g., 300).
 #' @param method Character. Clustering method: either `"correlation"` or `"euclidean"`.
 #'
-#' @return A list with three elements:
+#' @return A list with four elements:
 #' \describe{
 #'   \item{reduced_mat}{A data frame with one representative column per cluster.}
 #'   \item{cluster_map}{A named list mapping representative wavenumbers to all members of their cluster.}
 #'   \item{selected_vars}{Character vector of retained wavenumber names.}
+#'   \item{clustered}{Logical. `FALSE` when there were fewer bands than `k`,
+#'     so each band is its own representative; the caller records it.}
 #' }
 #'
 #' @examples
@@ -26,7 +28,7 @@
 #'
 #' @importFrom stats cor as.dist hclust cutree
 #' @importFrom purrr map_lgl map_chr
-#' @importFrom cli cli_abort cli_alert_warning
+#' @importFrom cli cli_abort
 #' @keywords internal
 
 cluster_spectral_predictors <- function(spectra_mat,
@@ -41,16 +43,17 @@ cluster_spectral_predictors <- function(spectra_mat,
   ### cutree().
   k <- as.integer(k)
 
+  ### Fewer bands than clusters: each band is its own representative. The
+  ### caller records it rather than this helper printing it at every prep.
   if (ncol(spectra_mat) < k) {
-
-    cli::cli_alert_warning("Number of clusters (k) exceeds number of wavenumbers. Returning original matrix.")
 
     cluster_map        <- as.list(colnames(spectra_mat))
     names(cluster_map) <- colnames(spectra_mat)
 
     return(list(reduced_mat   = spectra_mat,
                 cluster_map   = cluster_map,
-                selected_vars = colnames(spectra_mat)))
+                selected_vars = colnames(spectra_mat),
+                clustered     = FALSE))
 
   }
 
@@ -105,7 +108,8 @@ cluster_spectral_predictors <- function(spectra_mat,
 
   return(list(reduced_mat   = reduced_mat,
               cluster_map   = cluster_map,
-              selected_vars = representative_bands))
+              selected_vars = representative_bands,
+              clustered     = TRUE))
 }
 
 

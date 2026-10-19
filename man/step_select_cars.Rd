@@ -74,8 +74,10 @@ components (the PLS model's own cap), and no more than its bands or the
 rows it is fitted on, less one. The step returns the set with the lowest score (#106), the first
 on ties, each kept representative bringing its whole cluster. The trained
 step records this in its \code{cars} element: the bands it selected from
-(\code{n_bands}), the near-constant bands it dropped before (\code{n_constant}), the
-representatives (\code{n_representatives}), the \code{path} (a tibble, one row per
+(\code{n_bands}), the near-constant bands it dropped before (\code{n_constant}),
+whether they were clustered (\code{clustered}, \code{FALSE} with fewer than 150, when
+each band is its own representative), the representatives
+(\code{n_representatives}), the \code{path} (a tibble, one row per
 iteration: its \code{representatives} and \code{bands}, \code{rmsecv}, its standard error
 across the folds \code{se}, and the component count \code{ncomp}), the iteration
 chosen, the bands kept, \code{retained_all} (always \code{FALSE}: CARS always
