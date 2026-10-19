@@ -272,7 +272,7 @@ fit <- function(x,
 
   if (cold_start) {
 
-    cold         <- cold_start_evaluation(x, metric, seed)
+    cold         <- cold_start_evaluation(x, metric, seed, collector)
     x$evaluation <- cold$evaluation
 
   }
@@ -311,10 +311,11 @@ fit <- function(x,
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
   ## The candidates are evaluate()'s best_config candidates: the successes
-  ## or, when none succeeded, the pruned configs with a cv_<metric>. fit()
-  ## used to keep successes only, so it refused an evaluation whose
-  ## best_config was a pruned config (#38). A cold start's one configuration
-  ## is the member as it stands: not_evaluated, with nothing to rank on.
+  ## or, when none succeeded, the pruned configs, and one without a
+  ## cv_<metric> is left out of the ranking. fit() used to keep successes
+  ## only, so it refused an evaluation whose best_config was a pruned config
+  ## (#38). A cold start's one configuration is the member as it stands:
+  ## not_evaluated, with nothing to rank on.
   candidates  <- if (cold_start) {
     list(rows = eval_results, fallback = FALSE)
   } else {
@@ -329,19 +330,23 @@ fit <- function(x,
   if (!cold_start &&
       (n_candidates == 0 || all(is.na(candidates$rows[[rank_column]])))) {
 
+    ## evaluate() returns such an evaluation, so re-running it would not help;
+    ## a metric the same candidates hold would. The lines are rendered
+    ## already, so each is substituted as text.
+    reason <- unranked_reason(eval_results, rank_metric, "`fit(x, metric = )`")
+
     cli::cli_abort(c(
       "No configuration in {.field evaluation$results} can be fitted.",
-      "x" = if (n_candidates == 0) {
-        "None succeeded, and no pruned configuration has a {.field {rank_column}} value."
-      } else {
-        "{n_candidates} succeeded, but none has a {.field {rank_column}} value."
-      },
-      "i" = "Re-run {.fn evaluate} to record the cross-validated metrics; when every configuration fails it aborts and lists the errors."
+      "x" = "{reason[1]}",
+      stats::setNames(sprintf("{reason[%d]}", seq_along(reason)[-1]), names(reason)[-1])
     ), class = "horizons_input_error")
 
   }
 
   ranked <- if (cold_start) candidates$rows else rank_configs_by_cv(candidates$rows, rank_metric)
+
+  ## A candidate without a value of the ranking metric is left out, said once
+  if (!cold_start) log_unranked(collector, candidates$rows, ranked, rank_metric)
 
   ## Cap n_best at available candidates. A cold start has one configuration
   ## by construction, so the default n_best is no request worth a note.
@@ -1169,6 +1174,8 @@ fit <- function(x,
 #'   keeps the `rank_metric` a cold-started fit recorded, or `"rpd"`.
 #'   Recorded as `rank_metric`; with one configuration it ranks nothing.
 #' @param seed The `seed` passed to `fit()`.
+#' @param collector `fit()`'s collector, from `log_open()`, which records a
+#'   response trim that could not run.
 #' @param call The call the conditions are attributed to. Default: the
 #'   caller, `fit()`.
 #' @return List with `evaluation` (the record), `stratified` (`FALSE` when
@@ -1181,7 +1188,7 @@ fit <- function(x,
 #'   another outcome ([response_trim_request()]).
 #' @keywords internal
 #' @noRd
-cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
+cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::caller_env()) {
 
   configs   <- x$config$configs
   n_configs <- if (is.data.frame(configs)) nrow(configs) else 0L
@@ -1212,14 +1219,14 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   cv_folds    <- x$config$tuning$cv_folds
-  modelled    <- modelling_rows(x$data$analysis, outcome_col)
+  modelled    <- modelling_rows(x$data$analysis, outcome_col, call = call)
   n_modelled  <- nrow(modelled$data)
 
   if (n_modelled < cv_folds * 2) {
 
     cli::cli_abort(c(
       "Too few rows to fit: {n_modelled} ha{?s/ve} an observed {.field {outcome_col}}.",
-      "i" = "{.fn fit} needs at least {cv_folds * 2} (twice {.field cv_folds}), the floor {.fn evaluate} applies."
+      "i" = "{.fn fit} needs at least {cv_folds * 2} (twice {.field cv_folds})."
     ), class = "horizons_input_error", call = call)
 
   }
@@ -1236,10 +1243,10 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
   ## is refused before anything is drawn.
   trim_request <- response_trim_request(x)
 
-  drawn <- draw_eval_split(modelled$data, outcome_col, seed)
+  drawn <- draw_eval_split(modelled$data, outcome_col, seed, call = call)
 
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
-                                     id_col = id_column(role_map))
+                                     id_col = id_column(role_map), collector = collector)
   split   <- trimmed$split
 
   ## The shape of an evaluate() results row (create_failed_result()'s
@@ -1256,6 +1263,7 @@ cold_start_evaluation <- function(x, metric, seed, call = rlang::caller_env()) {
     best_params           = list(NULL),
     error_message         = NA_character_,
     class                 = NA_character_,
+    trace                 = list(NULL),
     warnings              = list(NULL),
     runtime_secs          = NA_real_
   )
@@ -1456,7 +1464,7 @@ trim_settings <- function(trim) {
 #' The message lists the distinct error messages (the first three, each with
 #' the members that raised it, and a count of the rest), and the per-member
 #' results table travels on the condition as `results`, as it does for
-#' `evaluate()`'s `horizons_all_configs_failed`.
+#' `evaluate()`'s `horizons_error_all_configs_failed`.
 #'
 #' @param results `fit()`'s per-member results tibble, with `error_message`.
 #' @param call The call the condition is attributed to. Default: the caller,

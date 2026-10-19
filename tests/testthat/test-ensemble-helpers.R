@@ -203,6 +203,46 @@ describe("build_ensemble_contract() - improvement", {
     expect_equal(contract("rmse")$improvement, sqrt(2.5) - 0.5)
     expect_equal(contract("rpd")$improvement, stats::sd(truth) / 0.5 - stats::sd(truth) / sqrt(2.5))
 
+    ## The stored metrics keep their three columns
+    expect_named(contract("rmse")$metrics, c(".metric", ".estimator", ".estimate"))
+    expect_named(contract("rmse")$member_metrics, c(".metric", ".estimator", ".estimate", "config_id"))
+
+  })
+
+  it("measures against the members with a value, and is NA when the ensemble or every member has none", {
+
+    truth <- c(10, 20, 30, 40)
+    contract <- function(member_pred, ensemble_pred) {
+      build_ensemble_contract(
+        method = "weighted", model = NULL,
+        weights = tibble::tibble(member = c("a", "b"), coef = c(0.5, 0.5)),
+        ensemble_pred = ensemble_pred, member_pred = member_pred,
+        rank_metric = "rpd", runtime_secs = 1, optimize = FALSE, seed = 1L
+      )
+    }
+    members  <- tibble::tibble(config_id = rep(c("a", "b"), each = 4),
+                               sample_id = rep(paste0("s", 1:4), 2),
+                               .pred     = c(11, 19, 32, 38, NA, NA, NA, 36),
+                               truth     = rep(truth, 2))
+    ensemble <- tibble::tibble(sample_id = paste0("s", 1:4),
+                               .pred = truth + c(0.5, -0.5, 0.5, -0.5), truth = truth)
+
+    ## Member b has one complete pair, so no rpd: a is the best member, and
+    ## nothing warns about an empty max()
+    expect_no_warning(got <- contract(members, ensemble))
+    expect_equal(got$improvement, stats::sd(truth) / 0.5 - stats::sd(truth) / sqrt(2.5))
+
+    ## No member has a value
+    none <- members
+    none$.pred[1:3] <- NA
+    expect_no_warning(got <- contract(none, ensemble))
+    expect_identical(got$improvement, NA_real_)
+
+    ## The ensemble has none, a member does
+    unscored <- ensemble
+    unscored$.pred[1:3] <- NA
+    expect_identical(contract(members, unscored)$improvement, NA_real_)
+
   })
 
 })

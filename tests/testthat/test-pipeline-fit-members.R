@@ -72,7 +72,8 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
 
     expect_error(
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
-      "None succeeded, and no pruned configuration has a cv_rpd value.", fixed = TRUE,
+      paste0("None succeeded, and none of the ", nrow(unranked$evaluation$results),
+             " pruned configurations has a cv_rpd value."), fixed = TRUE,
       class = "horizons_input_error"
     )
 
@@ -85,11 +86,39 @@ describe("fit() - an evaluation with only pruned configs (#38)", {
     unranked$evaluation$results$status <- "success"
     unranked$evaluation$results$cv_rpd <- NA_real_
 
-    expect_error(
+    err <- expect_error(
       fit(unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
       "succeeded, but none has",
       class = "horizons_input_error"
     )
+
+    ## evaluate() returns such an evaluation, so the remedy is another metric
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "fit(x, metric = )", fixed = TRUE)
+    expect_no_match(msg, "Re-run", fixed = TRUE)
+
+  })
+
+  it("leaves a configuration without the ranking metric out, and says so once", {
+
+    one_unranked <- pruned
+    one_unranked$evaluation$results$status    <- "success"
+    one_unranked$evaluation$results$cv_rpd[1] <- NA_real_
+    left_out <- one_unranked$evaluation$results$config_id[1]
+
+    got <- collect_warnings(
+      fit(one_unranked, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
+      "left out of the ranking"
+    )
+
+    expect_length(got$warnings, 1L)
+    expect_s3_class(got$warnings[[1]], "horizons_warning_skipped")
+    expect_match(conditionMessage(got$warnings[[1]]), left_out, fixed = TRUE)
+
+    log <- got$value$log[got$value$log$verb == "fit", ]
+    expect_identical(log$topic, "skipped")
+    expect_identical(log$ids[[1]], left_out)
+    expect_false(left_out %in% got$value$models$results$config_id)
 
   })
 

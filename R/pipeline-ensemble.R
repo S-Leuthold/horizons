@@ -318,12 +318,16 @@ render_ensemble_summary <- function(contract, rank_metric) {
 
   imp <- contract$improvement
 
-  imp_line <- paste0("Improvement over best member: ",
-                     ifelse(imp >= 0, "+", ""), round(imp, 4))
+  ## NA when the ensemble or every member has no value of the rank metric
+  imp_line <- if (is.na(imp)) {
+    paste0("Improvement over best member: none to measure, without a ", rank_metric, " to compare")
+  } else {
+    paste0("Improvement over best member: ", ifelse(imp >= 0, "+", ""), round(imp, 4))
+  }
 
   cat(paste0(
     "\u2502  \u251c\u2500 ",
-    if (imp > 0) imp_line else cli::col_yellow(imp_line),
+    if (isTRUE(imp > 0)) imp_line else cli::col_yellow(imp_line),
     "\n"
   ))
 

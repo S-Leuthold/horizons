@@ -517,7 +517,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
       suppressWarnings(evaluate(other, prune = FALSE,
                                 seed = 42L, control = control_horizons(output_dir = outdir))),
       "outcome_range",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })

@@ -243,6 +243,7 @@ SHARED_ARG_NAMES <- c(
   "data_fp",
   "settings",
   "checkpoint_dir",
+  "keep_traces",
   "pkg_version"
 )
 
@@ -260,7 +261,13 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      all candidates); seed re-pinned before every stochastic stage.
 #   3  2026-10-15: every row carries the class of its failure (NA when it
 #      succeeded), so rows checkpointed without it are re-evaluated.
-SCORING_SCHEMA <- 3L
+#   4  2026-10-16: each configuration runs as one unit: a failed row names
+#      its step, its root class and, under keep_traces, its backtrace, and a
+#      recipe step's failure inside tune is reproduced with its class. A
+#      candidate scored on fewer folds than were drawn is not chosen, a cv_*
+#      mean is kept only over every fold (#101), and a failed final fit
+#      fails the configuration (#102).
+SCORING_SCHEMA <- 4L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records
@@ -277,6 +284,12 @@ EVAL_MANIFEST_SCHEMA <- 4L
 # after the three serialization fixes. 1 GiB is ~2.4x headroom. The footprint
 # tests in test-evaluate-parallel.R are the upstream guard.
 EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
+
+# evaluate()'s smallest cross-validation assessment fold, in rows, below which
+# it warns (quality) that the cross-validated metrics rest on few rows. A
+# warning only, so no override: small samples run. Judgement, not a published
+# standard; an RMSE over fewer than ten rows is a weak estimate.
+SMALL_FOLD_ROWS <- 10L
 
 # The circuit breaker's default (control_horizons(breaker = )): this many of
 # the first configurations to finish failing with the same cause stop

@@ -320,24 +320,9 @@ describe("tuning_metric_set()", {
   })
 
   ## An unknown transformation is refused at every verb's door, before a
-  ## metric set is built (config_findings(), test-class-core.R; #234).
-
-  it("aborts on an unknown metric name", {
-
-    expect_error(tuning_metric_set("log", metrics = c("rmse", "mape")), "mape")
-    expect_error(tuning_metric_set("log", metrics = character(0)), "at least one")
-
-  })
-
-  it("aborts on an invalid outcome_range", {
-
-    msg <- "must be a numeric vector of length 2"
-
-    expect_error(tuning_metric_set("log", outcome_range = c(5, 1)),     msg)
-    expect_error(tuning_metric_set("log", outcome_range = c(0, NA)),    msg)
-    expect_error(tuning_metric_set("log", outcome_range = 0),           msg)
-    expect_error(tuning_metric_set("log", outcome_range = c("0", "1")), msg)
-
-  })
+  ## metric set is built (config_findings(), test-class-core.R; #234). The
+  ## metric names are the two callers' constants, and the range is read
+  ## through outcome_range_setting(), which the door validators guarantee, so
+  ## the metric set checks neither.
 
 })

@@ -3,9 +3,8 @@
 # The non-linear combiner: an xgboost model fit on the out-of-fold matrix
 # (members as features, truth as outcome). Unlike the penalized engine it can
 # learn interactions between members, but over a handful of meta-features it
-# can also overfit and underperform the best single member — the design spec
-# (ensemble-design.md §3c) calls this out, and the contract's `improvement`
-# field reports it honestly when it happens.
+# can also overfit and underperform the best single member, and the
+# contract's `improvement` field reports it honestly when it happens.
 #
 # Shares the tune -> refit -> combine-through-model scaffold in
 # fit_tuned_meta_learner(); this file supplies only the xgboost spec, the grid,

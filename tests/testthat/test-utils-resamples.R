@@ -213,7 +213,7 @@ describe("resample_indices() refuses what it cannot round-trip", {
     fx    <- make_resample_fixture()
     folds <- rsample::vfold_cv(rsample::training(fx$split), v = 3, repeats = 2)
 
-    expect_error(resample_indices(fx$split, folds), "single-id")
+    expect_error(resample_indices(fx$split, folds), "single-id", class = "horizons_error_internal")
 
   })
 
@@ -227,7 +227,7 @@ describe("resample_indices() refuses what it cannot round-trip", {
     sw <- rsample::sliding_window(data.frame(y = rnorm(60)),
                                   lookback = 5, assess_start = 3, assess_stop = 4)
 
-    expect_error(resample_indices(sw$splits[[1]], sw), "complement")
+    expect_error(resample_indices(sw$splits[[1]], sw), "complement", class = "horizons_error_internal")
 
   })
 
@@ -242,7 +242,7 @@ describe("rebuild_resamples() fails at the boundary", {
     fx  <- make_resample_fixture()
     idx <- resample_indices(fx$split, fx$folds)
 
-    expect_error(rebuild_resamples(fx$data[1:100, ], idx), "same split")
+    expect_error(rebuild_resamples(fx$data[1:100, ], idx), "same split", class = "horizons_error_internal")
 
   })
 
@@ -418,6 +418,7 @@ describe("draw_stratified()", {
     expect_s3_class(drawn$draw, "vfold_cv")
     expect_true(drawn$stratified)
     expect_false(drawn$strata_failed)
+    expect_identical(drawn$strata_error, NA_character_)
 
   })
 
@@ -447,6 +448,7 @@ describe("draw_stratified()", {
     expect_identical(drawn$draw, "the unstratified draw")
     expect_false(drawn$stratified)
     expect_true(drawn$strata_failed)
+    expect_identical(drawn$strata_error, "stratification refused")
 
   })
 

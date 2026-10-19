@@ -1388,7 +1388,8 @@ contract_keys <- function(slot) {
 #' 6. **metrics**: data frame with `.metric`, `.estimator`, `.estimate`.
 #' 7. **member_metrics**: data frame with `.metric`, `.estimate`,
 #'    `config_id`; every `config_id` must be a known member.
-#' 8. **improvement**: single non-NA numeric.
+#' 8. **improvement**: single numeric; `NA` when the ensemble or every
+#'    member has no value of the rank metric.
 #' 9. **oof_predictions**: NULL, or data frame with `.row`, `.pred`, `truth`.
 #' 10. **optimize / seed**: a single logical and a single numeric, the
 #'     build-time settings [fit_ensemble_uq()] rebuilds the fold models with.
@@ -1583,10 +1584,11 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 
   ## improvement ---------------------------------------------------------------------
 
-  if (!is.numeric(ens$improvement) || length(ens$improvement) != 1 ||
-      is.na(ens$improvement)) {
+  ## NA when the ensemble or every member has no value of the rank metric
+  ## (build_ensemble_contract()), which is a reading, not a broken object
+  if (!is.numeric(ens$improvement) || length(ens$improvement) != 1) {
 
-    errors <- c(errors, cli::format_inline("{.field improvement} must be a single non-NA numeric"))
+    errors <- c(errors, cli::format_inline("{.field improvement} must be a single numeric"))
 
   }
 
