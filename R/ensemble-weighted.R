@@ -37,6 +37,8 @@
 #' @param seed Integer. Recorded on the contract (the engine itself is
 #'   deterministic); ensemble UQ derives its calibration partition from it.
 #'   Default `DEFAULT_ENSEMBLE_SEED` (307).
+#' @param call The frame a member's failure to predict the test rows reports
+#'   (`ensemble()`'s).
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'
@@ -47,7 +49,8 @@ fit_ensemble_weighted <- function(object,
                                   oof,
                                   rank_metric,
                                   optimize = TRUE,
-                                  seed     = DEFAULT_ENSEMBLE_SEED) {
+                                  seed     = DEFAULT_ENSEMBLE_SEED,
+                                  call     = rlang::caller_env()) {
 
   started <- Sys.time()
 
@@ -93,7 +96,7 @@ fit_ensemble_weighted <- function(object,
   ## -------------------------------------------------------------------------
 
   ## Each member predicts the held-out Split-F test set (shared helper).
-  member_pred <- predict_members_on_test(object, members)
+  member_pred <- predict_members_on_test(object, members, call = call)
 
   ## Combine per-member test_F predictions by the weights, sample-aligned.
   ensemble_pred <- member_pred |>

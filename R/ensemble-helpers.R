@@ -222,17 +222,19 @@ horizons_metric_set <- function() {
 #' evaluation data `fit()` reserved), via `predict_members()` — predict once,
 #' back-transform once, one unit per member. Shared by all engines so the
 #' meaning of "test_F" and the per-member prediction contract live in one
-#' place. A member that cannot predict aborts with
-#' `horizons_error_prediction_failed`.
+#' place. A member that cannot predict the test rows aborts with
+#' `horizons_error_prediction_failed`, reporting `call`.
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s.
+#' @param call The frame a member's failure to predict the test rows reports
+#'   (`ensemble()`'s).
 #'
 #' @return A long tibble: `config_id`, `sample_id`, `.pred`, `truth` (original
 #'   scale), one block per member.
 #'
 #' @keywords internal
-predict_members_on_test <- function(object, members) {
+predict_members_on_test <- function(object, members, call = rlang::caller_env()) {
 
   ## Load the namespaces the members' predict methods live in, as
   ## predict.horizons_ensemble() does. An installed package loads its Imports
@@ -263,7 +265,11 @@ predict_members_on_test <- function(object, members) {
   ## comparison must see raw model behavior — a blow-up member must score
   ## terribly, not be laundered by the deploy guardrail. A member that cannot
   ## predict the test rows stops the build with the same error.
-  member_pred <- predict_members(object, members, test_data)
+  member_pred <- predict_members(
+    object, members, test_data,
+    header = "The ensemble could not be built: {n_failed} of its {n_total} member{?s} could not predict the test rows.",
+    call   = call
+  )
 
   ## A warning a member raised while predicting (an engine's) reaches
   ## ensemble()'s caller as it did before the members ran as units, one per
@@ -319,6 +325,8 @@ predict_members_on_test <- function(object, members) {
 #'   Default `FALSE`.
 #' @param seed Integer. Seed set immediately before the CV folds are drawn, so
 #'   the tuning resamples and the genuine meta-OOF are reproducible.
+#' @param call The frame a member's failure to predict the test rows reports
+#'   (`ensemble()`'s).
 #'
 #' @return The ensemble contract list from [build_ensemble_contract()].
 #'   Aborts with class `horizons_error_internal` when the meta-model returns
@@ -336,7 +344,8 @@ fit_tuned_meta_learner <- function(object,
                                    grid,
                                    extract_weights,
                                    seed      = DEFAULT_ENSEMBLE_SEED,
-                                   allow_par = FALSE) {
+                                   allow_par = FALSE,
+                                   call      = rlang::caller_env()) {
 
   ## `allow_par` (from `ensemble()`'s control) reaches both tune calls via
   ## meta_tune_control(); documented on the roxygen block above.
@@ -481,7 +490,7 @@ fit_tuned_meta_learner <- function(object,
 
   ## Members predict test_F; combine THROUGH the fitted meta-model ----------
 
-  member_pred <- predict_members_on_test(object, members)
+  member_pred <- predict_members_on_test(object, members, call = call)
 
   ## Wide member-prediction matrix with the SAME column names the meta-model
   ## trained on; truth rides through the pivot (constant per sample).

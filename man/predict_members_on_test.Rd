@@ -4,12 +4,15 @@
 \alias{predict_members_on_test}
 \title{Predict Each Member on the Held-Out Test Set}
 \usage{
-predict_members_on_test(object, members)
+predict_members_on_test(object, members, call = rlang::caller_env())
 }
 \arguments{
 \item{object}{A \code{horizons_fit} object.}
 
 \item{members}{Character vector of member \code{config_id}s.}
+
+\item{call}{The frame a member's failure to predict the test rows reports
+(\code{ensemble()}'s).}
 }
 \value{
 A long tibble: \code{config_id}, \code{sample_id}, \code{.pred}, \code{truth} (original
@@ -20,7 +23,7 @@ Has every ensemble member predict the Split-F assessment set (the held-out
 evaluation data \code{fit()} reserved), via \code{predict_members()} — predict once,
 back-transform once, one unit per member. Shared by all engines so the
 meaning of "test_F" and the per-member prediction contract live in one
-place. A member that cannot predict aborts with
-\code{horizons_error_prediction_failed}.
+place. A member that cannot predict the test rows aborts with
+\code{horizons_error_prediction_failed}, reporting \code{call}.
 }
 \keyword{internal}

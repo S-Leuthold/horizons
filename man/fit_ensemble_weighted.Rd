@@ -10,7 +10,8 @@ fit_ensemble_weighted(
   oof,
   rank_metric,
   optimize = TRUE,
-  seed = DEFAULT_ENSEMBLE_SEED
+  seed = DEFAULT_ENSEMBLE_SEED,
+  call = rlang::caller_env()
 )
 }
 \arguments{
@@ -30,6 +31,9 @@ improvement comparison).}
 \item{seed}{Integer. Recorded on the contract (the engine itself is
 deterministic); ensemble UQ derives its calibration partition from it.
 Default \code{DEFAULT_ENSEMBLE_SEED} (307).}
+
+\item{call}{The frame a member's failure to predict the test rows reports
+(\code{ensemble()}'s).}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.

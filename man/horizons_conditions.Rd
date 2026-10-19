@@ -41,8 +41,9 @@ condition as \code{results}.}
 \code{fit()}. The per-member results travel as \code{results}.}
 \item{\code{horizons_error_prediction_failed}}{(run) \code{predict()} had nothing
 to return: the configuration asked for, or every one of them, could
-not predict, or an ensemble's member or its combination could not. One
-row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
+not predict, or an ensemble's member or its combination could not;
+or \code{\link[=ensemble]{ensemble()}} could not be built, because a member could not predict
+the test rows. One row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
 \code{"combination"} for an ensemble's), \code{config_id} (\code{NA} for the
 combination), \code{step}, \code{class} and \code{error_message}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,

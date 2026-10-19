@@ -402,6 +402,36 @@ describe("ensemble() - a member's warning on the test rows", {
 
 })
 
+describe("ensemble() - a member that cannot predict the test rows", {
+
+  ## The build stops, in ensemble()'s words and frame, for the weighted engine
+  ## and for the tuned meta-learners' shared scaffold
+
+  for (method in c("weighted", "penalized")) {
+
+    it(sprintf("stops the build and reports ensemble()'s call (%s)", method), {
+
+      fitted <- ens_fitted()
+      broken <- fitted$models$best_config
+      fitted$models$workflows[[broken]] <- "not a workflow"
+
+      ## The meta-learner's folds warn on the fixture's small n (rsample)
+      err <- expect_error(
+        suppressWarnings(ensemble(fitted, method = method, optimize = FALSE, compute_uq = FALSE)),
+        class = "horizons_error_prediction_failed"
+      )
+
+      expect_identical(rlang::call_name(err$call), "ensemble")
+      expect_match(conditionMessage(err), "The ensemble could not be built: 1 of its", fixed = TRUE)
+      expect_match(conditionMessage(err), "could not predict the test rows", fixed = TRUE)
+      expect_identical(err$results$config_id, broken)
+
+    })
+
+  }
+
+})
+
 ## =========================================================================
 ## predict.horizons_ensemble() — output contract
 ## =========================================================================
@@ -1059,8 +1089,8 @@ describe("ensemble() weighted - test-set combine", {
     ## predictions fall below the floor at 0 and some stay above it
     real_members <- predict_members_on_test
     shifted      <- NULL
-    local_mocked_bindings(predict_members_on_test = function(object, members) {
-      mp       <- real_members(object, members)
+    local_mocked_bindings(predict_members_on_test = function(object, members, ...) {
+      mp       <- real_members(object, members, ...)
       mp$.pred <- mp$.pred - 20
       shifted <<- mp
       mp

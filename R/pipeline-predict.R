@@ -1539,6 +1539,9 @@ log_foreign_warnings <- function(collector, records) {
 #'   `models$workflows`).
 #' @param members Character vector of member `config_id`s to predict.
 #' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
+#' @param header The abort's first line, a cli string that can use
+#'   `n_failed` and `n_total`; `predict()`'s by default, `ensemble()` passes
+#'   its own.
 #' @param call The frame the abort reports.
 #' @return A long tibble: `config_id`, `sample_id`, `.pred` (original scale),
 #'   one block per member, `NA` for the rows a member could not use, with the
@@ -1546,7 +1549,9 @@ log_foreign_warnings <- function(collector, records) {
 #'   each could not use as `"flagged"`.
 #' @keywords internal
 #' @noRd
-predict_members <- function(object, members, new_spectra, call = rlang::caller_env()) {
+predict_members <- function(object, members, new_spectra,
+                            header = "The ensemble cannot predict: {n_failed} of its {n_total} member{?s} failed, and it combines every member.",
+                            call   = rlang::caller_env()) {
 
   ## sample_id is the join key for every downstream combine (weighted average
   ## groups on it; the wide pivot keys rows on it): predict()'s door has
@@ -1571,11 +1576,7 @@ predict_members <- function(object, members, new_spectra, call = rlang::caller_e
     n_failed <- sum(failed)
     n_total  <- length(members)
 
-    abort_prediction_failed(
-      records,
-      "The ensemble cannot predict: {n_failed} of its {n_total} member{?s} failed, and it combines every member.",
-      call = call
-    )
+    abort_prediction_failed(records, header, call = call)
 
   }
 

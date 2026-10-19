@@ -159,8 +159,9 @@ check_arg <- function(check,
 #'     `fit()`. The per-member results travel as `results`.}
 #'   \item{`horizons_error_prediction_failed`}{(run) `predict()` had nothing
 #'     to return: the configuration asked for, or every one of them, could
-#'     not predict, or an ensemble's member or its combination could not. One
-#'     row per failure travels as `results`: its `unit` (`"configuration"`, or
+#'     not predict, or an ensemble's member or its combination could not;
+#'     or [ensemble()] could not be built, because a member could not predict
+#'     the test rows. One row per failure travels as `results`: its `unit` (`"configuration"`, or
 #'     `"combination"` for an ensemble's), `config_id` (`NA` for the
 #'     combination), `step`, `class` and `error_message`.}
 #'   \item{`horizons_error_systemic`}{(run) [evaluate()] stopped early,

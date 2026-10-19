@@ -11,7 +11,8 @@ fit_ensemble_penalized(
   rank_metric,
   optimize = TRUE,
   seed = DEFAULT_ENSEMBLE_SEED,
-  allow_par = FALSE
+  allow_par = FALSE,
+  call = rlang::caller_env()
 )
 }
 \arguments{
@@ -32,6 +33,9 @@ defaults (\code{FALSE}). Default \code{TRUE}.}
 \item{allow_par}{Logical. Passed through from \code{ensemble()}'s control to
 the meta-learner's tune controls; folds parallelise on the registered
 plan when \code{TRUE}. Default \code{FALSE}.}
+
+\item{call}{The frame a member's failure to predict the test rows reports
+(\code{ensemble()}'s).}
 }
 \value{
 The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.
