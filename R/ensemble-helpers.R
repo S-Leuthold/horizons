@@ -715,10 +715,15 @@ build_ensemble_contract <- function(method,
 #'
 #' @details
 #' All ensemble members must predict successfully. A member that fails to
-#' predict on `new_data` aborts the call naming the offending config — the
-#' meta-learner's combination is only valid over the exact member set it was
-#' trained on, so dropping a member would silently change what is being
-#' predicted.
+#' predict on `new_data`, or a combination that fails, aborts the call with
+#' `horizons_error_prediction_failed`, the failures in its `results` field —
+#' the meta-learner's combination is only valid over the exact member set it
+#' was trained on, so dropping a member would silently change what is being
+#' predicted. A row any member could not use (flagged on arrival, or
+#' non-finite after its recipe) is returned as `NA` and named in one
+#' `horizons_warning_flagged`. CV+ intervals that cannot be computed leave
+#' their columns `NA`, with one `horizons_warning_skipped`. The predictions
+#' come back one row per row of `new_data`, in its order.
 #'
 #' **Interval semantics.** Bounds are genuine CV+ aggregates (Barber et al.
 #' 2021) over the retained fold models and signed calibration residuals — not
@@ -813,60 +818,44 @@ predict.horizons_ensemble <- function(object,
   ## -------------------------------------------------------------------------
   ## Step 3: Every member predicts new_data (long frame, original scale)
   ## -------------------------------------------------------------------------
+  ## Each member is one unit, as each configuration is in predict() on a fit;
+  ## one that cannot predict stops the call (predict_members()).
 
   member_pred <- predict_members(object, members, new_spectra)
-
-  ## What the members' units reported (another package's warnings)
-  log_foreign_warnings(collector, attr(member_pred, "unit_records"))
+  records     <- attr(member_pred, "unit_records")
+  flagged     <- attr(member_pred, "flagged")
   attr(member_pred, "unit_records") <- NULL
+  attr(member_pred, "flagged")      <- NULL
+
+  ## A row any member could not use (flagged on arrival, or non-finite after
+  ## its recipe) is not predicted by the ensemble: an xgb meta-model would
+  ## read the member's NA as missing and return a number.
+  bad    <- unique(unlist(flagged))
+  usable <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
 
   ## -------------------------------------------------------------------------
   ## Step 4: Combine member predictions by the meta-learner (per method)
   ## -------------------------------------------------------------------------
+  ## One row per row of new_data, in its order; NA where nothing could be
+  ## predicted. The interval columns are there whenever intervals were asked
+  ## for and the ensemble has a CV+ bundle.
 
   method        <- object$ensemble$method
   outcome_range <- outcome_range_setting(object)
+  uq            <- object$ensemble$uq
+  intervals     <- isTRUE(interval) && !is.null(uq)
+  winsorized    <- NULL
 
-  point <- switch(
-    method,
+  out <- tibble::tibble(sample_id = new_spectra$sample_id,
+                        .pred     = rep(NA_real_, nrow(new_spectra)))
 
-    weighted = combine_ensemble_weighted(member_pred, object$ensemble$weights,
-                                         outcome_range),
+  if (intervals) {
 
-    penalized = ,
-    xgb       = combine_ensemble_metamodel(member_pred, members,
-                                           object$ensemble$model,
-                                           outcome_range)
+    out$.pred_lower     <- rep(NA_real_, nrow(out))
+    out$.pred_upper     <- rep(NA_real_, nrow(out))
+    out$.interval_width <- rep(NA_real_, nrow(out))
 
-    ### No default: the door validator refuses any other method.
-  )
-
-  ## Deploy-time response-bound guardrail, applied ONCE at the combined output.
-  ## Members predict unclamped above (their predictions are meta-learner
-  ## features and must match the raw member OOF the meta-learner trained and
-  ## the UQ fold models calibrated on); the physically-impossible-blow-up
-  ## protection lands here, on the value a user actually receives. The 257 g/kg
-  ## escape this guards against was an ensemble output. Interval bounds are
-  ## deliberately not clamped (uncertainty must not be truncated), so a clamped
-  ## point can sit below an unclamped upper bound — coherent, and documented.
-  bound       <- object$models$response_bound
-  bounded     <- apply_response_bound(point$.pred, bound)
-  winsorized  <- winsorized_report(point$sample_id, point$.pred, bounded, bound)
-  point$.pred <- bounded$values
-
-  log_winsorized(collector, list(winsorized))
-
-  ## -------------------------------------------------------------------------
-  ## Step 5: Intervals (only when ensemble UQ is available) + assemble output
-  ## -------------------------------------------------------------------------
-
-  ## Mirror the single-model seam (predict_one_config): point predictions are
-  ## complete here; intervals are a pure append when a UQ bundle exists. The
-  ## CV+ assembler reuses the Step-3 member predictions (members are never
-  ## re-predicted) and returns sample_id-keyed interval columns — joined, not
-  ## positionally bound, so row-order drift cannot silently misalign them.
-  uq  <- object$ensemble$uq
-  out <- point
+  }
 
   if (isTRUE(interval) && is.null(uq)) {
 
@@ -877,21 +866,94 @@ predict.horizons_ensemble <- function(object,
 
   }
 
-  if (isTRUE(interval) && !is.null(uq)) {
+  if (nrow(usable) > 0) {
 
-    interval_cols <- predict_ensemble_intervals(
-      uq            = uq,
-      member_pred   = member_pred,
-      outcome_range = outcome_range
-    )
+    ## The combination is one unit: when it fails there is nothing to return
+    combined <- run_unit(unit_step("combine", switch(
+      method,
 
-    if (!is.null(interval_cols)) {
+      weighted = combine_ensemble_weighted(usable, object$ensemble$weights,
+                                           outcome_range),
 
-      out <- dplyr::left_join(point, interval_cols, by = "sample_id")
+      penalized = ,
+      xgb       = combine_ensemble_metamodel(usable, members,
+                                             object$ensemble$model,
+                                             outcome_range)
+
+      ### No default: the door validator refuses any other method.
+    )), unit = "combination", id = method)
+
+    records <- dplyr::bind_rows(records, combined$records)
+
+    if (combined$failed) {
+
+      abort_prediction_failed(records, "The ensemble cannot predict: its combination failed.")
+
+    }
+
+    point <- combined$value
+
+    ## Deploy-time response-bound guardrail, applied ONCE at the combined
+    ## output. Members predict unclamped above (their predictions are
+    ## meta-learner features and must match the raw member OOF the
+    ## meta-learner trained and the UQ fold models calibrated on); the
+    ## physically-impossible-blow-up protection lands here, on the value a
+    ## user actually receives. The 257 g/kg escape this guards against was an
+    ## ensemble output. Interval bounds are deliberately not clamped
+    ## (uncertainty must not be truncated), so a clamped point can sit below
+    ## an unclamped upper bound — coherent, and documented.
+    bound      <- object$models$response_bound
+    bounded    <- apply_response_bound(point$.pred, bound)
+    winsorized <- winsorized_report(point$sample_id, point$.pred, bounded, bound)
+
+    out$.pred[match(point$sample_id, out$sample_id)] <- bounded$values
+
+    ## -----------------------------------------------------------------------
+    ## Step 5: CV+ intervals, a unit of their own
+    ## -----------------------------------------------------------------------
+    ## The CV+ assembler reuses the Step-3 member predictions (members are
+    ## never re-predicted) and returns sample_id-keyed interval columns, put
+    ## in place by key, not by position. A failure leaves the bounds NA.
+
+    if (intervals) {
+
+      cv_plus <- run_unit(predict_ensemble_intervals(uq, usable, outcome_range),
+                          unit = "intervals", id = "ensemble")
+
+      records <- dplyr::bind_rows(records,
+                                  cv_plus$records[cv_plus$records$type != "failure", , drop = FALSE])
+
+      if (cv_plus$failed) {
+
+        cause <- unit_failure_message(cv_plus$records, outside = NULL)
+
+        log_warning(collector, "skipped",
+                    "Prediction intervals (CV+) were not computed: {cause}")
+
+      } else {
+
+        bounds <- cv_plus$value
+        at     <- match(bounds$sample_id, out$sample_id)
+
+        out$.pred_lower[at]     <- bounds$.pred_lower
+        out$.pred_upper[at]     <- bounds$.pred_upper
+        out$.interval_width[at] <- bounds$.interval_width
+
+        log_missing_bounds(collector, bounds)
+
+      }
 
     }
 
   }
+
+  ## -------------------------------------------------------------------------
+  ## Step 6: Report, once per topic
+  ## -------------------------------------------------------------------------
+
+  log_flagged(collector, flagged)
+  log_foreign_warnings(collector, records)
+  log_winsorized(collector, list(winsorized))
 
   ## Conformal coverage on a selected training set, and CV+ intervals
   ## calibrated within the training fences, said only when intervals came
@@ -899,6 +961,32 @@ predict.horizons_ensemble <- function(object,
   log_interval_quality(collector, object, intervals_returned(out))
 
   finish_predict(collector, out)
+
+}
+
+#' Collect a warning for the rows whose CV+ bounds are NA
+#'
+#' A row the members could predict but whose CV+ augmented set held a missing
+#' value gets `NA` bounds (#145). Named in one `skipped` warning, beside the
+#' rows that are `NA` because they were flagged.
+#'
+#' @param collector The call's collector.
+#' @param bounds The CV+ interval columns, with `sample_id`.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_missing_bounds <- function(collector, bounds) {
+
+  missing <- bounds$sample_id[is.na(bounds$.pred_lower) | is.na(bounds$.pred_upper)]
+
+  if (length(missing) == 0) return(invisible(collector))
+
+  n <- length(missing)
+
+  log_warning(collector, "skipped", c(
+    "Prediction intervals (CV+) were not computed for {n} sample{?s}: a fold model's prediction or a calibration residual was missing.",
+    "i" = "{shown_ids(missing)}."
+  ), ids = missing)
 
 }
 
@@ -953,10 +1041,9 @@ combine_ensemble_weighted <- function(member_pred, weights,
 #' Clamped to the outcome's range, a floor at zero under the default (#76).
 #'
 #' The wide-frame columns are selected explicitly from the trained-on member
-#' set (not from whatever the pivot happens to produce), and a missing member
-#' column aborts — the meta-model's combination is only valid over the exact
-#' member set it saw, so an incomplete frame must fail loudly rather than
-#' silently mispredict.
+#' set (not from whatever the pivot happens to produce). Every member is
+#' there: `predict_members()` returns every member or aborts, and `predict()`
+#' combines only when there are rows to combine.
 #'
 #' @param member_pred Long tibble from [predict_members()].
 #' @param members Character vector of the trained-on member `config_id`s.
@@ -977,18 +1064,6 @@ combine_ensemble_metamodel <- function(member_pred, members, model,
     tidyr::pivot_wider(names_from   = "config_id",
                        values_from  = ".pred",
                        names_prefix = "member_")
-
-  missing <- setdiff(member_cols, names(wide))
-
-  if (length(missing) > 0) {
-
-    cli::cli_abort(c(
-      "Member prediction{?s} missing for {length(missing)} ensemble member{?s}.",
-      "x" = "Absent: {.val {sub('^member_', '', missing)}}",
-      "i" = "Every ensemble member must predict {.arg new_data}."
-    ))
-
-  }
 
   combined <- stats::predict(
     model,

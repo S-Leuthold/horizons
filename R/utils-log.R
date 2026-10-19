@@ -504,7 +504,10 @@ UNIT_STEPS <- c(
   predict             = "Prediction",
   uq_bake             = "Interval recipe bake",
   uq_quantiles        = "Interval quantiles",
-  ad_distance         = "Applicability-domain distance"
+  ad_distance         = "Applicability-domain distance",
+  combine             = "Ensemble combination",
+  cv_plus_folds       = "CV+ fold predictions",
+  cv_plus_bounds      = "CV+ bounds"
 )
 
 #' The message of a failed unit

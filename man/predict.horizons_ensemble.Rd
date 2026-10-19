@@ -52,10 +52,15 @@ the fitted meta-model.
 }
 \details{
 All ensemble members must predict successfully. A member that fails to
-predict on \code{new_data} aborts the call naming the offending config — the
-meta-learner's combination is only valid over the exact member set it was
-trained on, so dropping a member would silently change what is being
-predicted.
+predict on \code{new_data}, or a combination that fails, aborts the call with
+\code{horizons_error_prediction_failed}, the failures in its \code{results} field —
+the meta-learner's combination is only valid over the exact member set it
+was trained on, so dropping a member would silently change what is being
+predicted. A row any member could not use (flagged on arrival, or
+non-finite after its recipe) is returned as \code{NA} and named in one
+\code{horizons_warning_flagged}. CV+ intervals that cannot be computed leave
+their columns \code{NA}, with one \code{horizons_warning_skipped}. The predictions
+come back one row per row of \code{new_data}, in its order.
 
 \strong{Interval semantics.} Bounds are genuine CV+ aggregates (Barber et al.
 2021) over the retained fold models and signed calibration residuals — not

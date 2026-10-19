@@ -626,6 +626,92 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
 })
 
 ## =========================================================================
+## predict.horizons_ensemble() — rows a member cannot use, and the combine
+## =========================================================================
+## A row any member could not use is NA in the ensemble's output, for every
+## method: an xgb meta-model would read the member's NA as missing and return
+## a number. The combination is one unit; when it fails there is nothing to
+## return.
+
+describe("predict.horizons_ensemble() - flagged rows and the combination", {
+
+  pred_cols <- function(test_set) setdiff(names(test_set), "sample_id")
+
+  for (m in c("weighted", "xgb")) {
+
+    it(paste0("returns NA for a row a member cannot use, and the rest as without it, for ", m), {
+
+      test_set <- ens_test_set()
+      ens      <- ens_built(m)
+
+      bad <- test_set
+      bad[2, intersect(pred_cols(test_set), ens$models$predictor_schema)] <- NA_real_
+
+      w <- collect_warnings(p <- predict(ens, bad, interval = TRUE),
+                            "could not be predicted")$warnings
+
+      expect_length(w, 1L)
+      expect_identical(w[[1]]$log$ids[[1]], bad$sample_id[2])
+
+      expect_equal(nrow(p), nrow(bad))
+      expect_true(is.na(p$.pred[2]) && is.na(p$.pred_lower[2]))
+
+      alone <- suppressWarnings(predict(ens, test_set[-2, ], interval = TRUE))
+      expect_equal(p[-2, ], alone, ignore_attr = TRUE)
+
+    })
+
+  }
+
+  it("returns a row flagged on arrival as NA", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    flagged       <- test_set
+    flagged$.flag <- c("standardize", rep(NA_character_, nrow(test_set) - 1L))
+
+    w <- expect_warning(p <- predict(ens, flagged, interval = FALSE),
+                        class = "horizons_warning_flagged")
+
+    expect_match(conditionMessage(w), "flagged on arrival", fixed = TRUE)
+    expect_true(is.na(p$.pred[1]))
+    expect_true(all(is.finite(p$.pred[-1])))
+
+  })
+
+  it("returns its predictions in new_data's row order", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    set.seed(11)
+    shuffled <- test_set[sample(nrow(test_set)), ]
+
+    p <- predict(ens, shuffled, interval = FALSE)
+
+    expect_identical(p$sample_id, shuffled$sample_id)
+
+  })
+
+  it("aborts with the combination's failure when the combination cannot run", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    local_mocked_bindings(combine_ensemble_weighted = function(...) stop("the weights broke"))
+
+    err <- expect_error(predict(ens, test_set, interval = FALSE),
+                        class = "horizons_error_prediction_failed")
+
+    expect_identical(err$results$step, "combine")
+    expect_match(conditionMessage(err), "its combination failed", fixed = TRUE)
+
+  })
+
+})
+
+## =========================================================================
 ## Members' applicability domain and intervals are not computed
 ## =========================================================================
 ## The member helpers keep only .pred, so a member's AD was baked, scored and

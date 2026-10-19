@@ -708,14 +708,15 @@ predict_ensemble_uq_matrix <- function(uq, wide,
 #' predictions the point path already computed (members are never
 #' re-predicted), runs every retained fold model over them, and aggregates
 #' fold predictions with the calibration residuals into CV+ bounds. Interval
-#' columns are keyed by `sample_id` so the caller joins them to point
-#' predictions — never a positional bind.
+#' columns are keyed by `sample_id` so the caller puts them in place by key —
+#' never a positional bind.
 #'
 #' The ensemble validator at `predict()`'s door has refused a bundle that is
 #' not a CV+ bundle, whose members are not the weights', or whose
-#' calibration set cannot support the default level (#65, #234). Degrades to
-#' `NULL` (point-only predictions), with a warning through
-#' [warn_interval_failure()], only when a fold model fails to predict.
+#' calibration set cannot support the default level (#65, #234). Run by
+#' `predict()` as a unit of its own: a failure raises, labelled with its step
+#' (`cv_plus_folds`, `cv_plus_bounds`), and the bounds are `NA`, with one
+#' `skipped` warning.
 #'
 #' The deployed point prediction may occasionally fall outside its own CV+
 #' interval; this is a known property of jackknife+/CV+ aggregation (the
@@ -724,21 +725,17 @@ predict_ensemble_uq_matrix <- function(uq, wide,
 #'
 #' @param uq The `$ensemble$uq` bundle (from [fit_ensemble_uq()]).
 #' @param member_pred Long tibble from `predict_members()` (`config_id`,
-#'   `sample_id`, `.pred`).
+#'   `sample_id`, `.pred`), for the rows every member could predict.
 #' @param outcome_range Numeric length-2 vector the fold predictions and the
 #'   bounds are clamped to, from [outcome_range_setting()]. Default
 #'   `DEFAULT_OUTCOME_RANGE`.
 #'
 #' @return A tibble — `sample_id`, `.pred_lower`, `.pred_upper`,
-#'   `.interval_width` — or `NULL` (degrade to point-only).
+#'   `.interval_width` — one row per sample.
 #'
 #' @noRd
 predict_ensemble_intervals <- function(uq, member_pred,
                                        outcome_range = DEFAULT_OUTCOME_RANGE) {
-
-  ## The ensemble validator at predict()'s door has checked the bundle: a CV+
-  ## bundle whose members match the weights' and whose calibration set
-  ## supports intervals at level_default.
 
   ## Widen member predictions by sample_id into the canonical member order.
   wide <- member_pred |>
@@ -749,27 +746,14 @@ predict_ensemble_intervals <- function(uq, member_pred,
 
   ### member_pred holds every weighted member, and uq$members is that set.
 
-  ## Fold-model predictions on the new points. A fold model that cannot
-  ## predict degrades the whole interval request rather than erroring the
-  ## point path.
-  matrix_safe <- safely_execute(
-    predict_ensemble_uq_matrix(uq, wide, outcome_range),
-    log_error = FALSE
-  )
+  fold_matrix <- unit_step("cv_plus_folds", predict_ensemble_uq_matrix(uq, wide, outcome_range))
 
-  if (is.null(matrix_safe$result)) {
-
-    warn_interval_failure("predicting from the retained fold models", matrix_safe$error)
-    return(NULL)
-
-  }
-
-  bounds <- cv_plus_bounds(
-    fold_matrix = matrix_safe$result,
+  bounds <- unit_step("cv_plus_bounds", cv_plus_bounds(
+    fold_matrix = fold_matrix,
     fold_id     = uq$calib$fold,
     residuals   = uq$calib$residual,
     level       = uq$level_default
-  )
+  ))
 
   ## Crossing repair then clamp to the outcome's range (repair-then-clamp,
   ## mirroring the single-model assembler; a floor at 0 under the default

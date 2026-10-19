@@ -611,10 +611,9 @@ abort_on_missing_predict_packages <- function(needed, call = rlang::caller_env()
 
   ## Built with paste0(), not glue interpolation: pkg/reasons/hint are all
   ## package- or model-controlled strings (never an upstream error message),
-  ## so there is no brace-injection risk here the way there is for
-  ## warn_interval_failure()'s `detail` — but the resulting {.pkg ...} /
-  ## {.code ...} spans are still literal cli markup, rendered when cli_abort()
-  ## parses the finished vector below.
+  ## so there is no brace-injection risk here — but the resulting
+  ## {.pkg ...} / {.code ...} spans are still literal cli markup, rendered
+  ## when the abort parses the finished vector below.
   bullets <- vapply(missing, function(pkg) {
 
     reasons <- paste(needed[[pkg]], collapse = ", ")
@@ -1441,8 +1440,9 @@ log_foreign_warnings <- function(collector, records) {
 #' @param new_spectra Tibble from [resolve_new_data()] (sample_id + predictors).
 #' @param call The frame the abort reports.
 #' @return A long tibble: `config_id`, `sample_id`, `.pred` (original scale),
-#'   one block per member, with the members' unit records as the attribute
-#'   `"unit_records"`.
+#'   one block per member, `NA` for the rows a member could not use, with the
+#'   members' unit records as the attribute `"unit_records"` and the rows
+#'   each could not use as `"flagged"`.
 #' @keywords internal
 #' @noRd
 predict_members <- function(object, members, new_spectra, call = rlang::caller_env()) {
@@ -1484,6 +1484,7 @@ predict_members <- function(object, members, new_spectra, call = rlang::caller_e
   }))
 
   attr(out, "unit_records") <- records
+  attr(out, "flagged")      <- stats::setNames(lapply(blocks, attr, "flagged"), members)
 
   out
 
@@ -1590,70 +1591,5 @@ predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
     .pred_upper     = hi,
     .interval_width = hi - lo
   )
-
-}
-
-## ---------------------------------------------------------------------------
-## warn_interval_failure() — name a silent interval-degrade (silent helper)
-## ---------------------------------------------------------------------------
-
-#' Warn that interval computation failed and predictions are point-only
-#'
-#' Before #65, [predict_intervals()] (and, for the ensemble path,
-#' [predict_ensemble_intervals()]) degraded to `NULL` (point-only output) on
-#' any failure with no message: a missing `ranger` namespace made
-#' `stats::predict()` on the quantile forest error, the error was swallowed
-#' by `safely_execute()`, and `interval = TRUE` came back with no interval
-#' columns and no explanation. Warn instead, naming the step that failed and
-#' the underlying reason.
-#'
-#' @param stage Character(1). Which step failed (for the warning text).
-#' @param error The reason the step failed: an error condition (from a
-#'   failing `safely_execute()` call), a plain character string (for a
-#'   degrade path that has no caught condition, e.g. a structural check), or
-#'   `NULL`.
-#' @param config_id Character(1) or `NULL`. The config the failure belongs
-#'   to, when there is a single one to name (there is not, for the
-#'   ensemble's whole-bundle degrade points). `NULL` (default) omits it.
-#' @return Invisibly `NULL`. Called for the warning.
-#' @keywords internal
-#' @noRd
-warn_interval_failure <- function(stage, error, config_id = NULL) {
-
-  detail <- if (is.null(error)) {
-
-    "unknown error"
-
-  } else if (inherits(error, "condition")) {
-
-    condition_summary(error)
-
-  } else {
-
-    as.character(error)
-
-  }
-
-  header <- if (is.null(config_id)) {
-
-    "Prediction intervals could not be computed ({stage}); returning point predictions only."
-
-  } else {
-
-    "Prediction intervals could not be computed for config {.val {config_id}} ({stage}); returning point predictions only."
-
-  }
-
-  ## `detail` is upstream, possibly attacker- or data-derived text (a column
-  ## name like a bare "{wn_600}" is a realistic example) — interpolated as a
-  ## VALUE via "{detail}", never handed to cli as a template directly, or a
-  ## brace or unmatched quote in the message would crash predict() here
-  ## instead of just being reported (mirrors ad.R's bake_msg handling).
-  cli::cli_warn(c(
-    "!" = header,
-    "x" = "{detail}"
-  ), class = "horizons_interval_warning")
-
-  invisible(NULL)
 
 }
