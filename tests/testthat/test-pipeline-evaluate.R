@@ -2866,4 +2866,20 @@ describe("evaluate() - the ranking report when pruned configurations hold the me
 
   })
 
+  it("says in the tree's footer that no pruned configuration has the metric when none succeeded and none has it", {
+
+    template <- ev60()$evaluation$results[1, ]
+    rows     <- rows_with(template, c("pruned", "pruned"), c(NA_real_, NA_real_))
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) rows[[config_row$config_id]])
+
+    out <- utils::capture.output(ev <- suppressWarnings(
+      evaluate(make_eval_object(n = 60, n_configs = 2), metric = "rsq", seed = 42L,
+               control = control_horizons(verbose = TRUE))
+    ))
+
+    expect_identical(ev$evaluation$best_config, NA_character_)
+    expect_true("\u2514\u2500 Best: none, since no pruned configuration has a CV RSQ" %in% out)
+
+  })
+
 })

@@ -1096,8 +1096,14 @@ evaluate <- function(x,
 
     if (is.na(best_config_id)) {
 
-      cat(paste0("\u2514\u2500 Best: none, since no configuration that ",
-                 ranking_candidates(all_results, metric)$what, " has a CV ",
+      ## The successes, or the pruned configurations when none succeeded
+      candidates_were <- if (identical(ranking_candidates(all_results, metric)$what, "succeeded")) {
+        "configuration that succeeded"
+      } else {
+        "pruned configuration"
+      }
+
+      cat(paste0("\u2514\u2500 Best: none, since no ", candidates_were, " has a CV ",
                  toupper(metric), "\n"))
 
     } else {
