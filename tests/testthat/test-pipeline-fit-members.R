@@ -2,12 +2,13 @@
 ## Tests: fit() and the members it takes
 ## ---------------------------------------------------------------------------
 ## Which members fit() takes from an evaluation when none passed the prune
-## gate or all fell below it (#38), and what it does when members fail. Each
-## block builds its own objects; make_fit_object() is in helper-fixtures.R.
+## gate or all fell below it (#38), and what it does when members fail. The
+## blocks read their fit objects from fit_obj(), below, or build their own;
+## make_fit_object() is in helper-fixtures.R.
 
 ## The fit objects the member tests read, built once per process
-## (helper-memo.R). Each test reads its object before anything is mocked, so
-## no build runs under a mock.
+## (helper-memo.R). Each test reads its object inside its own it() block,
+## before anything is mocked, so no build runs under a mock.
 fit_obj <- function(n_configs) {
   memo_fixture("members_fit_obj", make_fit_object, n = 60, n_configs = n_configs)
 }
@@ -274,8 +275,12 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
 describe("fit() - member failures", {
 
-  obj <- fit_obj(2L)
-  obj$config$tuning$final_bayesian_iter <- 0L
+  ## Two members, no Bayesian iterations; read inside each it() block
+  member_obj <- function() {
+    obj <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 0L
+    obj
+  }
 
   ## A member failure as fit_single_config() reports one. The message carries
   ## braces, which must reach the abort as text, not as a cli template.
@@ -294,6 +299,8 @@ describe("fit() - member failures", {
   }
 
   it("aborts with horizons_error_all_members_failed when every member fails, naming the errors", {
+
+    obj <- member_obj()
 
     err <- testthat::with_mocked_bindings(
       tryCatch(
@@ -328,6 +335,8 @@ describe("fit() - member failures", {
   it("keeps each member's error_message in models$results", {
 
     skip_unless_slow_tier()
+
+    obj <- member_obj()
 
     real_fit_single_config <- fit_single_config
 
@@ -642,11 +651,10 @@ describe("fit() - each member is one unit", {
 
   it("stops at a Ctrl-C during a warm-start Bayesian search, rather than keeping the iterations before it", {
 
-    ## Real fits of the members, several seconds even without the search
-    skip_unless_slow_tier()
-
-    ## tune's on.exit() return cancels the interrupt's unwind, so without the
-    ## record the search's first iteration came back as the member's result
+    ## One member: its grid and one Bayesian iteration run before the
+    ## interrupt, about two seconds. tune's on.exit() return cancels the
+    ## interrupt's unwind, so without the record the search's first iteration
+    ## came back as the member's result.
     obj          <- fit_obj(1L)
     real_pred_gp <- tune:::pred_gp
     calls        <- 0L

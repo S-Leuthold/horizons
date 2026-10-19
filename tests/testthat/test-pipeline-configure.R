@@ -996,14 +996,15 @@ describe("configure() and the object contract", {
     expect_s3_class(fit_clay, "horizons_fit")
 
     ## Re-configured, the fit is the plain object configured the same way,
-    ## in every slot, so nothing is left for the evaluation to read, but the
-    ## log, which keeps what the fit reported, as a reset keeps it
-    reconfigured <- unclass(run_configure(fit_clay, "oc"))
-    fresh        <- unclass(run_configure(plain, "oc"))
-    slots        <- setdiff(names(fresh), "log")
+    ## so nothing is left for the evaluation to read, but the log, which
+    ## keeps what the fit reported, as a reset keeps it
+    reconfigured <- run_configure(fit_clay, "oc")
+    fresh        <- run_configure(plain, "oc")
 
-    expect_identical(reconfigured[slots], fresh[slots])
     expect_identical(reconfigured$log, fit_clay$log)
+
+    reconfigured$log <- fresh$log
+    expect_identical(reconfigured, fresh)
 
     via_fit   <- run_evaluate(run_configure(fit_clay, "oc"))
     via_plain <- run_evaluate(run_configure(plain, "oc"))
