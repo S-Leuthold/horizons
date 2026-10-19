@@ -283,6 +283,13 @@ on_own_grid <- function(wn, of = wn) {
 #'   resolved pool's, or a registered library's grid before it is downloaded.
 #' @param restandardize [Logical.] Whether the targets were standardized
 #'   already, so the call needs `force = TRUE`.
+#' @param library_form [Character.] The library's `form`; a library in
+#'   memory (`"object"`) or in a file (`"path"`) is named when it is the side
+#'   off its grid.
+#' @param library_standardized [Logical.] Whether the library carries a
+#'   standardization record, so its call needs `force = TRUE`.
+#' @param library_baseline [Logical.] Whether the library was
+#'   baseline-corrected, so the targets' call asks for it too.
 #' @param call The frame the refusal reports: the verb's.
 #'
 #' @return [List.] `shared_columns()`'s result, when the targets are on an
@@ -291,7 +298,7 @@ on_own_grid <- function(wn, of = wn) {
 #' @noRd
 check_shared_columns <- function(target_vars, library_vars, restandardize = FALSE,
                                  library_form = "object", library_standardized = FALSE,
-                                 call = rlang::caller_env()) {
+                                 library_baseline = FALSE, call = rlang::caller_env()) {
 
   cols      <- shared_columns(target_vars, library_vars)
   target_wn <- as.numeric(sub("^wn_", "", target_vars))
@@ -306,8 +313,11 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
 
   t_step <- signif(t_grid$resolution, 4)
   l_step <- signif(l_grid$resolution, 4)
-  remedy <- sprintf("standardize(x, resample = %s, trim = c(%s, %s)%s)",
+  ### The targets' call matches the library's baseline too, or following it
+  ### would land on the standardization door (#107).
+  remedy <- sprintf("standardize(x, resample = %s, trim = c(%s, %s)%s%s)",
                     l_step, l_grid$range[1], l_grid$range[2],
+                    if (library_baseline) ", baseline = TRUE" else "",
                     if (restandardize) ", force = TRUE" else "")
 
   ### A library left on an instrument's own axis is the side off its grid,

@@ -1407,6 +1407,25 @@ test_that("targets on an instrument's own axis that share a few columns by coinc
 })
 
 
+test_that("the grid door's remedy asks for the library's baseline, so following it passes (#236, #107)", {
+
+  ## A hull-corrected library, and targets on an instrument's axis spanning
+  ## it: the call that puts them on its grid has to correct them too, or it
+  ## leads to the standardization door
+  fx <- select_fixture(n_pool = 60)
+  utils::capture.output(pool <- standardize(fx$pool, resample = 4, baseline = TRUE))
+  targets <- make_axis_object(rev(598.1 + 1.93 * (0:1764)), n = 4L, prefix = "I")
+
+  err <- expect_error(select_training(targets, pool, k = 5), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "`standardize(x, resample = 4, trim = c(600, 4000), baseline = TRUE)`", fixed = TRUE)
+
+  utils::capture.output(on_grid <- standardize(targets, resample = 4, trim = c(600, 4000), baseline = TRUE))
+  expect_s3_class(select_training(on_grid, pool, k = 5), "horizons_data")
+
+})
+
+
 test_that("a library on an instrument's own axis is the side named in the remedy (#236)", {
 
   ## No change to the targets can put them on a grid the library is not on,
