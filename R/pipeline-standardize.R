@@ -84,8 +84,9 @@ canonical_grid <- function(lo, hi, step) {
 #'   (`canonical_grid()`), not a sequence stepped from the data's own
 #'   maximum. Exactly one of `target_resolution` and `new_wav` must be given.
 #' @param new_wav `numeric.` An explicit target grid, in any order. Used by
-#'   `select_training()` to bring a pool onto the targets' axis, so the
-#'   package has one resampling routine. Must lie within the range of
+#'   `standardize()` for each contiguous run of the data, and by
+#'   `select_training()` to put the targets on the library's grid for its
+#'   search, so the package has one resampling routine. Must lie within the range of
 #'   `current_wav`; this function never extrapolates. Default: `NULL`.
 #'
 #' @return `list.` With elements:
