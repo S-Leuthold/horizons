@@ -24,7 +24,7 @@ present, point predictions are returned with a one-time note. When the
 members were fit on a response-trimmed training partition
 (\code{validate(remove_outliers = "response")}, #77), the intervals come from out-of-fold predictions on
 the rows inside the training fences, so this warns once, with class
-\code{horizons_response_trim_warning}, that they were calibrated within those
+\code{horizons_warning_quality}, that they were calibrated within those
 fences and can undercover samples outside them.}
 
 \item{...}{Not used; present for S3 method consistency. A \code{level} passed
@@ -67,7 +67,7 @@ full-data refit). This is deliberate and not repaired.
 \strong{Interval level.} Intervals are at the coverage level the CV+ bundle was
 calibrated at in \code{\link[=ensemble]{ensemble()}}, 0.90 by default. \code{predict()} has no \code{level}
 argument: a \code{level} is ignored with a warning of class
-\code{horizons_input_warning}, and any other argument it does not take is an
+\code{horizons_warning_input}, and any other argument it does not take is an
 error of class \code{horizons_error_input}.
 }
 \examples{

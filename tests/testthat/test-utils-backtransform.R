@@ -115,56 +115,42 @@ describe("back_transform_predictions()", {
 describe("apply_response_bound()", {
 
   ## predict() applies the bound to the original-scale predictions
-  ## back_transform_predictions() returns, so these compose the two.
+  ## back_transform_predictions() returns, so these compose the two. The
+  ## bound is silent: predict() reports what it clamped (log_winsorized()).
 
   it("applies after the floor, so both hold at once", {
 
-    expect_warning(
-      r <- apply_response_bound(back_transform_predictions(c(-3, 0.5, 10), "log"), 5),
-      "winsorized"
+    expect_silent(
+      r <- apply_response_bound(back_transform_predictions(c(-3, 0.5, 10), "log"), 5)
     )
 
-    expect_equal(r, c(0, exp(0.5) - 1, 5))
+    expect_equal(r$values, c(0, exp(0.5) - 1, 5))
+    expect_identical(r$over, c(FALSE, FALSE, TRUE))
 
   })
 
-  it("winsorizes log-scale blow-ups to the bound with an informative warning", {
+  it("winsorizes log-scale blow-ups to the bound and marks what it clamped", {
 
     ## The 257 g/kg escape: an unconstrained log-scale prediction inflates
     ## through exp() to a physically impossible value. With a bound supplied,
-    ## the output is clamped to exactly the bound and the warning names the
-    ## count and the pre-clamp max.
+    ## the output is clamped to exactly the bound.
     preds <- c(1, 2, 7)  # exp(7) - 1 = 1095.6
 
-    expect_warning(
-      result <- apply_response_bound(back_transform_predictions(preds, "log"), 100),
-      "winsorized"
-    )
+    result <- apply_response_bound(back_transform_predictions(preds, "log"), 100)
 
-    expect_equal(result[3], 100)
-    expect_equal(result[1:2], exp(c(1, 2)) - 1, tolerance = 1e-10)
-
-    ## Warning content: count and pre-clamp max
-    w <- tryCatch(
-      apply_response_bound(back_transform_predictions(preds, "log"), 100),
-      warning = function(w) conditionMessage(w)
-    )
-    expect_match(w, "1 prediction")
-    expect_match(w, "1095.6")
+    expect_equal(result$values[3], 100)
+    expect_equal(result$values[1:2], exp(c(1, 2)) - 1, tolerance = 1e-10)
+    expect_identical(result$over, c(FALSE, FALSE, TRUE))
 
   })
 
   it("applies the bound uniformly across all transforms", {
 
-    bound <- function(x, trans) apply_response_bound(back_transform_predictions(x, trans), 100)
+    bound <- function(x, trans) apply_response_bound(back_transform_predictions(x, trans), 100)$values
 
-    expect_warning(r_none  <- bound(c(1, 500), "none"),  "winsorized")
-    expect_warning(r_sqrt  <- bound(c(1, 30),  "sqrt"),  "winsorized")
-    expect_warning(r_log10 <- bound(c(1, 4),   "log10"), "winsorized")
-
-    expect_equal(r_none[2],  100)
-    expect_equal(r_sqrt[2],  100)   # 30^2 = 900 -> clamped
-    expect_equal(r_log10[2], 100)   # 10^4 - 1 = 9999 -> clamped
+    expect_equal(bound(c(1, 500), "none")[2],  100)
+    expect_equal(bound(c(1, 30),  "sqrt")[2],  100)   # 30^2 = 900 -> clamped
+    expect_equal(bound(c(1, 4),   "log10")[2], 100)   # 10^4 - 1 = 9999 -> clamped
 
   })
 
@@ -172,21 +158,56 @@ describe("apply_response_bound()", {
 
     y <- c(0.1, 1, 5, 42, 100)
 
-    expect_equal(
-      apply_response_bound(back_transform_predictions(log(y + 1), "log"), 1e6),
-      y, tolerance = 1e-10
-    )
+    r <- apply_response_bound(back_transform_predictions(log(y + 1), "log"), 1e6)
+
+    expect_equal(r$values, y, tolerance = 1e-10)
+    expect_false(any(r$over))
 
   })
 
   it("passes NA values through unclamped when a bound is supplied", {
 
-    result <- suppressWarnings(
-      apply_response_bound(back_transform_predictions(c(1, NA, 7), "log"), 100)
-    )
+    result <- apply_response_bound(back_transform_predictions(c(1, NA, 7), "log"), 100)
 
-    expect_true(is.na(result[2]))
-    expect_equal(result[3], 100)
+    expect_true(is.na(result$values[2]))
+    expect_equal(result$values[3], 100)
+    expect_identical(result$over, c(FALSE, FALSE, TRUE))
+
+  })
+
+  it("is a no-op without a bound", {
+
+    expect_identical(apply_response_bound(c(1, 1e9), NULL),
+                     list(values = c(1, 1e9), over = c(FALSE, FALSE)))
+
+  })
+
+})
+
+describe("log_winsorized()", {
+
+  it("collects one applicability warning naming the count, the largest value and the samples", {
+
+    values  <- c(1, 2, exp(7) - 1)
+    report  <- winsorized_report(c("a", "b", "c"), values,
+                                 apply_response_bound(values, 100), 100)
+    col     <- log_open("predict")
+
+    log_winsorized(col, list(report, NULL))
+    rows <- log_rows(col)
+
+    expect_identical(rows$topic, "applicability")
+    expect_match(rows$message, "1 prediction exceeded the response upper bound", fixed = TRUE)
+    expect_match(rows$message, "1095.63", fixed = TRUE)
+    expect_identical(rows$ids[[1]], "c")
+
+  })
+
+  it("adds nothing when nothing was winsorized", {
+
+    col <- log_open("predict")
+    log_winsorized(col, list(NULL, NULL))
+    expect_length(col$events, 0)
 
   })
 

@@ -96,42 +96,32 @@ back_transform_predictions <- function(predictions, transformation,
 #' Winsorize Predictions to the Deploy-Time Response Upper Bound
 #'
 #' @description
-#' The guardrail primitive `predict()` applies to the point predictions it
-#' serves: each configuration's in `predict_one_config()`, and the combined
-#' output in `predict.horizons_ensemble()`. Values above `upper_bound` are
-#' clamped to it with a visible warning; `upper_bound = NULL` is a no-op. The
-#' warning is deliberately
-#' unconditional — a guardrail that fires silently defeats its purpose — so
-#' callers that suppress diagnostic warnings still surface this one.
+#' The guardrail `predict()` applies to the point predictions it serves: each
+#' configuration's in `predict_one_config()`, and the combined output in
+#' `predict.horizons_ensemble()`. Values above `upper_bound` are clamped to
+#' it; `upper_bound = NULL` is a no-op. Silent itself: it returns which
+#' values it clamped, and `predict()` reports them once per call, in one
+#' `horizons_warning_applicability` naming the samples.
 #'
 #' @param values Numeric vector, original response scale.
 #' @param upper_bound Single finite numeric (negative for a signed outcome
 #'   whose training values are all negative), or NULL (no clamp).
-#' @return `values`, winsorized to `upper_bound` where it was exceeded.
+#' @return List: `values`, winsorized to `upper_bound` where it was exceeded,
+#'   and `over`, a logical vector marking the values that were.
 #' @keywords internal
 apply_response_bound <- function(values, upper_bound) {
 
   if (is.null(upper_bound)) {
 
-    return(values)
+    return(list(values = values, over = rep(FALSE, length(values))))
 
   }
 
   over <- !is.na(values) & values > upper_bound
 
-  if (any(over)) {
+  values[over] <- upper_bound
 
-    cli::cli_warn(c(
-      "!" = "{sum(over)} prediction{?s} exceeded the response upper bound and {?was/were} winsorized.",
-      "i" = "Max pre-clamp value: {round(max(values[over]), 2)}; bound: {round(upper_bound, 2)}.",
-      "i" = "Large overshoots usually indicate extrapolation beyond the training domain."
-    ))
-
-    values[over] <- upper_bound
-
-  }
-
-  values
+  list(values = values, over = over)
 
 }
 
@@ -152,7 +142,7 @@ apply_response_bound <- function(values, upper_bound) {
 #' This is the physical constraint, applied silently and everywhere. The
 #' response bound ([apply_response_bound()]) is a different thing: a
 #' deploy-time guardrail against blow-ups, applied to served point
-#' predictions only, with a warning.
+#' predictions only, and reported by `predict()` with a warning.
 #'
 #' @param x Numeric vector, original response scale.
 #' @param outcome_range Numeric length-2 vector from

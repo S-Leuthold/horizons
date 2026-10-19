@@ -500,7 +500,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
     w <- expect_warning(
       p <- predict(ens_ref, test_set, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), "0.9.", fixed = TRUE)
@@ -518,7 +518,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
     w <- expect_warning(
       suppressMessages(predict(no_uq, test_set, level = 0.95)),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), paste0(DEFAULT_UQ_LEVEL, "."), fixed = TRUE)

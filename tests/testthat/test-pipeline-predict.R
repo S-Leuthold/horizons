@@ -461,11 +461,15 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     w <- expect_warning(
       p <- predict(fitted_fixture, new_df, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), "0.9.", fixed = TRUE)
     expect_equal(p, reference)
+
+    ## Raised at the end, carrying its record
+    expect_identical(w$log$topic, "input")
+    expect_identical(w$log$verb, "predict")
 
   })
 
@@ -477,7 +481,7 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     w <- expect_warning(
       predict(relevelled, new_df, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), "0.8.", fixed = TRUE)
@@ -487,7 +491,7 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     w <- expect_warning(
       predict(no_uq, new_df, level = 0.95),
-      class = "horizons_input_warning"
+      class = "horizons_warning_input"
     )
 
     expect_match(conditionMessage(w), paste0(DEFAULT_UQ_LEVEL, "."), fixed = TRUE)
@@ -522,15 +526,18 @@ describe("predict.horizons_fit() - arguments in ...", {
 
 describe("check_predict_dots()", {
 
-  it("does not evaluate the dots", {
+  it("does not evaluate the dots, and collects the level warning rather than raising it", {
 
-    expect_warning(
-      check_predict_dots(level = stop("evaluated"), .level_default = 0.9),
-      class = "horizons_input_warning"
+    col <- log_open("predict")
+
+    expect_no_warning(
+      check_predict_dots(level = stop("evaluated"), .level_default = 0.9, .collector = col)
     )
+    expect_identical(log_rows(col)$topic, "input")
 
     expect_error(
-      check_predict_dots(foo = stop("evaluated"), .level_default = 0.9),
+      check_predict_dots(foo = stop("evaluated"), .level_default = 0.9,
+                         .collector = log_open("predict")),
       class  = "horizons_error_input",
       regexp = "foo"
     )
@@ -540,7 +547,7 @@ describe("check_predict_dots()", {
   it("refuses unnamed arguments, showing them", {
 
     expect_error(
-      check_predict_dots(0.95, .level_default = 0.9),
+      check_predict_dots(0.95, .level_default = 0.9, .collector = log_open("predict")),
       class  = "horizons_error_input",
       regexp = "0.95"
     )
@@ -550,7 +557,8 @@ describe("check_predict_dots()", {
   it("aborts rather than warns when level comes with an unknown argument", {
 
     expect_error(
-      check_predict_dots(level = 0.95, foo = 1, .level_default = 0.9),
+      check_predict_dots(level = 0.95, foo = 1, .level_default = 0.9,
+                         .collector = log_open("predict")),
       class = "horizons_error_input"
     )
 
@@ -558,23 +566,104 @@ describe("check_predict_dots()", {
 
   it("is silent on empty dots", {
 
-    expect_no_condition(check_predict_dots(.level_default = 0.9))
+    col <- log_open("predict")
+    expect_no_condition(check_predict_dots(.level_default = 0.9, .collector = col))
+    expect_length(col$events, 0)
 
   })
 
   it("checks user arguments that share a name with its own", {
 
+    col <- log_open("predict")
+
     expect_error(
-      check_predict_dots(call = 1, .level_default = 0.9),
+      check_predict_dots(call = 1, .level_default = 0.9, .collector = col),
       class  = "horizons_error_input",
       regexp = "call"
     )
 
     expect_error(
-      check_predict_dots(level_default = 0.95, .level_default = 0.9),
+      check_predict_dots(level_default = 0.95, .level_default = 0.9, .collector = col),
       class  = "horizons_error_input",
       regexp = "level_default"
     )
+
+    expect_error(
+      check_predict_dots(collector = 1, .level_default = 0.9, .collector = col),
+      class  = "horizons_error_input",
+      regexp = "collector"
+    )
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## What predict() reports, and where (decision 1)
+## ---------------------------------------------------------------------------
+## predict() returns predictions only. Its warnings are collected as it runs
+## and raised once per topic at its end, each carrying its record as the
+## field `log`; nothing is written to the object.
+
+describe("predict.horizons_fit() - what it reports", {
+
+  new_df <- make_new_spectra()
+
+  ## Three topics in one call: an ignored level (input), winsorized
+  ## predictions (applicability), intervals on a selected fit (quality)
+  noisy <- function() {
+    x <- fitted_fixture
+    x$models$response_bound    <- stats::median(predict(fitted_fixture, new_df)$.pred)
+    x$models$selection_present <- TRUE
+    x
+  }
+
+  it("raises each topic once, at the end, with its record, and leaves the object as it was", {
+
+    x      <- noisy()
+    before <- x
+
+    caught <- list()
+    p <- withCallingHandlers(
+      predict(x, new_df, level = 0.95),
+      warning = function(w) {
+        caught[[length(caught) + 1L]] <<- w
+        invokeRestart("muffleWarning")
+      }
+    )
+
+    topics <- vapply(caught, function(w) w$log$topic, character(1))
+    expect_setequal(topics, c("input", "applicability", "quality"))
+    expect_true(all(vapply(caught, inherits, logical(1), what = "horizons_warning")))
+    expect_identical(x, before)
+    expect_null(attr(p, "winsorized"))
+
+  })
+
+  it("returns the same predictions when its warnings are silenced", {
+
+    x <- noisy()
+
+    quiet <- suppressWarnings(predict(x, new_df))
+    loud  <- NULL
+    warns <- testthat::capture_warnings(loud <- predict(x, new_df))
+
+    expect_gt(length(warns), 0)
+    expect_identical(quiet, loud)
+
+  })
+
+  it("under warn = 2, ends with the predictions on the error", {
+
+    x <- noisy()
+    reference <- suppressWarnings(predict(x, new_df))
+
+    withr::local_options(warn = 2)
+
+    err <- expect_error(predict(x, new_df), class = "horizons_error_promoted_warnings")
+    expect_identical(err$object, reference)
+    expect_setequal(err$log$topic, c("applicability", "quality"))
 
   })
 
@@ -656,19 +745,43 @@ describe("predict.horizons_fit() - response bound guardrail", {
     clamped_fixture <- fitted_fixture
     clamped_fixture$models$response_bound <- bound
 
-    expect_warning(
+    w <- expect_warning(
       p <- predict(clamped_fixture, new_df, interval = FALSE),
-      "winsorized"
+      "winsorized", class = "horizons_warning_applicability"
     )
 
     expect_true(all(p$.pred <= bound))
     expect_equal(nrow(p), nrow(new_df))
+
+    ## The record names the samples it clamped
+    clipped <- new_df$sample_id[p_raw$.pred > bound]
+    expect_gt(length(clipped), 0)
+    expect_setequal(w$log$ids[[1]], clipped)
+    expect_identical(w$log$n, length(clipped))
 
   })
 
   ## A fit without a response_bound was written by an earlier version; the
   ## door validator refuses it (#234), so there is no backward-compatible
   ## path to test.
+
+  it("raises one warning for every configuration it winsorized, naming each sample once", {
+
+    p_raw <- predict(fitted_fixture, new_df, interval = FALSE)
+    bound <- stats::median(p_raw$.pred)
+
+    two <- add_member_copy(fitted_fixture)
+    two$models$response_bound <- bound
+
+    warns <- collect_warnings(predict(two, new_df, config = "all", interval = FALSE),
+                              "winsorized")$warnings
+
+    expect_length(warns, 1L)
+    clipped <- new_df$sample_id[p_raw$.pred > bound]
+    expect_setequal(warns[[1]]$log$ids[[1]], clipped)
+    expect_identical(warns[[1]]$log$n, 2L * length(clipped))
+
+  })
 
   it("does not clamp interval bounds (only the point prediction)", {
 
@@ -912,7 +1025,7 @@ describe("predict.horizons_fit() - selected training set", {
 
     expect_warning(
       predict(selected_fixture, new_df, interval = TRUE),
-      class = "horizons_select_warning"
+      class = "horizons_warning_quality"
     )
 
   })
@@ -948,6 +1061,35 @@ describe("predict.horizons_fit() - selected training set", {
 
     expect_false(any(grepl("Conformal coverage", warns)))
     expect_false(".pred_lower" %in% names(p))
+
+  })
+
+  it("is silent when the configuration predicted has no bundle, though another has one (#145)", {
+
+    ## The gate reads the intervals returned, not whether any configuration
+    ## of the object has a bundle
+    two <- add_member_copy(selected_fixture)
+    two$models$uq[["cfg_001"]] <- NULL
+
+    expect_true(has_uq(two))
+
+    warns <- testthat::capture_warnings(
+      p <- predict(two, new_df, config = "cfg_001", interval = TRUE)
+    )
+
+    expect_false(any(grepl("Conformal coverage", warns)))
+    expect_false(".pred_lower" %in% names(p))
+
+  })
+
+  it("is silent when the intervals could not be computed", {
+
+    broken <- selected_fixture
+    broken$models$uq[["cfg_001"]]$quantile_model <- structure(list(), class = "not_a_real_model")
+
+    warns <- testthat::capture_warnings(predict(broken, new_df, interval = TRUE))
+
+    expect_false(any(grepl("Conformal coverage", warns)))
 
   })
 

@@ -265,14 +265,12 @@ describe("back_transform_predictions() - outcome_range", {
 
     ## The bound itself is checked against the range by the fit validator at
     ## predict()'s door; under a signed range a negative bound applies.
-    expect_warning(
-      out <- apply_response_bound(
-        back_transform_predictions(c(-20, -10), "none", outcome_range = c(-Inf, Inf)),
-        -12
-      ),
-      "winsorized"
+    out <- apply_response_bound(
+      back_transform_predictions(c(-20, -10), "none", outcome_range = c(-Inf, Inf)),
+      -12
     )
-    expect_identical(out, c(-20, -12))
+    expect_identical(out$values, c(-20, -12))
+    expect_identical(out$over, c(FALSE, TRUE))
 
   })
 

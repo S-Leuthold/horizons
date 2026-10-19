@@ -803,7 +803,7 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
       }
     )
 
-    trim_warnings <- Filter(function(w) inherits(w, "horizons_response_trim_warning"), caught)
+    trim_warnings <- Filter(function(w) inherits(w, "horizons_warning_quality"), caught)
 
     expect_length(trim_warnings, 1L)
     expect_match(conditionMessage(trim_warnings[[1]]),

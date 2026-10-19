@@ -88,7 +88,7 @@ NULL
 #' **Interval level.** Intervals are at the coverage level the uncertainty was
 #' calibrated at in `fit()`, 0.90 by default. `predict()` has no `level`
 #' argument: a `level` is ignored with a warning of class
-#' `horizons_input_warning`, and any other argument it does not take is an
+#' `horizons_warning_input`, and any other argument it does not take is an
 #' error of class `horizons_error_input`.
 #'
 #' **Outcome range.** Point predictions and interval bounds are clamped to
@@ -149,6 +149,11 @@ predict.horizons_fit <- function(object,
   ## workflows slot.
   object <- validate_horizons_fit(object)
 
+  ## What the call reports is collected here and raised once per topic at
+  ## its end (finish_predict()). predict() writes nothing to the object: each
+  ## warning carries its own record.
+  collector <- log_open("predict")
+
   check_arg(rlang::check_bool, interval)
   check_arg(rlang::check_bool, abstain_ood)
   check_arg(rlang::check_string, config)
@@ -173,7 +178,8 @@ predict.horizons_fit <- function(object,
   check_predict_dots(
     ...,
     .level_default = unlist(lapply(object$models$uq[config_ids],
-                                  function(uq) uq$level_default))
+                                  function(uq) uq$level_default)),
+    .collector     = collector
   )
 
   ## `library(horizons)` does not load workflows, most modeling engines, or
@@ -189,12 +195,6 @@ predict.horizons_fit <- function(object,
 
   ## Validate new_data carries the training-axis predictor columns fit() stored.
   check_predictor_schema(object, new_spectra)
-
-  ## -------------------------------------------------------------------------
-  ## Step 0c: Conformal coverage on a selected training set
-  ## -------------------------------------------------------------------------
-
-  warn_selection_intervals(object, interval)
 
   ## -------------------------------------------------------------------------
   ## Step 2-3: Predict per config (point + optional intervals)
@@ -218,10 +218,14 @@ predict.horizons_fit <- function(object,
   )
 
   ## -------------------------------------------------------------------------
-  ## Step 4: Assemble output
+  ## Step 4: Assemble output, then report
   ## -------------------------------------------------------------------------
 
-  if (identical(config, "all")) {
+  log_winsorized(collector, lapply(preds, attr, "winsorized"))
+
+  preds <- lapply(preds, drop_block_reports)
+
+  out <- if (identical(config, "all")) {
 
     ## Keep the config_id column for disambiguation
     dplyr::bind_rows(preds)
@@ -229,10 +233,120 @@ predict.horizons_fit <- function(object,
   } else {
 
     ## Single config: drop the config_id column for a cleaner result
-    out <- preds[[1]]
-    out[, setdiff(names(out), "config_id"), drop = FALSE]
+    preds[[1]][, setdiff(names(preds[[1]]), "config_id"), drop = FALSE]
 
   }
+
+  ## Conformal coverage on a selected training set, said only when intervals
+  ## came back (#145)
+  log_interval_quality(collector, object, intervals_returned(out))
+
+  finish_predict(collector, out)
+
+}
+
+## ---------------------------------------------------------------------------
+## finish_predict() — predict()'s end: what it collected, raised once
+## ---------------------------------------------------------------------------
+
+#' Raise what a predict() call collected, once per topic, and return
+#'
+#' The end both predict methods share. `predict()` reads the object and
+#' writes nothing to it, so the collector's rows go nowhere but the warnings:
+#' [signal_log()] raises each topic once, carrying its row as the field `log`.
+#' Under `options(warn = 2)` the warnings no handler takes end the call as
+#' `horizons_error_promoted_warnings`, with the predictions as `object`.
+#'
+#' @param collector The call's collector, from `log_open("predict")`.
+#' @param predictions The tibble the call returns.
+#' @return `predictions`.
+#' @keywords internal
+#' @noRd
+finish_predict <- function(collector, predictions) {
+
+  log_close(collector)
+  signal_log(collector, predictions)
+
+  predictions
+
+}
+
+#' Whether a prediction tibble carries any interval
+#'
+#' @param predictions A tibble `predict()` is about to return.
+#' @return Logical(1): `TRUE` when an interval bound holds a value.
+#' @keywords internal
+#' @noRd
+intervals_returned <- function(predictions) {
+
+  ".pred_lower" %in% names(predictions) && any(!is.na(predictions$.pred_lower))
+
+}
+
+#' The reports a configuration's block carries to predict()'s end
+#'
+#' [predict_one_config()] returns its block with what the call must report
+#' about it as attributes; `predict()` reads them and drops them before the
+#' blocks are bound.
+#'
+#' @keywords internal
+#' @noRd
+BLOCK_REPORTS <- c("winsorized")
+
+#' @noRd
+drop_block_reports <- function(block) {
+
+  for (a in BLOCK_REPORTS) attr(block, a) <- NULL
+  block
+
+}
+
+#' Collect one warning for the predictions the response bound winsorized
+#'
+#' @param collector The call's collector.
+#' @param reports List, one per block: `NULL`, or a list with `ids` (the
+#'   samples winsorized), `n`, `max` (the largest value before the bound) and
+#'   `bound`.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_winsorized <- function(collector, reports) {
+
+  reports <- Filter(Negate(is.null), reports)
+
+  if (length(reports) == 0) return(invisible(collector))
+
+  ids   <- unique(unlist(lapply(reports, `[[`, "ids")))
+  n     <- sum(vapply(reports, `[[`, integer(1), "n"))
+  top   <- max(vapply(reports, `[[`, numeric(1), "max"))
+  bound <- reports[[1]]$bound
+
+  log_warning(collector, "applicability", c(
+    "{n} prediction{?s} exceeded the response upper bound and {?was/were} winsorized.",
+    "i" = "Max pre-clamp value: {round(top, 2)}; bound: {round(bound, 2)}.",
+    "i" = "Large overshoots usually indicate extrapolation beyond the training domain."
+  ), ids = ids, n = n)
+
+}
+
+#' The record of what the response bound winsorized in one block
+#'
+#' @param sample_id The block's sample ids.
+#' @param values The values before the bound.
+#' @param bounded From [apply_response_bound()].
+#' @param bound The bound.
+#' @return `NULL` when nothing was winsorized, else the list
+#'   [log_winsorized()] reads.
+#' @keywords internal
+#' @noRd
+winsorized_report <- function(sample_id, values, bounded, bound) {
+
+  if (!any(bounded$over)) return(NULL)
+
+  list(ids   = sample_id[bounded$over],
+       n     = sum(bounded$over),
+       max   = max(values[bounded$over]),
+       bound = bound)
 
 }
 
@@ -254,14 +368,15 @@ predict.horizons_fit <- function(object,
 #' @param .level_default Numeric or `NULL`. The level the returned intervals
 #'   are at: `uq$level_default` of the bundle(s) in use. `NULL` (no bundle)
 #'   names `DEFAULT_UQ_LEVEL`.
-#' @param .call The predict method's frame, for the error's call. Both
-#'   arguments are dot-prefixed so a user argument named `level_default` or
-#'   `call` lands in `...` and is checked, not bound to them.
-#' @return Invisibly `NULL`. Warns with class `horizons_input_warning`; aborts
-#'   with class `horizons_error_input`.
+#' @param .collector The call's collector, which the `level` warning is added
+#'   to (`horizons_warning_input`, raised at the end of the call).
+#' @param .call The predict method's frame, for the error's call. The
+#'   arguments are dot-prefixed so a user argument named `level_default`,
+#'   `collector` or `call` lands in `...` and is checked, not bound to them.
+#' @return Invisibly `NULL`; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
-check_predict_dots <- function(..., .level_default = NULL,
+check_predict_dots <- function(..., .level_default = NULL, .collector,
                                .call = rlang::caller_env()) {
 
   dots      <- rlang::enquos(...)
@@ -298,10 +413,10 @@ check_predict_dots <- function(..., .level_default = NULL,
 
     level <- unique(.level_default) %||% DEFAULT_UQ_LEVEL
 
-    cli::cli_warn(c(
-      "!" = "{.arg level} is ignored. Prediction intervals are at the level they were calibrated at, {.val {level}}.",
+    log_warning(.collector, "input", c(
+      "{.arg level} is ignored. Prediction intervals are at the level they were calibrated at, {.val {level}}.",
       "i" = "{.fn predict} has no {.arg level} argument."
-    ), class = "horizons_input_warning")
+    ))
 
   }
 
@@ -556,102 +671,64 @@ resolve_new_data <- function(new_data, call = rlang::caller_env()) {
 }
 
 ## ---------------------------------------------------------------------------
-## warn_selection_intervals() — conformal coverage on a selected training set
+## log_interval_quality() — intervals weaker than they look
 ## ---------------------------------------------------------------------------
 
-#' Warn that conformal coverage does not transfer from a selected training set
+#' Collect the warnings that the returned intervals are weaker than they look
 #'
-#' `fit()`'s calibration rows are drawn from the training object. When that
-#' object came from [select_training()], those rows were chosen for proximity
-#' to the targets, so they are not exchangeable with arbitrary prediction data
-#' and the conformal guarantee does not transfer. Warned once per `predict()`
-#' call, before any per-config or per-member loop, so a `config = "all"`
-#' prediction (or an ensemble over many members) says it once rather than once
-#' per model. Nothing about the computation changes.
+#' Two cases, each a `quality` warning raised once per `predict()` call, and
+#' only when intervals came back (#145): a call that returns none has no
+#' coverage claim to qualify.
 #'
-#' Gated on intervals actually being produced. With no UQ bundle no intervals
-#' are returned at all and `interval` defaults to `TRUE`, so warning there
-#' would fire on every point prediction from a selected fit. Which slot decides
-#' that differs by class: a `horizons_fit` returns intervals from its per-config
-#' bundles (`models$uq`, via [has_uq()]), while an ensemble returns them only
-#' from its own conformal slot (`ensemble$uq`) — member UQ bundles are not used
-#' at the ensemble output.
+#' - **A selected training set.** `fit()`'s calibration rows are drawn from
+#'   the training object; when it came from [select_training()] they were
+#'   chosen for proximity to the targets, so they are not exchangeable with
+#'   arbitrary prediction data and the conformal guarantee does not transfer.
+#'   The ensemble's CV+ intervals inherit the same rows.
+#' - **An ensemble over a response-trimmed fit.** When `validate()` asked for
+#'   a response trim, `fit()` trains its members without the training rows
+#'   outside the fences (#77), so the out-of-fold predictions the CV+
+#'   intervals are built from cover only the rows inside them, and the
+#'   intervals can undercover samples like those set aside (#103). A single
+#'   fit draws its conformal calibration set from the untrimmed training
+#'   part, so it is not affected.
 #'
+#' @param collector The call's collector.
 #' @param object A `horizons_fit` or `horizons_ensemble`.
-#' @param interval The call's `interval` argument.
-#' @return Invisibly `NULL`. Called for the warning.
+#' @param returned Logical(1). Whether the call returns any interval.
+#' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-warn_selection_intervals <- function(object, interval) {
+log_interval_quality <- function(collector, object, returned) {
 
-  has_intervals <- if (inherits(object, "horizons_ensemble")) {
+  if (!returned) return(invisible(collector))
 
-    !is.null(object$ensemble$uq)
+  if (isTRUE(object$models$selection_present)) {
 
-  } else {
-
-    has_uq(object)
-
-  }
-
-  if (isTRUE(interval) && isTRUE(object$models$selection_present) &&
-      has_intervals) {
-
-    cli::cli_warn(c(
-      "!" = "Conformal coverage is not guaranteed: this model was fit on a selected training set.",
+    log_warning(collector, "quality", c(
+      "Conformal coverage is not guaranteed: this model was fit on a selected training set.",
       "i" = "{.fn select_training} chose the calibration rows for proximity to the targets, so exchangeability with {.arg new_data} does not hold.",
       "i" = "Use {.code $selection$target_distances} as the applicability signal for these predictions."
-    ), class = "horizons_select_warning")
+    ))
 
   }
-
-  invisible(NULL)
-
-}
-
-## ---------------------------------------------------------------------------
-## warn_trimmed_ensemble_intervals(): CV+ intervals within the training fences
-## ---------------------------------------------------------------------------
-
-#' Warn that an ensemble's intervals were calibrated within the training fences
-#'
-#' When `validate()` asked for a response trim, `fit()` trains its members
-#' without the training rows outside the fences (#77), so their out-of-fold
-#' predictions, which the ensemble's CV+ intervals are built from, cover only
-#' the rows inside them. The intervals are then calibrated on a population
-#' without the extremes the trim set aside, and can undercover samples like
-#' them. A single fit does not have this problem: its conformal calibration
-#' set is drawn from the untrimmed training part. The mechanism is not fixed
-#' here; this says so, once per `predict()` call, alongside
-#' [warn_selection_intervals()] and on the same gate: intervals requested and
-#' an ensemble conformal slot to produce them.
-#'
-#' @param object A `horizons_ensemble`.
-#' @param interval The call's `interval` argument.
-#' @return Invisibly `NULL`. Called for the warning, class
-#'   `horizons_response_trim_warning`.
-#' @keywords internal
-#' @noRd
-warn_trimmed_ensemble_intervals <- function(object, interval) {
 
   trim      <- object$evaluation$response_trim
   n_trimmed <- length(trim$trimmed_ids)
 
-  if (!isTRUE(interval) || is.null(object$ensemble$uq) || n_trimmed == 0) {
+  if (inherits(object, "horizons_ensemble") && n_trimmed > 0) {
 
-    return(invisible(NULL))
+    fences <- paste0("[", signif(trim$lower, 4), ", ", signif(trim$upper, 4), "]")
+
+    log_warning(collector, "quality", c(
+      "The ensemble's intervals were calibrated within the training fences {fences}.",
+      "i" = "{n_trimmed} training row{?s} outside them {cli::qty(n_trimmed)}{?was/were} trimmed as response outliers, so the members' out-of-fold predictions, which the CV+ intervals are built from, cover only the rows inside.",
+      "i" = "The intervals can undercover samples outside the fences."
+    ))
 
   }
 
-  fences <- paste0("[", signif(trim$lower, 4), ", ", signif(trim$upper, 4), "]")
-
-  cli::cli_warn(c(
-    "!" = "The ensemble's intervals were calibrated within the training fences {fences}.",
-    "i" = "{n_trimmed} training row{?s} outside them {cli::qty(n_trimmed)}{?was/were} trimmed as response outliers, so the members' out-of-fold predictions, which the CV+ intervals are built from, cover only the rows inside.",
-    "i" = "The intervals can undercover samples outside the fences."
-  ), class = "horizons_response_trim_warning")
-
-  invisible(NULL)
+  invisible(collector)
 
 }
 
@@ -884,14 +961,17 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   ## passes clamp = FALSE (guardrail applies once at the ensemble output,
   ## keeping member features consistent with the raw member OOF the
   ## meta-learner trained and calibrated on).
+  bound   <- if (clamp) object$models$response_bound else NULL
+  bounded <- apply_response_bound(point_pred, bound)
+
   out <- tibble::tibble(
     sample_id = new_spectra$sample_id,
     config_id = config_id,
-    .pred     = apply_response_bound(
-      point_pred,
-      if (clamp) object$models$response_bound else NULL
-    )
+    .pred     = bounded$values
   )
+
+  ## What the bound changed, reported once at predict()'s end
+  winsorized <- winsorized_report(new_spectra$sample_id, point_pred, bounded, bound)
 
   ## -------------------------------------------------------------------------
   ## Intervals (conformal CQR) — only if requested and a UQ bundle exists
@@ -935,7 +1015,12 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
   ## Callers that discard the AD columns (the ensemble member helpers) skip
   ## the computation, and so its warnings.
 
-  if (!ad) return(out)
+  if (!ad) {
+
+    attr(out, "winsorized") <- winsorized
+    return(out)
+
+  }
 
   ad_cols <- predict_ad(
     workflow    = workflow,
@@ -993,6 +1078,8 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
     ), class = "horizons_ad_warning")
 
   }
+
+  attr(out, "winsorized") <- winsorized
 
   out
 

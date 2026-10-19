@@ -689,7 +689,7 @@ build_ensemble_contract <- function(method,
 #'   (`validate(remove_outliers =
 #'   "response")`, #77), the intervals come from out-of-fold predictions on
 #'   the rows inside the training fences, so this warns once, with class
-#'   `horizons_response_trim_warning`, that they were calibrated within those
+#'   `horizons_warning_quality`, that they were calibrated within those
 #'   fences and can undercover samples outside them.
 #' @param ... Not used; present for S3 method consistency. A `level` passed
 #'   here is ignored with a warning (see Details), and any other argument is
@@ -721,7 +721,7 @@ build_ensemble_contract <- function(method,
 #' **Interval level.** Intervals are at the coverage level the CV+ bundle was
 #' calibrated at in [ensemble()], 0.90 by default. `predict()` has no `level`
 #' argument: a `level` is ignored with a warning of class
-#' `horizons_input_warning`, and any other argument it does not take is an
+#' `horizons_warning_input`, and any other argument it does not take is an
 #' error of class `horizons_error_input`.
 #'
 #' @examples
@@ -745,11 +745,16 @@ predict.horizons_ensemble <- function(object,
   ## model, a member set of fewer than two, and an unknown method.
   object <- validate_horizons_ensemble(object)
 
+  ## What the call reports is collected here and raised once per topic at
+  ## its end (finish_predict()). predict() writes nothing to the object.
+  collector <- log_open("predict")
+
   check_arg(rlang::check_bool, interval)
 
   ## Nothing in `...` is used. A `level` warns, naming the level the CV+
   ## bundle was calibrated at; anything else aborts (#141).
-  check_predict_dots(..., .level_default = object$ensemble$uq$level_default)
+  check_predict_dots(..., .level_default = object$ensemble$uq$level_default,
+                     .collector = collector)
 
   ## -------------------------------------------------------------------------
   ## Step 1: Resolve the authoritative member set
@@ -797,19 +802,6 @@ predict.horizons_ensemble <- function(object,
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 2b: Conformal coverage on a selected training set
-  ## -------------------------------------------------------------------------
-  ## Same condition and same wording as the single-fit path — the ensemble's
-  ## CV+ intervals inherit the calibration rows' non-exchangeability exactly as
-  ## the member intervals do. Warned once per call, ahead of the member loop.
-
-  warn_selection_intervals(object, interval)
-
-  ## And when the members were fit on a response-trimmed partition (#77),
-  ## the CV+ intervals come from out-of-fold predictions inside the fences.
-  warn_trimmed_ensemble_intervals(object, interval)
-
-  ## -------------------------------------------------------------------------
   ## Step 3: Every member predicts new_data (long frame, original scale)
   ## -------------------------------------------------------------------------
 
@@ -844,8 +836,12 @@ predict.horizons_ensemble <- function(object,
   ## escape this guards against was an ensemble output. Interval bounds are
   ## deliberately not clamped (uncertainty must not be truncated), so a clamped
   ## point can sit below an unclamped upper bound — coherent, and documented.
-  point$.pred <- apply_response_bound(point$.pred,
-                                      object$models$response_bound)
+  bound       <- object$models$response_bound
+  bounded     <- apply_response_bound(point$.pred, bound)
+  winsorized  <- winsorized_report(point$sample_id, point$.pred, bounded, bound)
+  point$.pred <- bounded$values
+
+  log_winsorized(collector, list(winsorized))
 
   ## -------------------------------------------------------------------------
   ## Step 5: Intervals (only when ensemble UQ is available) + assemble output
@@ -856,36 +852,40 @@ predict.horizons_ensemble <- function(object,
   ## CV+ assembler reuses the Step-3 member predictions (members are never
   ## re-predicted) and returns sample_id-keyed interval columns — joined, not
   ## positionally bound, so row-order drift cannot silently misalign them.
-  uq <- object$ensemble$uq
+  uq  <- object$ensemble$uq
+  out <- point
 
-  if (!isTRUE(interval) || is.null(uq)) {
+  if (isTRUE(interval) && is.null(uq)) {
 
-    if (isTRUE(interval) && is.null(uq)) {
+    cli::cli_inform(c(
+      "i" = "Ensemble prediction intervals are not available; \\
+             returning point predictions."
+    ))
 
-      cli::cli_inform(c(
-        "i" = "Ensemble prediction intervals are not available; \\
-               returning point predictions."
-      ))
+  }
+
+  if (isTRUE(interval) && !is.null(uq)) {
+
+    interval_cols <- predict_ensemble_intervals(
+      uq            = uq,
+      member_pred   = member_pred,
+      outcome_range = outcome_range
+    )
+
+    if (!is.null(interval_cols)) {
+
+      out <- dplyr::left_join(point, interval_cols, by = "sample_id")
 
     }
 
-    return(point)
-
   }
 
-  interval_cols <- predict_ensemble_intervals(
-    uq            = uq,
-    member_pred   = member_pred,
-    outcome_range = outcome_range
-  )
+  ## Conformal coverage on a selected training set, and CV+ intervals
+  ## calibrated within the training fences, said only when intervals came
+  ## back (#145)
+  log_interval_quality(collector, object, intervals_returned(out))
 
-  if (is.null(interval_cols)) {
-
-    return(point)
-
-  }
-
-  dplyr::left_join(point, interval_cols, by = "sample_id")
+  finish_predict(collector, out)
 
 }
 

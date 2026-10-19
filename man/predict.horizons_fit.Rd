@@ -94,7 +94,7 @@ to \code{NA} predictions for out-of-domain samples while keeping the AD columns.
 \strong{Interval level.} Intervals are at the coverage level the uncertainty was
 calibrated at in \code{fit()}, 0.90 by default. \code{predict()} has no \code{level}
 argument: a \code{level} is ignored with a warning of class
-\code{horizons_input_warning}, and any other argument it does not take is an
+\code{horizons_warning_input}, and any other argument it does not take is an
 error of class \code{horizons_error_input}.
 
 \strong{Outcome range.} Point predictions and interval bounds are clamped to
