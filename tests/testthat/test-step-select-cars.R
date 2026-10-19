@@ -217,8 +217,8 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     }, numeric(1))
     names(scored) <- vapply(tr$scoring, function(s) paste(s$bands, collapse = ","), character(1))
 
-    expect_equal(rec$scores, unname(scored[key]))
-    expect_identical(rec$iteration, which.min(rec$scores))
+    expect_equal(rec$path$rmsecv, unname(scored[key]))
+    expect_identical(rec$iteration, which.min(rec$path$rmsecv))
     expect_setequal(tr$step$selected_vars, tr$weight[[rec$iteration]]$bands)
     expect_identical(rec$n_kept, length(tr$step$selected_vars))
 
@@ -255,8 +255,12 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     }
 
     rmsecv <- sqrt(colMeans(press))
+    lv     <- which.min(rmsecv)
+    fold_e <- vapply(folds, function(f) sqrt(mean(press[f, lv])), numeric(1))
 
-    expect_equal(rec$scores[1], min(rmsecv))
+    expect_equal(rec$path$rmsecv[1], min(rmsecv))
+    expect_identical(rec$path$ncomp[1], lv)
+    expect_equal(rec$path$se[1], stats::sd(fold_e) / sqrt(5))
 
   })
 
@@ -277,8 +281,56 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     lv_sd <- min(which(mse <= min(mse) + stats::sd(e2[, lv])))
 
     expect_lt(lv_sd, lv)
-    expect_equal(tr$step$cars$scores[1], unname(sqrt(mse[lv])))
-    expect_gt(unname(sqrt(mse[lv_sd])), tr$step$cars$scores[1])
+    expect_identical(tr$step$cars$path$ncomp[1], unname(lv))
+    expect_equal(tr$step$cars$path$rmsecv[1], unname(sqrt(mse[lv])))
+    expect_gt(unname(sqrt(mse[lv_sd])), tr$step$cars$path$rmsecv[1])
+
+  })
+
+  it("records the path: each iteration's representatives and bands, score, standard error and components", {
+
+    skip_if_not_installed("pls")
+
+    ## 160 bands, so 150 representatives and clusters to expand
+    d <- withr::with_seed(5, {
+      m <- matrix(stats::rnorm(60 * 160), 60)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 160))
+      d <- tibble::as_tibble(m)
+      d$SOC <- 2 * d$wn_3980 - 2 * d$wn_3950 + stats::rnorm(60, sd = 0.3)
+      d
+    })
+
+    tr   <- cars_fits(d)
+    rec  <- tr$step$cars
+    path <- rec$path
+
+    expect_identical(names(path), c("iteration", "representatives", "bands", "rmsecv", "se", "ncomp"))
+    expect_identical(path$iteration, 1:50)
+    expect_identical(lengths(path$representatives), vapply(tr$weight, function(w) length(w$bands), integer(1)))
+    expect_identical(path$representatives[[1]], tr$weight[[1]]$bands)
+    expect_length(path$representatives[[1]], 150L)
+    expect_setequal(path$bands[[1]], paste0("wn_", seq(4000, by = -2, length.out = 160)))
+
+    ## Each set's bands are its representatives' clusters, never fewer
+    expect_true(all(lengths(path$bands) >= lengths(path$representatives)))
+
+    ## The score, its count and its standard error are the scoring fit's
+    key  <- vapply(path$representatives, paste, character(1), collapse = ",")
+    fits <- stats::setNames(tr$scoring, vapply(tr$scoring, function(s) paste(s$bands, collapse = ","), character(1)))
+
+    for (i in c(1L, 25L, 50L)) {
+      fit  <- fits[[key[i]]]$fit
+      cv   <- pls::RMSEP(fit, estimate = "CV", intercept = FALSE)$val[1, 1, ]
+      e2   <- (fit$validation$pred[, 1, which.min(cv)] - d$SOC)^2
+      fold <- vapply(dealt_folds(d$SOC), function(f) sqrt(mean(e2[f])), numeric(1))
+      expect_equal(path$rmsecv[i], unname(min(cv)), label = paste("iteration", i))
+      expect_identical(path$ncomp[i], unname(which.min(cv)), label = paste("iteration", i))
+      expect_equal(path$se[i], stats::sd(fold) / sqrt(5), label = paste("iteration", i))
+    }
+
+    ## The set returned is the chosen iteration's bands
+    expect_identical(rec$iteration, which.min(path$rmsecv))
+    expect_setequal(tr$step$selected_vars, path$bands[[rec$iteration]])
 
   })
 
@@ -315,7 +367,7 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     components     <- vapply(tr$scoring, function(s) min(pls::RMSEP(s$fit, estimate = "CV", intercept = FALSE)$val), numeric(1))
 
     expect_true(any(with_intercept < components))
-    expect_true(all(tr$step$cars$scores %in% components))
+    expect_true(all(tr$step$cars$path$rmsecv %in% components))
 
   })
 

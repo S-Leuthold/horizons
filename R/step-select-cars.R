@@ -52,8 +52,11 @@
 #' on ties, each kept representative bringing its whole cluster. The trained
 #' step records this in its `cars` element: the bands it selected from
 #' (`n_bands`), the near-constant bands it dropped before (`n_constant`), the
-#' representatives, each iteration's score, the iteration chosen, the bands
-#' kept, `retained_all` (always `FALSE`: CARS always selects) and `skipped`.
+#' representatives (`n_representatives`), the `path` (a tibble, one row per
+#' iteration: its `representatives` and `bands`, `rmsecv`, its standard error
+#' across the folds `se`, and the component count `ncomp`), the iteration
+#' chosen, the bands kept, `retained_all` (always `FALSE`: CARS always
+#' selects) and `skipped`.
 #' The score is the one CARS chose by, not an estimate of accuracy: the
 #' lowest of 50 is biased low, and `evaluate()`'s folds, which rerun the step
 #' on each analysis set, measure the configuration.
@@ -184,7 +187,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
       cars          = list(n_bands           = length(kept),
                            n_constant        = n_constant,
                            n_representatives = NA_integer_,
-                           scores            = NULL,
+                           path              = NULL,
                            iteration         = NA_integer_,
                            n_kept            = length(kept),
                            retained_all      = FALSE,
@@ -276,10 +279,25 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   kept_wavenumbers <- unique(unlist(cluster_map[kept_cluster_vars]))
 
+  ## The path, recorded on the step: each iteration's set (its
+  ## representatives, and the bands their clusters hold), its score, the
+  ## score's standard error across the folds, and its component count. The
+  ## score is the one CARS chose by, biased low as the least of 50.
+  path <- tibble::tibble(
+    iteration       = seq_len(n_iterations),
+    representatives = lapply(sets, function(s) unname(cluster_vars[s])),
+    bands           = lapply(sets, function(s) {
+      unique(unlist(cluster_map[cluster_vars[s]], use.names = FALSE))
+    }),
+    rmsecv          = scored$rmsecv,
+    se              = scored$se,
+    ncomp           = scored$ncomp
+  )
+
   cars_record <- list(n_bands           = ncol(spectra_mat),
                       n_constant        = n_constant,
                       n_representatives = n_vars,
-                      scores            = scored$rmsecv,
+                      path              = path,
                       iteration         = best,
                       n_kept            = length(kept_wavenumbers),
                       retained_all      = FALSE,

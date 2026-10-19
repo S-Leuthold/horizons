@@ -75,8 +75,11 @@ rows it is fitted on, less one. The step returns the set with the lowest score (
 on ties, each kept representative bringing its whole cluster. The trained
 step records this in its \code{cars} element: the bands it selected from
 (\code{n_bands}), the near-constant bands it dropped before (\code{n_constant}), the
-representatives, each iteration's score, the iteration chosen, the bands
-kept, \code{retained_all} (always \code{FALSE}: CARS always selects) and \code{skipped}.
+representatives (\code{n_representatives}), the \code{path} (a tibble, one row per
+iteration: its \code{representatives} and \code{bands}, \code{rmsecv}, its standard error
+across the folds \code{se}, and the component count \code{ncomp}), the iteration
+chosen, the bands kept, \code{retained_all} (always \code{FALSE}: CARS always
+selects) and \code{skipped}.
 The score is the one CARS chose by, not an estimate of accuracy: the
 lowest of 50 is biased low, and \code{evaluate()}'s folds, which rerun the step
 on each analysis set, measure the configuration.
