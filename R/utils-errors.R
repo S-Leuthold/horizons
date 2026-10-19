@@ -160,7 +160,9 @@ check_arg <- function(check,
 #'   \item{`horizons_error_prediction_failed`}{(run) `predict()` had nothing
 #'     to return: the configuration asked for, or every one of them, could
 #'     not predict, or an ensemble's member or its combination could not. One
-#'     row per failure travels as `results`.}
+#'     row per failure travels as `results`: its `unit` (`"configuration"`, or
+#'     `"combination"` for an ensemble's), `config_id` (`NA` for the
+#'     combination), `step`, `class` and `error_message`.}
 #'   \item{`horizons_error_systemic`}{(run) [evaluate()] stopped early,
 #'     because the first configurations to run failed the same way across at
 #'     least two models (the circuit breaker,

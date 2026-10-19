@@ -42,7 +42,9 @@ condition as \code{results}.}
 \item{\code{horizons_error_prediction_failed}}{(run) \code{predict()} had nothing
 to return: the configuration asked for, or every one of them, could
 not predict, or an ensemble's member or its combination could not. One
-row per failure travels as \code{results}.}
+row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
+\code{"combination"} for an ensemble's), \code{config_id} (\code{NA} for the
+combination), \code{step}, \code{class} and \code{error_message}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
 because the first configurations to run failed the same way across at
 least two models (the circuit breaker,

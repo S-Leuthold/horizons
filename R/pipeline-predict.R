@@ -1286,8 +1286,10 @@ prediction_block <- function(sample_id, config_id, intervals = FALSE, ad = FALSE
 #' One row per failed unit, as `horizons_error_prediction_failed` carries them
 #'
 #' @param records Unit records, shaped like [new_unit_records()]'s.
-#' @return Tibble: `config_id`, `step`, `class`, `error_message` (the step's
-#'   words and the cause), one row per failure.
+#' @return Tibble: `unit` (`"configuration"`, or `"combination"` for an
+#'   ensemble's), `config_id` (`NA` for a unit that is not a configuration),
+#'   `step`, `class`, `error_message` (the step's words and the cause), one
+#'   row per failure.
 #' @keywords internal
 #' @noRd
 prediction_failures <- function(records) {
@@ -1295,7 +1297,8 @@ prediction_failures <- function(records) {
   failures <- records[records$type == "failure", , drop = FALSE]
 
   tibble::tibble(
-    config_id     = failures$id,
+    unit          = failures$unit,
+    config_id     = ifelse(failures$unit == "configuration", failures$id, NA_character_),
     step          = failures$step,
     class         = failures$class,
     error_message = vapply(seq_len(nrow(failures)), function(i) {
@@ -1326,9 +1329,14 @@ abort_prediction_failed <- function(records, header, call = rlang::caller_env(),
   results <- prediction_failures(records)
   header  <- cli::format_inline(header, .envir = .envir)
 
+  ## Each failure named by its configuration, or by its unit when it is not
+  ## one (an ensemble's combination)
+  named <- results
+  named$config_id <- ifelse(is.na(named$config_id), named$unit, named$config_id)
+
   abort_horizons(c(
     cli_escape(header),
-    distinct_config_errors(results),
+    distinct_config_errors(named),
     "i" = "The failures are on this condition as {.field results}: {.code rlang::last_error()$results}."
   ), kind = "run", class = "horizons_error_prediction_failed", results = results,
   call = call)

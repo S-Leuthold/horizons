@@ -629,6 +629,7 @@ describe("predict.horizons_ensemble() - aborts on a failing member", {
                         class = "horizons_error_prediction_failed")
 
     expect_identical(err$results$config_id, broken_member)
+    expect_identical(err$results$unit, "configuration")
     expect_identical(err$results$step, "bake")
     expect_match(conditionMessage(err), "it combines every member", fixed = TRUE)
 
@@ -732,7 +733,10 @@ describe("predict.horizons_ensemble() - flagged rows and the combination", {
                         class = "horizons_error_prediction_failed")
 
     expect_identical(err$results$step, "combine")
+    expect_identical(err$results$unit, "combination")
+    expect_identical(err$results$config_id, NA_character_)
     expect_match(conditionMessage(err), "its combination failed", fixed = TRUE)
+    expect_match(conditionMessage(err), "the weights broke (combination)", fixed = TRUE)
 
   })
 
