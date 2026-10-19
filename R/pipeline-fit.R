@@ -67,13 +67,17 @@
 #' (`horizons_warning_substitution`); a smallest assessment fold under
 #' `SMALL_FOLD_ROWS` rows, or every member below `evaluate()`'s prune
 #' threshold (`horizons_warning_quality`); UQ and AD switched off because the
-#' calibration set is under `min_calib_rows` (`horizons_warning_skipped`); a
-#' member whose warm-start Bayesian search failed and kept what it finished
+#' calibration set is under `min_calib_rows` (`horizons_warning_skipped`);
+#' members whose prediction intervals, measured coverage or applicability
+#' domain could not be computed, with why (`horizons_warning_skipped`, #145);
+#' a member whose warm-start Bayesian search failed and kept what it finished
 #' (`horizons_warning_substitution`, #209); some members failed and the rest
 #' are returned (`horizons_warning_partial_failure`, naming them with each
-#' distinct cause). The folds are drawn from the rows the members are fitted
-#' on, which must outnumber the folds, or `fit()` refuses, as `evaluate()`
-#' does.
+#' distinct cause). It records as notes on the log, without a warning, a
+#' member's fitted workflow stored whole because it could not be slimmed and
+#' in-sample interval diagnostics that could not be computed. The folds are
+#' drawn from the rows the members are fitted on, which must outnumber the
+#' folds, or `fit()` refuses, as `evaluate()` does.
 #'
 #' @section Members that fail:
 #' Each member is one unit: a failure in any step of its re-tune, its

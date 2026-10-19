@@ -117,9 +117,26 @@ fit_single_config <- function(config_row,
     warning_log <<- dplyr::bind_rows(warning_log, text_records(text, pinned = TRUE))
   }
 
-  ## The safely_execute() steps that remain carry their warnings as text
-  collect_from <- function(safe_result) {
-    warning_log <<- dplyr::bind_rows(warning_log, text_records(safe_result$warnings))
+  ## UQ, measured coverage, AD and slimming each run as a unit of their own
+  ## inside the member's: one that fails costs the member only what it
+  ## computes, and the member says so (on_failure). Their warnings and notes
+  ## are the member's, so they join its records, under its unit, for its row
+  ## and its verb's log; a failure is reported by the member instead.
+  addon_records <- new_unit_records()
+
+  run_addon <- function(expr, unit, on_failure) {
+    out  <- run_unit(expr, unit = unit, id = config_id, debug = debug)
+    kept <- out$records[out$records$type != "failure", , drop = FALSE]
+    kept$unit <- rep("member", nrow(kept))
+    addon_records <<- dplyr::bind_rows(addon_records, kept)
+    if (!out$failed) return(out$value)
+    on_failure(unit_failure_message(out$records, outside = NULL))
+    NULL
+  }
+
+  ## An add-on that was asked for and not computed is skipped, with why
+  skipped <- function(what) {
+    function(cause) warn_in_unit("skipped", "{what} not computed: {cause}")
   }
 
   ## How the re-tune started, once it has: from evaluate()'s parameters, or
@@ -351,36 +368,28 @@ fit_single_config <- function(config_row,
     ))
 
     ## -----------------------------------------------------------------------
-    ## Step 10: UQ (must run BEFORE butchering — needs extract_mold())
+    ## Step 10: UQ (must run BEFORE butchering — needs the mold)
     ## -----------------------------------------------------------------------
+    ## A unit of its own (#145): a failure leaves the member without intervals
+    ## and names it in a skipped warning; a tripwire inside still stops the
+    ## call.
 
     uq_result <- NULL
 
     if (compute_uq && !is.null(calib_data)) {
 
-      uq_safe <- safely_execute(
-        fit_uq(
-          fitted_workflow = final_fit,
-          oof_predictions = cv_predictions,
-          calib_data      = calib_data,
-          role_map        = role_map,
-          transformation  = transformation,
-          level_default   = DEFAULT_UQ_LEVEL,
-          seed            = seed,
-          outcome_range   = outcome_range,
-          min_calib_rows  = min_calib_rows
-        ),
-        log_error          = FALSE,
-        capture_conditions = TRUE
-      )
-
-      if (is.null(uq_safe$error)) {
-
-        uq_result <- uq_safe$result
-
-      }
-
-      collect_from(uq_safe)
+      uq_result <- run_addon(fit_uq(
+        fitted_workflow = final_fit,
+        oof_predictions = cv_predictions,
+        calib_data      = calib_data,
+        role_map        = role_map,
+        transformation  = transformation,
+        level_default   = DEFAULT_UQ_LEVEL,
+        seed            = seed,
+        outcome_range   = outcome_range,
+        min_calib_rows  = min_calib_rows,
+        debug           = debug
+      ), "uq", skipped("Prediction intervals (UQ) were"))
 
       ## Measured coverage on the held-out test rows (#118). The intervals are
       ## built by predict_intervals(), the function predict() serves them with,
@@ -389,77 +398,56 @@ fit_single_config <- function(config_row,
       ## it is an in-sample diagnostic for the quantile forest, not coverage.
       if (!is.null(uq_result)) {
 
-        coverage_safe <- safely_execute(
+        coverage <- run_addon(
           test_interval_coverage(uq_result, test_preds, test_data, test_truth,
                                  config_id, outcome_range),
-          log_error          = FALSE,
-          capture_conditions = TRUE
+          "coverage", skipped("Measured test coverage was")
         )
 
-        collect_from(coverage_safe)
-
-        uq_result <- c(uq_result, if (is.null(coverage_safe$error)) {
-          coverage_safe$result
-        } else {
-          test_interval_coverage_missing()
-        })
+        uq_result <- c(uq_result, coverage %||% test_interval_coverage_missing())
 
       }
 
     }
 
     ## -----------------------------------------------------------------------
-    ## Step 10b: AD (must also run BEFORE butchering — needs extract_mold())
+    ## Step 10b: AD (must also run BEFORE butchering — needs the mold)
     ## -----------------------------------------------------------------------
-    ## Shares the UQ calibration split (D7). Independent of UQ: fit_ad() returns
-    ## NULL on any failure, so AD degrades without touching the config's fit.
+    ## Shares the UQ calibration split (D7), and is a unit of its own,
+    ## independent of UQ's.
 
     ad_result <- NULL
 
     if (compute_ad && !is.null(calib_data)) {
 
-      ad_safe <- safely_execute(
-        fit_ad(
-          fitted_workflow = final_fit,
-          calib_data      = calib_data,
-          level           = DEFAULT_AD_LEVEL,
-          min_calib_rows  = min_calib_rows,
-          min_ad_rows     = min_ad_rows
-        ),
-        log_error          = FALSE,
-        capture_conditions = TRUE
-      )
-
-      if (is.null(ad_safe$error)) {
-
-        ad_result <- ad_safe$result
-
-      }
-
-      collect_from(ad_safe)
+      ad_result <- run_addon(fit_ad(
+        fitted_workflow = final_fit,
+        calib_data      = calib_data,
+        level           = DEFAULT_AD_LEVEL,
+        min_calib_rows  = min_calib_rows,
+        min_ad_rows     = min_ad_rows
+      ), "ad", skipped("The applicability domain (AD) was"))
 
     }
 
     ## -----------------------------------------------------------------------
     ## Step 11: Butcher the final fit for storage
     ## -----------------------------------------------------------------------
+    ## A unit of its own too. Slimming only saves memory, so when it fails the
+    ## workflow is stored whole, and that is a note rather than a warning.
 
-    butchered <- safely_execute(
-      butcher::butcher(final_fit),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
+    fitted_workflow <- run_addon(butcher::butcher(final_fit), "slimming", function(cause) {
+      note_in_unit("The fitted workflow is stored whole, not slimmed: {cause}")
+    })
 
-    fitted_workflow <- if (is.null(butchered$error)) {
+    if (is.null(fitted_workflow)) {
 
-      result <- butchered$result
-      rm(final_fit, butchered)
-      invisible(gc(verbose = FALSE))
-      result
+      fitted_workflow <- final_fit
 
     } else {
 
-      final_fit  ## fall back to unbutchered if butcher fails
+      rm(final_fit)
+      invisible(gc(verbose = FALSE))
 
     }
 
@@ -492,7 +480,8 @@ fit_single_config <- function(config_row,
   ## The warnings the unit caught join the notes, so a warning caught as it
   ## was raised and the same warning in tune's notes are one line.
 
-  warning_log <- dplyr::bind_rows(unit_warning_records(unit$records), warning_log)
+  records     <- dplyr::bind_rows(unit$records, addon_records)
+  warning_log <- dplyr::bind_rows(unit_warning_records(records), warning_log)
 
   result <- if (unit$failed) {
 
@@ -529,7 +518,7 @@ fit_single_config <- function(config_row,
   result["warnings"]  <- list(render_warning_log(warning_log))
   result$runtime_secs <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 
-  attr(result, "unit_records") <- unit$records
+  attr(result, "unit_records") <- records
 
   result
 
@@ -547,8 +536,10 @@ fit_single_config <- function(config_row,
 #' the function `predict()` serves intervals with, and reports how many of the
 #' test outcomes they contain. This is the honest coverage figure: the test
 #' rows took no part in tuning, the quantile forest or the conformal
-#' calibration (#118). A failure inside [predict_intervals()] warns and
-#' returns `NULL`, which leaves the figures `NA`.
+#' calibration (#118). Run as a unit of its own by [fit_single_config()]:
+#' when [predict_intervals()] warns and returns `NULL`, this fails, the
+#' figures stay `NA`, and the member names it in a `skipped` warning with the
+#' interval warning beside it.
 #'
 #' @param uq A UQ bundle from [fit_uq()].
 #' @param test_preds Numeric. Back-transformed test predictions, original
@@ -557,7 +548,8 @@ fit_single_config <- function(config_row,
 #' @param test_truth Numeric. The test outcomes, original scale.
 #' @param config_id Character(1). Named in any warning.
 #' @param outcome_range Numeric length 2. The bounds intervals are clamped to.
-#' @return List with `test_coverage`, `test_mean_width` and `n_test`.
+#' @return List with `test_coverage`, `test_mean_width` and `n_test`. Aborts
+#'   with class `horizons_error_run` when no intervals were built.
 #' @keywords internal
 #' @noRd
 test_interval_coverage <- function(uq, test_preds, test_data, test_truth,
@@ -569,7 +561,10 @@ test_interval_coverage <- function(uq, test_preds, test_data, test_truth,
 
   if (is.null(intervals)) {
 
-    return(test_interval_coverage_missing())
+    abort_horizons(
+      "No intervals could be built for the test rows; the member's warnings say why.",
+      kind = "run"
+    )
 
   }
 

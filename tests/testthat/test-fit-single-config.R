@@ -853,7 +853,7 @@ describe("fit_single_config() - a run whose stages warn and whose last steps fai
 
   })
 
-  it("stores the unbutchered workflow when butcher() fails, and it predicts", {
+  it("stores the unbutchered workflow when butcher() fails, and it predicts, with a note saying so", {
 
     shared <- fsc_mocked()
     wf     <- shared$result$fitted_workflow
@@ -863,6 +863,15 @@ describe("fit_single_config() - a run whose stages warn and whose last steps fai
 
     test_data <- rsample::testing(shared$setup$split_F)
     expect_equal(nrow(stats::predict(wf, new_data = test_data)), nrow(test_data))
+
+    ## A note on the member's row and in its records, for fit() to log; not a
+    ## warning
+    note <- "The fitted workflow is stored whole, not slimmed: butcher failed"
+    expect_true(any(startsWith(shared$result$warnings, note)))
+
+    records <- attr(shared$result, "unit_records")
+    expect_identical(records$type[startsWith(records$message, note)], "note")
+    expect_identical(records$unit[startsWith(records$message, note)], "member")
 
   })
 
@@ -897,7 +906,12 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
   no_coverage <- list(test_coverage = NA_real_, test_mean_width = NA_real_, n_test = 0L)
 
-  it("leaves the figures NA and records the warning when no intervals can be built", {
+  skipped_lines <- function(result) {
+    records <- attr(result, "unit_records")
+    records$message[records$class %in% "horizons_warning_skipped"]
+  }
+
+  it("leaves the figures NA, records the interval warning and says coverage was skipped when no intervals can be built", {
 
     setup <- fsc()$setup
     ## predict_intervals() warns and returns NULL when it fails
@@ -911,12 +925,17 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
     result <- run_with_uq(setup)
 
+    expect_equal(result$status, "success")
     expect_identical(result$uq[names(no_coverage)], no_coverage)
     expect_true(any(grepl("intervals could not be built", result$warnings, fixed = TRUE)))
+    expect_identical(skipped_lines(result), paste(
+      "Measured test coverage was not computed: No intervals could be built for the",
+      "test rows; the member's warnings say why."
+    ))
 
   })
 
-  it("leaves the figures NA, and keeps the bundle, when measuring errors", {
+  it("leaves the figures NA, and keeps the bundle, when measuring errors, and says why", {
 
     setup <- fsc()$setup
     local_mocked_bindings(
@@ -928,6 +947,21 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
     expect_equal(result$uq$sentinel, "fit_uq() ran")
     expect_identical(result$uq[names(no_coverage)], no_coverage)
+    expect_true(startsWith(skipped_lines(result),
+                           "Measured test coverage was not computed: coverage could not be measured"))
+
+  })
+
+  it("lets the interval builder's tripwire stop the member", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(
+      fit_uq            = function(...) list(sentinel = "fit_uq() ran"),
+      predict_intervals = function(...) abort_horizons("Rows misaligned.", kind = "internal")
+    )
+
+    expect_error(run_with_uq(setup), "Rows misaligned.", fixed = TRUE,
+                 class = "horizons_error_internal")
 
   })
 
@@ -945,6 +979,116 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
                                        config_id = "cfg_001", outcome_range = c(0, Inf))
 
     expect_identical(coverage, no_coverage)
+
+  })
+
+})
+
+
+## =========================================================================
+## UQ and AD as units of their own (#145)
+## =========================================================================
+## A failure inside either costs the member only what it computes, is named
+## in a skipped warning the member raises, and a tripwire inside stops the
+## member. The test rows stand in for the calibration set.
+
+describe("fit_single_config() - UQ and AD as units of their own (#145)", {
+
+  run_addons <- function(setup = fsc()$setup, debug = FALSE, ...) {
+
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      calib_data          = rsample::testing(setup$split_F),
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(mtry = 2L),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      allow_par           = FALSE,
+      seed                = 42L,
+      debug               = debug,
+      ...
+    )
+
+  }
+
+  skipped_lines <- function(result) {
+    records <- attr(result, "unit_records")
+    records$message[records$class %in% "horizons_warning_skipped"]
+  }
+
+  it("keeps the member without intervals when the quantile forest fails, and says why", {
+
+    ## Only the quantile forest fails: the member's own rf runs on ranger too
+    real_ranger <- ranger::ranger
+    local_mocked_bindings(ranger = function(...) {
+      if (isTRUE(list(...)$quantreg)) stop("forest failed")
+      real_ranger(...)
+    }, .package = "ranger")
+
+    result <- run_addons(compute_uq = TRUE, min_calib_rows = 5L)
+
+    expect_equal(result$status, "success")
+    expect_null(result$uq)
+    expect_false(is.null(result$fitted_workflow))
+
+    line <- skipped_lines(result)
+    expect_length(line, 1L)
+    expect_true(startsWith(line, "Prediction intervals (UQ) were not computed: Quantile forest failed: forest failed"))
+    expect_true(any(startsWith(result$warnings, "Prediction intervals (UQ) were not computed")))
+
+  })
+
+  it("keeps the member without an applicability domain when its data cannot support one, and says why", {
+
+    ## The test rows, fewer than the default min_calib_rows, are the
+    ## calibration set; the member is fitted as before
+    result <- run_addons(compute_ad = TRUE)
+
+    expect_equal(result$status, "success")
+    expect_null(result$ad)
+    expect_true(startsWith(skipped_lines(result),
+                           "The applicability domain (AD) was not computed: The calibration set has"))
+
+  })
+
+  it("stops the member at a tripwire inside UQ: the out-of-fold rows past the mold", {
+
+    ## The mold read a row short, so the last out-of-fold .row indexes no
+    ## training row
+    real_mold <- mold_predictors
+    local_mocked_bindings(mold_predictors = function(wf) real_mold(wf)[-1, , drop = FALSE])
+
+    expect_error(run_addons(compute_uq = TRUE, min_calib_rows = 5L), "Out-of-fold rows",
+                 class = "horizons_error_internal")
+
+  })
+
+  it("stops at an add-on's failure under debug, rather than skipping it", {
+
+    local_mocked_bindings(fit_ad = function(...) stop("the domain broke"))
+
+    expect_error(run_addons(compute_ad = TRUE, debug = TRUE), "the domain broke", fixed = TRUE)
+
+  })
+
+  it("records the AD covariance's warning for fewer samples than features on the member's row", {
+
+    ## 60 wavenumbers keep 52 predictors past the raw step's edge trim, more
+    ## than the 45 training rows
+    setup  <- make_fit_setup(n_wn = 60)
+    result <- run_addons(setup, compute_ad = TRUE, min_calib_rows = 5L, min_ad_rows = 5L)
+
+    expect_equal(result$status, "success")
+    expect_false(is.null(result$ad))
+    expect_true(any(grepl("AD covariance estimated with fewer samples than features",
+                          result$warnings, fixed = TRUE)))
+
+    ## Not a horizons topic, so it stays on the row and is not lifted
+    records <- attr(result, "unit_records")
+    covariance <- grepl("fewer samples than features", records$message, fixed = TRUE)
+    expect_false(any(startsWith(records$class[covariance], "horizons_warning_")))
 
   })
 

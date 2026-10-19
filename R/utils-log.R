@@ -492,7 +492,14 @@ UNIT_STEPS <- c(
   final_fit           = "Final model fit",
   test_predict        = "Test prediction",
   test_back_transform = "Test back-transformation",
-  degradation         = "Degradation check"
+  degradation         = "Degradation check",
+  uq_quantile_forest       = "Quantile forest",
+  uq_calibration_predict   = "Calibration prediction",
+  uq_back_transform        = "Calibration back-transformation",
+  uq_calibration_quantiles = "Calibration quantiles",
+  ad_covariance       = "AD covariance",
+  ad_calibration_bake = "AD calibration bake",
+  ad_thresholds       = "AD thresholds"
 )
 
 #' The message of a failed unit
@@ -500,7 +507,9 @@ UNIT_STEPS <- c(
 #' @param records The unit's records, shaped like [new_unit_records()]'s,
 #'   holding its failure.
 #' @param outside Character(1). What the unit is called when it failed
-#'   outside every labelled step, e.g. `"Evaluation"`.
+#'   outside every labelled step, e.g. `"Evaluation"`; `NULL` for the cause
+#'   alone, when the unit's own condition says what failed (an add-on's data
+#'   too small to compute from).
 #' @return Character(1): the step's words (`UNIT_STEPS`), "failed: ", and
 #'   the cause.
 #' @keywords internal
@@ -510,7 +519,9 @@ unit_failure_message <- function(records, outside) {
   failure <- records[records$type == "failure", , drop = FALSE]
   step    <- failure$step[1]
 
-  paste0(if (is.na(step)) outside else UNIT_STEPS[[step]], " failed: ", failure$message[1])
+  label <- if (is.na(step)) outside else UNIT_STEPS[[step]]
+
+  paste0(if (!is.null(label)) paste0(label, " failed: "), failure$message[1])
 
 }
 

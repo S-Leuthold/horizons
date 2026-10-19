@@ -531,6 +531,23 @@ describe("warn_in_unit() and log_unit_records()", {
 
 })
 
+describe("unit_failure_message()", {
+
+  it("names the step a unit failed in, the unit itself outside every step, or neither", {
+
+    in_step <- run_unit(unit_step("final_fit", stop("no fit")), "member", "cfg_1")$records
+    outside <- run_unit(stop("no data"), "ad", "cfg_1")$records
+
+    expect_match(unit_failure_message(in_step, "Fit"), "^Final model fit failed: no fit")
+    expect_match(unit_failure_message(outside, "Fit"), "^Fit failed: no data")
+
+    ## An add-on's own condition says what failed, so it stands alone
+    expect_match(unit_failure_message(outside, NULL), "^no data")
+
+  })
+
+})
+
 describe("note_in_unit()", {
 
   it("is recorded as a note by the unit it is raised in, and silent outside one", {

@@ -1340,7 +1340,8 @@ make_valid_fit <- function() {
     cv_predictions    = tibble::tibble(),
     results           = results,
     split             = obj$evaluation$split,
-    uq                = list(cfg_a = list(quantile_model = 1, level_default = 0.9)),
+    uq                = list(cfg_a = list(quantile_model = 1, scores = seq(-1, 1, length.out = 10),
+                                          level_default = 0.9)),
     ad                = list(cfg_a = list(centroid = c(f1 = 0), cov_matrix = matrix(1),
                                           ad_thresholds = c(1, 2, 3, 4))),
     selection_present = FALSE,
@@ -3014,6 +3015,20 @@ describe("the class validators' new checks (#234)", {
       expect_true(any(grepl("has no level_default in (0, 1)", finding_of(validate_horizons_fit(obj)),
                             fixed = TRUE)), label = deparse(bad))
     }
+
+    ## The conformal margin needs 9 finite scores at 0.9: NA and Inf are not
+    ## scores, and a bundle without them has none
+    for (bad in list(c(seq_len(8), NA, Inf), NULL, "1")) {
+      obj <- make_valid_fit()
+      obj$models$uq$cfg_a["scores"] <- list(bad)
+      expect_true(any(grepl("has fewer finite scores than its level_default needs",
+                            finding_of(validate_horizons_fit(obj)), fixed = TRUE)),
+                  label = deparse(bad))
+    }
+
+    obj <- make_valid_fit()
+    obj$models$uq$cfg_a$scores <- c(seq_len(9), NA)
+    expect_no_error(validate_horizons_fit(obj))
 
     shapes <- list(
       short_centroid = function(b) { b$centroid <- numeric(0); b },

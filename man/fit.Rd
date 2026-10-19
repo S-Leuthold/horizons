@@ -146,13 +146,17 @@ cold start's split) that fell back to an unstratified one
 (\code{horizons_warning_substitution}); a smallest assessment fold under
 \code{SMALL_FOLD_ROWS} rows, or every member below \code{evaluate()}'s prune
 threshold (\code{horizons_warning_quality}); UQ and AD switched off because the
-calibration set is under \code{min_calib_rows} (\code{horizons_warning_skipped}); a
-member whose warm-start Bayesian search failed and kept what it finished
+calibration set is under \code{min_calib_rows} (\code{horizons_warning_skipped});
+members whose prediction intervals, measured coverage or applicability
+domain could not be computed, with why (\code{horizons_warning_skipped}, #145);
+a member whose warm-start Bayesian search failed and kept what it finished
 (\code{horizons_warning_substitution}, #209); some members failed and the rest
 are returned (\code{horizons_warning_partial_failure}, naming them with each
-distinct cause). The folds are drawn from the rows the members are fitted
-on, which must outnumber the folds, or \code{fit()} refuses, as \code{evaluate()}
-does.
+distinct cause). It records as notes on the log, without a warning, a
+member's fitted workflow stored whole because it could not be slimmed and
+in-sample interval diagnostics that could not be computed. The folds are
+drawn from the rows the members are fitted on, which must outnumber the
+folds, or \code{fit()} refuses, as \code{evaluate()} does.
 }
 
 \section{Members that fail}{

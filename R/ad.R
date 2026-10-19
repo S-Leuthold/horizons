@@ -41,17 +41,17 @@
 #' those rows' own distances. AD assumes a vetted training set.
 #'
 #' @param feature_matrix Numeric matrix (n x p) of baked predictors, with
-#'   column names. Rows are samples, columns the model's features. No NA/NaN/Inf.
-#' @param min_rows Integer. The fewest rows the covariance is estimated from.
-#'   Default `N_AD_TRAIN_MIN`.
+#'   column names. Rows are samples, columns the model's features. No NA/NaN/Inf
+#'   and at least `min_ad_rows` rows: [fit_ad()], its one caller, checks both.
 #'
 #' @return List with `centroid` (numeric length p, named), `cov_matrix`
-#'   (p x p shrinkage covariance). Aborts on invalid input.
+#'   (p x p shrinkage covariance). Warns when there are fewer samples than
+#'   features.
 #'
 #' @seealso [compute_ad_thresholds()], [calculate_ad_distance()].
 #'
 #' @noRd
-compute_ad_metadata <- function(feature_matrix, min_rows = N_AD_TRAIN_MIN) {
+compute_ad_metadata <- function(feature_matrix) {
 
   ## The mold's predictors, which hardhat builds: without names the centroid
   ## is unnamed and calculate_ad_distance()'s name check is skipped, silently.
@@ -63,22 +63,8 @@ compute_ad_metadata <- function(feature_matrix, min_rows = N_AD_TRAIN_MIN) {
 
   }
 
-  if (anyNA(feature_matrix) || any(!is.finite(feature_matrix))) {
-
-    cli::cli_abort("{.arg feature_matrix} must not contain NA, NaN, or Inf")
-
-  }
-
   n_samples  <- nrow(feature_matrix)
   n_features <- ncol(feature_matrix)
-
-  if (n_samples < min_rows) {
-
-    cli::cli_abort(
-      "{.arg feature_matrix} needs at least {min_rows} samples (has {n_samples})"
-    )
-
-  }
 
   ## Warn when the covariance cannot be meaningfully estimated -------------------
   ## Below n ~ p the shrinkage target dominates; the AD is still well-defined
@@ -282,8 +268,9 @@ assign_ad_bin <- function(distances, thresholds) {
 #' covariance on the model's own training feature space, and OOD/quartile
 #' thresholds calibrated on a held-out set. Called once per config by
 #' [fit_single_config()] when `compute_ad = TRUE`, alongside [fit_uq()] and
-#' sharing its calibration partition. Returns `NULL` on any failure or
-#' insufficient data, so one config's AD failure never aborts the fit.
+#' sharing its calibration partition. It runs as a unit of its own
+#' (`run_unit()`), so a failure, or data it cannot estimate from, costs the
+#' member its AD and is named in a `skipped` warning, not the fit.
 #'
 #' @details
 #' The training feature matrix is `extract_mold(fitted_workflow)$predictors` —
@@ -293,15 +280,17 @@ assign_ad_bin <- function(distances, thresholds) {
 #' the held-out distances are commensurate with the training ones. Both must run
 #' before the workflow is butchered (the mold is stripped by `butcher()`).
 #'
-#' Returns `NULL` (no bundle) when any of these hold: `calib_data` is `NULL` or
-#' under `min_calib_rows` rows; the training feature matrix has fewer than
-#' `min_ad_rows` rows or any NA; or the covariance / bake / threshold steps
-#' error. NULL degrades the config to no-AD rather than aborting the fit.
+#' Aborts with class `horizons_error_run`, saying why, when `calib_data` is
+#' `NULL` or under `min_calib_rows` rows, when the training feature matrix has
+#' fewer than `min_ad_rows` rows, or when the training or calibration
+#' features hold a value that is not finite (NA, NaN or Inf); and with the
+#' step's label (`ad_covariance`, `ad_calibration_bake`, `ad_thresholds`)
+#' when one of those steps errors. The covariance's warning for fewer samples
+#' than features is recorded on the member's row.
 #'
 #' @param fitted_workflow A trained `workflows::workflow` (pre-butcher).
 #' @param calib_data Data frame for threshold calibration — the same held-out
-#'   `calib_Fit` split UQ uses. `NULL` or under `min_calib_rows` rows returns
-#'   `NULL`.
+#'   `calib_Fit` split UQ uses.
 #' @param level Numeric in (0, 1). OOD coverage level. Default `DEFAULT_AD_LEVEL`.
 #' @param min_calib_rows Integer. The fewest calibration rows the thresholds
 #'   are computed from; `control_horizons(min_calib_rows = )`. Default
@@ -310,7 +299,7 @@ assign_ad_bin <- function(distances, thresholds) {
 #'   estimated from; `control_horizons(min_ad_rows = )`. Default
 #'   `N_AD_TRAIN_MIN`.
 #'
-#' @return List `list(centroid, cov_matrix, ad_thresholds, n_calib)`, or `NULL`.
+#' @return List `list(centroid, cov_matrix, ad_thresholds, n_calib)`.
 #'
 #' @seealso [compute_ad_metadata()], [compute_ad_thresholds()], [fit_uq()].
 #'
@@ -322,81 +311,75 @@ fit_ad <- function(fitted_workflow,
                    min_calib_rows = N_CALIB_MIN,
                    min_ad_rows    = N_AD_TRAIN_MIN) {
 
-  ## Guard: NULL or insufficient calibration data -------------------------------
+  ## Guard: insufficient calibration data ----------------------------------------
 
-  if (is.null(calib_data) || nrow(calib_data) < min_calib_rows) {
-
-    return(NULL)
-
-  }
+  check_calibration_rows(calib_data, min_calib_rows)
 
   ## Training feature matrix — the baked predictors the model sees --------------
 
-  train_matrix <- as.matrix(workflows::extract_mold(fitted_workflow)$predictors)
+  train_matrix <- as.matrix(mold_predictors(fitted_workflow))
 
-  if (nrow(train_matrix) < min_ad_rows || anyNA(train_matrix)) {
+  if (nrow(train_matrix) < min_ad_rows) {
 
-    return(NULL)
-
-  }
-
-  ## Centroid + shrinkage covariance (safely — degenerate matrices return NULL) -
-
-  md_safe <- safely_execute(
-    suppressWarnings(compute_ad_metadata(train_matrix, min_rows = min_ad_rows)),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(md_safe$error)) {
-
-    return(NULL)
+    abort_horizons(
+      "The model was fit on {nrow(train_matrix)} row{?s}, fewer than the {min_ad_rows} the covariance needs ({.code min_ad_rows}).",
+      kind = "run"
+    )
 
   }
 
-  ad_metadata <- md_safe$result
+  check_finite_features(train_matrix, "training")
+
+  ## Centroid + shrinkage covariance. Its warning for fewer samples than
+  ## features is recorded on the member's row, not muffled.
+
+  ad_metadata <- unit_step("ad_covariance", compute_ad_metadata(train_matrix))
 
   ## Calibration features — baked through the SAME prepped recipe ---------------
 
-  prepped_recipe <- workflows::extract_recipe(fitted_workflow, estimated = TRUE)
+  calib_matrix <- unit_step("ad_calibration_bake", {
+    prepped_recipe <- workflows::extract_recipe(fitted_workflow, estimated = TRUE)
+    as.matrix(recipes::bake(prepped_recipe, new_data = calib_data, recipes::all_predictors()))
+  })
 
-  calib_safe <- safely_execute(
-    as.matrix(recipes::bake(
-      prepped_recipe,
-      new_data = calib_data,
-      recipes::all_predictors()
-    )),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(calib_safe$error) || anyNA(calib_safe$result)) {
-
-    return(NULL)
-
-  }
-
-  calib_matrix <- calib_safe$result
+  check_finite_features(calib_matrix, "calibration")
 
   ## Held-out conformal thresholds (D6) -----------------------------------------
 
-  thr_safe <- safely_execute(
-    compute_ad_thresholds(calib_matrix, ad_metadata, level = level),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  if (!is.null(thr_safe$error)) {
-
-    return(NULL)
-
-  }
+  ad_thresholds <- unit_step("ad_thresholds",
+                             compute_ad_thresholds(calib_matrix, ad_metadata, level = level))
 
   list(
     centroid      = ad_metadata$centroid,
     cov_matrix    = ad_metadata$cov_matrix,
-    ad_thresholds = thr_safe$result,
+    ad_thresholds = ad_thresholds,
     n_calib       = nrow(calib_matrix)
+  )
+
+}
+
+
+#' Refuse features the applicability domain cannot be estimated from
+#'
+#' @param x Numeric matrix of baked features.
+#' @param what Character(1). Which features, `"training"` or `"calibration"`.
+#' @param call The frame the failure reports.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_run` when a
+#'   value is NA, NaN or Inf, since the centroid, the covariance and every
+#'   distance would carry it.
+#' @keywords internal
+#' @noRd
+check_finite_features <- function(x, what, call = rlang::caller_env()) {
+
+  bad <- !is.finite(x)
+
+  if (!any(bad)) return(invisible(NULL))
+
+  n_rows <- sum(rowSums(bad) > 0)
+
+  abort_horizons(
+    "{n_rows} of the {nrow(x)} {what} rows {cli::qty(n_rows)}ha{?s/ve} a feature that is not finite (NA, NaN or Inf).",
+    kind = "run", call = call
   )
 
 }

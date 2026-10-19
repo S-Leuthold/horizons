@@ -13,7 +13,8 @@ fit_uq(
   level_default = DEFAULT_UQ_LEVEL,
   seed = NULL,
   outcome_range = DEFAULT_OUTCOME_RANGE,
-  min_calib_rows = N_CALIB_MIN
+  min_calib_rows = N_CALIB_MIN,
+  debug = FALSE
 )
 }
 \arguments{
@@ -43,16 +44,21 @@ which the back-transformed calibration predictions are clamped to, as
 around. Default \code{c(0, Inf)}.}
 
 \item{min_calib_rows}{Integer. The fewest calibration rows the bundle is
-computed from, before and after rows without an outcome are dropped;
+computed from, before and after rows without a finite score are dropped;
 \code{control_horizons(min_calib_rows = )}. Default \code{N_CALIB_MIN}.}
+
+\item{debug}{Logical. Stop at the first failure, the diagnostics' included,
+rather than recover.}
 }
 \value{
 Named list with fields: \code{quantile_model}, \code{scores}, \code{n_calib},
 \code{level_default}, \code{oof_coverage}, \code{mean_width}, \code{prepped_recipe}.
-Returns NULL if calibration set is too small (\code{n < min_calib_rows}).
-Aborts with class \code{horizons_error_internal} when an out-of-fold \code{.row}
-falls outside the rows the model was fit on, or when the calibration
-predictions or features do not have one row per row of \code{calib_data}.
+Aborts with class \code{horizons_error_run} when the calibration set is too
+small (under \code{min_calib_rows} rows, or fewer finite scores than that or
+than \code{level_default}'s order statistic needs), and with class
+\code{horizons_error_internal} when an out-of-fold \code{.row} falls outside the
+rows the model was fit on, or when the calibration predictions or
+features do not have one row per row of \code{calib_data}.
 }
 \description{
 Trains a quantile random forest on OOF residuals from the point model,
@@ -63,5 +69,12 @@ intervals at any coverage level.
 \details{
 This function is the \strong{capture layer} — it runs silently and returns a
 structured list. Messaging is the caller's responsibility.
+
+\code{\link[=fit_single_config]{fit_single_config()}} runs it as a unit of its own (\code{run_unit()}): any
+step that fails ends the bundle, with the step's label, and the member
+keeps its model without intervals. A calibration set too small for the
+bundle is such a failure, with the counts. Only the in-sample diagnostics
+have a local recovery: when the out-of-fold quantile prediction fails they
+are \code{NA} and a note says why, since the bundle is complete without them.
 }
 \keyword{internal}

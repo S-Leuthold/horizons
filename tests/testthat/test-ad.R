@@ -44,20 +44,14 @@ test_that("compute_ad_metadata handles p > n via shrinkage (with a warning)", {
 
 })
 
-test_that("compute_ad_metadata validates inputs", {
+test_that("compute_ad_metadata refuses a matrix without column names, a broken invariant", {
 
   ## The mold's predictors come named; a matrix without names is a broken
-  ## invariant, not the user's input
+  ## invariant, not the user's input. Too few rows and values that are not
+  ## finite are fit_ad()'s to refuse, below.
   no_names <- matrix(stats::rnorm(100), 10, 10)
   expect_error(compute_ad_metadata(no_names), "column names",
                class = "horizons_error_internal")
-
-  small <- ad_matrix(3, 10, seed = 1)
-  expect_error(compute_ad_metadata(small), "at least")
-
-  ## NA is caught, not silently propagated to an all-NA centroid.
-  na_mat <- ad_matrix(20, 10, seed = 2); na_mat[1, 1] <- NA
-  expect_error(compute_ad_metadata(na_mat), "NA")
 
 })
 
@@ -242,14 +236,19 @@ test_that("fit_ad() takes its minimums from min_calib_rows and min_ad_rows", {
 
   fx <- ad_fitted_workflow()
 
-  ## The 60 rows clear the defaults; a minimum above them turns AD off
+  ## The 60 rows clear the defaults; a minimum above them is a run failure
+  ## of the AD unit, with the counts
   expect_false(is.null(fit_ad(fx$workflow, calib_data = fx$data)))
-  expect_null(fit_ad(fx$workflow, calib_data = fx$data, min_calib_rows = 61L))
+  expect_error(fit_ad(fx$workflow, calib_data = fx$data, min_calib_rows = 61L),
+               "The calibration set has 60 rows, fewer than `min_calib_rows` (61).",
+               fixed = TRUE, class = "horizons_error_run")
 
   ## A model trained on 8 rows is below the default covariance minimum of 10,
   ## and above a minimum of 5
   small <- ad_fitted_workflow(n = 8, seed = 43)
-  expect_null(fit_ad(small$workflow, calib_data = fx$data))
+  expect_error(fit_ad(small$workflow, calib_data = fx$data),
+               "The model was fit on 8 rows, fewer than the 10 the covariance needs",
+               fixed = TRUE, class = "horizons_error_run")
   expect_false(is.null(fit_ad(small$workflow, calib_data = fx$data, min_ad_rows = 5L)))
 
 })
@@ -372,72 +371,119 @@ test_that("every predict_ad warning names the config when it is given", {
 
 
 ## ---------------------------------------------------------------------------
-## fit_ad() — every exit returns NULL, never a partial bundle
+## fit_ad() — data it cannot estimate from is a run failure, with the counts
 ## ---------------------------------------------------------------------------
-## fit_ad() returns NULL whenever a step cannot run, so the config degrades to
-## no AD. Three of its checks are backed by a later step that refuses the same
-## input. The training-matrix guard repeats compute_ad_metadata()'s own refusal,
-## so its test asserts the NULL whichever of the two refuses. The covariance
-## and calibration-bake checks are backed only incidentally, by the threshold
-## step: calculate_ad_distance() refuses NULL metadata or a NULL matrix, and the
-## threshold quantile refuses NA distances. Their test mocks the threshold step
-## to succeed, so only fit_ad()'s own check keeps the bundle out.
+## fit_ad() runs as a unit of its own inside the member, so each condition it
+## cannot compute from raises, and the member names it in a skipped warning
+## rather than holding a partial bundle or none, silently.
 ## ---------------------------------------------------------------------------
 
-test_that("fit_ad returns NULL for a calibration set under N_CALIB_MIN rows", {
+test_that("fit_ad refuses a calibration set under N_CALIB_MIN rows, saying so", {
 
   fx <- ad_fitted_workflow()
 
   expect_false(is.null(fit_ad(fx$workflow, calib_data = fx$data[seq_len(N_CALIB_MIN), ])))
-  expect_null(fit_ad(fx$workflow, calib_data = fx$data[seq_len(N_CALIB_MIN - 1L), ]))
-  expect_null(fit_ad(fx$workflow, calib_data = NULL))
+  expect_error(fit_ad(fx$workflow, calib_data = fx$data[seq_len(N_CALIB_MIN - 1L), ]),
+               "The calibration set has 29 rows", fixed = TRUE, class = "horizons_error_run")
+  expect_error(fit_ad(fx$workflow, calib_data = NULL),
+               "The calibration set has 0 rows", fixed = TRUE, class = "horizons_error_run")
 
 })
 
-test_that("fit_ad returns NULL for a training matrix under N_AD_TRAIN_MIN rows", {
+test_that("fit_ad refuses a training matrix under N_AD_TRAIN_MIN rows, saying so", {
 
   fx    <- ad_fitted_workflow()
   short <- ad_fitted_workflow(n = N_AD_TRAIN_MIN - 1L)
 
   expect_equal(nrow(workflows::extract_mold(short$workflow)$predictors),
                N_AD_TRAIN_MIN - 1L)
-  expect_null(fit_ad(short$workflow, calib_data = fx$data))
+  expect_error(fit_ad(short$workflow, calib_data = fx$data),
+               "The model was fit on 9 rows", fixed = TRUE, class = "horizons_error_run")
 
 })
 
-test_that("fit_ad returns NULL when the covariance or the calibration bake fails", {
+test_that("fit_ad refuses training or calibration features that are not finite, Inf as well as NA", {
 
   fx <- ad_fitted_workflow()
 
-  local_mocked_bindings(compute_ad_thresholds = function(...) c(1, 2, 3, 4))
+  ## The training features, read from the mold
+  real_mold <- mold_predictors
+  local_mocked_bindings(mold_predictors = function(wf) {
+    m <- real_mold(wf)
+    m[2, 1] <- Inf
+    m
+  })
+  expect_error(fit_ad(fx$workflow, calib_data = fx$data),
+               "1 of the 60 training rows has a feature that is not finite (NA, NaN or Inf).",
+               fixed = TRUE, class = "horizons_error_run")
 
-  ## With the thresholds mocked, the full calibration set still gets a bundle
-  expect_false(is.null(fit_ad(fx$workflow, calib_data = fx$data)))
+})
 
-  ## The covariance step fails
-  fit_without_covariance <- function() {
-    local_mocked_bindings(compute_ad_metadata = function(...) stop("covariance failed"))
-    fit_ad(fx$workflow, calib_data = fx$data)
-  }
-  expect_null(fit_without_covariance())
+test_that("fit_ad refuses a calibration spectrum that bakes to a value that is not finite", {
+
+  fx <- ad_fitted_workflow()
 
   ## One calibration spectrum bakes to NA (step_transform_spectra's malformed
-  ## spectrum path), or the bake aborts on a missing spectral column
+  ## spectrum path)
   one_na <- fx$data
   one_na[1, fx$wn] <- NA_real_
-  expect_null(fit_ad(fx$workflow, calib_data = one_na))
-  expect_null(fit_ad(fx$workflow, calib_data = fx$data[, -1]))
+  expect_warning(
+    expect_error(fit_ad(fx$workflow, calib_data = one_na),
+                 "1 of the 60 calibration rows has a feature that is not finite", fixed = TRUE,
+                 class = "horizons_error_run"),
+    "produced no usable output", fixed = TRUE
+  )
 
 })
 
-test_that("fit_ad returns NULL, not a bundle without thresholds, when the threshold step fails", {
+## ---------------------------------------------------------------------------
+## fit_ad() as the unit it runs in: each step's failure is recorded with its
+## label, and the covariance's warning is recorded rather than muffled
+## ---------------------------------------------------------------------------
+
+run_ad <- function(fx, calib_data = fx$data, ...) {
+
+  run_unit(fit_ad(fx$workflow, calib_data = calib_data, ...), unit = "ad", id = "cfg_001")
+
+}
+
+test_that("fit_ad fails at the covariance, the calibration bake or the thresholds, with the step", {
 
   fx <- ad_fitted_workflow()
 
-  expect_false(is.null(fit_ad(fx$workflow, calib_data = fx$data)))
+  covariance <- local({
+    local_mocked_bindings(compute_ad_metadata = function(...) stop("covariance failed"))
+    run_ad(fx)
+  })
+  expect_true(covariance$failed)
+  expect_identical(covariance$records$step, "ad_covariance")
 
-  local_mocked_bindings(compute_ad_thresholds = function(...) stop("thresholds failed"))
+  ## The bake aborts on a missing spectral column
+  bake <- run_ad(fx, calib_data = fx$data[, -1])
+  expect_true(bake$failed)
+  expect_identical(bake$records$step[bake$records$type == "failure"], "ad_calibration_bake")
 
-  expect_null(fit_ad(fx$workflow, calib_data = fx$data))
+  thresholds <- local({
+    local_mocked_bindings(compute_ad_thresholds = function(...) stop("thresholds failed"))
+    run_ad(fx)
+  })
+  expect_true(thresholds$failed)
+  expect_identical(thresholds$records$step, "ad_thresholds")
+  expect_match(unit_failure_message(thresholds$records, NULL), "^AD thresholds failed: thresholds failed")
+
+})
+
+test_that("fit_ad records the covariance's warning for fewer samples than features, and keeps the bundle", {
+
+  ## 12 training rows against 30 features
+  fx    <- ad_fitted_workflow(n = 12, n_wn = 30, seed = 44)
+  calib <- ad_fitted_workflow(n = 40, n_wn = 30, seed = 45)
+
+  out <- run_ad(fx, calib_data = calib$data, min_ad_rows = 10L)
+
+  expect_false(out$failed)
+  expect_named(out$value, c("centroid", "cov_matrix", "ad_thresholds", "n_calib"))
+  expect_true(any(out$records$type == "warning" &
+                    grepl("fewer samples than features (12 <", out$records$message, fixed = TRUE)))
 
 })

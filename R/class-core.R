@@ -2160,7 +2160,10 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    reachable, every workflow key is a defined config id.
 #' 9. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
 #'    subset of the workflow keys (not every fitted config earns a UQ bundle —
-#'    only successful ones with sufficient calibration data).
+#'    only successful ones with sufficient calibration data). Each bundle
+#'    has a `level_default` in (0, 1) and at least
+#'    `conformal_min_rows(level_default)` finite `scores`, which `predict()`
+#'    takes the conformal margin from.
 #' 10. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
 #' @param x `horizons_fit`. The object to validate.
@@ -2450,6 +2453,23 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
         errors <- c(errors, cli::format_inline(
           "{.field uq} {cli::qty(length(bad_level))}bundle{?s} {.val {bad_level}} {?has/have} no {.field level_default} in (0, 1)"
+        ))
+
+      }
+
+      ## predict() takes the conformal margin from the saved scores, which
+      ## need as many finite values as the level's order statistic: fewer,
+      ## and the interval would cover less than its level, or nothing at all
+      ok_level   <- setdiff(names(uq), bad_level)
+      bad_scores <- ok_level[!vapply(uq[ok_level], function(b) {
+        scores <- b$scores
+        is.numeric(scores) && sum(is.finite(scores)) >= conformal_min_rows(b$level_default)
+      }, logical(1))]
+
+      if (length(bad_scores) > 0) {
+
+        errors <- c(errors, cli::format_inline(
+          "{.field uq} {cli::qty(length(bad_scores))}bundle{?s} {.val {bad_scores}} {?has/have} fewer finite {.field scores} than {?its/their} {.field level_default} needs"
         ))
 
       }

@@ -1107,6 +1107,33 @@ describe("fit() - what it reports at its end", {
 
   })
 
+  it("warns skipped once, naming the members, when their prediction intervals could not be built (#145)", {
+
+    ## A calibration set of 10 passes min_calib_rows = 10, and each member's
+    ## UQ unit fails; the members are fitted all the same
+    local_mocked_bindings(fit_uq = function(...) stop("the forest broke"))
+
+    got <- collect_warnings(
+      fit(mfo(), n_best = 2L, seed = 42L, compute_ad = FALSE,
+          control = control_horizons(min_calib_rows = 10L)),
+      "."
+    )
+    w <- got$warnings[vapply(got$warnings, inherits, logical(1), "horizons_warning_skipped")]
+
+    expect_length(w, 1L)
+    expect_match(conditionMessage(w[[1]]),
+                 "Prediction intervals (UQ) were not computed: the forest broke", fixed = TRUE)
+    expect_match(conditionMessage(w[[1]]), "In 2 members", fixed = TRUE)
+
+    expect_identical(got$value$models$results$status, c("success", "success"))
+    expect_null(got$value$models$uq)
+
+    log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "skipped", ]
+    expect_identical(nrow(log), 1L)
+    expect_setequal(log$ids[[1]], got$value$models$results$config_id)
+
+  })
+
   it("warns substitution once per draw that fell back to no strata, with why", {
 
     real_vfold_cv <- rsample::vfold_cv
