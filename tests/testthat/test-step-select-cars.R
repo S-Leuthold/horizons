@@ -502,8 +502,12 @@ describe("step_select_cars() with too few bands to select from", {
     expect_identical(step$cars$n_bands, 1L)
     expect_identical(calls, 0L)
     expect_identical(w$step, "step_select_cars")
-    expect_match(conditionMessage(w), "had 1 band to select from, too few to run CARS, so it is kept",
+    expect_match(conditionMessage(w), "had 1 band to select from, fewer than the 2 it needs, so it is kept",
                  fixed = TRUE)
+
+    ## print() says it in the warning's words
+    expect_output(print(step), "`step_select_cars()` had 1 band to select from, fewer than the 2 it needs, so it is kept",
+                  fixed = TRUE)
 
   })
 

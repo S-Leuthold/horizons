@@ -189,8 +189,9 @@ describe("step_select_correlation() with too few bands to select from", {
       expect_true(step$correlation$skipped)
       expect_identical(step$correlation$n_windows, 0L, label = paste(p, "bands"))
       expect_warning(recipes::prep(correlation_recipe(d), training = d),
-                     "too few to score the three windows its threshold needs", fixed = TRUE,
+                     "fewer than the 5 it needs", fixed = TRUE,
                      class = "horizons_warning_skipped")
+      expect_output(print(step), sprintf("`step_select_correlation()` had %d band", p), fixed = TRUE)
 
     }
 

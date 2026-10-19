@@ -162,7 +162,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   ## Fewer than two bands left: there is nothing to select between, so they
   ## are kept and the step says the selection did not run
-  if (ncol(spectra_mat) < 2) {
+  if (ncol(spectra_mat) < SELECTION_MIN_BANDS[["step_select_cars"]]) {
 
     kept <- colnames(spectra_mat)
 
@@ -332,9 +332,7 @@ print.step_select_cars <- function(x,
   if (x$trained) {
     cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after CARS"), "\n", sep = "")
     print_constant_bands(x$cars)
-    if (isTRUE(x$cars$skipped)) {
-      cat("\u2022 Too few bands to run CARS, so every band left was kept\n")
-    }
+    if (isTRUE(x$cars$skipped)) print_selection_skipped(x)
   } else {
     cat("\u2022 Step not yet trained\n")
   }

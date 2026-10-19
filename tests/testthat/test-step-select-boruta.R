@@ -548,7 +548,7 @@ describe("step_select_boruta() with too few bands to select from", {
 
     w <- expect_warning(
       prepped <- suppressMessages(recipes::prep(boruta_recipe(d), training = d)),
-      "had 1 band to select from, too few to cluster them and run Boruta, so it is kept",
+      "had 1 band to select from, fewer than the 2 it needs, so it is kept",
       fixed = TRUE, class = "horizons_warning_skipped"
     )
 
@@ -559,7 +559,9 @@ describe("step_select_boruta() with too few bands to select from", {
     expect_false(step$boruta$retained_all)
     expect_identical(calls, 0L)
     expect_identical(w$step, "step_select_boruta")
-    expect_output(print(step), "Too few bands to run Boruta, so the 1 left were kept")
+    ## print() says it in the warning's words
+    expect_output(print(step), "`step_select_boruta()` had 1 band to select from, fewer than the 2 it needs, so it is kept",
+                  fixed = TRUE)
 
     ## The record has every field a run's has, its settings among them
     expect_identical(step$boruta$n_kept, 1L)

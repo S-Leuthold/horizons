@@ -647,15 +647,12 @@ selection_warning <- function(step) {
   if (isTRUE(rec$skipped)) {
 
     n    <- rec$n_bands
-    what <- switch(name,
-                   step_select_cars        = "run CARS",
-                   step_select_boruta      = "cluster them and run Boruta",
-                   step_select_correlation = "score the three windows its threshold needs")
+    need <- SELECTION_MIN_BANDS[[name]]
 
     message <- if (n == 0) {
       "{.fn {name}} had no band to select from, every one being near-constant, so it keeps none."
     } else {
-      "{.fn {name}} had {n} band{?s} to select from, too few to {what}, so {cli::qty(n)}{?it is/they are} kept."
+      "{.fn {name}} had {n} band{?s} to select from, fewer than the {need} it needs, so {cli::qty(n)}{?it is/they are} kept."
     }
 
     return(list(topic = "skipped", message = message, env = environment()))
@@ -709,6 +706,25 @@ selection_warning <- function(step) {
   }
 
   NULL
+
+}
+
+#' The print() line for a selection step that had too few bands
+#'
+#' The warning's own words ([selection_warning()]), so the console and the
+#' warning say it one way.
+#'
+#' @param step A trained `step_select_*` step whose record says `skipped`.
+#' @return `NULL`, invisibly; prints one line.
+#' @keywords internal
+#' @noRd
+print_selection_skipped <- function(step) {
+
+  w <- selection_warning(step)
+
+  if (!is.null(w)) cat("\u2022 ", cli::format_inline(w$message, .envir = w$env), "\n", sep = "")
+
+  invisible(NULL)
 
 }
 

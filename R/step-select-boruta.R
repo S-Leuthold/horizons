@@ -185,7 +185,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## Fewer than two bands left: they cannot be clustered and there is nothing
   ## to select between, so they are kept and the step says the selection did
   ## not run. A one-band model is weak, not wrong (Sam, 2026-10-14).
-  if (ncol(spectra_mat) < 2) {
+  if (ncol(spectra_mat) < SELECTION_MIN_BANDS[["step_select_boruta"]]) {
 
     return(raise_selection_warning(step_select_boruta_new(
       terms         = selectors,
@@ -412,7 +412,7 @@ print.step_select_boruta <- function(x,
       print_constant_bands(b)
 
       if (isTRUE(b$skipped)) {
-        cat(glue::glue("\u2022 Too few bands to run Boruta, so the {b$n_bands} left were kept"), "\n", sep = "")
+        print_selection_skipped(x)
         return(invisible(x))
       }
 

@@ -158,6 +158,15 @@ SG_WINDOW_MIN <- 5L
 # above the cutoff.
 NEAR_CONSTANT_RATIO <- 1e-8
 
+# The fewest bands each selection step selects from; with fewer it keeps them
+# and warns that it was skipped (selection_warning()). CARS and Boruta need
+# two to choose between, and Boruta two to cluster; the correlation filter
+# needs five, for the three windows of three bands its threshold (their mean
+# plus one standard deviation) needs to select any.
+SELECTION_MIN_BANDS <- c(step_select_cars        = 2L,
+                         step_select_boruta      = 2L,
+                         step_select_correlation = 5L)
+
 ## fit() Parameters ------------------------------------------------------------
 
 DEFAULT_FINAL_BAYES_ITER <- 25L

@@ -153,10 +153,6 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 
   window_size <- 3
 
-  ## The threshold is the windows' mean plus one sd, which selects nothing
-  ## from fewer than three windows: one has no sd, and the mean plus one sd
-  ## of two lies above the higher of them
-  min_windows <- 3
 
   trained_step <- function(kept, record) {
     raise_selection_warning(step_select_correlation_new(
@@ -172,9 +168,11 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
     ))
   }
 
-  ## Too few bands for three windows: no selection can be made, so they are
-  ## kept and the step says the selection did not run
-  if (length(col_names) - window_size + 1 < min_windows) {
+  ## Too few bands for three windows: the threshold, the windows' mean plus
+  ## one sd, selects nothing from fewer (one window has no sd, and the mean
+  ## plus one sd of two lies above the higher), so the bands are kept and the
+  ## step says the selection did not run
+  if (length(col_names) < SELECTION_MIN_BANDS[["step_select_correlation"]]) {
 
     return(trained_step(col_names, list(n_bands        = length(col_names),
                                         threshold      = NA_real_,
@@ -260,7 +258,7 @@ print.step_select_correlation <- function(x,
   if (x$trained) {
     cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after windowed scoring"), "\n", sep = "")
     if (isTRUE(x$correlation$skipped)) {
-      cat("\u2022 Too few bands to score a window, so every band was kept\n")
+      print_selection_skipped(x)
     } else if (isTRUE(x$correlation$retained_all)) {
       cat("\u2022 No window cleared the threshold, so every band was kept\n")
     }
