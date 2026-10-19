@@ -33,8 +33,31 @@ predictor_matrix <- function(x) {
 
   list(
     matrix      = m,
-    wavenumbers = as.numeric(sub("^wn_", "", vars))
+    wavenumbers = predictor_wavenumbers(x)
   )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## predictor_wavenumbers() — The axis, without the spectra
+## ---------------------------------------------------------------------------
+
+#' The wavenumbers of a horizons_data object's predictor columns
+#'
+#' @description
+#' The axis as `predictor_matrix()` reads it, without building the matrix,
+#' which for a registered library is the whole library.
+#'
+#' @param x [horizons_data.] The object.
+#'
+#' @return [Numeric.] One wavenumber per predictor column, in column order.
+#' @noRd
+predictor_wavenumbers <- function(x) {
+
+  role_map <- x$data$role_map
+
+  as.numeric(sub("^wn_", "", role_map$variable[role_map$role == "predictor"]))
 
 }
 
@@ -87,37 +110,57 @@ grid_summary <- function(wn, gap_ratio = 3, gap_width = 30) {
 
 
 ## ---------------------------------------------------------------------------
-## check_contiguous() — refuse a grid with a hole in it
+## check_select_axis() — refuse an axis the search cannot use
 ## ---------------------------------------------------------------------------
 
-#' Stop when a wavenumber grid is not contiguous
+#' Stop when a wavenumber axis has under two columns or a hole in it
 #'
 #' @description
-#' A grid with a deleted band passes an endpoint coverage test and then gets
-#' spline-filled across the hole by `resample_spectra()`, and differentiated
-#' across it by `transform_similarity()`. Both inventions are silent: the
-#' output is smooth, finite and correctly named. So the gap is a refusal, and
-#' it is checked on the axis rather than on the mask, because masking happens
-#' after the derivative and cannot undo a hole that was already in the input.
+#' `select_training()`'s door for each axis, the targets' before the library
+#' resolves and the library's after. One column has no spacing to summarise
+#' and no spectrum to take a derivative along. A grid with a deleted band is
+#' spline-filled across the hole when the targets are put on the library's
+#' grid for the search, and differentiated across it by
+#' `transform_similarity()`. Both inventions are silent: the output is smooth,
+#' finite and correctly named. So the gap is a refusal, and it is checked on
+#' the axis rather than on the mask, because masking happens after the
+#' derivative and cannot undo a hole that was already in the input.
 #'
-#' @param grid [List.] From `grid_summary()`.
-#' @param side [Character.] `"pool"` or `"targets"`, for the message.
+#' @param wn [Numeric.] The axis's wavenumbers.
+#' @param arg [Character.] The argument the axis belongs to, `"x"` or
+#'   `"library"`.
+#' @param what [Character.] What the argument is, for the message.
+#' @param call The frame the refusal reports: the verb's.
 #'
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @return The axis's `grid_summary()`, invisibly. Aborts with class
+#'   `horizons_error_input`.
 #' @noRd
-check_contiguous <- function(grid, side) {
+check_select_axis <- function(wn, arg, what, call = rlang::caller_env()) {
 
-  if (isTRUE(grid$contiguous)) return(invisible(NULL))
+  if (length(wn) < 2L) {
+
+    abort_horizons(c(
+      "{.arg {arg}}, {what}, must have at least two wavenumbers.",
+      "x" = "It has {length(wn)} predictor column{?s}.",
+      "i" = "The similarity space takes a derivative along the axis, so it needs a spectrum, not a single band."
+    ), kind = "input", call = call)
+
+  }
+
+  grid <- grid_summary(wn)
+
+  if (isTRUE(grid$contiguous)) return(invisible(grid))
 
   gaps  <- grid$gaps
   shown <- utils::head(sprintf("%g to %g cm-1", gaps[, "low"], gaps[, "high"]), 3)
+  more  <- if (nrow(gaps) > 3) ", ..." else ""
 
-  cli::cli_abort(c(
-    "The wavenumber axis of the {side} has {nrow(gaps)} gap{?s} in it",
-    "x" = "{shown}{if (nrow(gaps) > 3) ', ...' else ''}, each more than three times and more than 30 cm-1 above the median spacing of {grid$resolution} cm-1",
-    "i" = "Resampling would spline-fill the gap and the derivative would run straight across it, inventing absorbance at every edge",
-    "i" = "Handle water bands with {.arg mask}, which masks after the derivative; never by deleting columns upstream"
-  ), class = "horizons_input_error")
+  abort_horizons(c(
+    "The wavenumber axis of {.arg {arg}}, {what}, has {nrow(gaps)} gap{?s} in it.",
+    "x" = "{shown}{more}, each more than three times and more than 30 cm-1 above the median spacing of {grid$resolution} cm-1.",
+    "i" = "Resampling would spline-fill the gap and the derivative would run straight across it, inventing absorbance at every edge.",
+    "i" = "Handle water bands with {.arg mask}, which masks after the derivative; never by deleting columns upstream."
+  ), kind = "input", call = call)
 
 }
 
@@ -144,16 +187,9 @@ check_contiguous <- function(grid, side) {
 #' its own extent. This function is where the two meet, and it settles the
 #' axis in the user's favour.
 #'
-#' Three conditions are checked, in this order:
+#' Both axes have passed `select_training()`'s door (`check_select_axis()`):
+#' two columns or more, and no gap. Two conditions are checked, in this order:
 #'
-#' * Contiguity. Either axis carrying a spacing more than three times its own
-#'   median *and* more than 30 cm-1 is a refusal, because a resampled spline
-#'   and a Savitzky-Golay window both run straight across a hole and invent
-#'   absorbance at its edges without erroring. Both conditions are needed:
-#'   the ratio alone fires on an axis that is merely non-uniform, which an
-#'   nm-sampled NIR grid converted to cm-1 always is. This is the ordering
-#'   `standardize()` was written to avoid, and it is why water bands belong
-#'   in `mask` rather than in a column deletion upstream.
 #' * Coverage. If the pool does not span the targets' range at either end the
 #'   function stops and names the end to trim, and says by how much. Within
 #'   half the pool's median spacing the overshoot is clamped instead: the
@@ -204,11 +240,6 @@ reconcile_axes <- function(pool, targets, quiet = FALSE) {
   target_grid <- grid_summary(target_wn)
   pool_grid   <- grid_summary(pool_wn)
   warnings    <- character(0)
-
-  ## Contiguity: before anything interpolates or differentiates ---------------
-
-  check_contiguous(pool_grid,   "pool")
-  check_contiguous(target_grid, "targets")
 
   ## Coverage: the one hard stop, to within half a pool spacing ---------------
 
@@ -455,11 +486,10 @@ reconciled_standardization <- function(pool_record, target_record, wn, clamp) {
 #' @noRd
 search_axis <- function(pool_wn, target_m, target_wn) {
 
+  ### Both axes passed select_training()'s door (check_select_axis()): two
+  ### columns or more, and no gap.
   library_grid <- grid_summary(pool_wn)
   target_grid  <- grid_summary(target_wn)
-
-  check_contiguous(library_grid, "pool")
-  check_contiguous(target_grid,  "targets")
 
   half  <- library_grid$resolution / 2
   short <- c(low  = max(0, target_grid$range[1] - library_grid$range[1]),

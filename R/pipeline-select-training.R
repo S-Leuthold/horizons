@@ -488,6 +488,10 @@ select_training <- function(x, library,
 
   x <- validate_select_input(x, arg = "x", what = "the targets")
 
+  ## The targets' axis needs nothing from the library, so it is checked now:
+  ## two columns or more, and no gap (check_select_axis()).
+  check_select_axis(predictor_wavenumbers(x), "x", "the targets")
+
   resolved <- resolve_source(library, verbose = isTRUE(verbose))
   pool     <- resolved$pool
 
@@ -560,6 +564,10 @@ select_training <- function(x, library,
   }
 
   if (length(errors) > 0) abort_select_inputs(errors)
+
+  ## The library's axis, by the targets' rule ---------------------------------
+
+  check_select_axis(predictor_wavenumbers(pool), "library", "the pool")
 
   k_by <- resolve_k(k, properties)
 

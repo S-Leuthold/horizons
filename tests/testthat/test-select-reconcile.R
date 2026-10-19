@@ -6,41 +6,6 @@
 
 
 ## =============================================================================
-## A horizons_data on an arbitrary wavenumber axis
-## =============================================================================
-
-#' Build a minimal horizons_data on the wavenumbers given
-#'
-#' @description
-#' The fixture's grids are regular and contiguous by construction, which is
-#' exactly what the gap and clamp checks need to vary. This builds a small
-#' object on any axis, spectra included, with no responses.
-#'
-#' @param wn [Numeric.] Wavenumbers, decreasing.
-#' @param n [Integer.] Rows. Default: `6`.
-#' @param prefix [Character.] Sample id prefix. Default: `"A"`.
-#'
-#' @return [horizons_data.]
-#' @noRd
-make_axis_object <- function(wn, n = 6L, prefix = "A", seed = 7L) {
-
-  set.seed(seed)
-
-  m <- gaussian_family(n, wn, centres = c(3400, 2920, 1630, 1030))
-  colnames(m) <- paste0("wn_", wn)
-
-  tbl <- dplyr::bind_cols(
-    tibble::tibble(sample_id = sprintf("%s%03d", prefix, seq_len(n))),
-    tibble::as_tibble(m)
-  )
-
-  utils::capture.output(obj <- spectra(tbl))
-  obj
-
-}
-
-
-## =============================================================================
 ## predictor_matrix()
 ## =============================================================================
 
@@ -176,36 +141,46 @@ test_that("grid_summary() reports a contiguous grid as contiguous", {
 })
 
 
-test_that("reconcile_axes() stops on a gapped pool axis and names the gap", {
+test_that("check_select_axis() stops on a gapped pool axis and names the gap", {
 
   ## A 140 cm-1 hole, the narrower of the two ranges standardize(remove_water)
-  ## deletes. It clears the endpoint coverage test and would be spline-filled.
-  fx      <- select_fixture(n_pool = 20)
-  gapped  <- seq(4000, 600, by = -4)
-  gapped  <- gapped[!(gapped >= 1580 & gapped <= 1720)]
+  ## deletes. It clears an endpoint coverage test and would be spline-filled.
+  gapped <- seq(4000, 600, by = -4)
+  gapped <- gapped[!(gapped >= 1580 & gapped <= 1720)]
 
-  pool <- make_axis_object(gapped, prefix = "G")
-
-  expect_error(reconcile_axes(pool, fx$targets),
-               regexp = "pool", class = "horizons_input_error")
-  expect_error(reconcile_axes(pool, fx$targets),
-               regexp = "1576|1724", class = "horizons_input_error")
-  expect_error(reconcile_axes(pool, fx$targets),
-               regexp = "mask", class = "horizons_input_error")
+  expect_error(check_select_axis(gapped, "library", "the pool"),
+               regexp = "pool", class = "horizons_error_input")
+  expect_error(check_select_axis(gapped, "library", "the pool"),
+               regexp = "1576|1724", class = "horizons_error_input")
+  expect_error(check_select_axis(gapped, "library", "the pool"),
+               regexp = "mask", class = "horizons_error_input")
 
 })
 
 
-test_that("reconcile_axes() stops on a gapped target axis too", {
+test_that("check_select_axis() stops on a gapped target axis too", {
 
-  fx     <- select_fixture(n_pool = 20)
   gapped <- seq(4000, 600, by = -8)
   gapped <- gapped[!(gapped >= 1580 & gapped <= 1720)]
 
-  targets <- make_axis_object(gapped, prefix = "H")
+  expect_error(check_select_axis(gapped, "x", "the targets"),
+               regexp = "targets", class = "horizons_error_input")
 
-  expect_error(reconcile_axes(fx$pool, targets),
-               regexp = "targets", class = "horizons_input_error")
+})
+
+
+test_that("check_select_axis() refuses an axis of one wavenumber, and passes a usable one", {
+
+  ## One column has no spacing for grid_summary() to take a median of, and
+  ## nothing for the derivative to run along
+  expect_error(check_select_axis(4000, "x", "the targets"),
+               regexp = "at least two wavenumbers", class = "horizons_error_input")
+  expect_error(check_select_axis(numeric(0), "library", "the pool"),
+               regexp = "has 0 predictor columns", class = "horizons_error_input")
+
+  ## Two columns are an axis; a usable one returns its summary
+  expect_identical(check_select_axis(c(4000, 3996), "x", "the targets")$n, 2L)
+  expect_true(check_select_axis(seq(4000, 600, by = -4), "x", "the targets")$contiguous)
 
 })
 
@@ -493,12 +468,5 @@ test_that("search_axis() records each coverage tier with its shortfall and its g
                  "short of the library's range", class = "horizons_select_warning")
   expect_identical(out$record$mode, "overlap")
   expect_identical(out$record$missing, c(low = 16, high = 4))
-
-  ## A library with a hole in its axis is refused, as the targets' would be
-  gapped <- lib_wn[!(lib_wn > 640 & lib_wn < 680)]
-
-  expect_error(search_axis(gapped, on(lib_wn), lib_wn),
-               "The wavenumber axis of the pool has 1 gap in it", fixed = TRUE,
-               class = "horizons_input_error")
 
 })

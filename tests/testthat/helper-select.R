@@ -208,6 +208,53 @@ make_select_fixture <- function(n_pool          = 300,
 
 
 ## ---------------------------------------------------------------------------
+## make_axis_object() — a small horizons_data on any wavenumber axis
+## ---------------------------------------------------------------------------
+
+#' Build a minimal horizons_data on the wavenumbers given
+#'
+#' @description
+#' The fixture's grids are regular, contiguous and nested by construction,
+#' which is exactly what the axis checks need to vary. This builds a small
+#' object on any axis, spectra included, optionally with a `clay` response so
+#' it can stand as a pool.
+#'
+#' @param wn [Numeric.] Wavenumbers, decreasing.
+#' @param n [Integer.] Rows. Default: `6`.
+#' @param prefix [Character.] Sample id prefix. Default: `"A"`.
+#' @param seed [Integer.] Default: `7`.
+#' @param clay [Logical.] Add a `clay` response. Default: `FALSE`.
+#'
+#' @return [horizons_data.]
+#' @noRd
+make_axis_object <- function(wn, n = 6L, prefix = "A", seed = 7L, clay = FALSE) {
+
+  set.seed(seed)
+
+  m <- gaussian_family(n, wn, centres = c(3400, 2920, 1630, 1030))
+  colnames(m) <- paste0("wn_", wn)
+
+  tbl <- dplyr::bind_cols(
+    tibble::tibble(sample_id = sprintf("%s%03d", prefix, seq_len(n))),
+    tibble::as_tibble(m)
+  )
+
+  utils::capture.output(obj <- spectra(tbl))
+
+  if (clay) {
+
+    lab <- tibble::tibble(sample_id = obj$data$analysis$sample_id,
+                          clay      = round(stats::runif(n, 5, 60), 1))
+    utils::capture.output(obj <- add_response(obj, lab, variable = "clay"))
+
+  }
+
+  obj
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## select_fixture() — make_select_fixture(), built once per argument set
 ## ---------------------------------------------------------------------------
 

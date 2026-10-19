@@ -360,6 +360,51 @@ test_that("select_training() refuses a pool that fails the base contract", {
 })
 
 
+test_that("select_training() refuses a target axis it cannot search, before the library resolves", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  one    <- make_axis_object(4000, prefix = "T")
+  gapped <- seq(4000, 600, by = -8)
+  gapped <- make_axis_object(gapped[!(gapped >= 1580 & gapped <= 1720)], prefix = "H")
+
+  ## The targets' axis needs nothing from the library, so a registered
+  ## library is not fetched for targets the verb would refuse
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  err <- expect_error(select_training(one, fx$pool, k = 5),
+                      regexp = "at least two wavenumbers", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`x`, the targets", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "select_training")
+
+  err <- expect_error(select_training(gapped, "kssl", k = 5),
+                      regexp = "gap", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`x`, the targets", fixed = TRUE)
+
+})
+
+
+test_that("select_training() refuses a library axis it cannot search, naming library", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  one    <- make_axis_object(4000, n = 12L, prefix = "L", clay = TRUE)
+  gapped <- seq(4000, 600, by = -4)
+  gapped <- make_axis_object(gapped[!(gapped >= 1580 & gapped <= 1720)], n = 12L,
+                             prefix = "G", clay = TRUE)
+
+  err <- expect_error(select_training(fx$targets, one, k = 5),
+                      regexp = "at least two wavenumbers", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`library`, the pool", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "select_training")
+
+  err <- expect_error(select_training(fx$targets, gapped, k = 5),
+                      regexp = "1576|1724", class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`library`, the pool", fixed = TRUE)
+
+})
+
+
 test_that("select_training() refuses a pool that is itself a selection", {
 
   fx    <- select_fixture(n_pool = 60)
