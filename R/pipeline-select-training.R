@@ -90,7 +90,7 @@
 #' noisy edge, a batch trimmed to one region), the space is built fresh on
 #' the library's columns inside the targets' range, uncached, with one
 #' `horizons_warning_coverage` saying what was missing and what was searched.
-#' A `window` wider than that overlap is refused, in cm-1.
+#' A `window` that does not fit in that overlap is refused, in cm-1.
 #'
 #' **The cached space.** A registered library's space at the default
 #' settings is built right after the library itself, at first use, and
@@ -822,7 +822,7 @@ select_training <- function(x, library,
     span     <- searched[2] - searched[1]
 
     abort_horizons(c(
-      "A {.arg window} of {window} cm\u207B\u00B9 is wider than the {span} cm\u207B\u00B9 of the library the targets cover.",
+      "A {.arg window} of {window} cm\u207B\u00B9 does not fit in the {span} cm\u207B\u00B9 of the library the targets cover.",
       "x" = "The similarity space is built on the library's {n_search} column{?s} from {searched[1]} to {searched[2]} cm\u207B\u00B9, and the window is {window_points} points on them; the filter needs fewer.",
       "i" = "Narrow {.arg window} below {span} cm\u207B\u00B9, or standardize the targets over more of the library's range."
     ), kind = "input")
