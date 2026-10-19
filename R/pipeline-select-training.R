@@ -1467,7 +1467,9 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
   p_range <- pool_record$wavelength_range
   t_range <- target_record$wavelength_range
   t_step  <- signif(target_step, 4)
+  l_step  <- signif(pool_step, 4)
   force   <- if (restandardize) ", force = TRUE" else ""
+  lib_force <- if (is.null(pool_record)) "" else ", force = TRUE"
   own     <- identical(library_form, "object")
 
   if (pool_hull && target_hull) {
@@ -1485,7 +1487,7 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
     problem <- "The library was baseline-corrected ({.code standardize(baseline = TRUE)}) and the targets were not."
     remedy  <- c(
       "i" = "Correct the targets over the library's range: {.code standardize(x, resample = {t_step}, trim = c({p_range[1]}, {p_range[2]}), baseline = TRUE{force})}.",
-      "i" = if (own) "Or standardize the library without {.arg baseline}."
+      "i" = if (own) "Or standardize the library from {.fn spectra} without {.arg baseline}, {.code standardize(library, resample = {l_step}, trim = c({p_range[1]}, {p_range[2]}))}; a hull already subtracted cannot be put back."
     )
 
   } else {
@@ -1493,7 +1495,7 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
     problem <- "The targets were baseline-corrected ({.code standardize(baseline = TRUE)}) and the library was not."
     remedy  <- c(
       "i" = "Standardize the targets from {.fn spectra} without {.arg baseline}, {.code standardize(x, resample = {t_step}, trim = c({t_range[1]}, {t_range[2]}))}; a hull already subtracted cannot be put back.",
-      "i" = if (own) "Or correct the library over the targets' range: {.code standardize(library, baseline = TRUE, trim = c({t_range[1]}, {t_range[2]}), force = TRUE)}."
+      "i" = if (own) "Or correct the library over the targets' range: {.code standardize(library, resample = {l_step}, trim = c({t_range[1]}, {t_range[2]}), baseline = TRUE{lib_force})}."
     )
 
   }

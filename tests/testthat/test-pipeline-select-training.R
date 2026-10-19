@@ -1507,7 +1507,10 @@ test_that("a baseline on one side only is refused, either way round (#107)", {
   expect_match(msg, "were standardized differently", fixed = TRUE)
   expect_match(msg, "The library was baseline-corrected", fixed = TRUE)
   expect_match(msg, "standardize(x, resample = 8, trim = c(600, 4000), baseline = TRUE, force = TRUE)", fixed = TRUE)
-  expect_match(msg, "Or standardize the library without `baseline`", fixed = TRUE)
+  ## The library-side remedy starts from spectra(): standardizing the corrected
+  ## library again would record no baseline over values that still carry it.
+  ## It keeps the library's step, which resample's default would change.
+  expect_match(msg, "Or standardize the library from `spectra()` without `baseline`, `standardize(library, resample = 4, trim = c(600, 4000))`; a hull already subtracted cannot be put back", fixed = TRUE)
 
   ## The targets corrected, the library not
   err <- expect_error(select_training(target_hull, pool_plain, k = 5), class = "horizons_error_input")
@@ -1515,6 +1518,7 @@ test_that("a baseline on one side only is refused, either way round (#107)", {
 
   expect_match(msg, "The targets were baseline-corrected", fixed = TRUE)
   expect_match(msg, "a hull already subtracted cannot be put back", fixed = TRUE)
+  expect_match(msg, "`standardize(library, resample = 4, trim = c(600, 4000), baseline = TRUE, force = TRUE)`", fixed = TRUE)
 
   ## Corrected on both sides over the same range, or on neither, runs
   expect_s3_class(select_training(target_hull, pool_hull, k = 5), "horizons_data")
