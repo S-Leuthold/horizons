@@ -35,8 +35,8 @@
 #' representatives of the selected columns (correlation clustering), after
 #' dropping near-constant columns (a variance not finite, zero, or at most a
 #' hundred-millionth of the median band's), for 50 iterations. Each iteration
-#' fits a PLS model of up to five components (and no more than it has bands)
-#' on a Monte Carlo sample of 80% of the rows, only to weight the bands: its
+#' fits a PLS model on a Monte Carlo sample of 80% of the rows, only to
+#' weight the bands: its
 #' coefficients weight them afresh, an exponentially decreasing function
 #' keeps the most heavily weighted, as many as the next iteration may fit (so
 #' the fits run from every band down to two, as carspls schedules them), and
@@ -46,7 +46,9 @@
 #' over all the rows the step is given, on one partition shared by every set
 #' (the rows sorted by the outcome and dealt to the folds in turn, as
 #' carspls's `plscv` deals them), at the component count where its error is
-#' lowest. The step returns the set with the lowest score (#106), the first
+#' lowest. Every fit, for the weights and for the scores, takes up to 30
+#' components (the PLS model's own cap), and no more than its bands or the
+#' rows it is fitted on, less one. The step returns the set with the lowest score (#106), the first
 #' on ties, each kept representative bringing its whole cluster. The trained
 #' step records this in its `cars` element: the bands it selected from
 #' (`n_bands`), the near-constant bands it dropped before (`n_constant`), the
@@ -215,9 +217,9 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
   n_iterations <- 50
   mc_ratio     <- 0.8
-  n_components <- min(5, floor(nrow(reduced_mat) / 3))
 
   n_samples <- nrow(reduced_mat)
+  n_mc      <- floor(n_samples * mc_ratio)
   n_vars    <- ncol(reduced_mat)
   decay     <- exp(log(2 / n_vars) / (n_iterations - 1))
 
@@ -233,14 +235,17 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
     ## i holds at most n_vars * decay^(i - 1) bands, every band at the first
     ## and two at the last
     n_keep     <- min(max(2, floor(n_vars * decay^iter)), length(selected))
-    mc_samples <- sample(n_samples, floor(n_samples * mc_ratio))
+    mc_samples <- sample(n_samples, n_mc)
 
     pls_data   <- as.data.frame(reduced_mat[mc_samples, selected, drop = FALSE])
     pls_data$y <- outcome_vec[mc_samples]
 
-    ### As many components as bands at most, as carspls's pls() caps them
-    ### (min(A, rows, bands)); a single band is fitted with one.
-    n_comp  <- max(1, min(n_components, length(selected)))
+    ### The package's PLS cap (PLS_MAX_COMP), limited as carspls's pls()
+    ### limits it, by the rows (less one) and the bands; a single band is
+    ### fitted with one. A cap of five underfitted organic carbon, which
+    ### needs about 13, so the weights and the scores came from a model
+    ### that could not fit the outcome.
+    n_comp  <- max(1, min(PLS_MAX_COMP, n_mc - 1, length(selected)))
     pls_fit <- pls::plsr(y ~ ., data = pls_data, ncomp = n_comp)
 
     ## Weights from this fit's coefficients alone (coef() on a pls fit is a
@@ -259,7 +264,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## every set, so the sets are compared on the same rows. The set with the
   ## lowest score is returned (#106), the first on ties.
   folds  <- cars_folds(outcome_vec, 5L)
-  scored <- cars_score_path(reduced_mat, outcome_vec, sets, folds, n_components)
+  scored <- cars_score_path(reduced_mat, outcome_vec, sets, folds, PLS_MAX_COMP)
   best   <- which.min(scored$rmsecv)
 
   kept_cluster_vars <- cluster_vars[sets[[best]]]

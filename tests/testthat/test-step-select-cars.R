@@ -134,7 +134,8 @@ describe("step_select_cars() selects", {
 
     ## Over seeds 1 to 20 (the recipe built under the seed, as here) both
     ## signal bands survive at every seed, with exactly those two kept at 16
-    ## and three at four; at seed 1 the set is pinned below.
+    ## and three to five at the other four; at seed 1 the set is pinned
+    ## below.
     d <- cars_signal_data()
 
     prepped  <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))
@@ -142,7 +143,7 @@ describe("step_select_cars() selects", {
 
     expect_true(all(c("wn_3980", "wn_3950") %in% selected))
     expect_lt(length(selected), 40L)
-    expect_setequal(selected, c("wn_3980", "wn_3950", "wn_3938"))
+    expect_setequal(selected, c("wn_3998", "wn_3980", "wn_3964", "wn_3950", "wn_3938"))
 
   })
 
@@ -240,12 +241,12 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     rec <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]$cars
 
     ## By hand: each fold predicted by a PLS fit on the other four, at every
-    ## component count up to the cap (five, here fewer than the six bands and
-    ## the 23 rows a fold's fit has less one); the score is the root of the
-    ## pooled squared error at the count where it is lowest
+    ## component count up to the cap (the six bands, under the PLS cap of 30
+    ## and the 23 rows a fold's fit has less one); the score is the root of
+    ## the pooled squared error at the count where it is lowest
     X     <- as.matrix(d[, 1:6])
     folds <- dealt_folds(d$SOC)
-    A     <- min(5L, 6L, 30L - max(lengths(folds)) - 1L)
+    A     <- min(PLS_MAX_COMP, 6L, 30L - max(lengths(folds)) - 1L)
     press <- matrix(NA_real_, 30, A)
 
     for (f in folds) {
@@ -445,17 +446,38 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
 
   })
 
-  it("fits up to five components, and one per band when there are fewer, as carspls's pls() caps them", {
+  it("fits up to the PLS cap of 30 components, limited by the bands and by the rows less one, for weights and scores", {
 
     skip_if_not_installed("pls")
 
-    tr    <- cars_traced()
-    sizes <- lengths(tr$seen)
-    ncomp <- vapply(tr$fits, function(f) as.integer(f$fit$ncomp), integer(1))
+    ## 60 rows of 40 bands: the weight fits have 48 rows, the scoring fits'
+    ## folds 48, so the cap of 30 binds until the sets fall below 30 bands
+    tr <- cars_fits(cars_signal_data())
 
-    ## The late sets hold five bands or fewer, so the cap binds there
-    expect_true(any(sizes < 5L))
-    expect_identical(ncomp, as.integer(pmin(5L, sizes)))
+    w_bands <- vapply(tr$weight, function(w) length(w$bands), integer(1))
+    w_comp  <- vapply(tr$weight, `[[`, numeric(1), "ncomp")
+    s_bands <- vapply(tr$scoring, function(s) length(s$bands), integer(1))
+    s_comp  <- vapply(tr$scoring, `[[`, numeric(1), "ncomp")
+
+    expect_identical(w_comp[1], 30)
+    expect_true(any(w_bands < 30L))
+    expect_identical(w_comp, as.numeric(pmin(PLS_MAX_COMP, 47L, w_bands)))
+    expect_identical(s_comp, as.numeric(pmin(PLS_MAX_COMP, 47L, s_bands)))
+
+    ## 25 rows: the weight fits' 20-row samples and the scoring fits' 20-row
+    ## folds allow 19
+    small <- withr::with_seed(4, {
+      m <- matrix(stats::rnorm(25 * 40), 25)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 40))
+      d <- tibble::as_tibble(m)
+      d$SOC <- 2 * d$wn_3980 + stats::rnorm(25, sd = 0.3)
+      d
+    })
+
+    tr <- cars_fits(small)
+
+    expect_identical(tr$weight[[1]]$ncomp, 19)
+    expect_identical(tr$scoring[[1]]$ncomp, 19)
 
   })
 

@@ -58,8 +58,8 @@ randomised sampling of Li et al. 2009) on at most 150 cluster
 representatives of the selected columns (correlation clustering), after
 dropping near-constant columns (a variance not finite, zero, or at most a
 hundred-millionth of the median band's), for 50 iterations. Each iteration
-fits a PLS model of up to five components (and no more than it has bands)
-on a Monte Carlo sample of 80\% of the rows, only to weight the bands: its
+fits a PLS model on a Monte Carlo sample of 80\% of the rows, only to
+weight the bands: its
 coefficients weight them afresh, an exponentially decreasing function
 keeps the most heavily weighted, as many as the next iteration may fit (so
 the fits run from every band down to two, as carspls schedules them), and
@@ -69,7 +69,9 @@ After the loop every iteration's set is scored by 5-fold cross-validation
 over all the rows the step is given, on one partition shared by every set
 (the rows sorted by the outcome and dealt to the folds in turn, as
 carspls's \code{plscv} deals them), at the component count where its error is
-lowest. The step returns the set with the lowest score (#106), the first
+lowest. Every fit, for the weights and for the scores, takes up to 30
+components (the PLS model's own cap), and no more than its bands or the
+rows it is fitted on, less one. The step returns the set with the lowest score (#106), the first
 on ties, each kept representative bringing its whole cluster. The trained
 step records this in its \code{cars} element: the bands it selected from
 (\code{n_bands}), the near-constant bands it dropped before (\code{n_constant}), the
