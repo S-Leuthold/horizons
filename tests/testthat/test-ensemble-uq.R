@@ -532,7 +532,7 @@ describe("predict.horizons_ensemble() - arguments in ...", {
 
     expect_error(
       predict(ens_ref, test_set, config = "all"),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "config"
     )
 

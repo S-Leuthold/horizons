@@ -722,7 +722,7 @@ build_ensemble_contract <- function(method,
 #' calibrated at in [ensemble()], 0.90 by default. `predict()` has no `level`
 #' argument: a `level` is ignored with a warning of class
 #' `horizons_input_warning`, and any other argument it does not take is an
-#' error of class `horizons_input_error`.
+#' error of class `horizons_error_input`.
 #'
 #' @examples
 #' \dontrun{
@@ -744,6 +744,8 @@ predict.horizons_ensemble <- function(object,
   ## validator's gate refuses a direct ::: call, an ensemble slot with no
   ## model, a member set of fewer than two, and an unknown method.
   object <- validate_horizons_ensemble(object)
+
+  check_arg(rlang::check_bool, interval)
 
   ## Nothing in `...` is used. A `level` warns, naming the level the CV+
   ## bundle was calibrated at; anything else aborts (#141).
@@ -778,6 +780,21 @@ predict.horizons_ensemble <- function(object,
   new_spectra <- resolve_new_data(new_data)
 
   check_predictor_schema(object, new_spectra)
+
+  ## sample_id keys every combine below (the weighted average groups on it,
+  ## the wide pivot keys rows on it, the intervals join on it), so a repeated
+  ## id would fan out each member's predictions.
+  if (anyDuplicated(new_spectra$sample_id)) {
+
+    dupes <- unique(new_spectra$sample_id[duplicated(new_spectra$sample_id)])
+
+    abort_horizons(c(
+      "{.arg new_data}'s {.field sample_id}s must be unique to predict from an ensemble.",
+      "x" = "{length(dupes)} repeat{?s}: {.val {utils::head(dupes, 5)}}.",
+      "i" = "Give each row its own {.field sample_id}, or {.fn average} replicate scans first."
+    ), kind = "input")
+
+  }
 
   ## -------------------------------------------------------------------------
   ## Step 2b: Conformal coverage on a selected training set

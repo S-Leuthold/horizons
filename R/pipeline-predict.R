@@ -48,7 +48,9 @@ NULL
 #'   are set to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`),
 #'   while `.ad_distance`/`.ad_flag` are preserved so the caller can see how far
 #'   out each sample was. Default `FALSE` (report AD, predict for all samples).
-#'   Has no effect on configs without an AD bundle.
+#'   Every configuration predicted needs an AD bundle: one without is refused
+#'   with an error of class `horizons_error_input`, since a prediction that is
+#'   not `NA` under abstention claims to be in domain.
 #' @param ... Not used; present for S3 method consistency. A `level` passed
 #'   here is ignored with a warning (see Details), and any other argument is
 #'   an error.
@@ -87,7 +89,7 @@ NULL
 #' calibrated at in `fit()`, 0.90 by default. `predict()` has no `level`
 #' argument: a `level` is ignored with a warning of class
 #' `horizons_input_warning`, and any other argument it does not take is an
-#' error of class `horizons_input_error`.
+#' error of class `horizons_error_input`.
 #'
 #' **Outcome range.** Point predictions and interval bounds are clamped to
 #' the `outcome_range` given to [configure()], silently, since the range is
@@ -147,7 +149,9 @@ predict.horizons_fit <- function(object,
   ## workflows slot.
   object <- validate_horizons_fit(object)
 
-  workflows_list <- object$models$workflows
+  check_arg(rlang::check_bool, interval)
+  check_arg(rlang::check_bool, abstain_ood)
+  check_arg(rlang::check_string, config)
 
   ## -------------------------------------------------------------------------
   ## Step 0b: Resolve new_data, then validate it carries the training axis
@@ -157,6 +161,11 @@ predict.horizons_fit <- function(object,
   ## their UQ level, and the namespace check loads their engines.
   ## resolve_config_ids() needs no namespace loading itself.
   config_ids <- resolve_config_ids(object, config)
+
+  ## Abstention is all or nothing (#145): a non-NA prediction under
+  ## abstain_ood claims to be in domain, so every configuration asked for
+  ## needs an applicability domain to check it against.
+  check_abstention(object, config_ids, abstain_ood)
 
   ## Nothing in `...` is used. A `level` warns, naming the level the predicted
   ## configs' UQ bundles were calibrated at; anything else aborts (#141).
@@ -249,7 +258,7 @@ predict.horizons_fit <- function(object,
 #'   arguments are dot-prefixed so a user argument named `level_default` or
 #'   `call` lands in `...` and is checked, not bound to them.
 #' @return Invisibly `NULL`. Warns with class `horizons_input_warning`; aborts
-#'   with class `horizons_input_error`.
+#'   with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_predict_dots <- function(..., .level_default = NULL,
@@ -272,12 +281,12 @@ check_predict_dots <- function(..., .level_default = NULL,
     unnamed <- vapply(unknown[!nzchar(unknown_names)], rlang::as_label,
                       character(1), USE.NAMES = FALSE)
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn predict} got {length(unknown)} argument{?s} it does not take.",
       "x" = if (length(named) > 0) "Unknown: {.arg {named}}.",
       "x" = if (length(unnamed) > 0) "Unnamed: {.code {unnamed}}.",
       "i" = "Did you misspell an argument name?"
-    ), class = "horizons_input_error", call = .call)
+    ), kind = "input", call = .call)
 
   }
 
@@ -335,11 +344,12 @@ check_predict_dots <- function(..., .level_default = NULL,
 #' @param config_ids Character vector of config_ids actually being predicted
 #'   (the resolved `config` argument for a fit, or the member set for an
 #'   ensemble — see the call sites).
+#' @param call The frame a refusal reports: the verb's.
 #' @return Invisibly `NULL`. Called for the side effect of loading
 #'   namespaces (and aborting when a required Suggested package is missing).
 #' @keywords internal
 #' @noRd
-ensure_predict_namespaces <- function(object, config_ids) {
+ensure_predict_namespaces <- function(object, config_ids, call = rlang::caller_env()) {
 
   configs <- object$config$configs
 
@@ -373,7 +383,7 @@ ensure_predict_namespaces <- function(object, config_ids) {
   needed[["parsnip"]]   <- unique(c(needed[["parsnip"]],   base_reason))
   needed[["recipes"]]   <- unique(c(needed[["recipes"]],   base_reason))
 
-  abort_on_missing_predict_packages(needed)
+  abort_on_missing_predict_packages(needed, call = call)
 
 }
 
@@ -436,10 +446,12 @@ compute_needed_predict_packages <- function(models, needs_ranger_for_uq = FALSE)
 #'
 #' @param needed Named list: package name -> character vector of reasons
 #'   (model names, or a UQ note) that need it.
-#' @return Invisibly `NULL`.
+#' @param call The frame the refusal reports: the verb's.
+#' @return Invisibly `NULL`; aborts with class
+#'   `horizons_error_missing_predict_package` (kind `dependency`).
 #' @keywords internal
 #' @noRd
-abort_on_missing_predict_packages <- function(needed) {
+abort_on_missing_predict_packages <- function(needed, call = rlang::caller_env()) {
 
   missing <- names(needed)[
     !vapply(names(needed), requireNamespace, logical(1), quietly = TRUE)
@@ -469,10 +481,10 @@ abort_on_missing_predict_packages <- function(needed) {
 
   names(bullets) <- rep("x", length(bullets))
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "Predicting from this object needs {length(missing)} package{?s} that {?is/are} not installed.",
     bullets
-  ), class = "horizons_missing_predict_package")
+  ), kind = "dependency", class = "horizons_error_missing_predict_package", call = call)
 
 }
 
@@ -488,11 +500,14 @@ abort_on_missing_predict_packages <- function(needed) {
 #' done inline via the role map).
 #'
 #' @param new_data A `horizons_data` or tibble/data.frame.
+#' @param call The frame a refusal reports: the verb's.
 #' @return A tibble with `sample_id` and the predictor columns; a bare
 #'   data frame is returned whole, with a `sample_id` added when it has none.
+#'   Aborts with class `horizons_error_input` when `new_data` is neither, or
+#'   a `horizons_data` without predictors.
 #' @keywords internal
 #' @noRd
-resolve_new_data <- function(new_data) {
+resolve_new_data <- function(new_data, call = rlang::caller_env()) {
 
   if (inherits(new_data, "horizons_data")) {
 
@@ -504,7 +519,10 @@ resolve_new_data <- function(new_data) {
 
     if (length(pred_cols) == 0) {
 
-      cli::cli_abort("{.arg new_data} has no predictor columns in its role map.")
+      abort_horizons(c(
+        "{.arg new_data} has no predictor columns in its role map.",
+        "i" = "Give the spectral columns the {.val predictor} role, as {.fn spectra} does."
+      ), kind = "input", call = call)
 
     }
 
@@ -528,10 +546,10 @@ resolve_new_data <- function(new_data) {
 
   } else {
 
-    cli::cli_abort(c(
-      "{.arg new_data} must be a {.cls horizons_data} object or a data frame.",
-      "x" = "Got {.cls {class(new_data)}}."
-    ))
+    abort_horizons(
+      "{.arg new_data} must be a {.cls horizons_data} object or a data frame, not {.obj_type_friendly {new_data}}.",
+      kind = "input", call = call
+    )
 
   }
 
@@ -688,11 +706,14 @@ check_predictor_schema <- function(object, new_spectra, call = rlang::caller_env
 #' Resolve the `config` argument to one or more config_ids
 #'
 #' @param object A `horizons_fit`.
-#' @param config `"best"`, a specific config_id, or `"all"`.
+#' @param config `"best"`, a specific config_id, or `"all"`: a single string,
+#'   which `predict()` has checked.
+#' @param call The frame a refusal reports: the verb's.
 #' @return Character vector of config_ids present in `models$workflows`.
+#'   Aborts with class `horizons_error_input` when `config` names none.
 #' @keywords internal
 #' @noRd
-resolve_config_ids <- function(object, config) {
+resolve_config_ids <- function(object, config, call = rlang::caller_env()) {
 
   available <- names(object$models$workflows)
 
@@ -713,22 +734,56 @@ resolve_config_ids <- function(object, config) {
   }
 
   ## A specific config_id
-  if (length(config) != 1 || !is.character(config)) {
-
-    cli::cli_abort('{.arg config} must be "best", "all", or a single config_id string.')
-
-  }
-
   if (!config %in% available) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "Config {.val {config}} is not among the fitted models.",
-      "i" = "Available: {.val {available}}."
-    ))
+      "i" = "Available: {.val {available}}, or {.val best} or {.val all}."
+    ), kind = "input", call = call)
 
   }
 
   config
+
+}
+
+## ---------------------------------------------------------------------------
+## check_abstention() — abstention needs every configuration's AD
+## ---------------------------------------------------------------------------
+
+#' Refuse abstention for a configuration without an applicability domain
+#'
+#' Under `abstain_ood = TRUE` a prediction that is not `NA` claims to be in
+#' domain, and `predict()` returns no column saying which configurations were
+#' checked, so a configuration without an AD bundle cannot take part.
+#'
+#' @param object A `horizons_fit`.
+#' @param config_ids The configurations being predicted.
+#' @param abstain_ood The call's `abstain_ood`.
+#' @param call The frame the refusal reports: the verb's.
+#' @return Invisibly `NULL`; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_abstention <- function(object, config_ids, abstain_ood, call = rlang::caller_env()) {
+
+  if (!abstain_ood) return(invisible(NULL))
+
+  without <- config_ids[vapply(config_ids, function(id) is.null(object$models$ad[[id]]),
+                               logical(1))]
+
+  if (length(without) == 0) return(invisible(NULL))
+
+  with_ad <- setdiff(config_ids, without)
+
+  abort_horizons(c(
+    "{.arg abstain_ood} needs an applicability domain for every configuration predicted.",
+    "x" = "{length(without)} configuration{?s} {?has/have} none: {.val {without}}.",
+    "i" = if (length(with_ad) > 0) {
+      "Predict the ones that have one ({.val {with_ad}}) with {.arg config}, refit with {.code fit(compute_ad = TRUE)}, or drop {.arg abstain_ood}."
+    } else {
+      "Refit with {.code fit(compute_ad = TRUE)} and enough calibration rows, or drop {.arg abstain_ood}."
+    }
+  ), kind = "input", call = call)
 
 }
 
@@ -927,13 +982,13 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
   } else if (isTRUE(abstain_ood)) {
 
-    ## Abstention was asked for and cannot happen: no AD bundle on this config,
-    ## or predict_ad() could not score the batch. Saying so is the point — a
-    ## silent pass-through returns exactly the unabstained predictions the
-    ## caller asked not to get.
+    ## Abstention was asked for and cannot happen: predict_ad() could not
+    ## score the batch (the door refused a configuration without a bundle).
+    ## Saying so is the point — a silent pass-through returns exactly the
+    ## unabstained predictions the caller asked not to get.
     cli::cli_warn(c(
       "!" = "{.arg abstain_ood} was requested but no applicability-domain information is available for config {.val {config_id}}.",
-      "i" = "Either {.fn fit} was run with {.code compute_ad = FALSE} (or without enough calibration data), or the AD computation failed; see any warning above.",
+      "i" = "The AD computation failed; see the warning above.",
       "i" = "Predictions are returned unabstained."
     ), class = "horizons_ad_warning")
 
@@ -970,19 +1025,8 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 predict_members <- function(object, members, new_spectra) {
 
   ## sample_id is the join key for every downstream combine (weighted average
-  ## groups on it; the wide pivot keys rows on it). A duplicate would silently
-  ## fan out each member's predictions and corrupt the combination, so assert
-  ## uniqueness loudly here — the predict-time mirror of the train-time gate in
-  ## predict_members_on_test().
-  if (anyDuplicated(new_spectra$sample_id)) {
-
-    cli::cli_abort(c(
-      "{.field sample_id}s in {.arg new_data} are not unique.",
-      "x" = "Duplicate keys would fan out the member-prediction combine.",
-      "i" = "Expected one row per sample."
-    ))
-
-  }
+  ## groups on it; the wide pivot keys rows on it): predict()'s door has
+  ## refused new_data whose sample_ids repeat.
 
   dplyr::bind_rows(lapply(members, function(m) {
 

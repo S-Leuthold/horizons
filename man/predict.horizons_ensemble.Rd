@@ -68,7 +68,7 @@ full-data refit). This is deliberate and not repaired.
 calibrated at in \code{\link[=ensemble]{ensemble()}}, 0.90 by default. \code{predict()} has no \code{level}
 argument: a \code{level} is ignored with a warning of class
 \code{horizons_input_warning}, and any other argument it does not take is an
-error of class \code{horizons_input_error}.
+error of class \code{horizons_error_input}.
 }
 \examples{
 \dontrun{

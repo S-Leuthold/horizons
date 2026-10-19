@@ -45,7 +45,9 @@ with arbitrary prediction data.}
 are set to \code{NA} for samples flagged out-of-domain (\code{.ad_flag == "OOD"}),
 while \code{.ad_distance}/\code{.ad_flag} are preserved so the caller can see how far
 out each sample was. Default \code{FALSE} (report AD, predict for all samples).
-Has no effect on configs without an AD bundle.}
+Every configuration predicted needs an AD bundle: one without is refused
+with an error of class \code{horizons_error_input}, since a prediction that is
+not \code{NA} under abstention claims to be in domain.}
 
 \item{...}{Not used; present for S3 method consistency. A \code{level} passed
 here is ignored with a warning (see Details), and any other argument is
@@ -93,7 +95,7 @@ to \code{NA} predictions for out-of-domain samples while keeping the AD columns.
 calibrated at in \code{fit()}, 0.90 by default. \code{predict()} has no \code{level}
 argument: a \code{level} is ignored with a warning of class
 \code{horizons_input_warning}, and any other argument it does not take is an
-error of class \code{horizons_input_error}.
+error of class \code{horizons_error_input}.
 
 \strong{Outcome range.} Point predictions and interval bounds are clamped to
 the \code{outcome_range} given to \code{\link[=configure]{configure()}}, silently, since the range is

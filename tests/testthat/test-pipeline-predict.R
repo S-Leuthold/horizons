@@ -186,11 +186,23 @@ describe("predict.horizons_fit() - config selection", {
 
   })
 
+  it("refuses a config that is not a single string, as predict()", {
+
+    err <- expect_error(predict(fitted_fixture, new_df, config = c("best", "all")),
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "`config` must be a single string", fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "predict")
+
+    expect_error(predict(fitted_fixture, new_df, config = 1L),
+                 class = "horizons_error_input")
+
+  })
+
   it("an unknown config_id errors informatively", {
 
     expect_error(
       predict(fitted_fixture, new_df, config = "nonsense"),
-      "not among the fitted models"
+      "not among the fitted models", class = "horizons_error_input"
     )
 
   })
@@ -366,6 +378,43 @@ describe("predict.horizons_fit() - input validation", {
 
   })
 
+  it("refuses new_data that is neither a horizons_data nor a data frame, as predict()", {
+
+    err <- expect_error(predict(fitted_fixture, as.matrix(make_new_spectra())),
+                        class = "horizons_error_input")
+    expect_identical(rlang::call_name(err$call), "predict")
+    expect_snapshot(predict(fitted_fixture, list(a = 1)), error = TRUE)
+
+  })
+
+  it("refuses a horizons_data new_data with no predictor columns", {
+
+    new_df <- make_new_spectra()
+    hd <- new_horizons_data(
+      analysis = new_df,
+      role_map = tibble::tibble(variable = names(new_df),
+                                role     = c(rep("meta", ncol(new_df) - 1L), "id"))
+    )
+
+    err <- expect_error(predict(fitted_fixture, hd), class = "horizons_error_input")
+    expect_identical(rlang::call_name(err$call), "predict")
+    expect_snapshot(predict(fitted_fixture, hd), error = TRUE)
+
+  })
+
+  it("refuses interval and abstain_ood that are not TRUE or FALSE", {
+
+    new_df <- make_new_spectra()
+
+    expect_error(predict(fitted_fixture, new_df, interval = "yes"),
+                 "`interval` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 class = "horizons_error_input")
+    expect_error(predict(fitted_fixture, new_df, abstain_ood = NA),
+                 "`abstain_ood` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
   it("accepts a horizons_data object as new_data", {
 
     ## Wrap new spectra as a minimal horizons_data (id + predictors), plus a
@@ -449,14 +498,14 @@ describe("predict.horizons_fit() - arguments in ...", {
 
     expect_error(
       predict(fitted_fixture, new_df, intervals = FALSE),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "intervals"
     )
 
     ## The stats convention's `newdata` is not `new_data`.
     expect_error(
       predict(fitted_fixture, newdata = new_df),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "newdata"
     )
 
@@ -482,7 +531,7 @@ describe("check_predict_dots()", {
 
     expect_error(
       check_predict_dots(foo = stop("evaluated"), .level_default = 0.9),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "foo"
     )
 
@@ -492,7 +541,7 @@ describe("check_predict_dots()", {
 
     expect_error(
       check_predict_dots(0.95, .level_default = 0.9),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "0.95"
     )
 
@@ -502,7 +551,7 @@ describe("check_predict_dots()", {
 
     expect_error(
       check_predict_dots(level = 0.95, foo = 1, .level_default = 0.9),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -517,13 +566,13 @@ describe("check_predict_dots()", {
 
     expect_error(
       check_predict_dots(call = 1, .level_default = 0.9),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "call"
     )
 
     expect_error(
       check_predict_dots(level_default = 0.95, .level_default = 0.9),
-      class  = "horizons_input_error",
+      class  = "horizons_error_input",
       regexp = "level_default"
     )
 
@@ -751,19 +800,35 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
-  it("warns when abstain_ood is asked for and no AD is available", {
+  it("refuses abstain_ood at its door when a configuration predicted has no AD", {
 
     no_ad <- fitted_fixture
     no_ad$models["ad"] <- list(NULL)
 
-    expect_warning(
-      p <- predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE),
-      "`abstain_ood` was requested but no applicability-domain information is available",
-      fixed = TRUE, class = "horizons_ad_warning"
-    )
+    err <- expect_error(predict(no_ad, new_df, interval = FALSE, abstain_ood = TRUE),
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "needs an applicability domain for every configuration",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "cfg_001", fixed = TRUE)
 
-    expect_false(".ad_flag" %in% names(p))
-    expect_true(all(!is.na(p$.pred)))          # nothing was abstained
+  })
+
+  it("refuses abstention under config = 'all' when any configuration has no AD, naming it and the ones that do", {
+
+    two <- add_member_copy(fitted_fixture)
+    two$models$ad[["cfg_002"]] <- NULL
+
+    expect_true(has_ad(two))
+    expect_null(two$models$ad[["cfg_002"]])
+
+    expect_error(predict(two, new_df, config = "all", interval = FALSE, abstain_ood = TRUE),
+                 "cfg_002", class = "horizons_error_input")
+    expect_snapshot(predict(two, new_df, config = "all", interval = FALSE, abstain_ood = TRUE),
+                    error = TRUE)
+
+    ## The configuration with an AD bundle abstains on its own
+    p <- predict(two, new_df, config = "cfg_001", interval = FALSE, abstain_ood = TRUE)
+    expect_true(all(c(".ad_distance", ".ad_flag") %in% names(p)))
 
   })
 
@@ -909,10 +974,11 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 
     err <- tryCatch(
       abort_on_missing_predict_packages(list(horizonsFakePkgXYZ123 = "cubist")),
-      horizons_missing_predict_package = function(e) e
+      horizons_error_missing_predict_package = function(e) e
     )
 
-    expect_s3_class(err, "horizons_missing_predict_package")
+    expect_s3_class(err, "horizons_error_missing_predict_package")
+    expect_s3_class(err, "horizons_error_dependency")
     expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
     expect_match(conditionMessage(err), "cubist")
 
@@ -925,10 +991,11 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
         horizonsFakePkgXYZ123 = "cubist",
         horizonsFakePkgABC456 = "mars"
       )),
-      horizons_missing_predict_package = function(e) e
+      horizons_error_missing_predict_package = function(e) e
     )
 
-    expect_s3_class(err, "horizons_missing_predict_package")
+    expect_s3_class(err, "horizons_error_missing_predict_package")
+    expect_s3_class(err, "horizons_error_dependency")
     expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
     expect_match(conditionMessage(err), "horizonsFakePkgABC456")
 
@@ -1034,7 +1101,7 @@ requested_packages <- function(obj, config_ids) {
 
   testthat::with_mocked_bindings(
     ensure_predict_namespaces(obj, config_ids = config_ids),
-    abort_on_missing_predict_packages = function(needed_pkgs) needed <<- needed_pkgs
+    abort_on_missing_predict_packages = function(needed_pkgs, ...) needed <<- needed_pkgs
   )
 
   needed
@@ -1110,7 +1177,7 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     expect_error(
       ensure_predict_namespaces(obj, config_ids = c("cfg_rf", "cfg_mars")),
       "horizonsFakePkgXYZ123",
-      class = "horizons_missing_predict_package"
+      class = "horizons_error_missing_predict_package"
     )
 
   })
@@ -1361,26 +1428,6 @@ describe("warn_interval_failure() - its reason", {
       warn_interval_failure("predicting quantiles from the UQ model", "a plain reason",
                             config_id = "cfg_001")
     })
-
-  })
-
-})
-
-
-## ---------------------------------------------------------------------------
-## predict_members() — one row per sample before members are combined
-## ---------------------------------------------------------------------------
-
-describe("predict_members() - repeated sample ids", {
-
-  it("refuses new_data whose sample_ids repeat, before predicting any member", {
-
-    ## The abort carries no package class, so its text is the check. The
-    ## object holds no member, so the refusal must come first.
-    expect_error(
-      predict_members(list(), "cfg_001", tibble::tibble(sample_id = c("A", "A"))),
-      "Duplicate keys would fan out the member-prediction combine.", fixed = TRUE
-    )
 
   })
 

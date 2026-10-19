@@ -644,6 +644,31 @@ describe("predict.horizons_ensemble() - preflight", {
 
   })
 
+  it("refuses new_data whose sample_ids repeat, before predicting any member", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+
+    dup <- rbind(test_set, test_set[1, ])
+
+    ## A member that would fail shows that no member is predicted first
+    ens$models$workflows[[ens$ensemble$weights$member[1]]] <- "not a workflow"
+
+    err <- expect_error(predict(ens, dup, interval = FALSE), class = "horizons_error_input")
+    expect_match(conditionMessage(err), "must be unique to predict from an ensemble", fixed = TRUE)
+    expect_match(conditionMessage(err), test_set$sample_id[1], fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "predict")
+
+  })
+
+  it("refuses an interval that is not TRUE or FALSE", {
+
+    expect_error(predict(ens_built("weighted"), ens_test_set(), interval = 1),
+                 "`interval` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
   it("aborts when the object carries no fitted ensemble", {
 
     test_set <- ens_test_set()
