@@ -142,7 +142,7 @@ describe("step_select_cars() selects", {
 
     expect_true(all(c("wn_3980", "wn_3950") %in% selected))
     expect_lt(length(selected), 40L)
-    expect_setequal(selected, paste0("wn_", c(3926, 3938, 3940, 3950, 3954, 3978, 3980, 4000)))
+    expect_setequal(selected, paste0("wn_", c(3926, 3938, 3950, 3964, 3978, 3980, 3988, 4000)))
 
   })
 
@@ -239,11 +239,17 @@ describe("step_select_cars() returns the set it scored (#106)", {
 
 describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
 
-  ## Each iteration's fit and the bands it was given, at seed 1
+  ## Each iteration's fit and the bands it was given, at seed 1, and each
+  ## adaptive reweighted draw: the size of the pool it drew from and what it
+  ## drew. The Monte Carlo row samples draw without weights, so the draws by
+  ## weight are the reweighted sampling's.
   cars_traced <- function(seed = 1) {
 
-    seen <- list()
-    fits <- list()
+    seen  <- list()
+    fits  <- list()
+    pools <- integer(0)
+    draws <- list()
+
     real <- pls::plsr
     local_mocked_bindings(plsr = function(formula, data, ...) {
       fit <- real(formula, data = data, ...)
@@ -252,10 +258,20 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
       fit
     }, .package = "pls")
 
+    real_sample <- base::sample.int
+    local_mocked_bindings(sample.int = function(n, size = n, replace = FALSE, prob = NULL, ...) {
+      out <- real_sample(n, size, replace, prob, ...)
+      if (!is.null(prob)) {
+        pools <<- c(pools, as.integer(n))
+        draws[[length(draws) + 1L]] <<- out
+      }
+      out
+    }, .package = "base")
+
     d    <- cars_signal_data()
     step <- withr::with_seed(seed, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
 
-    list(step = step, seen = seen, fits = fits)
+    list(step = step, seen = seen, fits = fits, pools = pools, draws = draws)
 
   }
 
@@ -288,12 +304,31 @@ describe("step_select_cars() weights the bands as published (Li et al. 2009)", {
 
     for (i in seq_len(length(tr$seen) - 1L)) {
 
-      n_keep <- max(2, floor(40 * decay^(i - 1)))
+      n_keep <- max(2, floor(40 * decay^i))
 
       expect_true(all(tr$seen[[i + 1L]] %in% tr$seen[[i]]), label = paste("iteration", i))
       expect_lte(sizes[i + 1L], min(n_keep, sizes[i]), label = paste("iteration", i))
 
     }
+
+  })
+
+  it("cuts after each fit to the share the next iteration may hold, as carspls does", {
+
+    skip_if_not_installed("pls")
+
+    tr    <- cars_traced()
+    decay <- exp(log(2 / 40) / 49)
+    sizes <- lengths(tr$seen)
+
+    ## carspls computes the share a * exp(-b * (iter + 1)) after fit iter:
+    ## each draw's pool is the top K by weight, K the next iteration's share
+    ## of the 40 bands (at least two), or every band the fit had when fewer
+    expected <- as.integer(pmin(pmax(2, floor(40 * decay^seq_len(50))), sizes))
+
+    expect_identical(tr$pools, expected)
+    expect_identical(sizes[1], 40L)
+    expect_lte(sizes[50], 2L)
 
   })
 

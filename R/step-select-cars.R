@@ -37,8 +37,9 @@
 #' PLS model of up to five components on a Monte Carlo sample of 80% of the
 #' rows and scores it by its leave-one-out RMSEP at its best number of
 #' components. The fit's coefficients weight the bands afresh: an
-#' exponentially decreasing function keeps the most heavily weighted (from
-#' every band down to two over the iterations), and adaptive reweighted
+#' exponentially decreasing function keeps the most heavily weighted, as many
+#' as the next iteration may fit (so the fits run from every band down to
+#' two, as carspls schedules them), and adaptive reweighted
 #' sampling draws among those, by weight and with replacement, as many times
 #' as there are bands, keeping the bands drawn. The step returns the set of
 #' bands the lowest score was measured on (#106), each kept representative
@@ -223,8 +224,11 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
 
     sets[[iter]] <- selected
 
-    ## EDF's count: from every band down to two over the iterations
-    n_keep     <- min(max(2, floor(n_vars * decay^(iter - 1))), length(selected))
+    ## EDF's count for the next iteration's set, as carspls computes it after
+    ## each fit (ratio a * exp(-b * (iter + 1))): the set fitted at iteration
+    ## i holds at most n_vars * decay^(i - 1) bands, every band at the first
+    ## and two at the last
+    n_keep     <- min(max(2, floor(n_vars * decay^iter)), length(selected))
     mc_samples <- sample(n_samples, floor(n_samples * mc_ratio))
 
     pls_data   <- as.data.frame(reduced_mat[mc_samples, selected, drop = FALSE])
