@@ -2742,8 +2742,9 @@ describe("evaluate() - a worker's death", {
     local_plan(future::multisession, workers = 2)
 
     ## tune's search catches future's error there, so the death reaches
-    ## evaluate() only as future.apply's unclassed warning, matched by its
-    ## text: if that wording changes, this fails rather than the death
+    ## evaluate() only as future.apply's unclassed report of it (a warning
+    ## before future.apply 1.21.0, a message since), matched by its text: if
+    ## that wording or its form changes, this fails rather than the death
     ## reading as a search that stopped early. The kill is armed at the
     ## search's second Gaussian-process prediction, once an iteration has
     ## run, and fires once, on a worker, from a recipe step that needs
@@ -2785,9 +2786,9 @@ describe("evaluate() - a worker's death", {
     expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
     expect_match(conditionMessage(err$parent), "A parallel worker stopped during the Bayesian search", fixed = TRUE)
     ## Wrapped once: the unit's systemic error is the direct parent, and
-    ## future.apply's warning is its cause
+    ## future.apply's report is its cause
     expect_s3_class(err$parent, "horizons_error_systemic")
-    expect_s3_class(err$parent$parent, "warning")
+    expect_true(inherits(err$parent$parent, c("warning", "message")))
     expect_match(conditionMessage(err$parent$parent), "^Caught [A-Za-z]*Future[A-Za-z]*Error\\. Canceling all iterations")
     expect_length(list.files(file.path(dir, "checkpoints")), 0L)
 
@@ -2803,19 +2804,23 @@ describe("evaluate() - a worker's death", {
 
   })
 
-  it("is read from future.apply's warning for every class of future's errors, and for no other", {
+  it("is read from future.apply's report, a warning or a message, for every class of future's errors, and for no other", {
 
+    ## A warning before future.apply 1.21.0; a message, ending in a newline, since
     caught <- function(class) simpleWarning(paste0("Caught ", class, ". Canceling all iterations ..."))
+    told   <- function(class) simpleMessage(paste0("Caught ", class, ". Canceling all iterations ...\n"))
 
     for (class in c("FutureInterruptError", "FutureError", "FutureLaunchError", "RngFutureError",
                     "UnexpectedFutureResultError", "GlobalEnvMisuseFutureError")) {
-      expect_true(worker_death_warning(caught(class)), label = class)
+      expect_true(worker_death_signal(caught(class)), label = class)
+      expect_true(worker_death_signal(told(class)), label = class)
     }
 
-    ## future.apply warns the same way about an error the worker's own code raised
-    expect_false(worker_death_warning(caught("simpleError")))
-    expect_false(worker_death_warning(caught("rlang_error")))
-    expect_false(worker_death_warning(simpleWarning("A FutureInterruptError was caught.")))
+    ## future.apply reports an error the worker's own code raised the same way
+    expect_false(worker_death_signal(caught("simpleError")))
+    expect_false(worker_death_signal(told("simpleError")))
+    expect_false(worker_death_signal(caught("rlang_error")))
+    expect_false(worker_death_signal(simpleWarning("A FutureInterruptError was caught.")))
 
   })
 

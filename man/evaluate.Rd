@@ -205,9 +205,10 @@ as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{
 run every configuration; the configs axis has no breaker), and their
 failures are not checkpointed. A parallel worker that dies stops the run
 the same way, during a Bayesian iteration too: tune catches future's error
-there, so the death is read from the warning future.apply raises first
-("Caught FutureInterruptError. Canceling all iterations ..."), which has
-no class and is matched by its text. When some configurations failed and
+there, so the death is read from what future.apply reports first
+("Caught FutureInterruptError. Canceling all iterations ...", a warning
+before future.apply 1.21.0 and a message since), which has no class and
+is matched by its text. When some configurations failed and
 the rest are returned, one \code{horizons_warning_partial_failure} names them
 with each distinct cause. A configuration whose Bayesian search stopped
 early keeps the iterations it finished; one whose search failed before any

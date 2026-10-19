@@ -304,11 +304,12 @@ evaluate_single_config <- function(config_row,
     ##
     ## A worker that dies during an iteration on the resamples axis never
     ## reaches here as future's error: tune's try() around the candidate's
-    ## resampling catches it. future.apply warns first, "Caught
-    ## FutureInterruptError. Canceling all iterations ...", unclassed, so the
-    ## death is read from that text (worker_death_warning()) and stops the
-    ## run as systemic once tune_bayes() has returned, as a death in the grid
-    ## stage does.
+    ## resampling catches it. future.apply reports it first, "Caught
+    ## FutureInterruptError. Canceling all iterations ...", unclassed, as a
+    ## warning before 1.21.0 and as a message since, so the death is read
+    ## from that text in either (worker_death_signal()) and stops the run as
+    ## systemic once tune_bayes() has returned, as a death in the grid stage
+    ## does.
     ##
     ## The same on.exit() return swallows a Ctrl-C during the search, so the
     ## interrupt is recorded as it arrives and raised again once tune has
@@ -334,7 +335,12 @@ evaluate_single_config <- function(config_row,
         worker_died <- NULL
         interrupted <- FALSE
 
+        read_death <- function(cnd) {
+          if (is.null(worker_died) && worker_death_signal(cnd)) worker_died <<- cnd
+        }
+
         read_log <- function(m) {
+          read_death(m)
           text <- cli::ansi_strip(conditionMessage(m))
           if (grepl("All models failed for:", text, fixed = TRUE)) {
             n_dropped <<- n_dropped + 1L
@@ -344,10 +350,6 @@ evaluate_single_config <- function(config_row,
           } else if (grepl("Couldn't estimate performance", text, fixed = TRUE)) {
             n_dropped <<- n_dropped + 1L
           }
-        }
-
-        read_warning <- function(w) {
-          if (is.null(worker_died) && worker_death_warning(w)) worker_died <<- w
         }
 
         bayes_results <- tryCatch(
@@ -372,7 +374,7 @@ evaluate_single_config <- function(config_row,
               ),
               message = read_log
             )),
-            warning   = read_warning,
+            warning   = read_death,
             error     = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e),
             interrupt = function(i) interrupted <<- TRUE
           ),

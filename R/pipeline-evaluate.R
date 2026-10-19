@@ -152,9 +152,10 @@
 #' run every configuration; the configs axis has no breaker), and their
 #' failures are not checkpointed. A parallel worker that dies stops the run
 #' the same way, during a Bayesian iteration too: tune catches future's error
-#' there, so the death is read from the warning future.apply raises first
-#' ("Caught FutureInterruptError. Canceling all iterations ..."), which has
-#' no class and is matched by its text. When some configurations failed and
+#' there, so the death is read from what future.apply reports first
+#' ("Caught FutureInterruptError. Canceling all iterations ...", a warning
+#' before future.apply 1.21.0 and a message since), which has no class and
+#' is matched by its text. When some configurations failed and
 #' the rest are returned, one `horizons_warning_partial_failure` names them
 #' with each distinct cause. A configuration whose Bayesian search stopped
 #' early keeps the iterations it finished; one whose search failed before any
@@ -1660,7 +1661,7 @@ abort_breaker_trip <- function(breaker, rows, n_left, call = rlang::caller_env()
 #' future raises a worker's death as a `FutureError`, which no unit contains
 #' (`NEVER_CONTAINED`). A death that tune caught during a Bayesian search
 #' reaches here as the unit's `horizons_error_systemic`, which no unit
-#' contains either ([worker_death_warning()]). Either is turned into
+#' contains either ([worker_death_signal()]). Either is turned into
 #' `horizons_error_systemic`, chained to the error, with the rows finished so
 #' far; every other error passes through untouched.
 #'
@@ -1697,26 +1698,27 @@ stop_on_worker_death <- function(expr, rows, output_dir, call = rlang::caller_en
 
 }
 
-#' Whether a warning is future.apply's report of a future's error
+#' Whether a condition is future.apply's report of a future's error
 #'
 #' @description
-#' future.apply warns `"Caught <class>. Canceling all iterations ..."` before
-#' it raises a future's error again. tune's Bayesian search catches that
-#' error in a `try()` and goes on, so on the resamples axis a worker's death
-#' during an iteration reaches the unit only as this warning, which has no
-#' class and is matched by its text. Only the classes of future's own errors
-#' (`FutureError` and its subclasses, `FutureInterruptError` among them)
-#' match: an error raised in a worker's own code is caught and warned about
-#' the same way.
+#' future.apply reports `"Caught <class>. Canceling all iterations ..."`
+#' before it raises a future's error again: as a warning before 1.21.0, and
+#' as a message since. tune's Bayesian search catches that error in a
+#' `try()` and goes on, so on the resamples axis a worker's death during an
+#' iteration reaches the unit only as this report, which has no class in
+#' either version and is matched by its text. Only the classes of future's
+#' own errors (`FutureError` and its subclasses, `FutureInterruptError`
+#' among them) match: an error raised in a worker's own code is caught and
+#' reported the same way.
 #'
-#' @param w A warning.
+#' @param cnd A warning or a message.
 #' @return Logical(1).
 #' @keywords internal
 #' @noRd
-worker_death_warning <- function(w) {
+worker_death_signal <- function(cnd) {
 
   grepl("^Caught [A-Za-z]*Future[A-Za-z]*Error\\. Canceling all iterations",
-        conditionMessage(w))
+        conditionMessage(cnd))
 
 }
 
