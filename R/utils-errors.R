@@ -996,8 +996,6 @@ text_records <- function(x, pinned = FALSE) {
 
   x <- as.character(unlist(x))
 
-  if (length(x) == 0) return(new_warning_log())
-
   distinct <- unique(x)
 
   ### A pinned line is the package's own text, kept whole as a message
