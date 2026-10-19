@@ -747,6 +747,30 @@ describe("predict.horizons_ensemble() - flagged rows and the combination", {
 ## an AD bundle and a UQ bundle, so a member helper that asked for either
 ## would compute it.
 
+describe("predict.horizons_ensemble() - what its units report", {
+
+  it("raises a horizons warning a member raised while predicting, once, naming the members, as on a fit", {
+
+    test_set <- ens_test_set()
+    ens      <- ens_built("weighted")
+    real     <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      warn_in_unit("substitution", "A member substituted something.")
+      real(object, new_data, ...)
+    })
+
+    w <- collect_warnings(predict(ens, test_set, interval = FALSE),
+                          "A member substituted something")$warnings
+
+    expect_length(w, 1L)
+    expect_s3_class(w[[1]], "horizons_warning_substitution")
+    expect_setequal(w[[1]]$log$ids[[1]], ens$ensemble$weights$member)
+
+  })
+
+})
+
 describe("ensemble() and predict.horizons_ensemble() - member AD and intervals", {
 
   it("never computes a member's applicability domain or intervals, in ensemble() or predict()", {

@@ -1334,9 +1334,8 @@ abort_prediction_failed <- function(records, header, call = rlang::caller_env(),
 #' Collect what the configurations' units reported
 #'
 #' One `partial_failure` warning when some configurations could not predict
-#' and others did; the `skipped` warnings and notes the units raised, through
-#' [log_unit_records()]; and every warning another package (or a recipe
-#' step) raised inside a unit, through [log_foreign_warnings()].
+#' and others did, then what every unit reported, through the tail both
+#' methods share ([log_prediction_reports()]).
 #'
 #' @param collector The call's collector.
 #' @param blocks The configurations' blocks, from [predict_one_config()].
@@ -1361,13 +1360,40 @@ log_prediction_units <- function(collector, blocks) {
 
   }
 
+  log_prediction_reports(
+    collector,
+    records    = records,
+    flagged    = stats::setNames(lapply(blocks, attr, "flagged"),
+                                 vapply(blocks, function(b) b$config_id[1] %||% NA_character_,
+                                        character(1))),
+    winsorized = lapply(blocks, attr, "winsorized")
+  )
+
+}
+
+#' Collect what predict()'s units reported, the same way for both methods
+#'
+#' The tail `predict()` on a fit and on an ensemble share: the warnings and
+#' notes horizons raised inside a unit ([log_unit_records()]), another
+#' package's warnings ([log_foreign_warnings()]), the rows that could not be
+#' predicted ([log_flagged()]) and the predictions the response bound
+#' winsorized ([log_winsorized()]).
+#'
+#' @param collector The call's collector.
+#' @param records The units' records, shaped like [new_unit_records()]'s.
+#' @param flagged Named list of the rows each configuration or member could
+#'   not use, as [log_flagged()] reads it.
+#' @param winsorized List of the winsorized reports, as [log_winsorized()]
+#'   reads it.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_prediction_reports <- function(collector, records, flagged, winsorized) {
+
   log_unit_records(collector, records)
   log_foreign_warnings(collector, records)
-
-  log_flagged(collector, stats::setNames(lapply(blocks, attr, "flagged"),
-                                         vapply(blocks, function(b) b$config_id[1] %||% NA_character_,
-                                                character(1))))
-  log_winsorized(collector, lapply(blocks, attr, "winsorized"))
+  log_flagged(collector, flagged)
+  log_winsorized(collector, winsorized)
 
   invisible(collector)
 

@@ -1686,6 +1686,25 @@ describe("predict.horizons_fit() - each configuration is one unit", {
 
   })
 
+  it("raises a horizons warning a configuration raised while predicting, once, naming it", {
+
+    real <- utils::getS3method("predict", "workflow")
+
+    local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {
+      warn_in_unit("substitution", "A member substituted something.")
+      real(object, new_data, ...)
+    })
+
+    w <- collect_warnings(predict(add_member_copy(fitted_fixture), new_df, config = "all",
+                                  interval = FALSE),
+                          "A member substituted something")$warnings
+
+    expect_length(w, 1L)
+    expect_s3_class(w[[1]], "horizons_warning_substitution")
+    expect_setequal(w[[1]]$log$ids[[1]], c("cfg_001", "cfg_002"))
+
+  })
+
   it("raises another package's warning from a configuration once, as quality, naming it", {
 
     local_mocked_s3_method("predict", "workflow", function(object, new_data, ...) {

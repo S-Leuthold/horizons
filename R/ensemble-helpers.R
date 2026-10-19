@@ -948,9 +948,7 @@ predict.horizons_ensemble <- function(object,
   ## Step 6: Report, once per topic
   ## -------------------------------------------------------------------------
 
-  log_flagged(collector, flagged)
-  log_foreign_warnings(collector, records)
-  log_winsorized(collector, list(winsorized))
+  log_prediction_reports(collector, records, flagged, list(winsorized))
 
   ## Conformal coverage on a selected training set, and CV+ intervals
   ## calibrated within the training fences, said only when intervals came
