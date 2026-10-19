@@ -126,10 +126,11 @@
 #' `best_config` with status `"not_evaluated"`, its metric and `cv_*` columns
 #' are `NA`, and `runtime_secs` is 0. `evaluation$recipe` records the recipe
 #' settings as `evaluate()` does, and `fit()` applies `evaluate()`'s checks
-#' first: an outcome that is not constant, a training part with more rows
-#' than `cv_folds` once the split and the trim have drawn it, and a
-#' Savitzky-Golay window narrower than the spectrum. Re-fitting a cold-started fit starts cold again. With more than
-#' one configuration `fit()` aborts with class `horizons_error_input`:
+#' first: an outcome that is not constant, a Savitzky-Golay window narrower
+#' than the spectrum, and more rows than `cv_folds` to draw the folds from,
+#' which `fit()` checks on either path. Re-fitting a cold-started fit starts
+#' cold again. With more than one configuration `fit()` aborts with class
+#' `horizons_error_input`:
 #' choosing among them is what `evaluate()` is for.
 #'
 #' @param x A `horizons_eval` object (output of `evaluate()`), or a
@@ -1346,7 +1347,7 @@ member_row <- function(res) {
 #'   stratified draw failed and was retried without strata) and
 #'   `strata_error` (why), as [draw_eval_split()] returns them. Aborts with class
 #'   `horizons_error_input` when the object has no configuration or more than
-#'   one, the training part has no more rows than folds, the window is at least as
+#'   one, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
 #'   another outcome ([response_trim_request()]).
 #' @keywords internal
@@ -1378,12 +1379,10 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
   ## carries, as a fit of an evaluated object keeps evaluate()'s.
   rank_metric <- metric %||% x$evaluation$rank_metric %||% "rpd"
 
-  ## The rows evaluate() would model, and the floor it applies to them
+  ## The rows evaluate() would model
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
-  cv_folds    <- x$config$tuning$cv_folds
   modelled    <- modelling_rows(x$data$analysis, outcome_col, call = call)
-  n_modelled  <- nrow(modelled$data)
 
   ## evaluate()'s next check: the Savitzky-Golay window has to fit the
   ## spectrum (#62). The record it returns is the one evaluate() stores, and
@@ -1403,12 +1402,9 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
                                      id_col = id_column(role_map), collector = collector)
   split   <- trimmed$split
 
-  ## The sample-size rule evaluate() applies, at the same point: after the
-  ## split and the trim, the training part needs more rows than folds
-  check_fold_rows(nrow(rsample::training(split)), cv_folds, n_modelled = n_modelled,
-                  n_test    = nrow(rsample::testing(split)),
-                  n_trimmed = length(trimmed$record$trimmed_ids %||% character(0)),
-                  call      = call)
+  ## The sample-size rule is fit()'s own check on the rows its folds are
+  ## drawn from, which are this training part less any calibration rows, so
+  ## it refuses every case a check here would, as evaluate() refuses them.
 
   ## The shape of an evaluate() results row (create_failed_result()'s
   ## columns less scoring_schema, since nothing was scored), all unmeasured

@@ -364,10 +364,14 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("refuses a training part with no more rows than folds, as evaluate() does", {
 
-    ## 4 rows: 3 in the training part, for 3 folds
+    ## 4 rows: 3 in the training part, for 3 folds. fit()'s own check on the
+    ## rows its folds are drawn from refuses it, before any member is fitted,
+    ## at the boundary evaluate() refuses at; 5 rows run (below)
     few <- make_eval_object(n = 4, n_configs = 1)
 
-    err <- expect_error(fit(few, seed = 42L), "The training part has 3 rows",
+    local_mocked_bindings(fit_single_config = function(...) stop("a member was fitted"))
+
+    err <- expect_error(suppressWarnings(fit(few, seed = 42L)), "The training part has 3 rows",
                         fixed = TRUE, class = "horizons_error_input")
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "3-fold cross-validation needs more training rows than folds", fixed = TRUE)
