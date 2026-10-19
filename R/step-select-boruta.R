@@ -159,17 +159,8 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## Stage 2: Variance filtering and clustering
   ## ---------------------------------------------------------------------------
 
-  # Remove near-constant features before clustering
-  variance_check <- apply(spectra_mat, 2, var, na.rm = TRUE)
-  keep_cols <- variance_check > 1e-10
-
-  if(sum(keep_cols) < ncol(spectra_mat)) {
-    cli::cli_alert_info("Filtering {ncol(spectra_mat) - sum(keep_cols)} near-constant features before clustering")
-    spectra_mat <- spectra_mat[, keep_cols, drop = FALSE]
-    col_names_filtered <- col_names[keep_cols]
-  } else {
-    col_names_filtered <- col_names
-  }
+  spectra_mat        <- drop_constant_bands(spectra_mat)
+  col_names_filtered <- colnames(spectra_mat)
 
   # Use more aggressive clustering for spectral data (k=50 instead of 150)
   cluster_spectral_predictors(spectra_mat,

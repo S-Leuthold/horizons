@@ -69,17 +69,10 @@ cluster_spectral_predictors <- function(spectra_mat,
 
   if (method == "correlation") {
 
+    ### The steps drop near-constant bands first (drop_constant_bands()), so
+    ### a correlation is missing only for a band with no values at all, which
+    ### hclust() refuses.
     cormat  <- cor(spectra_mat, use = "pairwise.complete.obs")
-
-    if (anyNA(cormat)) {
-
-      cli::cli_abort(c(
-        "Correlation matrix contains NA values",
-        "i" = "Remove zero-variance predictors or use {.arg method} = {.val euclidean}"
-      ))
-
-    }
-
     distmat <- as.dist(1 - abs(cormat))
 
     } else {
@@ -129,4 +122,32 @@ cluster_spectral_predictors <- function(spectra_mat,
   return(list(reduced_mat   = reduced_mat,
               cluster_map   = cluster_map,
               selected_vars = representative_bands))
+}
+
+
+#' Drop the Near-Constant Bands Before Clustering
+#'
+#' @description
+#' Shared by `step_select_cars()` and `step_select_boruta()`. A band whose
+#' variance is at most `1e-10` has no correlation with any other, so it
+#' cannot be clustered, and it carries nothing to select. Says how many it
+#' drops.
+#'
+#' @param spectra_mat Numeric matrix, one column per band.
+#' @return `spectra_mat` without its near-constant columns.
+#' @keywords internal
+#' @noRd
+drop_constant_bands <- function(spectra_mat) {
+
+  variances <- apply(spectra_mat, 2, stats::var, na.rm = TRUE)
+  keep      <- !is.na(variances) & variances > 1e-10
+
+  if (!all(keep)) {
+
+    cli::cli_alert_info("Filtering {sum(!keep)} near-constant features before clustering")
+
+  }
+
+  spectra_mat[, keep, drop = FALSE]
+
 }

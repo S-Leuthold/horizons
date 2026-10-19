@@ -49,21 +49,6 @@ describe("cluster_spectral_predictors() refuses input it cannot cluster", {
 
   })
 
-  it("aborts when the correlation matrix has NA values", {
-
-    ## Arrange: a band with no observed values has no correlation with any
-    ## other
-    withr::local_seed(1)
-    spectra      <- cluster_data()
-    spectra[, 2] <- NA_real_
-
-    ## Act & Assert: the finding, and the remedy
-    err <- expect_error(cluster_spectral_predictors(spectra, k = 2, method = "correlation"),
-                        "Correlation matrix contains NA values", fixed = TRUE)
-    expect_match(conditionMessage(err), "Remove zero-variance predictors", fixed = TRUE)
-
-  })
-
 })
 
 

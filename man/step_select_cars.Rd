@@ -54,7 +54,8 @@ derivatives) and \emph{before} PCA or model fitting. CARS is particularly effect
 identifying minimal wavelength sets that maintain predictive performance.
 
 CARS runs on at most 150 cluster representatives of the selected columns
-(correlation clustering), for 50 iterations. Each iteration fits a PLS
+(correlation clustering), after dropping near-constant columns, for 50
+iterations. Each iteration fits a PLS
 model of up to five components on a Monte Carlo sample of 80\% of the rows,
 weighted by the bands' accumulated importance, and scores it by its
 leave-one-out RMSEP at its best number of components; the bands kept then

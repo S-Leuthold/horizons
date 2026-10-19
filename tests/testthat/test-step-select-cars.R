@@ -238,3 +238,36 @@ describe("step_select_cars() returns the set it scored (#106)", {
   })
 
 })
+
+
+describe("step_select_cars() and near-constant bands", {
+
+  it("drops a near-constant band before clustering, as step_select_boruta() does", {
+
+    skip_if_not_installed("pls")
+
+    ## 160 bands, more than the 150 representatives, so the clustering runs;
+    ## a constant band has no correlation with the others and stopped it
+    d <- withr::with_seed(1, {
+      m <- matrix(stats::rnorm(60 * 160), 60)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 160))
+      m[, "wn_3900"] <- 1
+      d <- tibble::as_tibble(m)
+      d$SOC <- 2 * d$wn_3980 - 2 * d$wn_3950 + stats::rnorm(60, sd = 0.3)
+      d
+    })
+
+    expect_message(
+      prepped <- withr::with_seed(1, recipes::prep(cars_recipe(d), training = d)),
+      "Filtering 1 near-constant features before clustering", fixed = TRUE
+    )
+
+    step <- prepped$steps[[1]]
+
+    expect_identical(step$cars$n_representatives, 150L)
+    expect_false("wn_3900" %in% step$selected_vars)
+    expect_gt(length(step$selected_vars), 0L)
+
+  })
+
+})

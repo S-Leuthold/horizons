@@ -31,7 +31,8 @@
 #' identifying minimal wavelength sets that maintain predictive performance.
 #'
 #' CARS runs on at most 150 cluster representatives of the selected columns
-#' (correlation clustering), for 50 iterations. Each iteration fits a PLS
+#' (correlation clustering), after dropping near-constant columns, for 50
+#' iterations. Each iteration fits a PLS
 #' model of up to five components on a Monte Carlo sample of 80% of the rows,
 #' weighted by the bands' accumulated importance, and scores it by its
 #' leave-one-out RMSEP at its best number of components; the bands kept then
@@ -136,6 +137,10 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
   ## Stage 2: Cluster predictors before CARS
   ## ---------------------------------------------------------------------------
+  ## A near-constant band has no correlation with any other, so it is dropped
+  ## before clustering, as step_select_boruta() drops it.
+
+  spectra_mat <- drop_constant_bands(spectra_mat)
 
   cluster_spectral_predictors(spectra_mat,
                               k      = 150,
