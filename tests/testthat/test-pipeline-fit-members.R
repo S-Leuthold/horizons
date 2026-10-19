@@ -5,6 +5,13 @@
 ## gate or all fell below it (#38), and what it does when members fail. Each
 ## block builds its own objects; make_fit_object() is in helper-fixtures.R.
 
+## The fit objects the member tests read, built once per process
+## (helper-memo.R). Each test reads its object before anything is mocked, so
+## no build runs under a mock.
+fit_obj <- function(n_configs) {
+  memo_fixture("members_fit_obj", make_fit_object, n = 60, n_configs = n_configs)
+}
+
 
 ## =========================================================================
 ## No config passed the prune gate: fit() takes evaluate()'s fallback (#38)
@@ -267,7 +274,7 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
 describe("fit() - member failures", {
 
-  obj <- make_fit_object(n = 60, n_configs = 2)
+  obj <- fit_obj(2L)
   obj$config$tuning$final_bayesian_iter <- 0L
 
   ## A member failure as fit_single_config() reports one. The message carries
@@ -362,7 +369,7 @@ describe("fit() - each member is one unit", {
   ## cubist
   four_members <- function(models = c("rf", "cubist")) {
 
-    obj  <- make_fit_object(n = 60, n_configs = 2)
+    obj  <- fit_obj(2L)
     more <- obj$config$configs
     more$config_id <- c("cfg_003", "cfg_004")
 
@@ -409,7 +416,7 @@ describe("fit() - each member is one unit", {
 
   it("records each member's failure class, backtrace and warnings, and warns partial_failure once", {
 
-    obj <- mfo_two <- make_fit_object(n = 60, n_configs = 2)
+    obj <- fit_obj(2L)
 
     got <- collect_warnings(
       testthat::with_mocked_bindings(
@@ -441,11 +448,12 @@ describe("fit() - each member is one unit", {
 
   it("passes debug and keep_traces to every member, and with debug runs them in this session", {
 
+    obj  <- fit_obj(1L)
     seen <- list()
     out  <- utils::capture.output(
       ## rsample's own stratification notice is not under test
       fitted <- testthat::with_mocked_bindings(
-        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 1), n_best = 1L,
+        suppressWarnings(fit(obj, n_best = 1L,
                              compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
                              control = control_horizons(allow_par = TRUE, debug = TRUE,
                                                         keep_traces = TRUE, verbose = TRUE))),
@@ -530,11 +538,12 @@ describe("fit() - each member is one unit", {
 
   it("stops with the members so far when a parallel worker dies", {
 
+    obj   <- fit_obj(2L)
     calls <- 0L
 
     err <- expect_error(
       testthat::with_mocked_bindings(
-        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L,
+        suppressWarnings(fit(obj, n_best = 2L,
                              compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
         fit_single_config = function(config_row, ...) {
           calls <<- calls + 1L
@@ -558,8 +567,15 @@ describe("fit() - each member is one unit", {
 
   it("fails the member whose every out-of-fold fit failed and returns the other, rather than stopping fit() (#102)", {
 
+    ## Real fits of the members, several seconds even without the search
+    skip_unless_slow_tier()
+
     ## The cubist member's engine fails on every fold, but only while its
-    ## out-of-fold predictions are made; the rf member is untouched
+    ## out-of-fold predictions are made; the rf member is untouched. No
+    ## Bayesian iterations: the search is not what is tested.
+    obj <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 0L
+
     in_oof <- FALSE
     real_cubist    <- Cubist::cubist
     real_resamples <- tune::fit_resamples
@@ -574,8 +590,7 @@ describe("fit() - each member is one unit", {
     }, .package = "tune")
 
     got <- collect_warnings(
-      fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L, seed = 42L,
-          compute_uq = FALSE, compute_ad = FALSE),
+      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE),
       "."
     )
     res <- got$value$models$results
@@ -590,10 +605,15 @@ describe("fit() - each member is one unit", {
 
   it("stops with the members so far when a worker dies during a warm-start Bayesian search, reported as a message or a warning", {
 
+    ## Real fits of the members, several seconds even without the search
+    skip_unless_slow_tier()
+
     ## tune catches future's error inside its search; future.apply reports it
     ## first, as a warning before 1.21.0 and as a message since. The first
     ## member's search returns without an iteration, the second one's worker
     ## dies.
+    obj <- fit_obj(2L)
+
     for (report in list(message, warning)) {
 
       calls <- 0L
@@ -604,7 +624,7 @@ describe("fit() - each member is one unit", {
       }, .package = "tune")
 
       err <- expect_error(
-        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L,
+        suppressWarnings(fit(obj, n_best = 2L,
                              compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
         class = "horizons_error_systemic"
       )
@@ -622,8 +642,12 @@ describe("fit() - each member is one unit", {
 
   it("stops at a Ctrl-C during a warm-start Bayesian search, rather than keeping the iterations before it", {
 
+    ## Real fits of the members, several seconds even without the search
+    skip_unless_slow_tier()
+
     ## tune's on.exit() return cancels the interrupt's unwind, so without the
     ## record the search's first iteration came back as the member's result
+    obj          <- fit_obj(1L)
     real_pred_gp <- tune:::pred_gp
     calls        <- 0L
     local_mocked_bindings(pred_gp = function(...) {
@@ -633,7 +657,7 @@ describe("fit() - each member is one unit", {
     }, .package = "tune")
 
     got <- tryCatch(
-      suppressWarnings(fit(make_fit_object(n = 60, n_configs = 1), n_best = 1L,
+      suppressWarnings(fit(obj, n_best = 1L,
                            compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
       interrupt = function(i) "interrupted"
     )
@@ -644,9 +668,11 @@ describe("fit() - each member is one unit", {
 
   it("carries a members table with every column and no rows when the first member's worker dies", {
 
+    obj <- fit_obj(2L)
+
     err <- expect_error(
       testthat::with_mocked_bindings(
-        suppressWarnings(fit(make_fit_object(n = 60, n_configs = 2), n_best = 2L,
+        suppressWarnings(fit(obj, n_best = 2L,
                              compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
         fit_single_config = function(config_row, ...) {
           stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
@@ -667,7 +693,7 @@ describe("fit() - each member is one unit", {
 
   it("refuses a parallel run its workers cannot match, before anything is drawn", {
 
-    obj <- make_fit_object(n = 60, n_configs = 1)
+    obj <- fit_obj(1L)
 
     run <- function(...) {
       testthat::with_mocked_bindings(

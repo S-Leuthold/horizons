@@ -1113,12 +1113,19 @@ describe("fit() - what it reports at its end", {
 
   it("warns skipped once, naming the members, when their prediction intervals could not be built (#145)", {
 
+    ## Real fits of the members, several seconds even without the search
+    skip_unless_slow_tier()
+
     ## A calibration set of 10 passes min_calib_rows = 10, and each member's
-    ## UQ unit fails; the members are fitted all the same
+    ## UQ unit fails; the members are fitted all the same. No Bayesian
+    ## iterations: the search is not what is tested.
+    obj <- mfo()
+    obj$config$tuning$final_bayesian_iter <- 0L
+
     local_mocked_bindings(fit_uq = function(...) stop("the forest broke"))
 
     got <- collect_warnings(
-      fit(mfo(), n_best = 2L, seed = 42L, compute_ad = FALSE,
+      fit(obj, n_best = 2L, seed = 42L, compute_ad = FALSE,
           control = control_horizons(min_calib_rows = 10L)),
       "."
     )
@@ -1140,12 +1147,23 @@ describe("fit() - what it reports at its end", {
 
   it("leaves degraded NA when the degradation check could not run, and warns skipped once, naming the members", {
 
-    got <- collect_warnings(
-      fit(mfo(), n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
-          control = control_horizons(min_degradation_rows = 50L)),
+    ## Real fits of the members, several seconds even without the search
+    skip_unless_slow_tier()
+
+    ## No Bayesian iterations: the search is not what is tested. Verbose, so
+    ## the tree reads a degraded that is NA too
+    obj <- mfo()
+    obj$config$tuning$final_bayesian_iter <- 0L
+
+    tree <- utils::capture.output(got <- collect_warnings(
+      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+          control = control_horizons(min_degradation_rows = 50L, verbose = TRUE)),
       "."
-    )
+    ))
     res <- got$value$models$results
+
+    expect_false(any(grepl("DEGRADED", tree, fixed = TRUE)))
+    expect_true(any(grepl("Successful: 2 / 2", tree, fixed = TRUE)))
     w   <- got$warnings[vapply(got$warnings, inherits, logical(1), "horizons_warning_skipped")]
     why <- "The degradation check did not run: the test set has"
 
@@ -1159,10 +1177,19 @@ describe("fit() - what it reports at its end", {
 
   })
 
-  it("warns substitution once per draw that fell back to no strata, with why", {
+  it("warns substitution once for the draws that fell back to no strata, naming each, with why", {
 
-    real_vfold_cv <- rsample::vfold_cv
+    ## A cold start with AD on draws three: the train/test split, the
+    ## calibration split and the folds. Built before anything is mocked.
+    obj <- make_eval_object(n = 60, n_configs = 1)
+
+    real_initial_split <- rsample::initial_split
+    real_vfold_cv      <- rsample::vfold_cv
     local_mocked_bindings(
+      initial_split = function(data, prop = 3 / 4, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_initial_split(data, prop = prop, ...)
+      },
       vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
         if (!missing(strata)) stop("stratification refused")
         real_vfold_cv(data, v = v, repeats = repeats, ...)
@@ -1170,14 +1197,19 @@ describe("fit() - what it reports at its end", {
       .package = "rsample"
     )
 
-    got <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
+    got <- fit_reports(obj, compute_uq = FALSE, compute_ad = TRUE)
     w   <- got$warnings[got$classes == "horizons_warning_substitution"]
 
     expect_length(w, 1L)
-    expect_match(conditionMessage(w[[1]]), "The stratified draw of the cross-validation folds failed",
-                 fixed = TRUE)
-    expect_match(conditionMessage(w[[1]]), "stratification refused", fixed = TRUE)
-    expect_true("substitution" %in% got$value$log$topic[got$value$log$verb == "fit"])
+    msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split failed", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the calibration split failed", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds failed", fixed = TRUE)
+    expect_match(msg, "stratification refused", fixed = TRUE)
+
+    ## The log holds the three, under one substitution row
+    log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "substitution", ]
+    expect_identical(log$n, 3L)
 
   })
 
@@ -1204,7 +1236,7 @@ describe("fit() - what it reports at its end", {
 
     ## 250 rows: 200 in the training part, 40 of them for calibration, so the
     ## folds would be drawn from 160 rows
-    obj <- make_fit_object(n = 250, n_configs = 1)
+    obj <- fit250_uq()$obj
     obj$config$tuning$cv_folds <- 170L
 
     local_mocked_bindings(fit_single_config = function(...) stop("a member was fitted"))
