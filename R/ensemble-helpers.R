@@ -423,15 +423,31 @@ fit_tuned_meta_learner <- function(object,
 
     }
 
-    left_out <- incomplete_note(tune_res, n_folds)
-
-    if (!is.null(left_out)) note_in_unit("The meta-learner's tuning: {left_out}")
-
     candidate   <- candidate_of(tune_res, best, grid, meta_wflow)
     warning_log <- dplyr::bind_rows(
       warning_log,
       tune_note_records(tune_res, type = "warning", scope = "cv", candidate = candidate)
     )
+
+    ## Pinned on the ensemble's own row, as evaluate() and fit() pin them on
+    ## a configuration's: the line saying every candidate's warnings are
+    ## shown when the chosen one's could not be told apart (#109), and the
+    ## candidates left out of the choice for a missing fold (#101)
+    unmapped <- unmapped_line(candidate)
+
+    if (!is.null(unmapped)) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(unmapped, pinned = TRUE))
+
+    }
+
+    left_out <- incomplete_note(tune_res, n_folds)
+
+    if (!is.null(left_out)) {
+
+      warning_log <- dplyr::bind_rows(warning_log, text_records(left_out, pinned = TRUE))
+
+    }
 
     final_wflow <- unit_step("finalize_workflow", tune::finalize_workflow(meta_wflow, best))
 

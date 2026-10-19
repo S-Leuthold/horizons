@@ -477,9 +477,12 @@ describe("ensemble() - the meta-learner as one unit", {
 
     expect_identical(asked, 5L)
 
-    ## The candidates left out are a note on the log, as on a configuration's row
+    ## The candidates left out are pinned on the ensemble's row, as on a
+    ## configuration's, and are not a note on the log
+    expect_true(any(grepl("3 of 200 candidates were left out", ens$ensemble$warnings, fixed = TRUE)))
+
     notes <- ens$log[ens$log$verb == "ensemble" & ens$log$type == "note", , drop = FALSE]
-    expect_true(any(grepl("3 of 200 candidates were left out", notes$message, fixed = TRUE)))
+    expect_false(any(grepl("candidates were left out", notes$message, fixed = TRUE)))
 
   })
 

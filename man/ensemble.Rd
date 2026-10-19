@@ -95,8 +95,10 @@ candidates scored on every fold, as \code{\link[=evaluate]{evaluate()}} and \cod
 The warnings another package raised while it was built (the engine's,
 tune's for the chosen candidate, a member's while predicting the test
 rows) are kept in \code{ensemble$warnings}, as a member's are in
-\code{models$results$warnings}; horizons' own warnings are written to the log
-and raised once at the end.
+\code{models$results$warnings}, with the package's own lines about the
+ensemble: the meta-learner's candidates left out for a missing fold, and
+the CV+ intervals not computed. horizons' own warnings are written to the
+log and raised once at the end.
 }
 \examples{
 \dontrun{

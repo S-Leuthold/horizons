@@ -736,6 +736,12 @@ describe("ensemble UQ - degradation and gates", {
       skipped <- ens$log[ens$log$verb == "ensemble" & ens$log$topic %in% "skipped", , drop = FALSE]
       expect_identical(nrow(skipped), 1L)
 
+      ## Pinned on the ensemble's row too, as fit() keeps a member's lost
+      ## intervals on the member's row
+      expect_identical(
+        sum(grepl("Prediction intervals (CV+) were not computed: ", ens$ensemble$warnings, fixed = TRUE)), 1L
+      )
+
     }
 
   })

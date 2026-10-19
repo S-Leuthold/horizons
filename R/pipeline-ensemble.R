@@ -49,8 +49,10 @@
 #' The warnings another package raised while it was built (the engine's,
 #' tune's for the chosen candidate, a member's while predicting the test
 #' rows) are kept in `ensemble$warnings`, as a member's are in
-#' `models$results$warnings`; horizons' own warnings are written to the log
-#' and raised once at the end.
+#' `models$results$warnings`, with the package's own lines about the
+#' ensemble: the meta-learner's candidates left out for a missing fold, and
+#' the CV+ intervals not computed. horizons' own warnings are written to the
+#' log and raised once at the end.
 #'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),
@@ -299,8 +301,12 @@ ensemble <- function(x,
     if (cv_plus$failed) {
 
       cause <- unit_failure_message(cv_plus$records, outside = NULL)
+      line  <- paste0("Prediction intervals (CV+) were not computed: ", cause)
 
-      log_warning(collector, "skipped", "Prediction intervals (CV+) were not computed: {cause}")
+      ## On the log, and pinned on the ensemble's row, as fit() keeps a
+      ## member's lost intervals on the member's row
+      log_warning(collector, "skipped", "{line}")
+      warning_log <- dplyr::bind_rows(warning_log, text_records(line, pinned = TRUE))
 
     } else {
 
@@ -312,7 +318,8 @@ ensemble <- function(x,
 
   ## The ensemble's own warnings, as a member's are kept: another package's
   ## (an engine's, tune's notes for the chosen candidate) and the package's
-  ## own lines. horizons' topic warnings go to the log as well, once.
+  ## own lines, pinned (the candidates left out, the CV+ intervals not
+  ## computed). horizons' topic warnings go to the log as well, once.
   warning_log <- dplyr::bind_rows(unit_warning_records(records), warning_log)
   x$ensemble["warnings"] <- list(render_warning_log(warning_log))
 
