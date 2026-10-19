@@ -264,6 +264,25 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
 
   })
 
+  it("returns the first of the sets tied at the lowest score, as carspls takes the first minimum", {
+
+    skip_if_not_installed("pls")
+
+    d <- cars_signal_data()
+
+    ## Every set scored alike: the first iteration's, every band, is returned
+    local_mocked_bindings(cars_score_path = function(X, y, sets, folds, max_comp) {
+      tibble::tibble(rmsecv = rep(1, length(sets)), se = rep(0, length(sets)),
+                     ncomp = rep(1L, length(sets)))
+    })
+
+    step <- withr::with_seed(1, suppressMessages(recipes::prep(cars_recipe(d), training = d)))$steps[[1]]
+
+    expect_identical(step$cars$iteration, 1L)
+    expect_length(step$selected_vars, 40L)
+
+  })
+
   it("takes each set's minimum over component counts, not libPLS's one-standard-deviation rule", {
 
     skip_if_not_installed("pls")
