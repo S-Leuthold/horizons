@@ -43,34 +43,6 @@ test_that("grid_summary() reports a contiguous grid as contiguous", {
 })
 
 
-test_that("check_select_axis() stops on a gapped pool axis and names the gap", {
-
-  ## A 140 cm-1 hole, the narrower of the two ranges standardize(remove_water)
-  ## deletes. It clears an endpoint coverage test and would be spline-filled.
-  gapped <- seq(4000, 600, by = -4)
-  gapped <- gapped[!(gapped >= 1580 & gapped <= 1720)]
-
-  expect_error(check_select_axis(gapped, "library", "the pool"),
-               regexp = "pool", class = "horizons_error_input")
-  expect_error(check_select_axis(gapped, "library", "the pool"),
-               regexp = "1576|1724", class = "horizons_error_input")
-  expect_error(check_select_axis(gapped, "library", "the pool"),
-               regexp = "mask", class = "horizons_error_input")
-
-})
-
-
-test_that("check_select_axis() stops on a gapped target axis too", {
-
-  gapped <- seq(4000, 600, by = -8)
-  gapped <- gapped[!(gapped >= 1580 & gapped <= 1720)]
-
-  expect_error(check_select_axis(gapped, "x", "the targets"),
-               regexp = "targets", class = "horizons_error_input")
-
-})
-
-
 test_that("check_select_axis() refuses an axis of one wavenumber, and passes a usable one", {
 
   ## One column has no spacing for grid_summary() to take a median of, and

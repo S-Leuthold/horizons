@@ -226,6 +226,12 @@ test_that("a window wider than the stretch of the library the targets cover is r
   expect_match(msg, "A `window` of 40 cm⁻¹ is wider than the 16 cm⁻¹ of the library the targets cover", fixed = TRUE)
   expect_match(msg, "5 columns from 3984 to 4000", fixed = TRUE)
 
+  ## A window exactly as many points as the overlap has columns is refused
+  ## too: targets over 4000 to 3960 cover 11 columns, the window's 11 points
+  exact <- make_axis_object(seq(4000, 3960, by = -8), n = 4L, prefix = "E")
+  expect_error(suppressWarnings(select_training(exact, fx$pool, k = 5, properties = "clay")),
+               "is wider than the 40 cm⁻¹ of the library the targets cover", class = "horizons_error_input")
+
   ## A window that fits the overlap runs: 8 cm-1 is 3 points there
   expect_s3_class(suppressWarnings(select_training(targets, fx$pool, k = 5, properties = "clay",
                                                    window = 8, poly = 1L)),
@@ -459,6 +465,7 @@ test_that("select_training() refuses a target axis it cannot search, before the 
   err <- expect_error(select_training(gapped, "kssl", k = 5),
                       regexp = "gap", class = "horizons_error_input")
   expect_match(conditionMessage(err), "`x`, the targets", fixed = TRUE)
+  expect_match(conditionMessage(err), "mask", fixed = TRUE)
 
 })
 
@@ -480,6 +487,7 @@ test_that("select_training() refuses a library axis it cannot search, naming lib
   err <- expect_error(select_training(fx$targets, gapped, k = 5),
                       regexp = "1576|1724", class = "horizons_error_input")
   expect_match(conditionMessage(err), "`library`, the pool", fixed = TRUE)
+  expect_match(conditionMessage(err), "mask", fixed = TRUE)
 
 })
 
