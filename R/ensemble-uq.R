@@ -397,19 +397,32 @@ compute_ensemble_uq <- function(oof,
   meta_frame        <- oof$predictors
   meta_frame$.truth <- oof$truth
 
-  ## The remedy both size gates name: CV+ needs cv_plus_min_rows(level) rows
-  ## whatever the minimum (19 at 0.90)
+  ## CV+ needs cv_plus_min_rows(level) rows whatever the minimum (19 at
+  ## 0.90). The gates name the constraint that binds: lowering
+  ## min_calib_rows is offered only when the rows reach CV+'s floor, since
+  ## below it no minimum lets the intervals run.
   floor_rows <- cv_plus_min_rows(level)
-  remedy     <- "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )}, to {floor_rows} at least."
+
+  ### A template, interpolated where the gate aborts, which sets n_have.
+  remedy <- function(n_have) {
+
+    if (n_have >= floor_rows) {
+      "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )} to {n_have} or fewer; CV+ at the {level} level needs {floor_rows}."
+    } else {
+      "Fit on more rows: CV+ at the {level} level needs {floor_rows} whatever {.code min_calib_rows} is."
+    }
+
+  }
 
   ## Gate 1: enough rows to calibrate at all.
   if (nrow(meta_frame) < min_calib_rows) {
 
     n_rows <- nrow(meta_frame)
+    n_have <- n_rows
 
     abort_horizons(c(
       "The meta frame has {n_rows} row{?s} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows}).",
-      "i" = remedy
+      "i" = remedy(n_rows)
     ), kind = "run")
 
   }
@@ -444,9 +457,16 @@ compute_ensemble_uq <- function(oof,
 
   if (n_calib < needed || is.null(cv_plus_indices(n_calib, level))) {
 
+    n_have   <- n_calib
+    short_of <- if (n_calib < floor_rows) {
+      "fewer than the {floor_rows} CV+ needs at the {level} level."
+    } else {
+      "fewer than {.code min_calib_rows} ({min_calib_rows})."
+    }
+
     abort_horizons(c(
-      "{n_calib} of the {n_rows} calibration row{?s} have a finite residual, fewer than the {needed} that {.code min_calib_rows} and CV+ at the {level} level need.",
-      "i" = remedy
+      paste("{n_calib} of the {n_rows} calibration row{?s} have a finite residual,", short_of),
+      "i" = remedy(n_calib)
     ), kind = "run")
 
   }

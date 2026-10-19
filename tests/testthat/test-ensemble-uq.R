@@ -603,7 +603,9 @@ describe("ensemble UQ - degradation and gates", {
     )
     expect_match(conditionMessage(err), "has 25 rows to calibrate on, fewer than `min_calib_rows` (30)",
                  fixed = TRUE)
-    expect_match(conditionMessage(err), "to 19 at least", fixed = TRUE)
+    expect_match(conditionMessage(err),
+                 "Fit on more rows, or lower `control_horizons(min_calib_rows = )` to 25 or fewer; CV+ at the 0.9 level needs 19.",
+                 fixed = TRUE)
 
     ## The same rows calibrate at a minimum below them. suppressWarnings():
     ## rsample's note that 25 rows are too few for its default strata breaks
@@ -644,8 +646,47 @@ describe("ensemble UQ - degradation and gates", {
     spoil <- seq_len(length(oof$truth) - N_CALIB_MIN + 1L)
     err   <- expect_error(run(), class = "horizons_error_run")
     expect_match(conditionMessage(err),
-                 sprintf("29 of the %d calibration rows have a finite residual, fewer than the 30", length(oof$truth)),
+                 sprintf("29 of the %d calibration rows have a finite residual, fewer than `min_calib_rows` (30).", length(oof$truth)),
                  fixed = TRUE)
+    expect_match(conditionMessage(err), "lower `control_horizons(min_calib_rows = )` to 29 or fewer", fixed = TRUE)
+
+  })
+
+  it("compute_ensemble_uq names CV+'s floor, not min_calib_rows, when the rows fall below it", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+
+    first <- function(n) {
+      keep <- seq_len(n)
+      list(predictors = oof$predictors[keep, , drop = FALSE], truth = oof$truth[keep],
+           row = oof$row[keep], members = oof$members)
+    }
+
+    run <- function(n, ...) {
+      ## suppressWarnings(): rsample's note that so few rows are too few for
+      ## its default strata breaks
+      suppressWarnings(compute_ensemble_uq(oof = first(n), contract = ens_ref$ensemble,
+                                           optimize = FALSE, conformal_seed = 1307L, ...))
+    }
+
+    ## 18 rows meet a minimum of 9 but not the 19 CV+ needs at 0.90: lowering
+    ## the minimum would not help, so it is not offered
+    err <- expect_error(run(18L, min_calib_rows = 9L), class = "horizons_error_run")
+    msg <- conditionMessage(err)
+
+    expect_match(msg, "18 of the 18 calibration rows have a finite residual, fewer than the 19 CV+ needs at the 0.9 level.",
+                 fixed = TRUE)
+    expect_match(msg, "Fit on more rows: CV+ at the 0.9 level needs 19 whatever `min_calib_rows` is.", fixed = TRUE)
+    expect_no_match(msg, "lower")
+
+    ## 15 rows under the default minimum are below the floor too
+    err <- expect_error(run(15L), class = "horizons_error_run")
+    msg <- conditionMessage(err)
+
+    expect_match(msg, "has 15 rows to calibrate on, fewer than `min_calib_rows` (30).", fixed = TRUE)
+    expect_match(msg, "needs 19 whatever `min_calib_rows` is.", fixed = TRUE)
+    expect_no_match(msg, "lower")
 
   })
 
