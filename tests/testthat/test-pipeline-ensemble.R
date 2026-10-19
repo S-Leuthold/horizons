@@ -216,11 +216,12 @@ describe("ensemble() - preflight validation", {
 
   it("aborts on non-horizons_fit input", {
 
-    ## The abort carries no package class. validate_horizons_fit() refuses
-    ## the same input with the same headline but no hint, so the hint is what
-    ## shows this check fired.
+    ## validate_horizons_fit() refuses the same input with the same headline
+    ## but no hint and the validation class, so the input class and the hint
+    ## are what show this check fired.
     err <- expect_error(ensemble(list(a = 1)),
-                        "`x` must be a <horizons_fit> object", fixed = TRUE)
+                        "`x` must be a <horizons_fit> object", fixed = TRUE,
+                        class = "horizons_error_input")
     expect_match(conditionMessage(err), "Run `fit()` first to produce a fitted object",
                  fixed = TRUE)
 
@@ -230,9 +231,12 @@ describe("ensemble() - preflight validation", {
 
     fitted <- ens_fitted()
 
-    ## The abort carries no package class.
     expect_error(ensemble(fitted, method = "bogus"),
-                 "`method` must be one of", fixed = TRUE)
+                 "`method` must be one of", fixed = TRUE,
+                 class = "horizons_error_input")
+    expect_error(ensemble(fitted, method = c("weighted", "xgb")),
+                 "`method` must be one of", fixed = TRUE,
+                 class = "horizons_error_input")
 
   })
 
@@ -297,7 +301,7 @@ describe("ensemble() - preflight validation", {
 
   })
 
-  it("refuses a bad seed or optimize before any engine runs (#130)", {
+  it("refuses a bad seed, optimize or compute_uq before any engine runs (#130)", {
 
     fitted <- ens_fitted()
 
@@ -308,7 +312,7 @@ describe("ensemble() - preflight validation", {
       fit_ensemble_weighted = function(...) stop("fit_ensemble_weighted() was called")
     )
 
-    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307")
+    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307", Inf)
 
     for (s in bad_seeds) {
 
@@ -316,20 +320,26 @@ describe("ensemble() - preflight validation", {
         ensemble(fitted, method = "weighted", optimize = FALSE, seed = s,
                  compute_uq = FALSE),
         "seed",
-        class = "horizons_input_error"
+        class = "horizons_error_input"
       )
 
     }
 
-    bad_optimize <- list(NULL, NA, c(TRUE, FALSE), "yes")
+    bad_flags <- list(NULL, NA, c(TRUE, FALSE), "yes")
 
-    for (o in bad_optimize) {
+    for (o in bad_flags) {
 
       expect_error(
         ensemble(fitted, method = "weighted", optimize = o,
                  compute_uq = FALSE),
         "optimize",
-        class = "horizons_input_error"
+        class = "horizons_error_input"
+      )
+
+      expect_error(
+        ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = o),
+        "compute_uq",
+        class = "horizons_error_input"
       )
 
     }

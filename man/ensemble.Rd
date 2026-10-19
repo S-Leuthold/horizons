@@ -69,8 +69,10 @@ comparable to the single-model metrics from \code{fit()}.
 
 Combined predictions are clamped to \code{configure()}'s \code{outcome_range}, as
 every scored and served prediction is, and \code{ensemble()} aborts with class
-\code{horizons_input_error} before fitting anything when an observed outcome
-lies outside it (#76).
+\code{horizons_error_input} before fitting anything when an observed outcome
+lies outside it (#76). Its other refusals (an \code{x} that is not a fit, an
+unknown \code{method}, an \code{optimize}, \code{seed} or \code{compute_uq} of the wrong type,
+a fit with fewer than two members) carry the same class.
 
 After the outcome-range check and before it fits anything, \code{ensemble()}
 checks that \code{x} still holds what a fitted object promises (its data,

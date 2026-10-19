@@ -50,14 +50,7 @@ gather_members <- function(object) {
 
   members <- intersect(intersect(succeeded, have_wf), have_oof)
 
-  if (length(members) < 2) {
-
-    cli::cli_abort(c(
-      "An ensemble needs at least 2 members; found {length(members)}.",
-      "i" = "Members must have a fitted workflow and out-of-fold predictions."
-    ))
-
-  }
+  ### ensemble() refuses fewer than two at its door.
 
   list(
     members     = members,

@@ -273,6 +273,9 @@ fit <- function(x,
   ## would fail validation only after every model had been fitted.
   if (!is.null(metric)) check_rank_metric_arg(metric)
 
+  check_arg(rlang::check_bool, compute_uq)
+  check_arg(rlang::check_bool, compute_ad)
+
   ## The object as it arrives (#234): on the evaluate() path its evaluation
   ## record, and through it the base contract; on a cold start the base
   ## contract. A record from an earlier version, or one edited by hand, is

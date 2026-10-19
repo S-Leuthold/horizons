@@ -30,8 +30,10 @@
 #'
 #' Combined predictions are clamped to `configure()`'s `outcome_range`, as
 #' every scored and served prediction is, and `ensemble()` aborts with class
-#' `horizons_input_error` before fitting anything when an observed outcome
-#' lies outside it (#76).
+#' `horizons_error_input` before fitting anything when an observed outcome
+#' lies outside it (#76). Its other refusals (an `x` that is not a fit, an
+#' unknown `method`, an `optimize`, `seed` or `compute_uq` of the wrong type,
+#' a fit with fewer than two members) carry the same class.
 #'
 #' After the outcome-range check and before it fits anything, `ensemble()`
 #' checks that `x` still holds what a fitted object promises (its data,
@@ -104,10 +106,10 @@ ensemble <- function(x,
 
   if (!inherits(x, "horizons_fit")) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.arg x} must be a {.cls horizons_fit} object.",
       "i" = "Run {.fn fit} first to produce a fitted object."
-    ))
+    ), kind = "input")
 
   }
 
@@ -118,12 +120,12 @@ ensemble <- function(x,
 
   valid_methods <- c("penalized", "weighted", "xgb")
 
-  if (!is.character(method) || length(method) != 1 || !method %in% valid_methods) {
+  if (!rlang::is_string(method) || !method %in% valid_methods) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.arg method} must be one of {.val {valid_methods}}.",
       "x" = "Got {.val {method}}."
-    ))
+    ), kind = "input")
 
   }
 
@@ -131,23 +133,9 @@ ensemble <- function(x,
   ## the meta-learner is built, and fit_ensemble_uq() rebuilds the fold
   ## models from them; checked here so a bad value is refused before any
   ## engine runs.
-  if (!rlang::is_bool(optimize)) {
-
-    cli::cli_abort(c(
-      "{.arg optimize} must be TRUE or FALSE.",
-      "x" = "Got {.obj_type_friendly {optimize}}."
-    ), class = "horizons_input_error")
-
-  }
-
-  if (!is.numeric(seed) || length(seed) != 1 || is.na(seed)) {
-
-    cli::cli_abort(c(
-      "{.arg seed} must be a single number.",
-      "x" = "Got {.obj_type_friendly {seed}}."
-    ), class = "horizons_input_error")
-
-  }
+  check_arg(rlang::check_bool, optimize)
+  check_arg(rlang::check_number_decimal, seed, allow_infinite = FALSE)
+  check_arg(rlang::check_bool, compute_uq)
 
   ## The fit contract, and through it the evaluation and base contracts at
   ## the full stage, before anything is gathered or trained. The argument and
@@ -155,6 +143,21 @@ ensemble <- function(x,
   ## reported as such rather than as the response bound it breaks; an unusable
   ## range is the validator's finding (check_outcome_range() leaves it).
   x <- validate_horizons_fit(x)
+
+  ## The members: fitted, with a stored workflow and out-of-fold predictions.
+  ## A combination needs two of them.
+  member_info <- gather_members(x)
+  members     <- member_info$members
+  rank_metric <- member_info$rank_metric
+
+  if (length(members) < 2) {
+
+    abort_horizons(c(
+      "{.fn ensemble} needs at least 2 fitted members; {.arg x} has {length(members)}.",
+      "i" = "Fit with {.arg n_best} of at least 2, as {.code fit(x, n_best = 5)} does by default, on an evaluation with two or more configurations that succeed."
+    ), kind = "input")
+
+  }
 
   ## -------------------------------------------------------------------------
   ## Step 0b: Parallel backend
@@ -178,10 +181,6 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
   ## Step 1: Gather members and build the canonical out-of-fold matrix
   ## -------------------------------------------------------------------------
-
-  member_info <- gather_members(x)
-  members     <- member_info$members
-  rank_metric <- member_info$rank_metric
 
   oof <- build_oof_matrix(x, members)
 
