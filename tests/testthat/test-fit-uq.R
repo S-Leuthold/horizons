@@ -523,12 +523,15 @@ describe("fit_uq() - a prediction step that fails", {
 
   })
 
-  it("lets a tripwire inside the diagnostics through", {
+  it("lets a tripwire inside the diagnostics through, whatever its parent", {
 
+    ## A parent from another package is the case a declined handler would
+    ## be offered again, and contain
     real_predict <- getS3method("predict", "ranger")
     local_mocked_s3_method("predict", "ranger", function(object, data, ...) {
       if (nrow(data) == nrow(setup$oof_predictions)) {
-        abort_horizons("Rows misaligned.", kind = "internal")
+        abort_horizons("Rows misaligned.", kind = "internal",
+                       parent = simpleError("the upstream cause"))
       }
       real_predict(object, data, ...)
     })

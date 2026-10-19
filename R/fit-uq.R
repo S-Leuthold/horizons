@@ -289,26 +289,31 @@ fit_uq <- function(fitted_workflow,
 
   ## OOF coverage: predict quantiles on OOF features, check coverage. The
   ## bundle is complete without these diagnostics, so a failure here leaves
-  ## them NA with a note; that recovery is containment, so the kinds no unit
-  ## contains still propagate, and under debug nothing is recovered from.
-  oof_q <- rlang::try_fetch(
+  ## them NA with a note. That recovery is containment, so it follows
+  ## run_unit()'s rule: under debug nothing is recovered from, and a kind no
+  ## unit contains is raised again as it is.
+  predict_oof <- function() {
     stats::predict(
       quantile_model,
       data      = as.data.frame(oof_features),
       type      = "quantiles",
       quantiles = tau
-    ),
-    error = function(e) {
+    )
+  }
 
-      if (debug || rlang::cnd_inherits(e, NEVER_CONTAINED)) return(rlang::zap())
+  oof_q <- if (debug) predict_oof() else rlang::try_fetch(predict_oof(), error = function(e) {
 
-      cause <- condition_summary(e)
-      note_in_unit("The in-sample interval diagnostics (oof_coverage, mean_width) were not computed: {cause}")
+    ### Raised again with its class, chain and trace. Declining with zap()
+    ### is not enough: try_fetch() then offers the condition's parent to the
+    ### same handler, and an upstream parent would be contained.
+    if (rlang::cnd_inherits(e, NEVER_CONTAINED)) stop(e)
 
-      NULL
+    cause <- condition_summary(e)
+    note_in_unit("The in-sample interval diagnostics (oof_coverage, mean_width) were not computed: {cause}")
 
-    }
-  )
+    NULL
+
+  })
 
   if (is.null(oof_q)) {
 
