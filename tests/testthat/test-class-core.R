@@ -1415,6 +1415,7 @@ make_valid_ensemble <- function() {
     seed            = 307L,
     uq              = NULL,
     control         = NULL,
+    warnings        = NULL,
     timestamp       = Sys.time(),
     runtime_secs    = 1.5
   )

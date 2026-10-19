@@ -462,7 +462,8 @@ unit_step <- function(step, expr) {
 #'
 #' @description
 #' The [unit_step()] labels inside [evaluate_single_config()],
-#' [fit_single_config()] and `predict_one_config()`, each with the words a
+#' [fit_single_config()], `predict_one_config()` and `ensemble()`'s
+#' meta-learner, each with the words a
 #' failed unit's `error_message` starts with ("Grid search failed: ..."). A
 #' label means the same step in every verb. A failure outside every step is named by the
 #' unit itself ([unit_failure_message()]).
@@ -488,6 +489,8 @@ UNIT_STEPS <- c(
   warm_start_grid     = "Warm-start grid search",
   warm_start_bayes    = "Warm-start Bayesian search",
   oof_predictions     = "OOF predictions",
+  oof_matrix          = "Out-of-fold matrix",
+  member_weights      = "Member weights",
   oof_back_transform  = "OOF back-transformation",
   final_fit           = "Final model fit",
   test_predict        = "Test prediction",

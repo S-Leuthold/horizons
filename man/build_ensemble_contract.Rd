@@ -57,7 +57,8 @@ derive a calibration partition disjoint from the tuning folds.}
 A list matching the \code{ensemble} slot contract: \code{method}, \code{model},
 \code{weights}, \code{predictions}, \code{metrics}, \code{member_metrics}, \code{improvement},
 \code{oof_predictions}, \code{optimize}, \code{seed}, \code{uq} (populated by
-\code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), \code{timestamp}, \code{runtime_secs}.
+\code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), \code{control} and \code{warnings} (filled by \code{\link[=ensemble]{ensemble()}}),
+\code{timestamp}, \code{runtime_secs}.
 }
 \description{
 Packs an engine's outputs into the canonical \code{ensemble} slot that every

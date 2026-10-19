@@ -40,6 +40,18 @@
 #' evaluation and fitted models), and aborts with class
 #' `horizons_error_validation` when it does not.
 #'
+#' The meta-learner is one unit: its tuning, its fit, its out-of-fold pass,
+#' the members' predictions of the test rows and the scoring are its steps.
+#' When any fails there is no ensemble to return, and `ensemble()` aborts with
+#' `horizons_error_ensemble_failed`, the step and the cause in its `results`
+#' field. A tuned meta-learner chooses its hyperparameters only among the
+#' candidates scored on every fold, as [evaluate()] and [fit()] do (#101).
+#' The warnings another package raised while it was built (the engine's,
+#' tune's for the chosen candidate, a member's while predicting the test
+#' rows) are kept in `ensemble$warnings`, as a member's are in
+#' `models$results$warnings`; horizons' own warnings are written to the log
+#' and raised once at the end.
+#'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),
 #'   `"weighted"`, or `"xgb"`.
@@ -60,7 +72,10 @@
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `ensemble()` reads `allow_par`, `verbose`, `debug`,
 #'   `keep_traces` and `min_calib_rows`, and refuses any other field that is
-#'   set. With `allow_par = TRUE`, the meta-learner's CV tuning and its
+#'   set. With `debug = TRUE` the meta-learner runs in this session and its
+#'   first failure, inside tuning included, stops the call with its
+#'   backtrace; with `keep_traces = TRUE` a failure's backtrace is kept as
+#'   text in the abort's `results`. With `allow_par = TRUE`, the meta-learner's CV tuning and its
 #'   out-of-fold pass parallelise over folds on whatever `future::plan()` the
 #'   caller has registered; `ensemble()` never registers a plan, and runs
 #'   sequentially, warning with class `horizons_warning_substitution`, if the
@@ -164,6 +179,14 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
   ## The user owns the backend; confirm there is one and pin threads here
   ## before tune spawns anything. Never touch the plan.
+  ##
+  ## Debug runs in this session: a backtrace from a worker shows the worker's
+  ## plumbing, and no debugger attaches there. The user asked for debug, so
+  ## the tree says so rather than a warning.
+
+  debug       <- control$debug
+  par_by_user <- allow_par
+  allow_par   <- allow_par && !debug
 
   if (allow_par) {
 
@@ -179,10 +202,8 @@ ensemble <- function(x,
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 1: Gather members and build the canonical out-of-fold matrix
+  ## Step 1: The members, gathered above
   ## -------------------------------------------------------------------------
-
-  oof <- build_oof_matrix(x, members)
 
   if (verbose) {
 
@@ -196,28 +217,54 @@ ensemble <- function(x,
       "\u2502  Tuning: ",
       if (optimize) "CV on out-of-fold matrix" else "fixed defaults", "\n"
     ))
+    if (par_by_user && debug) {
+      cat("\u2502  Parallel: off, since debug runs in this session\n")
+    }
     cat("\u2502\n")
 
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 2: Dispatch to the meta-learner engine
+  ## Step 2: The meta-learner, one unit
   ## -------------------------------------------------------------------------
-
+  ## The meta-learner is the unit: a failure in any of its steps leaves
+  ## nothing usable, so the call aborts with the record. Its warnings are
+  ## recorded, not raised as they come, and a worker's death is systemic.
+  ##
   ## `seed` is threaded explicitly into each engine (rather than a set.seed()
   ## side-effect here) so the meta-learner's CV folds - which seed the Phase-2
   ## conformal calibration - are reproducible regardless of any RNG use between
   ## here and the vfold_cv() call. The tuned engines set the seed immediately
   ## before drawing folds; the weighted engine is deterministic and ignores it.
 
-  contract <- switch(
-    method,
-    penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed,
-                                       allow_par = allow_par),
-    weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize, seed),
-    xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed,
-                                 allow_par = allow_par)
-  )
+  meta <- stop_on_worker_death(run_unit({
+
+    oof <- unit_step("oof_matrix", build_oof_matrix(x, members))
+
+    switch(
+      method,
+      penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed,
+                                         allow_par = allow_par, debug = debug),
+      weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize, seed),
+      xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed,
+                                   allow_par = allow_par, debug = debug)
+    )
+
+  }, unit = "meta_learner", id = method, debug = debug, keep_traces = control$keep_traces),
+  results = NULL, verb = "ensemble")
+
+  if (meta$failed) abort_ensemble_failed(meta$records, method)
+
+  contract <- meta$value
+
+  ## What the run recorded: the meta-learner's warnings and notes, the
+  ## members' while they predicted the test rows, the rows a member could not
+  ## use, and the warnings tune kept as notes
+  records     <- dplyr::bind_rows(meta$records, attr(contract, "unit_records"))
+  flagged     <- attr(contract, "flagged")
+  warning_log <- attr(contract, "warning_log")
+
+  for (a in c("unit_records", "flagged", "warning_log")) attr(contract, a) <- NULL
 
   ## -------------------------------------------------------------------------
   ## Step 3: Promote class and attach the ensemble
@@ -240,6 +287,15 @@ ensemble <- function(x,
     x <- fit_ensemble_uq(x, verbose = verbose, min_calib_rows = control$min_calib_rows)
 
   }
+
+  ## The ensemble's own warnings, as a member's are kept: another package's
+  ## (an engine's, tune's notes for the chosen candidate) and the package's
+  ## own lines. horizons' topic warnings go to the log as well, once.
+  warning_log <- dplyr::bind_rows(unit_warning_records(records), warning_log)
+  x$ensemble["warnings"] <- list(render_warning_log(warning_log))
+
+  log_unit_records(collector, records)
+  log_flagged(collector, flagged)
 
   ## What the run reported goes on the object's log before it is certified
   x$log <- log_close(collector, x$log)
@@ -364,5 +420,48 @@ render_ensemble_summary <- function(contract, rank_metric) {
   ))
 
   invisible(NULL)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## abort_ensemble_failed()
+## ---------------------------------------------------------------------------
+
+#' Abort because the meta-learner could not be built
+#'
+#' @description
+#' The meta-learner is `ensemble()`'s unit, and without it there is no
+#' ensemble to return. The failure travels on the condition as `results`, as
+#' `evaluate()`'s, `fit()`'s and `predict()`'s do: one row, with the unit,
+#' its id (the method), the step it failed in, the root cause's class, the
+#' message, and under `control_horizons(keep_traces = TRUE)` the backtrace as
+#' text.
+#'
+#' @param records The meta-learner unit's records, holding its failure.
+#' @param method Character(1). The ensemble method.
+#' @param call The frame the error reports: `ensemble()`'s.
+#' @return Does not return; aborts with class
+#'   `horizons_error_ensemble_failed` (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_ensemble_failed <- function(records, method, call = rlang::caller_env()) {
+
+  failure <- records[records$type == "failure", , drop = FALSE]
+
+  results <- tibble::tibble(
+    unit          = failure$unit,
+    id            = failure$id,
+    step          = failure$step,
+    class         = failure$class,
+    error_message = unit_failure_message(failure, outside = "Meta-learner"),
+    trace         = failure$trace
+  )
+
+  abort_horizons(c(
+    "The {method} ensemble could not be built: its meta-learner failed.",
+    "x" = cli_escape(results$error_message[1]),
+    "i" = "The failure is on this condition as {.field results}: {.code rlang::last_error()$results}."
+  ), kind = "run", class = "horizons_error_ensemble_failed", results = results, call = call)
 
 }

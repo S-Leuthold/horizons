@@ -391,7 +391,7 @@ describe("ensemble() - predict namespaces", {
 
 describe("ensemble() - a member's warning on the test rows", {
 
-  it("reaches the caller, once per member that raised it", {
+  it("is kept once in the ensemble's warnings, as a member's are kept, not raised per member", {
 
     fitted <- ens_fitted()
     real   <- utils::getS3method("predict", "workflow")
@@ -401,12 +401,163 @@ describe("ensemble() - a member's warning on the test rows", {
       real(object, new_data, ...)
     })
 
-    w <- collect_warnings(
+    run <- collect_warnings(
       ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
       "the member engine says hello"
-    )$warnings
+    )
 
-    expect_length(w, length(unique(fitted$models$cv_predictions$config_id)))
+    kept <- run$value$ensemble$warnings
+
+    expect_length(run$warnings, 0L)
+    expect_identical(sum(grepl("the member engine says hello", kept, fixed = TRUE)), 1L)
+
+  })
+
+})
+
+describe("ensemble() - the meta-learner as one unit", {
+
+  it("stops at the first failure under debug, and keeps the backtrace under keep_traces", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(extract_weights_penalized = function(...) stop("the weights broke"))
+
+    run <- function(...) {
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
+                                compute_uq = FALSE, control = control_horizons(...)))
+    }
+
+    ## Contained: the record, its step, and no trace unless asked for
+    err <- expect_error(run(), class = "horizons_error_ensemble_failed")
+    expect_identical(err$results$step, "member_weights")
+    expect_null(err$results$trace[[1]])
+
+    traced <- expect_error(run(keep_traces = TRUE), class = "horizons_error_ensemble_failed")
+    expect_type(traced$results$trace[[1]], "character")
+
+    ## Under debug nothing is contained: the engine's own error
+    raw <- expect_error(run(debug = TRUE), "the weights broke", fixed = TRUE)
+    expect_false(inherits(raw, "horizons_error"))
+
+  })
+
+  it("stops as systemic when a parallel worker dies", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(build_oof_matrix = function(...) {
+      stop(structure(class = c("FutureError", "error", "condition"),
+                     list(message = "the worker died", call = NULL)))
+    })
+
+    expect_error(
+      ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
+      class = "horizons_error_systemic"
+    )
+
+  })
+
+  it("chooses the meta-learner's hyperparameters among the candidates scored on every fold (#101)", {
+
+    fitted <- ens_fitted()
+    real   <- select_complete
+    asked  <- NULL
+
+    local_mocked_bindings(
+      select_complete = function(results, metric, n_folds, debug = FALSE) {
+        asked <<- n_folds
+        real(results, metric, n_folds, debug)
+      },
+      incomplete_note = function(...) "3 of 200 candidates were left out of the choice of hyperparameters."
+    )
+
+    ens <- suppressWarnings(ensemble(fitted, method = "penalized", optimize = TRUE,
+                                     compute_uq = FALSE))
+
+    expect_identical(asked, 5L)
+
+    ## The candidates left out are a note on the log, as on a configuration's row
+    notes <- ens$log[ens$log$verb == "ensemble" & ens$log$type == "note", , drop = FALSE]
+    expect_true(any(grepl("3 of 200 candidates were left out", notes$message, fixed = TRUE)))
+
+  })
+
+  it("fails when no meta-learner candidate was scored on every fold", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(select_complete = function(results, metric, n_folds, debug = FALSE) {
+      tibble::tibble(penalty = numeric(0), mixture = numeric(0), .config = character(0))
+    })
+
+    err <- expect_error(
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = TRUE, compute_uq = FALSE)),
+      class = "horizons_error_ensemble_failed"
+    )
+
+    expect_identical(err$results$step, "select_best")
+    expect_match(err$results$error_message, "no meta-learner candidate was scored on every fold",
+                 fixed = TRUE)
+
+  })
+
+  it("keeps the warnings tune noted for the meta-learner in the ensemble's warnings", {
+
+    fitted <- ens_fitted()
+    real   <- tune_note_records
+
+    local_mocked_bindings(tune_note_records = function(tune_results, type = "warning", scope = "cv", ...) {
+      if (identical(type, "warning")) text_records("glmnet said something about the fold") else
+        real(tune_results, type = type, scope = scope, ...)
+    })
+
+    ens <- suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
+                                     compute_uq = FALSE))
+
+    expect_true(any(grepl("glmnet said something about the fold", ens$ensemble$warnings, fixed = TRUE)))
+
+  })
+
+  it("names a test row a member could not use in one flagged warning", {
+
+    fitted  <- ens_fitted()
+    real    <- predict_members
+    test_id <- ens_test_set()$sample_id[1]
+
+    local_mocked_bindings(predict_members = function(...) {
+      out <- real(...)
+      attr(out, "flagged") <- list(m = list(arrived = character(0), recipe = test_id))
+      out
+    })
+
+    run <- collect_warnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
+      "could not be predicted"
+    )
+
+    expect_length(run$warnings, 1L)
+
+    flagged <- run$value$log[run$value$log$topic %in% "flagged", , drop = FALSE]
+
+    expect_identical(nrow(flagged), 1L)
+    expect_identical(flagged$ids[[1]], test_id)
+
+  })
+
+  it("refuses an ensemble whose warnings are not character, or that lacks the key", {
+
+    ens <- ens_built("weighted")
+
+    bad <- ens
+    bad$ensemble$warnings <- 1
+    err <- expect_error(validate_horizons_ensemble(bad), class = "horizons_error_validation")
+    expect_true(any(grepl("ensemble$warnings must be NULL or character", err$findings, fixed = TRUE)))
+
+    gone <- ens
+    gone$ensemble$warnings <- NULL
+    err <- expect_error(validate_horizons_ensemble(gone), class = "horizons_error_validation")
+    expect_true(any(grepl("warnings", err$findings, fixed = TRUE)))
 
   })
 
@@ -414,12 +565,14 @@ describe("ensemble() - a member's warning on the test rows", {
 
 describe("ensemble() - a member that cannot predict the test rows", {
 
-  ## The build stops, in ensemble()'s words and frame, for the weighted engine
-  ## and for the tuned meta-learners' shared scaffold
+  ## The meta-learner is ensemble()'s unit, and the members' test predictions
+  ## one of its steps: the build stops with the record, in ensemble()'s words
+  ## and frame, for the weighted engine and for the tuned meta-learners'
+  ## shared scaffold
 
   for (method in c("weighted", "penalized")) {
 
-    it(sprintf("stops the build and reports ensemble()'s call (%s)", method), {
+    it(sprintf("stops the build with the meta-learner's record and reports ensemble()'s call (%s)", method), {
 
       fitted <- ens_fitted()
       broken <- fitted$models$best_config
@@ -428,13 +581,16 @@ describe("ensemble() - a member that cannot predict the test rows", {
       ## The meta-learner's folds warn on the fixture's small n (rsample)
       err <- expect_error(
         suppressWarnings(ensemble(fitted, method = method, optimize = FALSE, compute_uq = FALSE)),
-        class = "horizons_error_prediction_failed"
+        class = "horizons_error_ensemble_failed"
       )
 
+      expect_s3_class(err, "horizons_error_run")
       expect_identical(rlang::call_name(err$call), "ensemble")
-      expect_match(conditionMessage(err), "The ensemble could not be built: 1 of its", fixed = TRUE)
-      expect_match(conditionMessage(err), "could not predict the test rows", fixed = TRUE)
-      expect_identical(err$results$config_id, broken)
+      expect_match(conditionMessage(err), sprintf("The %s ensemble could not be built", method), fixed = TRUE)
+      expect_identical(err$results$step, "test_predict")
+      expect_identical(err$results$class, "horizons_error_prediction_failed")
+      expect_match(err$results$error_message, "Test prediction failed:", fixed = TRUE)
+      expect_match(err$results$error_message, broken, fixed = TRUE)
 
     })
 
@@ -1357,16 +1513,19 @@ describe("combine_ensemble_metamodel() - row alignment", {
 
   })
 
-  it("aborts at fit time when the meta-model's out-of-fold predictions are short", {
+  it("aborts at fit time when the meta-model's out-of-fold predictions are too many", {
 
     fitted <- ens_fitted()
 
-    ## The OOF predictions are bound to oof$row and truth by position; a
-    ## single collected prediction used to be recycled across every row.
+    ## The OOF predictions are bound to oof$row and truth by position; one
+    ## too many would shift every row after it.
     collect_predictions <- tune::collect_predictions
 
     local_mocked_bindings(
-      collect_predictions = function(x, ...) collect_predictions(x, ...)[1, ],
+      collect_predictions = function(x, ...) {
+        p <- collect_predictions(x, ...)
+        rbind(p, p[1, ])
+      },
       .package = "tune"
     )
 
@@ -1375,6 +1534,31 @@ describe("combine_ensemble_metamodel() - row alignment", {
                                 compute_uq = FALSE)),
       "Meta-model out-of-fold predictions", class = "horizons_error_internal"
     )
+
+  })
+
+  it("fails the meta-learner when its out-of-fold pass leaves rows unpredicted (#101)", {
+
+    fitted <- ens_fitted()
+
+    ## A fold that failed leaves its rows without a prediction; the
+    ## meta-learner is then not scored on every row, a run failure rather
+    ## than a broken invariant
+    collect_predictions <- tune::collect_predictions
+
+    local_mocked_bindings(
+      collect_predictions = function(x, ...) collect_predictions(x, ...)[-(1:3), ],
+      .package = "tune"
+    )
+
+    err <- expect_error(
+      suppressWarnings(ensemble(fitted, method = "penalized", optimize = FALSE,
+                                compute_uq = FALSE)),
+      class = "horizons_error_ensemble_failed"
+    )
+
+    expect_identical(err$results$step, "oof_predictions")
+    expect_match(err$results$error_message, "out-of-fold pass predicted", fixed = TRUE)
 
   })
 

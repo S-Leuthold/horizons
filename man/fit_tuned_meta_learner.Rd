@@ -16,6 +16,7 @@ fit_tuned_meta_learner(
   extract_weights,
   seed = DEFAULT_ENSEMBLE_SEED,
   allow_par = FALSE,
+  debug = FALSE,
   call = rlang::caller_env()
 )
 }
@@ -48,14 +49,21 @@ build their control through \code{meta_tune_control()} with it, so the
 meta-learner never dispatches onto a registered plan unless asked.
 Default \code{FALSE}.}
 
+\item{debug}{Logical. From \code{ensemble()}'s control: a failure inside tune,
+or a candidate left out for a missing fold, stops the call.}
+
 \item{call}{The frame a member's failure to predict the test rows reports
 (\code{ensemble()}'s).}
 }
 \value{
-The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}.
-Aborts with class \code{horizons_error_internal} when the meta-model returns
-a different number of out-of-fold predictions than there are OOF rows,
-or of \code{test_F} predictions than there are test samples.
+The ensemble contract list from \code{\link[=build_ensemble_contract]{build_ensemble_contract()}}, with
+what the run recorded as attributes (\code{with_run_records()}). Runs inside
+\code{ensemble()}'s meta-learner unit, each step labelled: every candidate
+failing, no candidate scored on every fold, or an out-of-fold pass that
+misses a fold is a run failure of the unit. Aborts with class
+\code{horizons_error_internal} when the meta-model returns a different number
+of out-of-fold predictions than there are OOF rows, or of \code{test_F}
+predictions than there are test samples.
 }
 \description{
 The shared scaffold behind the \code{penalized} and \code{xgb} engines: build the

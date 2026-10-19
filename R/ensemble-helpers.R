@@ -216,7 +216,10 @@ horizons_metric_set <- function() {
 #' back-transform once, one unit per member. Shared by all engines so the
 #' meaning of "test_F" and the per-member prediction contract live in one
 #' place. A member that cannot predict the test rows aborts with
-#' `horizons_error_prediction_failed`, reporting `call`.
+#' `horizons_error_prediction_failed`, reporting `call`; inside `ensemble()`
+#' the meta-learner's unit contains it. What the members' units recorded
+#' (their warnings, the rows they could not use) rides on the result as the
+#' attributes `"unit_records"` and `"flagged"`, for `ensemble()` to report.
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s.
@@ -224,7 +227,8 @@ horizons_metric_set <- function() {
 #'   (`ensemble()`'s).
 #'
 #' @return A long tibble: `config_id`, `sample_id`, `.pred`, `truth` (original
-#'   scale), one block per member.
+#'   scale), one block per member, with the attributes `"unit_records"` and
+#'   `"flagged"`.
 #'
 #' @keywords internal
 predict_members_on_test <- function(object, members, call = rlang::caller_env()) {
@@ -264,20 +268,40 @@ predict_members_on_test <- function(object, members, call = rlang::caller_env())
     call   = call
   )
 
-  ## A warning a member raised while predicting (an engine's) reaches
-  ## ensemble()'s caller as it did before the members ran as units, one per
-  ## occurrence, with the class of its root cause; ensemble()'s own unit
-  ## records them once it is converted.
-  records <- attr(member_pred, "unit_records")
-  raised  <- records[records$type == "warning", , drop = FALSE]
+  ## What the members' units recorded travels as data to ensemble(), which
+  ## reports it with the meta-learner's
+  out <- dplyr::left_join(drop_block_reports(member_pred), truth_df, by = "sample_id")
 
-  for (i in seq_len(nrow(raised))) {
+  attr(out, "unit_records") <- attr(member_pred, "unit_records")
+  attr(out, "flagged")      <- attr(member_pred, "flagged")
 
-    warning(warningCondition(raised$message[i], class = raised$class[i]))
+  out
 
-  }
+}
 
-  dplyr::left_join(drop_block_reports(member_pred), truth_df, by = "sample_id")
+#' Carry what a meta-learner's run recorded on its contract
+#'
+#' @description
+#' The engines run inside `ensemble()`'s meta-learner unit and return the
+#' contract. What the run recorded that the unit cannot see travels on it as
+#' attributes, which `ensemble()` reads and drops: the members' unit records
+#' and the test rows they could not use (from [predict_members_on_test()]),
+#' and the warning records tune kept as notes.
+#'
+#' @param contract From [build_ensemble_contract()].
+#' @param member_pred From [predict_members_on_test()].
+#' @param warning_log Records shaped like [new_warning_log()]'s.
+#' @return `contract`, with the attributes `"unit_records"`, `"flagged"` and
+#'   `"warning_log"`.
+#' @keywords internal
+#' @noRd
+with_run_records <- function(contract, member_pred, warning_log = new_warning_log()) {
+
+  attr(contract, "unit_records") <- attr(member_pred, "unit_records")
+  attr(contract, "flagged")      <- attr(member_pred, "flagged")
+  attr(contract, "warning_log")  <- warning_log
+
+  contract
 
 }
 
@@ -315,13 +339,19 @@ predict_members_on_test <- function(object, members, call = rlang::caller_env())
 #'   Default `FALSE`.
 #' @param seed Integer. Seed set immediately before the CV folds are drawn, so
 #'   the tuning resamples and the genuine meta-OOF are reproducible.
+#' @param debug Logical. From `ensemble()`'s control: a failure inside tune,
+#'   or a candidate left out for a missing fold, stops the call.
 #' @param call The frame a member's failure to predict the test rows reports
 #'   (`ensemble()`'s).
 #'
-#' @return The ensemble contract list from [build_ensemble_contract()].
-#'   Aborts with class `horizons_error_internal` when the meta-model returns
-#'   a different number of out-of-fold predictions than there are OOF rows,
-#'   or of `test_F` predictions than there are test samples.
+#' @return The ensemble contract list from [build_ensemble_contract()], with
+#'   what the run recorded as attributes (`with_run_records()`). Runs inside
+#'   `ensemble()`'s meta-learner unit, each step labelled: every candidate
+#'   failing, no candidate scored on every fold, or an out-of-fold pass that
+#'   misses a fold is a run failure of the unit. Aborts with class
+#'   `horizons_error_internal` when the meta-model returns a different number
+#'   of out-of-fold predictions than there are OOF rows, or of `test_F`
+#'   predictions than there are test samples.
 #'
 #' @keywords internal
 fit_tuned_meta_learner <- function(object,
@@ -335,6 +365,7 @@ fit_tuned_meta_learner <- function(object,
                                    extract_weights,
                                    seed      = DEFAULT_ENSEMBLE_SEED,
                                    allow_par = FALSE,
+                                   debug     = FALSE,
                                    call      = rlang::caller_env()) {
 
   ## `allow_par` (from `ensemble()`'s control) reaches both tune calls via
@@ -351,6 +382,10 @@ fit_tuned_meta_learner <- function(object,
     workflows::add_model(spec) |>
     workflows::add_formula(.truth ~ .)
 
+  ## The warnings tune keeps as notes: the chosen candidate's (#109) and the
+  ## out-of-fold pass's. They are the ensemble's own, for its `warnings`.
+  warning_log <- new_warning_log()
+
   ## CV folds on the OOF matrix. Built once: the same resamples drive both
   ## hyperparameter tuning (when optimize) and the genuine meta-OOF below, so
   ## the held-out-fold meta predictions are produced on the identical splits.
@@ -363,33 +398,52 @@ fit_tuned_meta_learner <- function(object,
 
   set.seed(seed)
 
-  folds <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+  folds   <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+  n_folds <- nrow(folds)
 
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
+  ## As evaluate() tunes: tune's console notes muffled and read from the
+  ## result instead; every candidate failing fails the meta-learner; and only
+  ## a candidate scored on every fold takes part in the choice (#101).
 
   if (optimize) {
 
-    tune_safe <- safely_execute(
-      tune::tune_grid(meta_wflow,
-                      resamples = folds,
-                      grid      = grid,
-                      metrics   = horizons_metric_set(),
-                      control   = meta_tune_control("grid", allow_par)),
-      log_error          = FALSE,
-      capture_conditions = TRUE
-    )
-
-    tune_res <- handle_results(
-      tune_safe,
-      error_title = paste0("Meta-learner tuning failed for the ", method,
-                           " ensemble.")
-    )
+    tune_res <- unit_step("tune_grid", {
+      results <- suppressMessages(tune::tune_grid(
+        meta_wflow,
+        resamples = folds,
+        grid      = grid,
+        metrics   = horizons_metric_set(),
+        control   = meta_tune_control("grid", allow_par)
+      ))
+      check_tune_result(results, "every meta-learner candidate failed", debug = debug)
+      results
+    })
 
     ## rank_metric is one of VALID_RANK_METRICS, which the fit validator at
     ## ensemble()'s door checks.
 
-    best        <- tune::select_best(tune_res, metric = rank_metric)
-    final_wflow <- tune::finalize_workflow(meta_wflow, best)
+    best <- unit_step("select_best", select_complete(tune_res, rank_metric, n_folds, debug))
+
+    if (nrow(best) == 0) {
+
+      unit_step("select_best", abort_tune_failure(
+        tune_res, "no meta-learner candidate was scored on every fold"
+      ))
+
+    }
+
+    left_out <- incomplete_note(tune_res, n_folds)
+
+    if (!is.null(left_out)) note_in_unit("The meta-learner's tuning: {left_out}")
+
+    candidate   <- candidate_of(tune_res, best, grid, meta_wflow)
+    warning_log <- dplyr::bind_rows(
+      warning_log,
+      tune_note_records(tune_res, type = "warning", scope = "cv", candidate = candidate)
+    )
+
+    final_wflow <- unit_step("finalize_workflow", tune::finalize_workflow(meta_wflow, best))
 
   } else {
 
@@ -397,21 +451,11 @@ fit_tuned_meta_learner <- function(object,
 
   }
 
-  fit_safe <- safely_execute(
-    parsnip::fit(final_wflow, data = meta_frame),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
-
-  meta_fit <- handle_results(
-    fit_safe,
-    error_title = paste0("Meta-learner refit failed for the ", method,
-                         " ensemble.")
-  )
+  meta_fit <- unit_step("final_fit", parsnip::fit(final_wflow, data = meta_frame))
 
   ## Member weights (engine-specific extraction) ---------------------------
 
-  weights <- extract_weights(meta_fit, oof$members)
+  weights <- unit_step("member_weights", extract_weights(meta_fit, oof$members))
 
   ## Genuine meta out-of-fold predictions (the Phase-2 conformal-calibration
   ## seed). Each row is predicted by a meta-model that never saw it in training:
@@ -434,33 +478,44 @@ fit_tuned_meta_learner <- function(object,
   ## oof_predictions remain for diagnostics and the fold-honesty regression
   ## tests, not for calibration.
 
-  oof_safe <- safely_execute(
-    tune::fit_resamples(
+  oof_by_pos <- unit_step("oof_predictions", {
+
+    oof_res <- suppressMessages(tune::fit_resamples(
       final_wflow,
       resamples = folds,
       metrics   = horizons_metric_set(),
       control   = meta_tune_control("resamples", allow_par)
-    ),
-    log_error          = FALSE,
-    capture_conditions = TRUE
-  )
+    ))
 
-  oof_res <- handle_results(
-    oof_safe,
-    error_title = paste0("Meta out-of-fold prediction failed for the ", method,
-                         " ensemble.")
-  )
+    check_tune_result(oof_res, "the meta-learner's out-of-fold pass failed", debug = debug)
 
-  oof_collected <- tune::collect_predictions(oof_res)
+    warning_log <- dplyr::bind_rows(
+      warning_log, tune_note_records(oof_res, type = "warning", scope = "cv")
+    )
 
-  ## Map fold-held-out predictions onto the object's true .row, in oof$row
-  ## order. collect_predictions$.row is the meta_frame position; oof$row[pos]
-  ## recovers the real id, and a position-keyed lookup reorders to oof$row.
-  oof_by_pos <- oof_collected$.pred[order(oof_collected$.row)]
+    oof_collected <- tune::collect_predictions(oof_res)
+
+    ## A fold that failed leaves its rows unpredicted: the meta-learner is
+    ## then not scored on every row, which fails it, as a member whose
+    ## out-of-fold predictions miss a fold fails (#101)
+    if (nrow(oof_collected) < length(oof$row)) {
+
+      abort_tune_failure(oof_res, cli::format_inline(
+        "the meta-learner's out-of-fold pass predicted {nrow(oof_collected)} of the {length(oof$row)} rows"
+      ))
+
+    }
+
+    ## Map fold-held-out predictions onto the object's true .row, in oof$row
+    ## order. collect_predictions$.row is the meta_frame position; oof$row[pos]
+    ## recovers the real id, and a position-keyed lookup reorders to oof$row.
+    oof_collected$.pred[order(oof_collected$.row)]
+
+  })
 
   ## Bound to oof$row and oof$truth by position below. A fold that failed to
-  ## predict would leave the vector short, and a single value would be
-  ## recycled across every row.
+  ## predict is refused above, so a short vector here is a bug, and a single
+  ## value would be recycled across every row.
   check_rows_aligned(
     what       = "Meta-model out-of-fold predictions",
     to         = "the out-of-fold rows",
@@ -480,7 +535,7 @@ fit_tuned_meta_learner <- function(object,
 
   ## Members predict test_F; combine THROUGH the fitted meta-model ----------
 
-  member_pred <- predict_members_on_test(object, members, call = call)
+  member_pred <- unit_step("test_predict", predict_members_on_test(object, members, call = call))
 
   ## Wide member-prediction matrix with the SAME column names the meta-model
   ## trained on; truth rides through the pivot (constant per sample).
@@ -490,10 +545,10 @@ fit_tuned_meta_learner <- function(object,
                        values_from  = ".pred",
                        names_prefix = "member_")
 
-  combined <- stats::predict(
+  combined <- unit_step("combine", stats::predict(
     meta_fit,
     new_data = test_wide[, member_cols, drop = FALSE]
-  )$.pred
+  )$.pred)
 
   ## Attached to test_wide$sample_id and truth by position, as at predict
   ## time in combine_ensemble_metamodel(): a short prediction would be
@@ -511,7 +566,7 @@ fit_tuned_meta_learner <- function(object,
     truth     = test_wide$truth
   )
 
-  build_ensemble_contract(
+  contract <- unit_step("test_metrics", build_ensemble_contract(
     method        = method,
     model         = meta_fit,
     weights       = weights,
@@ -522,7 +577,9 @@ fit_tuned_meta_learner <- function(object,
     oof_pred      = oof_pred,
     optimize      = optimize,
     seed          = seed
-  )
+  ))
+
+  with_run_records(contract, member_pred, warning_log)
 
 }
 
@@ -573,7 +630,8 @@ fit_tuned_meta_learner <- function(object,
 #' @return A list matching the `ensemble` slot contract: `method`, `model`,
 #'   `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,
 #'   `oof_predictions`, `optimize`, `seed`, `uq` (populated by
-#'   [fit_ensemble_uq()]), `timestamp`, `runtime_secs`.
+#'   [fit_ensemble_uq()]), `control` and `warnings` (filled by [ensemble()]),
+#'   `timestamp`, `runtime_secs`.
 #'
 #' @details
 #' **The `model` slot is typed per method:**
@@ -660,6 +718,7 @@ build_ensemble_contract <- function(method,
     seed            = seed,
     uq              = NULL,
     control         = NULL,
+    warnings        = NULL,
     timestamp       = Sys.time(),
     runtime_secs    = runtime_secs
   )

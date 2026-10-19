@@ -237,6 +237,7 @@ new_horizons_data <- function(analysis       = NULL,
                     seed            = NULL,   ## build-time seed (UQ partitions at seed + 1000)
                     uq              = NULL,   ## CV+ conformal bundle from fit_ensemble_uq(), or NULL
                     control         = NULL,   ## horizons_control ensemble() ran with, or NULL
+                    warnings        = NULL,   ## the ensemble's own warnings, as a member's, or NULL
                     timestamp       = NULL,
                     runtime_secs    = NULL),
 
@@ -1375,8 +1376,8 @@ contract_keys <- function(slot) {
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `ensemble` slot is present (see [contract_keys()]): `method`,
 #'    `model`, `weights`, `predictions`, `metrics`, `member_metrics`,
-#'    `improvement`, `oof_predictions`, `optimize`, `seed`, `uq`,
-#'    `timestamp`, `runtime_secs`. Extra keys are tolerated.
+#'    `improvement`, `oof_predictions`, `optimize`, `seed`, `uq`, `control`,
+#'    `warnings`, `timestamp`, `runtime_secs`. Extra keys are tolerated.
 #' 2. **method**: one of `weighted`, `penalized`, `xgb`.
 #' 3. **weights**: data frame with character `member` + numeric `coef`,
 #'    at least 2 rows, unique members, no NA coefficients.
@@ -1398,6 +1399,7 @@ contract_keys <- function(slot) {
 #'     (see [fit_ensemble_uq()]), whose `members` match the weights' and
 #'     whose calibration set supports intervals at `level_default`.
 #' 12. **timestamp**: POSIXct. **runtime_secs**: single non-negative numeric.
+#' 13. **warnings**: NULL or character, the ensemble's own warnings.
 #'
 #' @param x `horizons_ensemble`. The object to validate.
 #' @param call The frame the error reports: the verb that validated.
@@ -1691,6 +1693,14 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
   ## control ----------------------------------------------------------------------------
 
   errors <- c(errors, control_finding(ens$control, "ensemble"))
+
+  ## warnings: the ensemble's own, rendered as a member's ----------------------
+
+  if (!is.null(ens$warnings) && !is.character(ens$warnings)) {
+
+    errors <- c(errors, cli::format_inline("{.field ensemble$warnings} must be NULL or character"))
+
+  }
 
   ## timestamp / runtime ---------------------------------------------------------------
 

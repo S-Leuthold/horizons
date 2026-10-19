@@ -12,6 +12,7 @@ fit_ensemble_xgb(
   optimize = TRUE,
   seed = DEFAULT_ENSEMBLE_SEED,
   allow_par = FALSE,
+  debug = FALSE,
   call = rlang::caller_env()
 )
 }
@@ -33,6 +34,9 @@ conservative fixed defaults (\code{FALSE}). Default \code{TRUE}.}
 \item{allow_par}{Logical. Passed through from \code{ensemble()}'s control to
 the meta-learner's tune controls; folds parallelise on the registered
 plan when \code{TRUE}. Default \code{FALSE}.}
+
+\item{debug}{Logical. From \code{ensemble()}'s control; see
+\code{\link[=fit_tuned_meta_learner]{fit_tuned_meta_learner()}}.}
 
 \item{call}{The frame a member's failure to predict the test rows reports
 (\code{ensemble()}'s).}

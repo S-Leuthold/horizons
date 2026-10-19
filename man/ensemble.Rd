@@ -39,7 +39,10 @@ callers (\code{method}, \code{optimize}, \code{seed}) are unaffected. Default \c
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{ensemble()} reads \code{allow_par}, \code{verbose}, \code{debug},
 \code{keep_traces} and \code{min_calib_rows}, and refuses any other field that is
-set. With \code{allow_par = TRUE}, the meta-learner's CV tuning and its
+set. With \code{debug = TRUE} the meta-learner runs in this session and its
+first failure, inside tuning included, stops the call with its
+backtrace; with \code{keep_traces = TRUE} a failure's backtrace is kept as
+text in the abort's \code{results}. With \code{allow_par = TRUE}, the meta-learner's CV tuning and its
 out-of-fold pass parallelise over folds on whatever \code{future::plan()} the
 caller has registered; \code{ensemble()} never registers a plan, and runs
 sequentially, warning with class \code{horizons_warning_substitution}, if the
@@ -78,6 +81,18 @@ After the outcome-range check and before it fits anything, \code{ensemble()}
 checks that \code{x} still holds what a fitted object promises (its data,
 evaluation and fitted models), and aborts with class
 \code{horizons_error_validation} when it does not.
+
+The meta-learner is one unit: its tuning, its fit, its out-of-fold pass,
+the members' predictions of the test rows and the scoring are its steps.
+When any fails there is no ensemble to return, and \code{ensemble()} aborts with
+\code{horizons_error_ensemble_failed}, the step and the cause in its \code{results}
+field. A tuned meta-learner chooses its hyperparameters only among the
+candidates scored on every fold, as \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} do (#101).
+The warnings another package raised while it was built (the engine's,
+tune's for the chosen candidate, a member's while predicting the test
+rows) are kept in \code{ensemble$warnings}, as a member's are in
+\code{models$results$warnings}; horizons' own warnings are written to the log
+and raised once at the end.
 }
 \examples{
 \dontrun{

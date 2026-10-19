@@ -16,7 +16,8 @@ predict_members_on_test(object, members, call = rlang::caller_env())
 }
 \value{
 A long tibble: \code{config_id}, \code{sample_id}, \code{.pred}, \code{truth} (original
-scale), one block per member.
+scale), one block per member, with the attributes \code{"unit_records"} and
+\code{"flagged"}.
 }
 \description{
 Has every ensemble member predict the Split-F assessment set (the held-out
@@ -24,6 +25,9 @@ evaluation data \code{fit()} reserved), via \code{predict_members()} — predict
 back-transform once, one unit per member. Shared by all engines so the
 meaning of "test_F" and the per-member prediction contract live in one
 place. A member that cannot predict the test rows aborts with
-\code{horizons_error_prediction_failed}, reporting \code{call}.
+\code{horizons_error_prediction_failed}, reporting \code{call}; inside \code{ensemble()}
+the meta-learner's unit contains it. What the members' units recorded
+(their warnings, the rows they could not use) rides on the result as the
+attributes \code{"unit_records"} and \code{"flagged"}, for \code{ensemble()} to report.
 }
 \keyword{internal}
