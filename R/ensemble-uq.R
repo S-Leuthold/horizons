@@ -355,12 +355,14 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
 #' Compute the CV+ Ensemble UQ Bundle (Silent Core)
 #'
 #' @description
-#' The capture layer of ensemble UQ: draws a fresh fold partition of the meta
-#' frame at `conformal_seed` (disjoint-by-construction from the tuning folds —
-#' Route B), runs the per-fold calibration pass, gates on calibration size and
+#' The core of ensemble UQ: draws a fresh fold partition of the meta frame at
+#' `conformal_seed` (disjoint-by-construction from the tuning folds — Route
+#' B), runs the per-fold calibration pass, gates on calibration size and
 #' order-statistic validity, computes leave-self-out diagnostics, and packs
-#' the bundle. Returns `NULL` — never errors to the caller — when any gate
-#' fails, so the ensemble degrades to point-only predictions.
+#' the bundle. It runs inside `ensemble()`'s CV+ unit: a gate that fails is a
+#' run failure with the counts and the remedy, and a fold refit that fails
+#' fails at its step (`cv_plus_fold_models`), so the ensemble is point-only
+#' and says why.
 #'
 #' **Route B honesty caveat.** Under `optimize = TRUE` the hyperparameter
 #' VALUES were selected using all meta-frame rows, so exchangeability is
@@ -380,7 +382,8 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
-#' @return The uq bundle list (see [fit_ensemble_uq()]), or `NULL`.
+#' @return The uq bundle list (see [fit_ensemble_uq()]). Aborts with class
+#'   `horizons_error_run` when a size gate fails.
 #'
 #' @noRd
 compute_ensemble_uq <- function(oof,
@@ -394,10 +397,20 @@ compute_ensemble_uq <- function(oof,
   meta_frame        <- oof$predictors
   meta_frame$.truth <- oof$truth
 
+  ## The remedy both size gates name: CV+ needs cv_plus_min_rows(level) rows
+  ## whatever the minimum (19 at 0.90)
+  floor_rows <- cv_plus_min_rows(level)
+  remedy     <- "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )}, to {floor_rows} at least."
+
   ## Gate 1: enough rows to calibrate at all.
   if (nrow(meta_frame) < min_calib_rows) {
 
-    return(NULL)
+    n_rows <- nrow(meta_frame)
+
+    abort_horizons(c(
+      "The meta frame has {n_rows} row{?s} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows}).",
+      "i" = remedy
+    ), kind = "run")
 
   }
 
@@ -408,37 +421,33 @@ compute_ensemble_uq <- function(oof,
 
   folds_cal <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
 
-  fold_safe <- safely_execute(
-    fit_uq_fold_models(
-      meta_frame    = meta_frame,
-      oof_row       = oof$row,
-      folds         = folds_cal,
-      contract      = contract,
-      optimize      = optimize,
-      outcome_range = outcome_range
-    ),
-    log_error = FALSE
-  )
+  fold_fit <- unit_step("cv_plus_fold_models", fit_uq_fold_models(
+    meta_frame    = meta_frame,
+    oof_row       = oof$row,
+    folds         = folds_cal,
+    contract      = contract,
+    optimize      = optimize,
+    outcome_range = outcome_range
+  ))
 
-  if (is.null(fold_safe$result)) {
-
-    return(NULL)
-
-  }
-
-  fold_models <- fold_safe$result$fold_models
-  calib       <- fold_safe$result$calib
+  fold_models <- fold_fit$fold_models
+  calib       <- fold_fit$calib
 
   ## Drop rows whose residual is not finite, then re-gate: both the size
   ## minimum and the order-statistic indices must survive the drop. The index
   ## validity check shares its formula with cv_plus_bounds() via
   ## cv_plus_indices() — gate and aggregator cannot disagree.
+  n_rows  <- nrow(calib)
   calib   <- calib[is.finite(calib$residual), ]
   n_calib <- nrow(calib)
+  needed  <- max(min_calib_rows, floor_rows)
 
-  if (n_calib < min_calib_rows || is.null(cv_plus_indices(n_calib, level))) {
+  if (n_calib < needed || is.null(cv_plus_indices(n_calib, level))) {
 
-    return(NULL)
+    abort_horizons(c(
+      "{n_calib} of the {n_rows} calibration row{?s} have a finite residual, fewer than the {needed} that {.code min_calib_rows} and CV+ at the {level} level need.",
+      "i" = remedy
+    ), kind = "run")
 
   }
 
@@ -450,43 +459,43 @@ compute_ensemble_uq <- function(oof,
   meta_pos    <- match(calib$.row, oof$row)
   member_cols <- paste0("member_", contract$weights$member)
 
-  P_full <- vapply(
-    fold_models,
-    function(fm) {
-      predict_fold_model(fm, contract$method,
-                         meta_frame[, member_cols, drop = FALSE],
-                         outcome_range)
-    },
-    numeric(nrow(meta_frame))
-  )
-
   covered <- rep(NA, n_calib)
   widths  <- rep(NA_real_, n_calib)
 
-  ## Indices for the leave-self-out set: row i stands in for the new point, so
-  ## the augmented set has n_calib - 1 members and the shared formula applies
-  ## with n = n_calib - 1 (its (n+1) adjustment then reads n_calib).
-  idx_loo <- cv_plus_indices(n_calib - 1L, level)
+  unit_step("cv_plus_diagnostics", {
 
-  if (!is.null(idx_loo)) {
+    P_full <- vapply(
+      fold_models,
+      function(fm) {
+        predict_fold_model(fm, contract$method,
+                           meta_frame[, member_cols, drop = FALSE],
+                           outcome_range)
+      },
+      numeric(nrow(meta_frame))
+    )
 
-    for (i in seq_len(n_calib)) {
+    ## Indices for the leave-self-out set: row i stands in for the new point,
+    ## so the augmented set has n_calib - 1 members and the shared formula
+    ## applies with n = n_calib - 1 (its (n+1) adjustment then reads n_calib).
+    idx_loo <- cv_plus_indices(n_calib - 1L, level)
 
-      v <- P_full[meta_pos[i], calib$fold[-i]] + calib$residual[-i]
+    ### A calibration row kept above has a finite residual, which its own
+    ### fold model's finite prediction gave it, so no augmented set here can
+    ### hold an NA.
+    if (!is.null(idx_loo)) {
 
-      if (anyNA(v)) {
+      for (i in seq_len(n_calib)) {
 
-        next
+        v          <- P_full[meta_pos[i], calib$fold[-i]] + calib$residual[-i]
+        s          <- sort(v)
+        covered[i] <- calib$truth[i] >= s[idx_loo$l] && calib$truth[i] <= s[idx_loo$u]
+        widths[i]  <- s[idx_loo$u] - s[idx_loo$l]
 
       }
 
-      s          <- sort(v)
-      covered[i] <- calib$truth[i] >= s[idx_loo$l] && calib$truth[i] <= s[idx_loo$u]
-      widths[i]  <- s[idx_loo$u] - s[idx_loo$l]
-
     }
 
-  }
+  })
 
   list(
     method          = "cv_plus",
@@ -524,10 +533,12 @@ compute_ensemble_uq <- function(oof,
 #' `uq$level_default`; [predict.horizons_ensemble()] returns intervals at that
 #' level and takes no level of its own.
 #'
-#' Degrades gracefully: when calibration is impossible (fewer than
-#' `min_calib_rows` rows, invalid order-statistic indices, or a fold refit
-#' failure), the bundle stays `NULL`, a one-line note is emitted, and the
-#' ensemble continues to predict point-only.
+#' Runs inside `ensemble()`'s CV+ unit. When calibration is impossible
+#' (fewer than `min_calib_rows` rows, too few finite residuals for CV+ at the
+#' level, or a fold refit that fails), it raises, and `ensemble()` leaves the
+#' ensemble point-only with one warning of class `horizons_warning_skipped`
+#' saying why. A leave-self-out coverage more than 0.15 from the level warns
+#' with class `horizons_warning_quality`; the bundle still ships.
 #'
 #' @details
 #' **Route B honesty caveat.** The fresh calibration partition guarantees that
@@ -547,51 +558,23 @@ compute_ensemble_uq <- function(oof,
 #' @param seed Integer or NULL. Base seed for the calibration partition
 #'   (`+ 1000` is applied internally). `NULL` (default) resolves to the seed
 #'   recorded on the ensemble contract.
-#' @param verbose Logical. Emit the degradation note when UQ cannot be
-#'   computed. Default `TRUE`.
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
-#' @return `x` with `$ensemble$uq` populated (or unchanged when calibration
-#'   is not possible). The bundle carries: `method` (`"cv_plus"`),
-#'   `ensemble_method`, `members`, `fold_models`, `calib` (`.row`, `fold`,
-#'   `.pred_oof`, `truth`, `residual`), `n_calib`, `level_default`, `seed`,
-#'   `oof_coverage`, `mean_width`, `timestamp`.
+#' @return `x` with `$ensemble$uq` populated. The bundle carries: `method`
+#'   (`"cv_plus"`), `ensemble_method`, `members`, `fold_models`, `calib`
+#'   (`.row`, `fold`, `.pred_oof`, `truth`, `residual`), `n_calib`,
+#'   `level_default`, `seed`, `oof_coverage`, `mean_width`, `timestamp`.
 #'
 #' @keywords internal
 fit_ensemble_uq <- function(x,
                             level          = DEFAULT_UQ_LEVEL,
                             seed           = NULL,
-                            verbose        = TRUE,
                             min_calib_rows = N_CALIB_MIN) {
-
-  if (!inherits(x, "horizons_ensemble")) {
-
-    cli::cli_abort(c(
-      "{.arg x} must be a {.cls horizons_ensemble} object.",
-      "i" = "Run {.fn ensemble} first to produce a fitted ensemble."
-    ))
-
-  }
-
-  if (is.null(x$ensemble) || is.null(x$ensemble$weights)) {
-
-    cli::cli_abort("No fitted ensemble found on this object.")
-
-  }
-
-  if (!is.numeric(level) || length(level) != 1 || level <= 0 || level >= 1) {
-
-    cli::cli_abort(c(
-      "{.arg level} must be a single numeric in (0, 1).",
-      "x" = "Got {.val {level}}."
-    ))
-
-  }
 
   members <- x$ensemble$weights$member
 
-  oof <- build_oof_matrix(x, members)
+  oof <- unit_step("oof_matrix", build_oof_matrix(x, members))
 
   base_seed      <- seed %||% x$ensemble$seed %||% DEFAULT_ENSEMBLE_SEED
   conformal_seed <- base_seed + 1000L
@@ -602,58 +585,35 @@ fit_ensemble_uq <- function(x,
   ## already encodes tuning).
   optimize <- x$ensemble$optimize
 
-  ## Read outside the capture below. The door validator has refused an
-  ## unusable stored range.
+  ## The door validator has refused an unusable stored range.
   outcome_range <- outcome_range_setting(x)
 
-  uq_safe <- safely_execute(
-    compute_ensemble_uq(
-      oof            = oof,
-      contract       = x$ensemble,
-      optimize       = optimize,
-      conformal_seed = conformal_seed,
-      level          = level,
-      outcome_range  = outcome_range,
-      min_calib_rows = min_calib_rows
-    ),
-    log_error = FALSE
+  bundle <- compute_ensemble_uq(
+    oof            = oof,
+    contract       = x$ensemble,
+    optimize       = optimize,
+    conformal_seed = conformal_seed,
+    level          = level,
+    outcome_range  = outcome_range,
+    min_calib_rows = min_calib_rows
   )
-
-  if (is.null(uq_safe$result)) {
-
-    if (verbose) {
-
-      needed <- max(min_calib_rows, cv_plus_min_rows(level))
-
-      cli::cli_inform(c(
-        "i" = "Ensemble UQ could not be calibrated (needs >= {needed} \\
-               calibration rows and a successful fold refit); predictions \\
-               will be point-only."
-      ))
-
-    }
-
-    return(x)
-
-  }
 
   ## Guardrail on the diagnostic itself: a bundle whose leave-self-out
   ## coverage sits far from the target is exactly the look-correct-but-wrong
-  ## failure the 7%-coverage bug taught us to surface. Warn (not abort) —
-  ## the bundle still ships, but never silently.
-  oof_cov <- uq_safe$result$oof_coverage
+  ## failure the 7%-coverage bug taught us to surface. The bundle still ships,
+  ## but never silently.
+  oof_cov <- bundle$oof_coverage
 
   if (is.finite(oof_cov) && abs(oof_cov - level) > 0.15) {
 
-    cli::cli_warn(c(
-      "!" = "Ensemble UQ leave-self-out coverage ({round(oof_cov, 3)}) is far \\
-             from the target level ({level}).",
-      "i" = "Inspect $ensemble$uq$calib before trusting these intervals."
+    warn_in_unit("quality", c(
+      "Ensemble UQ leave-self-out coverage ({round(oof_cov, 3)}) is far from the target level ({level}).",
+      "i" = "Inspect {.field ensemble$uq$calib} before trusting these intervals."
     ))
 
   }
 
-  x$ensemble$uq <- uq_safe$result
+  x$ensemble$uq <- bundle
 
   x
 

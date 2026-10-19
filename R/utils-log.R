@@ -511,6 +511,8 @@ UNIT_STEPS <- c(
   ad_distance         = "Applicability-domain distance",
   combine             = "Ensemble combination",
   cv_plus_folds       = "CV+ fold predictions",
+  cv_plus_fold_models = "CV+ fold models",
+  cv_plus_diagnostics = "CV+ leave-self-out diagnostics",
   cv_plus_bounds      = "CV+ bounds"
 )
 

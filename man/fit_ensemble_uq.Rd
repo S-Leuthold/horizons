@@ -8,7 +8,6 @@ fit_ensemble_uq(
   x,
   level = DEFAULT_UQ_LEVEL,
   seed = NULL,
-  verbose = TRUE,
   min_calib_rows = N_CALIB_MIN
 )
 }
@@ -22,18 +21,14 @@ fit_ensemble_uq(
 (\code{+ 1000} is applied internally). \code{NULL} (default) resolves to the seed
 recorded on the ensemble contract.}
 
-\item{verbose}{Logical. Emit the degradation note when UQ cannot be
-computed. Default \code{TRUE}.}
-
 \item{min_calib_rows}{Integer. The fewest rows the bundle calibrates on;
 \code{control_horizons(min_calib_rows = )}. Default \code{N_CALIB_MIN}.}
 }
 \value{
-\code{x} with \verb{$ensemble$uq} populated (or unchanged when calibration
-is not possible). The bundle carries: \code{method} (\code{"cv_plus"}),
-\code{ensemble_method}, \code{members}, \code{fold_models}, \code{calib} (\code{.row}, \code{fold},
-\code{.pred_oof}, \code{truth}, \code{residual}), \code{n_calib}, \code{level_default}, \code{seed},
-\code{oof_coverage}, \code{mean_width}, \code{timestamp}.
+\code{x} with \verb{$ensemble$uq} populated. The bundle carries: \code{method}
+(\code{"cv_plus"}), \code{ensemble_method}, \code{members}, \code{fold_models}, \code{calib}
+(\code{.row}, \code{fold}, \code{.pred_oof}, \code{truth}, \code{residual}), \code{n_calib},
+\code{level_default}, \code{seed}, \code{oof_coverage}, \code{mean_width}, \code{timestamp}.
 }
 \description{
 Populates \verb{$ensemble$uq} with a CV+ conformal bundle calibrated on the
@@ -49,10 +44,12 @@ with \code{compute_uq = FALSE}, re-run \code{\link[=ensemble]{ensemble()}}. The 
 \code{uq$level_default}; \code{\link[=predict.horizons_ensemble]{predict.horizons_ensemble()}} returns intervals at that
 level and takes no level of its own.
 
-Degrades gracefully: when calibration is impossible (fewer than
-\code{min_calib_rows} rows, invalid order-statistic indices, or a fold refit
-failure), the bundle stays \code{NULL}, a one-line note is emitted, and the
-ensemble continues to predict point-only.
+Runs inside \code{ensemble()}'s CV+ unit. When calibration is impossible
+(fewer than \code{min_calib_rows} rows, too few finite residuals for CV+ at the
+level, or a fold refit that fails), it raises, and \code{ensemble()} leaves the
+ensemble point-only with one warning of class \code{horizons_warning_skipped}
+saying why. A leave-self-out coverage more than 0.15 from the level warns
+with class \code{horizons_warning_quality}; the bundle still ships.
 }
 \details{
 \strong{Route B honesty caveat.} The fresh calibration partition guarantees that

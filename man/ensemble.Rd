@@ -32,7 +32,11 @@ from the tuning folds. Mirrors the \code{seed} argument of \code{\link[=fit]{fit
 
 \item{compute_uq}{Logical. Calibrate CV+ conformal prediction intervals for
 the ensemble (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), stored in \verb{$ensemble$uq} and
-consumed by \code{predict(..., interval = TRUE)}. Mirrors the \code{compute_uq}
+consumed by \code{predict()}. When they cannot be calibrated (fewer than
+\code{min_calib_rows} rows, too few finite residuals for CV+ at its level, or
+a fold refit that fails), the ensemble is returned point-only with one
+warning of class \code{horizons_warning_skipped} saying why, whatever
+\code{verbose} is (#145). Mirrors the \code{compute_uq}
 argument of \code{\link[=fit]{fit()}}. Placed after \code{seed} so pre-existing positional
 callers (\code{method}, \code{optimize}, \code{seed}) are unaffected. Default \code{TRUE}.}
 

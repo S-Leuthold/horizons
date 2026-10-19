@@ -66,7 +66,11 @@
 #'   [evaluate()]. Default `DEFAULT_ENSEMBLE_SEED` (307).
 #' @param compute_uq Logical. Calibrate CV+ conformal prediction intervals for
 #'   the ensemble (see [fit_ensemble_uq()]), stored in `$ensemble$uq` and
-#'   consumed by `predict(..., interval = TRUE)`. Mirrors the `compute_uq`
+#'   consumed by `predict()`. When they cannot be calibrated (fewer than
+#'   `min_calib_rows` rows, too few finite residuals for CV+ at its level, or
+#'   a fold refit that fails), the ensemble is returned point-only with one
+#'   warning of class `horizons_warning_skipped` saying why, whatever
+#'   `verbose` is (#145). Mirrors the `compute_uq`
 #'   argument of [fit()]. Placed after `seed` so pre-existing positional
 #'   callers (`method`, `optimize`, `seed`) are unaffected. Default `TRUE`.
 #' @param control A [control_horizons()] object: how the run goes, not what
@@ -280,11 +284,29 @@ ensemble <- function(x,
   ## Step 4: Calibrate ensemble UQ (CV+ conformal) on the promoted object
   ## -------------------------------------------------------------------------
 
-  ## Gate/failure inside fit_ensemble_uq degrades to a NULL bundle plus a
-  ## one-line note — UQ never fails the ensemble.
+  ## A unit of its own, after the meta-learner's (#145): a failure leaves the
+  ## ensemble point-only and says why, whatever `verbose` is; a tripwire
+  ## inside still stops the call.
   if (compute_uq) {
 
-    x <- fit_ensemble_uq(x, verbose = verbose, min_calib_rows = control$min_calib_rows)
+    cv_plus <- run_unit(
+      fit_ensemble_uq(x, min_calib_rows = control$min_calib_rows),
+      unit = "cv_plus", id = method, debug = debug
+    )
+
+    records <- dplyr::bind_rows(records, cv_plus$records[cv_plus$records$type != "failure", , drop = FALSE])
+
+    if (cv_plus$failed) {
+
+      cause <- unit_failure_message(cv_plus$records, outside = NULL)
+
+      log_warning(collector, "skipped", "Prediction intervals (CV+) were not computed: {cause}")
+
+    } else {
+
+      x <- cv_plus$value
+
+    }
 
   }
 
