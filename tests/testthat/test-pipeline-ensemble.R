@@ -545,6 +545,23 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
+  it("says in its own words that the meta-learner could not be built, and when CV+ could not be calibrated", {
+
+    local_mocked_bindings(extract_weights_penalized = function(...) stop("the weights broke"))
+
+    expect_snapshot(
+      ensemble(ens_fitted(), method = "penalized", optimize = FALSE, compute_uq = FALSE),
+      error = TRUE
+    )
+
+    local_mocked_bindings(fit_uq_fold_models = function(...) stop("a fold refit failed"))
+
+    expect_snapshot(
+      invisible(ensemble(ens_fitted(), method = "weighted", optimize = FALSE))
+    )
+
+  })
+
   it("refuses an ensemble whose warnings are not character, or that lacks the key", {
 
     ens <- ens_built("weighted")
