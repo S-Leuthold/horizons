@@ -460,18 +460,16 @@ reconciled_standardization <- function(pool_record, target_record, wn, clamp) {
 #' training set returned is still built on the targets' grid, by
 #' `reconcile_axes()` on the drawn rows.
 #'
-#' Coverage decides the grid, in three tiers:
+#' Coverage decides the grid, in two tiers:
 #' * `"full"`: the targets reach both ends of the library's range, to within
 #'   half its spacing or less than one of their own steps, which is as close
 #'   as a coarse grid can land. The search grid is the library's whole grid,
 #'   the one a cached space was built on. Library columns beyond the targets'
-#'   ends are sampled at the targets' endpoint, the clamp `reconcile_axes()`
-#'   also applies.
-#' * `"overlap"`: the targets fall short of an end by no more than
-#'   `SELECT_COVERAGE_TOLERANCE_CM`. The search grid is the library's columns
-#'   inside the targets' range, the space is built fresh on them, and the
-#'   verb warns, naming what is missing.
-#' * Short by more at either end: the verb stops and names the missing range.
+#'   ends are sampled at the targets' endpoint.
+#' * `"overlap"`: the targets fall short of an end by more, however much.
+#'   The search grid is the library's columns inside the targets' range, and
+#'   the space is built fresh on them. `select_training()` reports it as a
+#'   `coverage` warning from `record$missing`; nothing is raised here.
 #'
 #' @param pool_wn [Numeric.] The library's wavenumbers.
 #' @param target_m [Matrix.] Target spectra, rows named by sample id.
@@ -495,18 +493,6 @@ search_axis <- function(pool_wn, target_m, target_wn) {
   short <- c(low  = max(0, target_grid$range[1] - library_grid$range[1]),
              high = max(0, library_grid$range[2] - target_grid$range[2]))
 
-  if (any(short > SELECT_COVERAGE_TOLERANCE_CM)) {
-
-    ends <- names(short)[short > SELECT_COVERAGE_TOLERANCE_CM]
-
-    cli::cli_abort(c(
-      "The targets do not cover the library's wavenumber range",
-      "x" = "Targets span {target_grid$range[1]} to {target_grid$range[2]} cm-1; the library's similarity space is {library_grid$range[1]} to {library_grid$range[2]}, so the {ends} end{?s} {?is/are} short by {signif(short[ends], 4)} cm-1",
-      "i" = "A batch may fall short by up to {SELECT_COVERAGE_TOLERANCE_CM} cm-1 at an end; beyond that it is not the same measurement. Standardize the targets over the library's range (the default {.code trim = c(600, 4000)})"
-    ), class = "horizons_input_error")
-
-  }
-
   ## A batch on a coarse grid of its own cannot land on the library's ends:
   ## standardize()'s canonical grid at 16 cm-1 stops 8 short of 600. A
   ## shortfall under one of the batch's own steps is as close as that grid
@@ -524,16 +510,6 @@ search_axis <- function(pool_wn, target_m, target_wn) {
   }
 
   search_wn <- pool_wn[keep]
-
-  if (mode == "overlap") {
-
-    cli::cli_warn(c(
-      "The targets fall short of the library's range, so the similarity space is built on the overlap and not cached",
-      "i" = "Short by {signif(short[['low']], 4)} cm-1 at the low end and {signif(short[['high']], 4)} at the high end, within the {SELECT_COVERAGE_TOLERANCE_CM} cm-1 allowed",
-      "i" = "Standardize the targets over the library's range to use the cached space"
-    ), class = "horizons_select_warning")
-
-  }
 
   if (identical(search_wn, target_wn)) {
 

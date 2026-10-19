@@ -152,7 +152,8 @@ when an end column was taken at the pool's endpoint, else \code{NULL}) and
 entry is the object's axis history and travels with its provenance; it
 is distinct from \code{x$selection$reconciliation}, the selection's record of
 how the two axes compared. A pool already on the targets' grid keeps its
-record unchanged, and a pool never standardized keeps none.
+record unchanged, and a pool never standardized keeps none. \code{x$log} is
+the pool's, with a row for each \code{coverage} warning this call raised.
 }
 \description{
 Draws a training set from a reference pool (a spectral library with
@@ -221,9 +222,10 @@ end to end and the whole library is never copied onto a batch's grid.
 \strong{Coverage.} The targets should span the library's range. Within half
 the library's spacing, or less than one of their own grid steps (a coarse
 grid cannot land on 600 or 4000), they do, and the cached space is used.
-Short by up to 50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy
-edge), the space is built fresh on the overlap, uncached, with a warning.
-Short by more, the verb stops and names the missing range.
+Short by more at an end, however much (an ATR crystal's cutoff, a trimmed
+noisy edge, a batch trimmed to one region), the space is built fresh on
+the library's columns inside the targets' range, uncached, with one
+\code{horizons_warning_coverage} saying what was missing and what was searched.
 
 \strong{The cached space.} A registered library's space at the default
 settings is built right after the library itself, at first use, and

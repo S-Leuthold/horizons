@@ -210,6 +210,61 @@ test_that("select_training() returns the pool's log", {
 })
 
 
+test_that("select_training() writes its coverage warning to the log before raising it, once", {
+
+  ## Targets trimmed to 1000-4000: the search is the overlap, 400 cm-1 short
+  ## at the low end, which the 50 cm-1 limit used to refuse
+  fx <- select_fixture(n_pool = 60, target_range = c(4000, 1000))
+
+  warned <- list()
+  out <- withCallingHandlers(
+    select_training(fx$targets, fx$pool, k = 5, properties = "clay"),
+    horizons_warning = function(w) {
+      warned[[length(warned) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  ## One warning, carrying the row it wrote
+  expect_length(warned, 1L)
+  expect_s3_class(warned[[1]], "horizons_warning_coverage")
+  expect_match(conditionMessage(warned[[1]]), "Short by 400 cm-1 at the low end", fixed = TRUE)
+
+  ## The row is on the object, after the pool's
+  row <- out$log[out$log$verb == "select_training", ]
+  expect_identical(nrow(row), 1L)
+  expect_identical(row$type, "warning")
+  expect_identical(row$topic, "coverage")
+  expect_identical(warned[[1]]$log, row)
+
+  ## Its ids are the library columns the search left out, 600 to 996 cm-1
+  left_out <- paste0("wn_", seq(996, 600, by = -4))
+  expect_setequal(row$ids[[1]], left_out)
+  expect_identical(row$n, length(left_out))
+
+  ## The record does not depend on the signal
+  quiet <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay"))
+  expect_identical(quiet$log, out$log)
+
+})
+
+
+test_that("select_training() under warn = 2 ends in one error that keeps the selection", {
+
+  fx <- select_fixture(n_pool = 60, target_range = c(4000, 1000))
+
+  withr::local_options(warn = 2)
+
+  err <- expect_error(select_training(fx$targets, fx$pool, k = 5, properties = "clay"),
+                      class = "horizons_error_promoted_warnings")
+
+  expect_s3_class(err$object, "horizons_data")
+  expect_identical(err$log$topic, "coverage")
+  expect_identical(err$object$log[err$object$log$verb == "select_training", ]$topic, "coverage")
+
+})
+
+
 test_that("select_training() refuses a pool that carries state from later verbs", {
 
   fx <- select_fixture(n_pool = 60)

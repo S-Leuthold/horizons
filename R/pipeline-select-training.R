@@ -77,9 +77,10 @@
 #' **Coverage.** The targets should span the library's range. Within half
 #' the library's spacing, or less than one of their own grid steps (a coarse
 #' grid cannot land on 600 or 4000), they do, and the cached space is used.
-#' Short by up to 50 cm-1 at an end (an ATR crystal's cutoff, a trimmed noisy
-#' edge), the space is built fresh on the overlap, uncached, with a warning.
-#' Short by more, the verb stops and names the missing range.
+#' Short by more at an end, however much (an ATR crystal's cutoff, a trimmed
+#' noisy edge, a batch trimmed to one region), the space is built fresh on
+#' the library's columns inside the targets' range, uncached, with one
+#' `horizons_warning_coverage` saying what was missing and what was searched.
 #'
 #' **The cached space.** A registered library's space at the default
 #' settings is built right after the library itself, at first use, and
@@ -270,7 +271,8 @@
 #'   entry is the object's axis history and travels with its provenance; it
 #'   is distinct from `x$selection$reconciliation`, the selection's record of
 #'   how the two axes compared. A pool already on the targets' grid keeps its
-#'   record unchanged, and a pool never standardized keeps none.
+#'   record unchanged, and a pool never standardized keeps none. `x$log` is
+#'   the pool's, with a row for each `coverage` warning this call raised.
 #'
 #' @examples
 #' \dontrun{
@@ -316,6 +318,10 @@ select_training <- function(x, library,
   control    <- resolve_control(control, "select_training")
   chunk_size <- control$chunk_size
   verbose    <- control$verbose
+
+  ## The call's warnings, written to the returned object's log and raised
+  ## once per topic at the end (log_close(), signal_log())
+  collector <- log_open("select_training")
 
   errors <- character()
 
@@ -590,6 +596,25 @@ select_training <- function(x, library,
 
   rc_check <- reconcile_axes(subset_rows(pool, pool$data$analysis$sample_id[1]), x)
   sa       <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
+
+  ## Targets short of the library's range are searched on the overlap, in a
+  ## space built fresh and not cached. The warning's ids are the library
+  ## columns the search left out.
+  if (sa$record$mode == "overlap") {
+
+    pool_vars  <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
+    left_out   <- pool_vars[-sa$pool_cols]
+    short_low  <- signif(sa$record$missing[["low"]],  4)
+    short_high <- signif(sa$record$missing[["high"]], 4)
+    searched   <- range(sa$wavenumbers)
+
+    log_warning(collector, "coverage", c(
+      "The targets fall short of the library's range, so the similarity space was built on the overlap and not cached.",
+      "i" = "Short by {short_low} cm-1 at the low end and {short_high} at the high end; searched on the library's {length(sa$wavenumbers)} columns from {searched[1]} to {searched[2]} cm-1.",
+      "i" = "Standardize the targets over the library's range to use the cached space."
+    ), ids = left_out)
+
+  }
 
   if (verbose) {
 
@@ -1152,10 +1177,17 @@ select_training <- function(x, library,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 7: Re-validate
+  ## Step 7: Record, re-validate, then raise
   ## ---------------------------------------------------------------------------
 
+  ## The pool's log, carried by subset_rows(), gains this call's rows before
+  ## the object is validated, and each warning is raised only once its row
+  ## is on the object.
+  out$log <- log_close(collector, out$log)
+
   out <- validate_horizons_data(out)
+
+  signal_log(collector, out)
 
   out
 

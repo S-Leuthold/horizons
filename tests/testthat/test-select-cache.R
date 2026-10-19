@@ -1,7 +1,7 @@
 # tests/testthat/test-select-cache.R
 # The flip and the cached similarity space: distances measured in the
 # library's own space on its grid, the space cached beside a registered
-# library or a library file, and the three coverage tiers.
+# library or a library file, and the two coverage tiers.
 #
 # The miniature library comes from helper-mini-library.R.
 
@@ -123,7 +123,7 @@ test_that("a PLS space is never cached", {
 
 
 ## ---------------------------------------------------------------------------
-## The search axis and its three tiers
+## The search axis and its two tiers
 ## ---------------------------------------------------------------------------
 
 test_that("targets on another grid are searched on the library's and returned on their own", {
@@ -144,14 +144,14 @@ test_that("targets on another grid are searched on the library's and returned on
 
 })
 
-test_that("targets short of the library by up to 50 cm-1 search the overlap, uncached, and warn", {
+test_that("targets short of the library's range search the overlap, uncached, and warn coverage", {
 
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 630, by = -2))
 
   expect_warning(
     out <- select_training(x, "mini", k = 5L),
-    "short of the library's range", class = "horizons_select_warning"
+    "short of the library's range", class = "horizons_warning_coverage"
   )
 
   expect_identical(out$selection$search$mode, "overlap")
@@ -162,13 +162,21 @@ test_that("targets short of the library by up to 50 cm-1 search the overlap, unc
 
 })
 
-test_that("targets short by more than 50 cm-1 are refused, naming the end", {
+test_that("targets short by more than 50 cm-1 are searched on the overlap too, not refused", {
 
+  ## 60 cm-1 short at the low end, which was refused until the search took
+  ## any overlap: the warning names the shortfall and what was searched. The
+  ## overlap is 21 columns, so the window is narrowed to fit inside it.
   m <- use_mini()
   x <- mini_targets(m$pool, wn = seq(700, 660, by = -2))
 
-  expect_error(select_training(x, "mini", k = 5L),
-               class = "horizons_input_error", regexp = "low end")
+  w <- expect_warning(out <- select_training(x, "mini", k = 5L, window = 20),
+                      class = "horizons_warning_coverage")
+
+  expect_match(conditionMessage(w), "Short by 60 cm-1 at the low end", fixed = TRUE)
+  expect_match(conditionMessage(w), "from 660 to 700 cm-1", fixed = TRUE)
+  expect_identical(out$selection$search$mode, "overlap")
+  expect_equal(out$selection$search$missing[["low"]], 60)
 
 })
 

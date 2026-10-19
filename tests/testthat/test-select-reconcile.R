@@ -450,11 +450,11 @@ test_that("search_axis() records each coverage tier with its shortfall and its g
   expect_identical(out$record$missing, c(low = 0, high = 0.5))
 
   ## 30 cm-1 short at the high end: the overlap, the library's columns inside
-  ## the targets' range only
+  ## the targets' range only. The verb warns from the record; the helper
+  ## raises nothing.
   wn <- seq(670, 600, by = -2)
 
-  expect_warning(out <- search_axis(lib_wn, on(wn), wn),
-                 "short of the library's range", class = "horizons_select_warning")
+  expect_no_warning(out <- search_axis(lib_wn, on(wn), wn))
   expect_identical(out$record$mode, "overlap")
   expect_identical(out$record$missing, c(low = 0, high = 30))
   expect_identical(out$wavenumbers, seq(670, 600, by = -2))
@@ -464,9 +464,17 @@ test_that("search_axis() records each coverage tier with its shortfall and its g
   ## within it, so it is the overlap too (under one step is full)
   wn <- seq(696, 616, by = -16)
 
-  expect_warning(out <- search_axis(lib_wn, on(wn), wn),
-                 "short of the library's range", class = "horizons_select_warning")
+  expect_no_warning(out <- search_axis(lib_wn, on(wn), wn))
   expect_identical(out$record$mode, "overlap")
   expect_identical(out$record$missing, c(low = 16, high = 4))
+
+  ## Short by more than the 50 cm-1 that used to be refused: still the
+  ## overlap, with nothing raised
+  wn <- seq(700, 680, by = -2)
+
+  expect_no_warning(out <- search_axis(lib_wn, on(wn), wn))
+  expect_identical(out$record$mode, "overlap")
+  expect_identical(out$record$missing, c(low = 80, high = 0))
+  expect_identical(out$wavenumbers, seq(700, 680, by = -2))
 
 })
