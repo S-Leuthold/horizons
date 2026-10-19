@@ -32,7 +32,8 @@ select_training(
 row per sample, with finite spectra: the record names each target by its
 \code{sample_id}, so replicate scans that share one are refused and should be
 averaged first with \code{\link[=average]{average()}}. On a grid that shares columns with the
-library's, as \code{\link[=standardize]{standardize()}} puts them (see "Two axes").}
+library's, as \code{\link[=standardize]{standardize()}} puts them (see "Two axes"), and
+standardized as the library was (see "Standardized alike").}
 
 \item{library}{\code{horizons_data} or \code{character}. The reference library:
 a \code{horizons_data} with one or more response columns (your own pool,
@@ -251,6 +252,16 @@ width in cm-1, so
 the filter is the same physical filter on any batch; the point count it
 becomes on the library's grid is recorded in \code{settings$window_points}, and
 the width that count actually spans in \code{settings$window_cm}.
+
+\strong{Standardized alike.} The training set is the library's spectra as
+\code{\link[=standardize]{standardize()}} left them, so the targets must have been left the same
+way: baseline-corrected on both sides or neither, and when both, with the
+hulls fitted over the same range (each end within the coarser grid's
+step). Otherwise the model would train on one preprocessing and predict
+another, and the call is refused before any work, naming the
+\code{\link[=standardize]{standardize()}} call that matches the targets to the library (#107). A
+side that never went through \code{\link[=standardize]{standardize()}} counts as not corrected.
+The registered \code{"kssl"} library is not baseline-corrected.
 
 \strong{Self-leakage.} A pool row that sits far closer to a target than that
 target's surroundings do — distance zero, or below \code{twin_ratio} times the

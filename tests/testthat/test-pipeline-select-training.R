@@ -1458,6 +1458,113 @@ test_that("targets on an offset step get the columns both grids share, at their 
 })
 
 
+## Standardized alike (#107): the training set is the library's spectra as
+## standardize() left them, so a hull on one side only, or hulls fitted over
+## different ranges, is refused before any work.
+
+test_that("a baseline on one side only is refused, either way round (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool_hull    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    pool_plain   <- standardize(fx$pool,    resample = 4)
+    target_hull  <- standardize(fx$targets, resample = 8, baseline = TRUE)
+    target_plain <- standardize(fx$targets, resample = 8)
+  })
+
+  ## The library corrected, the targets not
+  err <- expect_error(select_training(target_plain, pool_hull, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(msg, "were standardized differently", fixed = TRUE)
+  expect_match(msg, "The library was baseline-corrected", fixed = TRUE)
+  expect_match(msg, "standardize(x, resample = 8, trim = c(600, 4000), baseline = TRUE, force = TRUE)", fixed = TRUE)
+  expect_match(msg, "Or standardize the library without `baseline`", fixed = TRUE)
+
+  ## The targets corrected, the library not
+  err <- expect_error(select_training(target_hull, pool_plain, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "The targets were baseline-corrected", fixed = TRUE)
+  expect_match(msg, "a hull already subtracted cannot be put back", fixed = TRUE)
+
+  ## Corrected on both sides over the same range, or on neither, runs
+  expect_s3_class(select_training(target_hull, pool_hull, k = 5), "horizons_data")
+  expect_s3_class(select_training(target_plain, pool_plain, k = 5), "horizons_data")
+
+})
+
+
+test_that("a side never standardized counts as not baseline-corrected (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool_hull   <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    target_hull <- standardize(fx$targets, resample = 8, baseline = TRUE)
+  })
+
+  expect_null(fx$pool$provenance$standardization)
+  expect_null(fx$targets$provenance$standardization)
+
+  expect_error(select_training(target_hull, fx$pool, k = 5),
+               "The targets were baseline-corrected", class = "horizons_error_input")
+  expect_error(select_training(fx$targets, pool_hull, k = 5),
+               "The library was baseline-corrected", class = "horizons_error_input")
+
+  ## Unstandardized targets need no force = TRUE to be corrected
+  err <- expect_error(select_training(fx$targets, pool_hull, k = 5), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "standardize(x, resample = 8, trim = c(600, 4000), baseline = TRUE)`", fixed = TRUE)
+
+})
+
+
+test_that("hulls fitted over ranges an end apart by a step or more are refused (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    trimmed <- standardize(fx$targets, resample = 8, trim = c(1000, 3000), baseline = TRUE)
+    one_off <- standardize(fx$targets, resample = 8, trim = c(608, 4000),  baseline = TRUE)
+  })
+
+  err <- expect_error(select_training(trimmed, pool, k = 5), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "the library's hull over 600 to 4000 cm-1 and the targets' over 1000 to 3000 cm-1", fixed = TRUE)
+  expect_snapshot(select_training(trimmed, pool, k = 5), error = TRUE)
+
+  ## One end off by the coarser grid's step, 8 cm-1, is a different hull
+  expect_error(select_training(one_off, pool, k = 5),
+               "hulls are pinned at different ends", class = "horizons_error_input")
+
+})
+
+
+test_that("hulls over ranges an end apart by less than the coarser step pass (#107)", {
+
+  ## A 6 cm-1 grid over 600 to 4000 ends at 3996: 4 cm-1 short of the 4 cm-1
+  ## library's end, under the coarser 6 cm-1 step, so it is the same hull as
+  ## close as the two grids land. It shares every 12 cm-1, so it warns.
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    targets <- standardize(fx$targets, resample = 6, baseline = TRUE)
+  })
+
+  expect_identical(targets$provenance$standardization$wavelength_range, c(600, 3996))
+
+  expect_warning(out <- select_training(targets, pool, k = 5), class = "horizons_warning_coverage")
+  expect_s3_class(out, "horizons_data")
+
+})
+
+
 test_that("the record carries the SG window in cm-1 and the space's floor", {
 
   fx  <- select_fixture(n_pool = 100)

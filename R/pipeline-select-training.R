@@ -109,6 +109,16 @@
 #' becomes on the library's grid is recorded in `settings$window_points`, and
 #' the width that count actually spans in `settings$window_cm`.
 #'
+#' **Standardized alike.** The training set is the library's spectra as
+#' [standardize()] left them, so the targets must have been left the same
+#' way: baseline-corrected on both sides or neither, and when both, with the
+#' hulls fitted over the same range (each end within the coarser grid's
+#' step). Otherwise the model would train on one preprocessing and predict
+#' another, and the call is refused before any work, naming the
+#' [standardize()] call that matches the targets to the library (#107). A
+#' side that never went through [standardize()] counts as not corrected.
+#' The registered `"kssl"` library is not baseline-corrected.
+#'
 #' **Self-leakage.** A pool row that sits far closer to a target than that
 #' target's surroundings do — distance zero, or below `twin_ratio` times the
 #' reference distance — is the target's twin: the same sample, present in
@@ -177,7 +187,8 @@
 #'   row per sample, with finite spectra: the record names each target by its
 #'   `sample_id`, so replicate scans that share one are refused and should be
 #'   averaged first with [average()]. On a grid that shares columns with the
-#'   library's, as [standardize()] puts them (see "Two axes").
+#'   library's, as [standardize()] puts them (see "Two axes"), and
+#'   standardized as the library was (see "Standardized alike").
 #' @param library `horizons_data` or `character`. The reference library:
 #'   a `horizons_data` with one or more response columns (your own pool,
 #'   `spectra() |> standardize() |> add_response()`), the name of a
@@ -607,6 +618,15 @@ select_training <- function(x, library,
 
   pool_vars <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
   cols      <- check_shared_columns(target_vars, pool_vars, restandardize = restandardize)
+
+  ## Standardized alike (#107): a hull on one side only, or hulls fitted over
+  ## different ranges, would train on one preprocessing and predict another.
+
+  check_same_standardization(pool$provenance$standardization, x$provenance$standardization,
+                             pool_step     = grid_summary(predictor_wavenumbers(pool))$resolution,
+                             target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
+                             library_form  = resolved$record$form,
+                             restandardize = restandardize)
 
   if (length(cols$target_only)) {
 
@@ -1386,6 +1406,102 @@ check_pool_unpromoted <- function(pool) {
   }
 
   msgs
+
+}
+
+
+## ---------------------------------------------------------------------------
+## check_same_standardization() — Pool and targets corrected alike (#107)
+## ---------------------------------------------------------------------------
+
+#' Refuse a library and targets standardized with different baselines
+#'
+#' @description
+#' The training set is the library's spectra as `standardize()` left them,
+#' and the model predicts the targets as theirs were left. A convex-hull
+#' baseline on one and not the other, or hulls fitted over different ranges,
+#' make the model train on one preprocessing and predict on another, which
+#' is a wrong result, not a weak one, so it is refused before any work.
+#'
+#' @details
+#' `standardize()` fits the hull after it trims and resamples, and the only
+#' step after it, water-band removal, leaves a gap the axis door refuses, so
+#' the hull's ends are each record's `wavelength_range`. Those ranges are
+#' compared, not the `trim` arguments: data that stops short of a bound fits
+#' a different hull under an equal trim, and `trim = NULL` on data spanning
+#' the bounds fits the same hull as the bounds. Two ranges agree when each
+#' end differs by less than the coarser of the two grids' steps, as close as
+#' two grids can land (the search's own reasoning for full coverage), so a
+#' 2 cm-1 library over 600 to 4000 and 3 cm-1 targets over 600 to 3999 pass.
+#'
+#' A side with no record was never standardized, so horizons fitted no hull
+#' on it, and it counts as not corrected. Hull correction applied twice gives
+#' the same spectra, so the remedy also works on spectra corrected outside
+#' horizons. The steps, `resample` and `remove_water` are not compared: a
+#' coarser grid shares the library's columns (#236), and a removed band is
+#' refused as a gap.
+#'
+#' @param pool_record,target_record [List or NULL.] Each side's
+#'   `provenance$standardization`.
+#' @param pool_step,target_step [Numeric.] Each axis's median spacing.
+#' @param library_form [Character.] The library's `form` (`"object"`,
+#'   `"path"`, `"registered"`): only a pool in memory is offered the remedy
+#'   of standardizing the library instead.
+#' @param restandardize [Logical.] Whether the targets were standardized
+#'   already, so a remedy that adds a baseline needs `force = TRUE`.
+#' @param call The frame the refusal reports: the verb's.
+#'
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
+#' @noRd
+check_same_standardization <- function(pool_record, target_record, pool_step, target_step,
+                                       library_form, restandardize = FALSE,
+                                       call = rlang::caller_env()) {
+
+  pool_hull   <- isTRUE(pool_record$baseline)
+  target_hull <- isTRUE(target_record$baseline)
+
+  if (!pool_hull && !target_hull) return(invisible(NULL))
+
+  p_range <- pool_record$wavelength_range
+  t_range <- target_record$wavelength_range
+  t_step  <- signif(target_step, 4)
+  force   <- if (restandardize) ", force = TRUE" else ""
+  own     <- identical(library_form, "object")
+
+  if (pool_hull && target_hull) {
+
+    if (all(abs(p_range - t_range) < max(pool_step, target_step))) return(invisible(NULL))
+
+    problem <- "Both were baseline-corrected, the library's hull over {p_range[1]} to {p_range[2]} cm-1 and the targets' over {t_range[1]} to {t_range[2]} cm-1, so the hulls are pinned at different ends."
+    remedy  <- c(
+      "i" = "Standardize the targets from {.fn spectra} over the library's range: {.code standardize(x, resample = {t_step}, trim = c({p_range[1]}, {p_range[2]}), baseline = TRUE)}.",
+      "i" = if (own) "Or standardize the library over the targets' range."
+    )
+
+  } else if (pool_hull) {
+
+    problem <- "The library was baseline-corrected ({.code standardize(baseline = TRUE)}) and the targets were not."
+    remedy  <- c(
+      "i" = "Correct the targets over the library's range: {.code standardize(x, resample = {t_step}, trim = c({p_range[1]}, {p_range[2]}), baseline = TRUE{force})}.",
+      "i" = if (own) "Or standardize the library without {.arg baseline}."
+    )
+
+  } else {
+
+    problem <- "The targets were baseline-corrected ({.code standardize(baseline = TRUE)}) and the library was not."
+    remedy  <- c(
+      "i" = "Standardize the targets from {.fn spectra} without {.arg baseline}, {.code standardize(x, resample = {t_step}, trim = c({t_range[1]}, {t_range[2]}))}; a hull already subtracted cannot be put back.",
+      "i" = if (own) "Or correct the library over the targets' range: {.code standardize(library, baseline = TRUE, trim = c({t_range[1]}, {t_range[2]}), force = TRUE)}."
+    )
+
+  }
+
+  abort_horizons(c(
+    "{.arg x} and {.arg library} were standardized differently.",
+    "x" = problem,
+    "i" = "A model trained on one baseline cannot predict the other.",
+    remedy
+  ), kind = "input", call = call)
 
 }
 

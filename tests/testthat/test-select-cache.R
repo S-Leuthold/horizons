@@ -164,6 +164,24 @@ test_that("targets that share no column with a registered library are refused be
 
 })
 
+test_that("baseline-corrected targets are refused against the registered library, which is not corrected (#107)", {
+
+  m <- use_mini()
+  x <- mini_targets(m$pool)
+
+  utils::capture.output(x <- standardize(x, resample = 2, trim = c(600, 700), baseline = TRUE))
+
+  err <- expect_error(select_training(x, "mini", k = 5L), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "The targets were baseline-corrected", fixed = TRUE)
+  expect_identical(m$pool$provenance$standardization$baseline, FALSE)
+
+  ## A registered library is not the user's to standardize again
+  expect_false(grepl("Or correct the library", msg, fixed = TRUE))
+
+})
+
 test_that("the registry's grid names the columns the built library has", {
 
   ## What the check before the download compares against is what the build
