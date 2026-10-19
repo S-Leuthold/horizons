@@ -671,7 +671,8 @@ fit_ensemble_uq <- function(x,
 #' models (weights tibbles) combine by matrix product; penalized/xgb fold
 #' models (workflows) predict through [stats::predict()]. Columns are clamped
 #' to the outcome's range (a floor at zero under the default, #76) to match
-#' deployed-combine semantics.
+#' deployed-combine semantics. The matrix's shape is stated, so one new row
+#' gives a one-row matrix rather than a vector (#235).
 #'
 #' @param uq The `$ensemble$uq` bundle.
 #' @param wide Tibble with `member_<config_id>` columns in `uq$members` order
@@ -688,12 +689,17 @@ predict_ensemble_uq_matrix <- function(uq, wide,
   member_cols <- paste0("member_", uq$members)
   member_mat  <- wide[, member_cols, drop = FALSE]
 
-  vapply(
+  fold_matrix <- vapply(
     uq$fold_models,
     function(fm) predict_fold_model(fm, uq$ensemble_method, member_mat,
                                     outcome_range),
     numeric(nrow(wide))
   )
+
+  ## vapply() drops a one-row result to a vector, one value per fold model
+  dim(fold_matrix) <- c(nrow(wide), length(uq$fold_models))
+
+  fold_matrix
 
 }
 

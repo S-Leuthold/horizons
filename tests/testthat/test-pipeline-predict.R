@@ -607,6 +607,24 @@ describe("check_predict_dots()", {
 ## forest or distance sees it (conditions.md, rows are removed only where
 ## modelling happens).
 
+describe("predict.horizons_fit() - one row of new_data", {
+
+  it("returns one prediction with its interval and AD for a single row", {
+
+    one <- make_new_spectra(n = 1)
+
+    p <- predict(fitted_fixture, one)
+
+    expect_equal(nrow(p), 1L)
+    expect_true(is.finite(p$.pred) && is.finite(p$.pred_lower) && is.finite(p$.pred_upper))
+    expect_lte(p$.pred_lower, p$.pred_upper)
+    expect_false(is.na(p$.ad_flag))
+
+  })
+
+})
+
+
 describe("predict.horizons_fit() - flagged rows", {
 
   new_df <- make_new_spectra()

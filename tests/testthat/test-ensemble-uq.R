@@ -363,6 +363,20 @@ describe("fit_ensemble_uq() - coverage", {
 
 describe("predict.horizons_ensemble() - CV+ intervals", {
 
+  it("returns a prediction and its interval for a single row of new_data (#235)", {
+
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+
+    p <- predict(ens_ref, test_set[1, ], interval = TRUE)
+
+    expect_equal(nrow(p), 1L)
+    expect_identical(p$sample_id, test_set$sample_id[1])
+    expect_true(is.finite(p$.pred_lower) && is.finite(p$.pred_upper))
+    expect_lte(p$.pred_lower, p$.pred_upper)
+
+  })
+
   it("interval columns key by sample_id: shuffled rows give identical bounds", {
 
     test_set <- ens_test_set()
