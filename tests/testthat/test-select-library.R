@@ -617,7 +617,7 @@ test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
   fx <- with_depth(select_fixture())
 
   expect_error(select_training(fx$targets, fx$pool, k = 250L, properties = "clay"),
-               class = "horizons_input_error", regexp = "depth = \"all\"")
+               class = "horizons_error_input", regexp = "depth = \"all\"")
 
 })
 

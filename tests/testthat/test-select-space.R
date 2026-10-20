@@ -114,14 +114,17 @@ test_that("transform_similarity() masks ranges after the derivative", {
 })
 
 
-test_that("transform_similarity() aborts on a row that goes non-finite, naming it", {
+test_that("transform_similarity() trips an internal check on a row that goes non-finite, naming it", {
 
+  ## select_training() leaves flagged rows out, and the validator admits a
+  ## non-finite value in no other, so only a bug reaches this; NaN would
+  ## otherwise spread through the projection silently
   fx <- select_fixture(n_pool = 30)
   pm <- predictor_matrix(fx$pool)
   pm$matrix["P004", 3] <- Inf   # propagates through SNV and the filter
 
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers),
-               regexp = "P004", class = "horizons_input_error")
+               regexp = "P004", class = "horizons_error_internal")
 
 })
 

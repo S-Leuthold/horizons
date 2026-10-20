@@ -44,8 +44,7 @@
 #' @return [List.] `matrix` (transformed, row names kept) and `wavenumbers`
 #'   (the columns that survive the filter's edge trim and the mask).
 #'   Errors of class `horizons_error_input` when the mask leaves too few
-#'   columns, and of class `horizons_input_error` when a row goes
-#'   non-finite.
+#'   columns.
 #'
 #' @seealso [build_similarity_space()]
 #' @noRd
@@ -97,17 +96,20 @@ transform_similarity <- function(M, wn,
 
   }
 
+  ## select_training() leaves flagged rows out, and the validator admits
+  ## non-finite values in no other row, so nothing non-finite reaches here;
+  ## if it did, it would spread silently through the projection.
+
   bad <- which(rowSums(!is.finite(m)) > 0)
 
   if (length(bad)) {
 
     shown <- utils::head(ids[bad], 5)
 
-    cli::cli_abort(c(
-      "{length(bad)} spectr{?um/a} went non-finite in the similarity space",
-      "x" = "{.val {shown}}{if (length(bad) > 5) ', ...' else ''}",
-      "i" = "A constant or near-constant spectrum divides by zero under SNV; check these rows"
-    ), class = "horizons_input_error")
+    abort_horizons(c(
+      "{length(bad)} spectr{?um/a} went non-finite in the similarity space.",
+      "x" = "{.val {shown}}{if (length(bad) > 5) ', ...' else ''}."
+    ), kind = "internal")
 
   }
 

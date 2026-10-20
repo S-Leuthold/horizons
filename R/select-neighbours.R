@@ -477,9 +477,6 @@ missing_k <- function(k, properties) {
 #'   distance tables. `select_training()` has one space, the library's, and
 #'   always passes `"all"`; the column stays so a record names the space its
 #'   distances were measured in. Default: `"all"`.
-#' @param short_hint [Character or NULL.] A further hint for the error when
-#'   a property has fewer measured rows than `k`: the caller knows why rows
-#'   are missing (a depth restriction) and this function does not.
 #' @return [List.] `membership` (tibble: `target_id`, `property`, `space`,
 #'   `pool_id`, `distance`, `rank`), `target_distances` (tibble:
 #'   `target_id`, `property`, `space`, `nearest`, `mean_k`, after twin
@@ -496,8 +493,7 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
                             chunk_size  = 500L,
                             twin_ratio  = SELECT_TWIN_RATIO,
                             twin_ref    = SELECT_TWIN_REF,
-                            space_label = "all",
-                            short_hint  = NULL) {
+                            space_label = "all") {
 
   k_by <- resolve_k(k, properties)
 
@@ -508,19 +504,11 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
 
   for (p in properties) {
 
+    ## select_training() draws only for a property with at least k measured
+    ## rows (Step 2), so nearest_neighbours() is never asked for more
     kp       <- k_by[[p]]
     measured <- responses$sample_id[!is.na(responses[[p]])]
     measured <- intersect(rownames(Sp), measured)
-
-    if (length(measured) < kp) {
-
-      cli::cli_abort(c(
-        "Property {.field {p}} has {length(measured)} measured pool rows, fewer than k = {kp}",
-        "i" = "Lower {.arg k} for this property or bring more referenced rows into the pool",
-        if (!is.null(short_hint)) c("i" = short_hint)
-      ), class = "horizons_input_error")
-
-    }
 
     Sp_p <- Sp[measured, , drop = FALSE]
 

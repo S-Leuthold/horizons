@@ -394,7 +394,8 @@ SELECT_CHUNK_SIZE <- 500L
 # and outlive package upgrades, so a change to how the space is built
 # (transform_similarity(), the PCA, the component cap, the sdev floor's rule)
 # must bump this, or old spaces are read as if the new code had built them.
-SELECT_SPACE_CACHE_VERSION <- 1L
+# 2: the space is fit without the library's flagged rows (0.12.0).
+SELECT_SPACE_CACHE_VERSION <- 2L
 
 ## validate() Heuristics --------------------------------------------------------
 

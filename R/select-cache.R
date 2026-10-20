@@ -211,7 +211,8 @@ default_space_settings <- function(resolution) {
 #' backtrace. An input or internal error propagates, as from any unit. A
 #' library narrower than the default window is not primed: the filter needs
 #' fewer points than the library has columns ([sg_window_fits()]), and a
-#' default draw refuses that window at its door.
+#' default draw refuses that window at its door. The space is fit without
+#' the library's flagged rows, as a draw fits it, so the two agree.
 #'
 #' @param pool [horizons_data.] The library just built.
 #' @param record [List.] Its record.
@@ -226,9 +227,11 @@ prime_library_space <- function(pool, record, verbose = TRUE,
   identity <- space_cache_identity(record)
   if (is.null(identity)) return(invisible(NULL))
 
-  pm       <- predictor_matrix(pool)
-  settings <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
-  n_cols   <- length(pm$wavenumbers)
+  ## The space a draw builds: without the rows an earlier step flagged
+  pm        <- predictor_matrix(pool)
+  pm$matrix <- pm$matrix[!flagged_rows(pool$data$analysis), , drop = FALSE]
+  settings  <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
+  n_cols    <- length(pm$wavenumbers)
 
   if (settings$derivative > 0L && !sg_window_fits(settings$window, n_cols)) {
 

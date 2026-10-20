@@ -60,6 +60,43 @@ learnable_clay_pool <- function(pool, r2 = 0.8, seed = 1) {
 }
 
 
+#' The object with `.flag` set on the rows named, as a step that kept rows
+#' it could not use sets it, and one of their values made non-finite, which
+#' the validator admits only in a flagged row
+#' @noRd
+with_flag <- function(obj, ids, step = "standardize") {
+
+  a <- obj$data$analysis
+  a$.flag <- ifelse(a$sample_id %in% ids, step, NA_character_)
+  a$wn_2000[a$sample_id %in% ids] <- NA_real_
+
+  obj$data$analysis <- a
+  obj$data$role_map <- rbind(obj$data$role_map, tibble::tibble(variable = ".flag", role = "meta"))
+  obj
+
+}
+
+
+#' Every warning an expression raises, muffled, with its value
+#' @noRd
+with_warnings <- function(expr) {
+
+  warned <- list()
+  value  <- withCallingHandlers(expr, warning = function(w) {
+    warned[[length(warned) + 1L]] <<- w
+    invokeRestart("muffleWarning")
+  })
+
+  list(value = value, warnings = warned)
+
+}
+
+
+#' The warnings of one class among those caught
+#' @noRd
+of_class <- function(warnings, class) Filter(function(w) inherits(w, class), warnings)
+
+
 ## =============================================================================
 ## Input validation
 ## =============================================================================
@@ -1323,11 +1360,12 @@ test_that("at k = 1 batch and global record every twin in the measured pool, wit
 })
 
 
-test_that("a draw the twin subtraction empties stops with the property and the cause", {
+test_that("a draw the twin subtraction empties fails with the property and the cause", {
 
   ## At a twin_ratio this close to 1 every row any target drew is some
   ## other target's twin. The subset used to fail on an empty keep, naming
-  ## neither the property nor the twin rule.
+  ## neither the property nor the twin rule; it is the only property drawn
+  ## for, so nothing is left to return.
 
   ## The scenario depends on the fixture's exact geometry, so the filter is
   ## pinned to the one it was built under: 11 points on the targets' 8 cm-1
@@ -1335,16 +1373,20 @@ test_that("a draw the twin subtraction empties stops with the property and the c
 
   fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
 
-  err <- expect_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99, properties = "clay",
-                                   window = 80),
-                      regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
+  err <- expect_error(suppressWarnings(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
+                                                    properties = "clay", window = 80)),
+                      regexp = "Every row drawn for clay was flagged", class = "horizons_error_selection_failed")
 
-  ## Ordinary neighbours were flagged, so the ratio is the lever
+  ## Ordinary neighbours were flagged, so the ratio is the lever; the work
+  ## was attempted, so the kind is run, and the cause travels with it
+  expect_s3_class(err, "horizons_error_run")
   expect_match(conditionMessage(err), "lower it")
+  expect_identical(err$results$property, "clay")
+  expect_match(err$results$cause, "lower it (the default is 0.05)", fixed = TRUE)
 
   ## Global keeps the pool, so there is nothing to empty
-  expect_no_error(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
-                               properties = "clay", scope = "global", window = 80))
+  expect_no_error(suppressWarnings(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
+                                                properties = "clay", scope = "global", window = 80)))
 
 })
 
@@ -1374,11 +1416,46 @@ test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {
   fx      <- select_fixture(n_pool = 60, seed = 3)
   targets <- pool_as_targets(fx)
 
-  err <- expect_error(select_training(targets, fx$pool, k = 1, properties = "clay"),
-                      regexp = "Every row drawn for clay was flagged", class = "horizons_input_error")
+  err <- expect_error(suppressWarnings(select_training(targets, fx$pool, k = 1)),
+                      regexp = "Every row drawn for clay and oc was flagged",
+                      class = "horizons_error_selection_failed")
 
   expect_match(conditionMessage(err), "targets are in the pool")
   expect_no_match(conditionMessage(err), "lower it")
+
+  ## One row per property, each with its cause
+  expect_identical(err$results$property, c("clay", "oc"))
+  expect_true(all(grepl("targets are in the pool", err$results$cause, fixed = TRUE)))
+
+})
+
+
+test_that("a property the twin subtraction empties is left out with one partial_failure warning, and the rest drawn", {
+
+  ## The targets are the library's rows that have oc measured, so every
+  ## row drawn for oc is some target's own copy; clay has the other rows
+
+  fx      <- select_fixture(n_pool = 60, seed = 3)
+  oc_rows <- which(!is.na(fx$pool$data$analysis$oc))
+  targets <- pool_as_targets(fx, oc_rows)
+
+  run <- with_warnings(select_training(targets, fx$pool, k = 5))
+  out <- run$value
+  w   <- of_class(run$warnings, "horizons_warning_partial_failure")
+
+  expect_length(w, 1L)
+
+  msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
+  expect_match(msg, "Every row drawn for oc was flagged as some target's twin, so it was left out of the training set", fixed = TRUE)
+  expect_match(msg, "targets are in the pool", fixed = TRUE)
+  expect_identical(w[[1]]$log$ids[[1]], "oc")
+
+  ## Out of the properties drawn for, and drawn none; clay drawn as usual
+  ps <- out$selection$pool_sizes
+  expect_identical(out$selection$settings$properties, "clay")
+  expect_identical(ps$drawn[ps$property == "oc"], 0L)
+  expect_gt(ps$drawn[ps$property == "clay"], 0L)
+  expect_gt(out$data$n_rows, 0L)
 
 })
 
@@ -1417,7 +1494,7 @@ test_that("a target's own copy is recorded as exact, at distance zero to roundin
 })
 
 
-test_that("a property with no measured pool row stops every scope", {
+test_that("a property with no measured pool row is refused when named, under every scope, and skipped otherwise", {
 
   ## Global used to skip such a property; batch failed inside the draw.
 
@@ -1426,7 +1503,7 @@ test_that("a property with no measured pool row stops every scope", {
 
   for (scope in c("batch", "global")) {
 
-    err <- expect_error(quiet_select(fx, k = 5, scope = scope),
+    err <- expect_error(quiet_select(fx, k = 5, scope = scope, properties = c("clay", "oc")),
                         regexp = "measured rows for oc", class = "horizons_error_input")
 
     ## No depth column, so no depth was applied and no hint about it
@@ -1434,8 +1511,21 @@ test_that("a property with no measured pool row stops every scope", {
 
   }
 
+  ## Not named: skipped, with one warning naming it, and out of the record
+  run <- with_warnings(quiet_select(fx, k = 5))
+  out <- run$value
+  w   <- of_class(run$warnings, "horizons_warning_skipped")
+
+  expect_length(w, 1L)
+  expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])),
+               "No training rows were drawn for oc: the library has no measured rows for it", fixed = TRUE)
+  expect_identical(w[[1]]$log$ids[[1]], "oc")
+  expect_identical(out$selection$settings$properties, "clay")
+  expect_identical(out$selection$pool_sizes$property, "clay")
+  expect_false("oc" %in% out$selection$membership$property)
+
   ## oc measured only below 30 cm: topsoil leaves it unmeasured, and the
-  ## refusal says depth = "all" would reach it
+  ## refusal and the warning say depth = "all" would reach it
   deep <- select_fixture(n_pool = 60)
   upper <- rep(c(0, 60), length.out = 60)
   deep$pool$data$analysis$upper_depth_cm <- upper
@@ -1443,9 +1533,198 @@ test_that("a property with no measured pool row stops every scope", {
   deep$pool$data$role_map <- rbind(deep$pool$data$role_map,
                                    tibble::tibble(variable = "upper_depth_cm", role = "meta"))
 
-  err <- expect_error(quiet_select(deep, k = 5),
+  err <- expect_error(quiet_select(deep, k = 5, properties = "oc"),
                       regexp = "measured rows for oc", class = "horizons_error_input")
   expect_match(conditionMessage(err), "depth = \"all\"", fixed = TRUE)
+
+  w <- of_class(with_warnings(quiet_select(deep, k = 5))$warnings, "horizons_warning_skipped")
+  expect_match(conditionMessage(w[[1]]), "depth = \"all\"", fixed = TRUE)
+
+})
+
+
+test_that("a property with fewer measured rows than k is skipped when not named, and refused when named", {
+
+  ## oc is measured on half the fixture's 60 rows
+  fx <- select_fixture(n_pool = 60)
+
+  run <- with_warnings(quiet_select(fx, k = 40))
+  w   <- of_class(run$warnings, "horizons_warning_skipped")
+
+  expect_length(w, 1L)
+  msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
+  expect_match(msg, "No training rows were drawn for oc: the library has fewer measured rows than `k` for it", fixed = TRUE)
+  expect_match(msg, "oc: 30 measured rows, k = 40.", fixed = TRUE)
+  expect_identical(run$value$selection$settings$properties, "clay")
+  expect_identical(run$value$selection$settings$k, c(clay = 40L))
+
+  err <- expect_error(quiet_select(fx, k = 40, properties = c("clay", "oc")),
+                      class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "oc: 30 measured rows, k = 40.", fixed = TRUE)
+
+  ## Global draws nothing, so k skips nothing there
+  g <- suppressWarnings(quiet_select(fx, k = 40, scope = "global"))
+  expect_identical(g$selection$settings$properties, c("clay", "oc"))
+
+})
+
+
+test_that("a library none of whose responses can be drawn for is refused", {
+
+  fx <- select_fixture(n_pool = 60)
+  fx$pool$data$analysis$oc   <- NA_real_
+  fx$pool$data$analysis$clay <- NA_real_
+
+  local_mocked_bindings(build_similarity_space = function(...) stop("the space was built"))
+
+  err <- expect_error(quiet_select(fx, k = 5), class = "horizons_error_input")
+  expect_match(conditionMessage(err), "None of the library's responses can be drawn for", fixed = TRUE)
+  expect_match(conditionMessage(err), "No measured rows: clay and oc", fixed = TRUE)
+
+})
+
+
+test_that("a library row flagged by an earlier step is left out of the space and the draw, with a line in the tree", {
+
+  fx   <- select_fixture(n_pool = 60)
+  base <- quiet_select(fx, k = 5, properties = "clay")
+  hit  <- base$data$analysis$sample_id[1]
+
+  ## Saved as a library file, so the space is cached
+  path <- file.path(withr::local_tempdir(), "library.qs2")
+  qs2::qs_save(with_flag(fx$pool, hit), path)
+  cache <- withr::local_tempdir()
+  withr::local_options(horizons.cache_dir = cache)
+
+  txt <- utils::capture.output(
+    run <- with_warnings(select_training(fx$targets, path, k = 5, properties = "clay",
+                                         control = control_horizons(verbose = TRUE)))
+  )
+  out <- run$value
+
+  ## Not drawn, not warned: the library's rows are its modelling data
+  expect_false(hit %in% out$data$analysis$sample_id)
+  expect_false(hit %in% out$selection$membership$pool_id)
+  expect_length(of_class(run$warnings, "horizons_warning_flagged"), 0L)
+  expect_true(any(grepl("1 flagged row of the library left out (see .flag)", txt, fixed = TRUE)))
+
+  ## The cached space was fit without it, and the next draw reads it
+  space <- qs2::qs_read(list.files(cache, pattern = "\\.space-", full.names = TRUE))$space
+  expect_identical(nrow(space$scores), 59L)
+  expect_false(hit %in% rownames(space$scores))
+
+  again <- suppressWarnings(select_training(fx$targets, path, k = 5, properties = "clay"))
+  expect_true(again$selection$search$cache$hit)
+  expect_identical(again$selection$membership, out$selection$membership)
+
+})
+
+
+test_that("a target flagged by an earlier step gets no training set, and is named in one flagged warning", {
+
+  fx  <- select_fixture(n_pool = 60)
+  ids <- fx$targets$data$analysis$sample_id
+  bad <- ids[2]
+
+  run <- with_warnings(select_training(with_flag(fx$targets, bad), fx$pool, k = 5, properties = "clay"))
+  out <- run$value
+  w   <- of_class(run$warnings, "horizons_warning_flagged")
+
+  expect_length(w, 1L)
+  expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])),
+               "1 target flagged by an earlier step was left out, so no training set was drawn for it", fixed = TRUE)
+  expect_identical(w[[1]]$log$ids[[1]], bad)
+
+  expect_false(bad %in% out$selection$membership$target_id)
+  expect_false(bad %in% out$selection$target_distances$target_id)
+
+  ## The others are drawn as they are without it
+  without <- suppressWarnings(select_training(subset_rows(fx$targets, ids[-2]), fx$pool, k = 5,
+                                              properties = "clay"))
+  expect_identical(out$selection$membership, without$selection$membership)
+  expect_identical(out$data$analysis$sample_id, without$data$analysis$sample_id)
+
+})
+
+
+test_that("every target flagged is refused before the library resolves, and every library row flagged once it has", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  every_target <- with_flag(fx$targets, fx$targets$data$analysis$sample_id)
+
+  with_mocked_bindings(
+    {
+      err <- expect_error(select_training(every_target, "kssl", k = 5), class = "horizons_error_input")
+      expect_match(conditionMessage(err), "Every target was flagged by an earlier step", fixed = TRUE)
+    },
+    resolve_source = function(...) stop("the library was resolved")
+  )
+
+  every_row <- with_flag(fx$pool, fx$pool$data$analysis$sample_id)
+
+  err <- expect_error(select_training(fx$targets, every_row, k = 5), class = "horizons_error_input")
+  expect_match(err$findings, "Every row of `library` was flagged by an earlier step", fixed = TRUE)
+
+})
+
+
+test_that("scope = 'global' returns the eligible rows the similarity space holds", {
+
+  fx   <- select_fixture(n_pool = 60)
+  pool <- with_flag(fx$pool, c("P001", "P002"))
+
+  out <- suppressWarnings(select_training(fx$targets, pool, k = 5, scope = "global"))
+
+  expect_identical(out$data$n_rows, 58L)
+  expect_false(any(c("P001", "P002") %in% out$data$analysis$sample_id))
+  expect_identical(out$selection$depth$n_eligible, 58L)
+
+  ## The pool's identity is still the library's
+  expect_identical(out$selection$pool$n_rows, 60L)
+
+})
+
+
+test_that("a PLS space with no more measured rows than ncomp is refused before it is built", {
+
+  fx <- select_fixture(n_pool = 60)
+  fx$pool$data$analysis$clay[-(1:3)] <- NA_real_
+
+  local_mocked_bindings(build_similarity_space = function(...) stop("the space was built"))
+
+  err <- expect_error(quiet_select(fx, k = 2, properties = "clay", space = "pls", ncomp = 3L),
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err),
+               "A PLS similarity space of 3 components needs more measured rows of clay than that; the library has 3.",
+               fixed = TRUE)
+
+  ## One more measured row passes, and reaches the space
+  fx$pool$data$analysis$clay[4] <- 10
+  expect_error(quiet_select(fx, k = 2, properties = "clay", space = "pls", ncomp = 3L),
+               "the space was built", fixed = TRUE)
+
+})
+
+
+test_that("a fixed cluster count above the targets the similarity space holds is refused", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  local_mocked_bindings(cluster_targets = function(...) stop("k-means ran"))
+
+  err <- expect_error(quiet_select(fx, k = 5, scope = "cluster", clusters = 9, cluster_min = 1),
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "`clusters` = 9 is more clusters than the 8 targets the similarity space holds.",
+               fixed = TRUE)
+
+  ## A flagged target left out can bring the targets below the count
+  targets <- with_flag(fx$targets, fx$targets$data$analysis$sample_id[8])
+
+  err <- expect_error(suppressWarnings(select_training(targets, fx$pool, k = 5, scope = "cluster",
+                                                       clusters = 8, cluster_min = 1)),
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "than the 7 targets", fixed = TRUE)
 
 })
 

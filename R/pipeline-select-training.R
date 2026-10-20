@@ -35,10 +35,12 @@
 #'   (k-means, count by silhouette unless `clusters` fixes it, clusters
 #'   under `cluster_min` merged into the nearest); one group per cluster.
 #' * `"sample"`: one group per target, its own `k` nearest.
-#' * `"global"`: no draw; the whole pool, kept so the comparison is one
-#'   argument away. `k` only sets how many rows the recorded `mean_k`
-#'   averages over, so a `k` above a property's measured rows is capped
-#'   there under global, where the drawing scopes refuse it.
+#' * `"global"`: no draw; every row the others draw from (the library's
+#'   rows at the depth asked for, less the flagged ones), kept so the
+#'   comparison is one argument away. `k` only sets how many rows the
+#'   recorded `mean_k` averages over, so a `k` above a property's measured
+#'   rows is capped there under global, where the drawing scopes refuse or
+#'   skip the property (see `properties`).
 #'
 #' For `"cluster"` and `"sample"` the return is still the single union, and
 #' fitting one model per group is the caller's loop over
@@ -138,12 +140,24 @@
 #' drew it. Under `scope = "global"` the same check runs, per property, in
 #' the same space and with the same width, and its exclusions and target
 #' distances are the ones a batch-scope call with the same arguments
-#' records. The flagged rows are recorded but stay in the returned rows,
-#' because global returns the whole pool by definition, so a comparison that
+#' records. The twins are recorded but stay in the returned rows, because
+#' global returns every row the others draw from, so a comparison that
 #' scores global against batch has to act on `x$selection$exclusions`
 #' itself. The membership table keeps the subtracted rows with
 #' `retained = FALSE` rather than dropping them, so the record still says
-#' what each neighbourhood was.
+#' what each neighbourhood was. When the subtraction leaves a property with
+#' no rows at all (every row drawn for it was some target's twin), the
+#' property is left out with one `horizons_warning_partial_failure` saying
+#' why, and the call fails with `horizons_error_selection_failed` only when
+#' it leaves every property empty.
+#'
+#' **Unusable spectra.** A target or library spectrum an earlier step has
+#' flagged (`.flag`, see [standardize()]) is left out of the similarity
+#' space and the draw. A flagged target gets no training set and is named in
+#' one `horizons_warning_flagged`; flagged library rows are left out as
+#' [evaluate()] and [fit()] leave them out, with a line in the verbose tree.
+#' The call is refused only when every target, or every library row, is
+#' flagged.
 #'
 #' **Units.** The pool and the targets are compared on raw absorbance
 #' magnitude before the similarity space is built. The comparison is of
@@ -208,8 +222,12 @@
 #' @param scope `character.` `"batch"`, `"cluster"`, `"sample"` or
 #'   `"global"`. Default: `"batch"`.
 #' @param properties `character or NULL.` Response columns of the pool to
-#'   draw for. `NULL` means all of them. Each needs at least one measured
-#'   pool row, under every scope. Default: `NULL`.
+#'   draw for. `NULL` means all of them. A property named here needs at
+#'   least one measured pool row at the depth asked for, under every scope,
+#'   and at least `k` under the drawing scopes, or the call is refused;
+#'   under `NULL` a response short of either is skipped, with one
+#'   `horizons_warning_skipped`, and the call is refused only when none is
+#'   left. Default: `NULL`.
 #' @param snv `logical.` SNV in the similarity space. Default: `TRUE`.
 #' @param derivative `integer.` Savitzky-Golay derivative order in the
 #'   similarity space; `0` disables the filter. Default: `1`.
@@ -278,7 +296,10 @@
 #'   columns at the wavenumbers the targets share with it, with every
 #'   response column the pool carried, three provenance columns with role
 #'   `meta` (`.drawn_by`, `.min_distance`, and `.group` except under
-#'   `scope = "sample"`), and the record in `x$selection`.
+#'   `scope = "sample"`), and the record in `x$selection`, whose
+#'   `settings$properties` are the properties drawn for (a skipped or
+#'   emptied property is not among them, so [configure()] warns when one is
+#'   chosen as the outcome).
 #'   `provenance$standardization` is the library's, describing the returned
 #'   axis: when only some of the library's columns are returned (targets on a
 #'   coarser or narrower grid), `n_wavelengths`, `wavelength_range` and `grid`
@@ -575,6 +596,20 @@ select_training <- function(x, library,
   ## two columns or more, and no gap (check_select_axis()).
   check_select_axis(predictor_wavenumbers(x), "x", "the targets")
 
+  ## A target an earlier step flagged gets no training set (decision 5), so
+  ## targets that are all flagged leave nothing to draw for.
+
+  target_flagged <- flagged_rows(x$data$analysis)
+
+  if (all(target_flagged)) {
+
+    abort_horizons(c(
+      "Every target was flagged by an earlier step, so there is nothing to draw for.",
+      "i" = "{.field .flag} names the step that could not use each one."
+    ), kind = "input")
+
+  }
+
   target_vars   <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
   restandardize <- !is.null(x$provenance$standardization)
 
@@ -607,8 +642,23 @@ select_training <- function(x, library,
   pool     <- validate_select_input(resolved$pool, arg = "library", what = "the pool")
   errors   <- check_pool_unpromoted(pool)
 
+  ## The library's rows an earlier step flagged are left out of the space
+  ## and the draw (decision 5), so a library that is all flagged has none.
+
+  pool_flagged <- flagged_rows(pool$data$analysis)
+
+  if (all(pool_flagged)) {
+
+    errors <- c(errors, cli::format_inline(
+      "Every row of {.arg library} was flagged by an earlier step, so there is nothing to draw from; {.field .flag} names the step"))
+
+  }
+
   ## Properties: the pool's responses ---------------------------------------
 
+  ## A property the user named is refused when it cannot be drawn for; one
+  ## taken from the pool's responses (properties = NULL) is skipped
+  named     <- !is.null(properties)
   responses <- pool$data$role_map$variable[pool$data$role_map$role == "response"]
 
   if (!length(responses)) {
@@ -715,6 +765,28 @@ select_training <- function(x, library,
   pm <- predictor_matrix(pool)
   tm <- predictor_matrix(x)
 
+  ## Rows an earlier step flagged leave the space and the draw first, as
+  ## every verb that computes over predictors leaves them (decision 5): they
+  ## may hold values the search's resampling cannot take. A target left out
+  ## gets no training set, and is named; the library's are its modelling
+  ## data, left out as evaluate() and fit() leave flagged rows, with a line
+  ## in the tree.
+
+  pm$matrix <- pm$matrix[!pool_flagged, , drop = FALSE]
+  tm$matrix <- tm$matrix[!target_flagged, , drop = FALSE]
+  usable    <- pool$data$analysis[!pool_flagged, , drop = FALSE]
+
+  if (any(target_flagged)) {
+
+    left_targets <- x$data$analysis$sample_id[target_flagged]
+
+    log_warning(collector, "flagged", c(
+      "{length(left_targets)} target{?s} flagged by an earlier step {?was/were} left out, so no training set was drawn for {?it/them}: {.val {utils::head(left_targets, 5)}}{if (length(left_targets) > 5) ', ...' else ''}.",
+      "i" = "{.field .flag} names the step that could not use each one."
+    ), ids = left_targets)
+
+  }
+
   sa <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
 
   ## Targets short of the library's range are searched on the overlap, in a
@@ -744,6 +816,13 @@ select_training <- function(x, library,
                ", targets ", if (sa$record$operation == "none") "already on it" else "resampled onto it",
                "\n"))
 
+    if (any(pool_flagged)) {
+
+      cat(paste0("\u2502  \u251C\u2500 ", sum(pool_flagged), " flagged row", if (sum(pool_flagged) > 1) "s",
+                 " of the library left out (see .flag)\n"))
+
+    }
+
   }
 
   ## ---------------------------------------------------------------------------
@@ -756,8 +835,8 @@ select_training <- function(x, library,
   ## property on its measured rows (space_rows = "measured") was removed on
   ## 2026-09-30: on KSSL it moved the drawn training set by about 6 %.
 
-  pool_ids <- pool$data$analysis$sample_id
-  resp_tbl <- pool$data$analysis[, c("sample_id", properties), drop = FALSE]
+  pool_ids <- usable$sample_id
+  resp_tbl <- usable[, c("sample_id", properties), drop = FALSE]
 
   ## Depth restricts the draw, not the space. A subsoil row stays in the
   ## space: the library is the population, and whether a row is subsoil
@@ -769,13 +848,13 @@ select_training <- function(x, library,
   ## A library that records no depth at all has nothing to restrict on, and
   ## the record says so rather than the default refusing a user's own pool.
 
-  depth_recorded <- "upper_depth_cm" %in% names(pool$data$analysis)
+  depth_recorded <- "upper_depth_cm" %in% names(usable)
   depth_applied  <- identical(depth, "topsoil") && depth_recorded
   eligible       <- rep(TRUE, length(pool_ids))
 
   if (depth_applied) {
 
-    upper <- pool$data$analysis$upper_depth_cm
+    upper <- usable$upper_depth_cm
 
     ## A character column compares as text, where "250" < 30 is TRUE, and
     ## the cut would silently let every depth through while saying it applied.
@@ -795,21 +874,97 @@ select_training <- function(x, library,
 
   }
 
-  ## A property no pool row has measured has no rows to draw from and no
-  ## rows to check twins against, under any scope. Stop here, before the
-  ## draw fails with a message naming none of that.
+  ## The property is the unit (decision 5) -----------------------------------
+
+  ## A property with no measured rows, or, under the drawing scopes, fewer
+  ## than k, has nothing to draw from: refused when the user named it,
+  ## skipped with a warning when it came with the pool's responses. Global
+  ## draws nothing, so k only sets the reach of mean_k there and is capped
+  ## at the measured rows (Step 3).
 
   n_measured <- vapply(properties, function(p) sum(!is.na(resp_tbl[[p]])), integer(1))
-
   unmeasured <- properties[n_measured < 1L]
+  thin       <- if (scope == "global") character() else setdiff(properties[n_measured < k_by[properties]], unmeasured)
 
-  if (length(unmeasured)) {
+  depth_hint <- if (depth_applied) c("i" = "Only topsoil rows (upper depth < {SELECT_TOPSOIL_MAX_CM} cm) count under {.code depth = \"topsoil\"}; {.code depth = \"all\"} draws from every depth.")
+  thin_rows  <- cli_escape(sprintf("%s: %d measured row%s, k = %d.", thin, n_measured[thin],
+                                   ifelse(n_measured[thin] == 1L, "", "s"), k_by[thin]))
+
+  if (named && length(unmeasured)) {
 
     abort_horizons(c(
       "{.arg library} has no measured rows for {.field {unmeasured}}.",
       "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the library first.",
-      if (depth_applied) c("i" = "Only topsoil rows (upper depth < {SELECT_TOPSOIL_MAX_CM} cm) count under {.code depth = \"topsoil\"}; {.code depth = \"all\"} draws from every depth.")
+      depth_hint
     ), kind = "input")
+
+  }
+
+  if (named && length(thin)) {
+
+    abort_horizons(c(
+      "{.arg library} has fewer measured rows than {.arg k} for {.field {thin}}.",
+      stats::setNames(thin_rows, rep("x", length(thin))),
+      "i" = "Lower {.arg k} for {cli::qty(thin)}{?it/them} (a named {.arg k} sets one per property), or bring more measured rows into the library.",
+      depth_hint
+    ), kind = "input")
+
+  }
+
+  if (length(unmeasured)) {
+
+    log_warning(collector, "skipped", c(
+      "No training rows were drawn for {.field {unmeasured}}: the library has no measured rows for {cli::qty(unmeasured)}{?it/them}.",
+      "i" = "Add the lab values to the library, or name the properties to draw for in {.arg properties}.",
+      depth_hint
+    ), ids = unmeasured)
+
+  }
+
+  if (length(thin)) {
+
+    log_warning(collector, "skipped", c(
+      "No training rows were drawn for {.field {thin}}: the library has fewer measured rows than {.arg k} for {cli::qty(thin)}{?it/them}.",
+      stats::setNames(thin_rows, rep("*", length(thin))),
+      "i" = "A named {.arg k} sets one per property.",
+      depth_hint
+    ), ids = thin)
+
+  }
+
+  properties <- setdiff(properties, c(unmeasured, thin))
+
+  if (!length(properties)) {
+
+    abort_horizons(c(
+      "None of the library's responses can be drawn for.",
+      "x" = if (length(unmeasured)) "No measured rows: {.field {unmeasured}}.",
+      stats::setNames(thin_rows, rep("x", length(thin))),
+      "i" = "Add the lab values to the library, or lower {.arg k}.",
+      depth_hint
+    ), kind = "input")
+
+  }
+
+  resp_tbl   <- resp_tbl[, c("sample_id", properties), drop = FALSE]
+  n_measured <- n_measured[properties]
+  k_by       <- k_by[properties]
+
+  ## A PLS space is fit on the property's measured rows at every depth, and
+  ## needs more of them than components
+
+  if (space == "pls") {
+
+    n_fit <- sum(!is.na(usable[[properties]]))
+
+    if (n_fit <= ncomp) {
+
+      abort_horizons(c(
+        "A PLS similarity space of {ncomp} component{?s} needs more measured rows of {.field {properties}} than that; the library has {n_fit}.",
+        "i" = "Lower {.arg ncomp}, or use {.code space = \"pca\"}."
+      ), kind = "input")
+
+    }
 
   }
 
@@ -877,7 +1032,7 @@ select_training <- function(x, library,
                            snv = space_settings$snv, derivative = space_settings$derivative,
                            window = space_settings$window, poly = space_settings$poly,
                            mask = mask, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
-                           y = if (space == "pls") pool$data$analysis[[properties]] else NULL,
+                           y = if (space == "pls") usable[[properties]] else NULL,
                            call = call)
 
   }
@@ -923,6 +1078,18 @@ select_training <- function(x, library,
   rm(lib_m)
 
   St <- project_similarity(sp, sa$matrix, sa$wavenumbers)
+
+  ## A fixed cluster count needs as many targets in the space, which the
+  ## flagged targets left out can bring below it
+
+  if (scope == "cluster" && !is.null(clusters) && clusters > nrow(St)) {
+
+    abort_horizons(c(
+      "{.arg clusters} = {clusters} is more clusters than the {nrow(St)} target{?s} the similarity space holds.",
+      "i" = "Lower {.arg clusters}, or leave it {.code NULL} to choose the count by silhouette."
+    ), kind = "input")
+
+  }
 
   ## The width the filter actually spans once rounded to whole points.
 
@@ -1007,8 +1174,8 @@ select_training <- function(x, library,
   ## for its record and not its rows: the
   ## exclusions and target_distances are kept, row for row the ones batch
   ## records, and the membership and short draws are discarded below. The
-  ## flagged rows stay in the return, because global returns the whole pool
-  ## by definition.
+  ## twins stay in the return, because global returns every row the other
+  ## scopes draw from, by definition.
   ##
   ## Global trains on every measured row, so it needs every twin in the
   ## pool, not only those before a k-th kept row. draw_neighbours() records
@@ -1023,20 +1190,14 @@ select_training <- function(x, library,
   ##
   ## k is capped at each property's measured rows under global, because
   ## global draws nothing and k only sets the reach of mean_k; the drawing
-  ## scopes refuse such a k in draw_neighbours().
+  ## scopes refused or skipped such a property in Step 2.
 
   k_draw <- if (scope == "global") pmin(k_by, n_measured) else k_by
-
-  short_hint <- if (depth_applied) {
-    cli::format_inline("Only topsoil rows count under {.code depth = \"topsoil\"}; {.code depth = \"all\"} draws from every depth")
-  } else {
-    NULL
-  }
 
   draw <- draw_neighbours(St, sp$scores, responses = resp_tbl, k = k_draw,
                           properties = properties, metric = metric, sdev = sp$sdev,
                           chunk_size = chunk_size, twin_ratio = twin_ratio,
-                          space_label = "all", short_hint = short_hint)
+                          space_label = "all")
 
   if (scope == "global") {
 
@@ -1108,10 +1269,12 @@ select_training <- function(x, library,
   }
 
   ## A property whose every drawn row was some target's twin has no training
-  ## rows left, and the subset below would fail on an empty keep with a
-  ## message naming neither the property nor the twin rule. At a twin_ratio
-  ## near 1 the threshold reaches ordinary neighbours and this is what
-  ## happens, so say that.
+  ## rows left. The property is the unit (decision 5): it is left out with a
+  ## partial_failure warning saying why, and the call fails only when every
+  ## property is emptied. At a twin_ratio near 1 the threshold reaches
+  ## ordinary neighbours and this is what happens, so the warning says so.
+
+  emptied <- character()
 
   if (scope != "global") {
 
@@ -1122,29 +1285,48 @@ select_training <- function(x, library,
 
     }, logical(1))]
 
-    if (length(emptied)) {
+  }
 
-      ### Whether a lower twin_ratio would bring the rows back. It cannot when
-      ### every drawn row is some target's own copy, at distance zero to
-      ### rounding, below any ratio. is_exact_copy() is the rule, the same
-      ### one that writes "exact" into the record's reason column.
+  if (length(emptied)) {
 
-      ex     <- draw$exclusions
-      copies <- ex$pool_id[is_exact_copy(ex$distance, ex$reference_distance)]
-      drawn  <- unique(membership$pool_id[membership$property %in% emptied])
+    ### Whether a lower twin_ratio would bring a property's rows back. It
+    ### cannot when every row drawn for it is some target's own copy, at
+    ### distance zero to rounding, below any ratio. is_exact_copy() is the
+    ### rule, the same one that writes "exact" into the record's reason
+    ### column.
 
-      cause <- if (all(drawn %in% copies)) {
-        "Each was a target's own copy, at distance zero, so the targets are in the pool; a lower {.arg twin_ratio} cannot help. Remove the targets from the pool"
-      } else {
-        "A twin sits below {.arg twin_ratio} = {twin_ratio} times its target's reference distance, and at this value ordinary neighbours are being flagged; lower it (the default is {SELECT_TWIN_RATIO})"
-      }
+    ex      <- draw$exclusions
+    copies  <- ex$pool_id[is_exact_copy(ex$distance, ex$reference_distance)]
+    is_copy <- vapply(emptied, function(p) {
+      all(unique(membership$pool_id[membership$property == p]) %in% copies)
+    }, logical(1))
 
-      cli::cli_abort(c(
-        "Every row drawn for {.field {emptied}} was flagged as some target's twin, so the training set has none left for {cli::qty(emptied)}{?it/them}",
-        "i" = cause
-      ), class = "horizons_input_error")
+    causes <- cli::ansi_strip(ifelse(
+      is_copy,
+      cli::format_inline("Each row was a target's own copy, at distance zero, so the targets are in the pool; a lower {.arg twin_ratio} cannot help. Remove the targets from the pool."),
+      cli::format_inline("A twin sits below {.arg twin_ratio} = {twin_ratio} times its target's reference distance, and at this value ordinary neighbours are being flagged; lower it (the default is {SELECT_TWIN_RATIO}).")
+    ))
+
+    by_cause <- split(emptied, causes)
+    bullets  <- if (length(by_cause) == 1L) names(by_cause) else {
+      paste0(vapply(by_cause, paste, character(1), collapse = ", "), ": ", names(by_cause))
+    }
+    bullets <- stats::setNames(cli_escape(bullets), rep("i", length(bullets)))
+
+    if (length(emptied) == length(properties)) {
+
+      abort_horizons(c(
+        "Every row drawn for {.field {emptied}} was flagged as some target's twin, so there is no training set.",
+        bullets
+      ), kind = "run", class = "horizons_error_selection_failed",
+         results = tibble::tibble(property = unname(emptied), cause = unname(causes)))
 
     }
+
+    log_warning(collector, "partial_failure", c(
+      "Every row drawn for {.field {emptied}} was flagged as some target's twin, so {cli::qty(emptied)}{?it was/they were} left out of the training set.",
+      bullets
+    ), ids = emptied)
 
   }
 
@@ -1257,7 +1439,7 @@ select_training <- function(x, library,
 
   out$selection <- list(
     settings = list(
-      k = k_by, scope = scope, properties = properties,
+      k = k_by, scope = scope, properties = setdiff(properties, emptied),
       snv = snv, derivative = as.integer(derivative), window = window, window_points = window_points,
       poly = as.integer(poly), window_cm = window_cm, mask = mask,
       space = space, ncomp = ncomp, sdev_floor = sdev_floor,
@@ -1274,7 +1456,8 @@ select_training <- function(x, library,
                             shared_range = range(as.numeric(sub("^wn_", "", cols$shared))),
                             target_only  = as.numeric(sub("^wn_", "", cols$target_only))),
     search           = c(sa$record, list(cache = cache)),
-    pool             = list(n_rows = length(pool_ids), id_hash = digest::digest(sort(pool_ids, method = "radix"))),
+    pool             = list(n_rows = nrow(pool$data$analysis),
+                            id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix"))),
     targets          = list(source  = x$provenance$spectra_source,
                             n_rows  = nrow(x$data$analysis),
                             id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),

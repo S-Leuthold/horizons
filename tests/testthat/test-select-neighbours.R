@@ -606,18 +606,6 @@ test_that("draw_neighbours() labels the space it measured in", {
 })
 
 
-test_that("draw_neighbours() aborts when a property has fewer measured rows than k", {
-
-  s   <- fixture_scores(n_pool = 20)
-  rsp <- s$fx$pool$data$analysis[, c("sample_id", "clay", "oc")]   # oc has 10 measured
-
-  expect_error(draw_neighbours(s$St, s$Sp, responses = rsp, k = 15L,
-                               properties = "oc", metric = "euclidean"),
-               regexp = "oc.*10", class = "horizons_input_error")
-
-})
-
-
 ## =============================================================================
 ## cluster_targets()
 ## =============================================================================
