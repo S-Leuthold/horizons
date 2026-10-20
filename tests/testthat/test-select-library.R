@@ -79,6 +79,12 @@ test_that("without consent a non-interactive session downloads nothing", {
   expect_true(dir.exists(cache))
   expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
 
+  ## A yes builds it
+  local_mocked_bindings(askYesNo = function(...) TRUE, .package = "utils")
+  res <- suppressMessages(resolve_source("mini", ask = TRUE, verbose = FALSE))
+  expect_identical(res$record$form, "registered")
+  expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
+
 })
 
 test_that("the credit and the download's size are printed before any download", {
@@ -122,6 +128,7 @@ test_that("first use builds and caches; later uses read the cache", {
   again <- resolve_source("mini", verbose = FALSE)
 
   expect_equal(again$pool$data$analysis, res$pool$data$analysis)
+  expect_output(resolve_source("mini", verbose = TRUE), "v0 (cached)", fixed = TRUE)
 
   ## A cache file that holds another version of the library is refused, not read
   lib <- qs2::qs_read(file.path(cache, "mini_v0.qs2"))

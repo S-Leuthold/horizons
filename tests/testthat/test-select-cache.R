@@ -282,10 +282,13 @@ test_that("an unreadable or foreign cache file is rebuilt, not trusted, with a n
   writeLines("not a space", f)
 
   x   <- mini_targets(m$pool)
-  out <- suppressWarnings(select_training(x, "mini", k = 5L))
+  txt <- utils::capture.output(
+    out <- suppressWarnings(select_training(x, "mini", k = 5L, control = control_horizons(verbose = TRUE)))
+  )
 
   expect_false(out$selection$search$cache$hit)
   expect_s3_class(qs2::qs_read(f), "horizons_space_cache")
+  expect_true(any(grepl("The cached similarity space could not be used; rebuilding it", txt, fixed = TRUE)))
 
   notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
   expect_identical(nrow(notes), 1L)
@@ -396,8 +399,12 @@ test_that("a library narrower than the default window is cached, and its space l
 
   ## Act
   expect_no_warning(
-    res <- suppressMessages(resolve_source("mini", verbose = FALSE, collector = collector))
+    txt <- utils::capture.output(
+      res <- suppressMessages(resolve_source("mini", verbose = TRUE, collector = collector))
+    )
   )
+  expect_true(any(grepl("narrower than the default window, so its similarity space is built at the first draw", txt,
+                        fixed = TRUE)))
 
   ## Assert: the library is built and cached, no space was written, and the
   ## note says why
@@ -430,8 +437,13 @@ test_that("a first-use space that fails to build is a note, and stops the call u
     real(...)
   })
 
-  out   <- suppressWarnings(suppressMessages(select_training(x, "mini", k = 5L)))
+  txt <- utils::capture.output(
+    out <- suppressWarnings(suppressMessages(select_training(x, "mini", k = 5L,
+                                                             control = control_horizons(verbose = TRUE))))
+  )
   notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+
+  expect_true(any(grepl("could not be built now; the first draw will build it", txt, fixed = TRUE)))
 
   expect_identical(nrow(notes), 1L)
   expect_match(notes$message, "similarity space could not be built at first use; the first draw builds it", fixed = TRUE)
@@ -472,13 +484,16 @@ test_that("a library built but not moved into the cache is returned, with one sk
   )
 
   warned <- list()
-  out <- withCallingHandlers(
-    suppressMessages(select_training(x, "mini", k = 5L)),
-    warning = function(w) {
-      warned[[length(warned) + 1L]] <<- w
-      invokeRestart("muffleWarning")
-    }
+  txt <- utils::capture.output(
+    out <- withCallingHandlers(
+      suppressMessages(select_training(x, "mini", k = 5L, control = control_horizons(verbose = TRUE))),
+      warning = function(w) {
+        warned[[length(warned) + 1L]] <<- w
+        invokeRestart("muffleWarning")
+      }
+    )
   )
+  expect_true(any(grepl("mini v0 built, but not cached", cli::ansi_strip(txt), fixed = TRUE)))
 
   skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), warned)
   expect_length(skipped, 1L)
@@ -554,9 +569,13 @@ test_that("a cached space whose rows are not the library's is rebuilt over, with
   rownames(obj$space$scores) <- rev(rownames(obj$space$scores))
   qs2::qs_save(obj, f)
 
-  ## A rebuild costs only time, once: a note on the log, not a warning
+  ## A rebuild costs only time, once: a note on the log and a line in the
+  ## tree, not a warning
   x   <- mini_targets(m$pool)
-  out <- suppressWarnings(select_training(x, "mini", k = 5L))
+  txt <- utils::capture.output(
+    out <- suppressWarnings(select_training(x, "mini", k = 5L, control = control_horizons(verbose = TRUE)))
+  )
+  expect_true(any(grepl("did not match this library's rows; rebuilding it", txt, fixed = TRUE)))
 
   notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
   expect_identical(nrow(notes), 1L)
