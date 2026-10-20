@@ -351,7 +351,7 @@ test_that("the recipe refuses a MIR table that is not on the entry's grid", {
 
 })
 
-test_that("the recipe maps every registered property from its own column, decompressing in place", {
+test_that("the recipe maps every registered property from its own column, decompressing beside its sources", {
 
   ## A lab table carrying every property the registry maps, each column its
   ## own values, so a property read from the wrong column or dropped shows
@@ -365,6 +365,7 @@ test_that("the recipe maps every registered property from its own column, decomp
     cbind(lab["id.layer_uuid_txt"], vals)
   }, table = "lab")
   lab_ids <- utils::read.csv(gzfile(rel$raw[["lab"]]))$id.layer_uuid_txt
+  md5     <- tools::md5sum(rel$raw)
 
   pool <- build_ossl_library(rel$raw, rel$entry, verbose = FALSE)
   a    <- pool$data$analysis
@@ -380,9 +381,11 @@ test_that("the recipe maps every registered property from its own column, decomp
   }
 
   ## The sources were decompressed beside the downloads, in the cache's raw
-  ## directory rather than the session's temporary one, and the .gz removed
+  ## directory rather than the session's temporary one, and each source is
+  ## still there, unchanged: a build pointed at a directory of published
+  ## files must not consume them
   expect_true(all(file.exists(sub("\\.gz$", "", rel$raw))))
-  expect_false(any(file.exists(rel$raw)))
+  expect_identical(tools::md5sum(rel$raw), md5)
 
 })
 

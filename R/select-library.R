@@ -740,8 +740,13 @@ read_ossl_table <- function(path, cols) {
 
 #' Decompress a .gz file next to itself with base R
 #'
+#' @description
+#' The source is left as it is. A registered library's build decompresses
+#' into the per-process raw directory under the cache, which is removed
+#' whole when the build ends, so nothing is left behind.
+#'
 #' @return The path to read: the decompressed file, or `path` unchanged when
-#'   it is not gzipped. The .gz is removed once the copy is complete.
+#'   it is not gzipped.
 #' @noRd
 decompress_gz <- function(path) {
 
@@ -761,7 +766,6 @@ decompress_gz <- function(path) {
 
   }
 
-  unlink(path)
   out
 
 }
