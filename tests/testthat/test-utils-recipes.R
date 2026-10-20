@@ -672,12 +672,13 @@ describe("transform_spectra_matrix()", {
 
   })
 
-  it("is never given an unknown method: the step refuses one when it is added (#199)", {
+  it("is never given an unknown method, so one is a bug in its caller (#199)", {
 
-    rec <- recipes::recipe(~ ., data = as.data.frame(matrix(rnorm(41), 1)))
-
-    expect_error(step_transform_spectra(rec, dplyr::everything(), preprocessing = "nope"),
-                 "`preprocessing` must be one of", fixed = TRUE, class = "horizons_error_input")
+    ## The step refuses an unknown method when it is added
+    ## (test-step-transform-spectra.R); reaching here with one is internal
+    expect_error(horizons:::transform_spectra_matrix(matrix(rnorm(41), 1), "nope"),
+                 'Unknown preprocessing method "nope"', fixed = TRUE,
+                 class = "horizons_error_internal")
 
   })
 

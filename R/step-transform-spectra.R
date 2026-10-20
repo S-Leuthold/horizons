@@ -56,9 +56,6 @@ step_transform_spectra <- function(recipe,
 
   terms <- rlang::enquos(...)
 
-  ## An even window has no centre point, and a window under 5 cannot fit the
-  ## cubic deriv2 needs. Either would otherwise build, prep, and fail at bake
-  ## inside prospectr (or, for raw and snv, trim a fractional edge).
   if (!rlang::is_string(preprocessing) || !preprocessing %in% VALID_PREPROCESSING) {
 
     abort_horizons(c(
@@ -68,6 +65,9 @@ step_transform_spectra <- function(recipe,
 
   }
 
+  ## An even window has no centre point, and a window under 5 cannot fit the
+  ## cubic deriv2 needs. Either would otherwise build, prep, and fail at bake
+  ## inside prospectr (or, for raw and snv, trim a fractional edge).
   if (!is_valid_sg_window(window_size)) {
 
     abort_horizons(c(
@@ -460,7 +460,10 @@ transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
     "deriv1"     = sg(X, m = 1, p = 1),
     "deriv2"     = sg(X, m = 2, p = 3),
     "snv_deriv1" = sg(snv(X), m = 1, p = 1),
-    "snv_deriv2" = sg(snv(X), m = 2, p = 3)
+    "snv_deriv2" = sg(snv(X), m = 2, p = 3),
+
+    ### step_transform_spectra() checks the method when it is added (#199)
+    abort_horizons("Unknown preprocessing method {.val {preprocessing}}.", kind = "internal")
 
   )
 

@@ -168,6 +168,7 @@ test_that("standardize() refuses water-band removal that would leave nothing, an
                       "Water band removal would delete all wavelength data", fixed = TRUE,
                       class = "horizons_error_input")
   expect_match(conditionMessage(err), "Use `remove_water = FALSE`, or a wider `trim`", fixed = TRUE)
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "(1580 to 1720 and 3100 to 3700 cm-1)", fixed = TRUE)
   expect_identical(rlang::call_name(err$call), "standardize")
 
   ## A spline needs two points: one column cannot be resampled

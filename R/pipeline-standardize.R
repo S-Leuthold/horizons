@@ -407,9 +407,11 @@ remove_water_bands <- function(spectra_matrix, wavelengths, call = rlang::caller
 
   if (length(keep_idx) == 0) {
 
+    water_text <- paste(vapply(WATER_BANDS, paste, character(1), collapse = " to "), collapse = " and ")
+
     abort_horizons(c(
       "Water band removal would delete all wavelength data.",
-      "i" = "The axis left by the trim and the resampling lies wholly inside the water bands (1580 to 1720 and 3100 to 3700 cm-1).",
+      "i" = "The axis left by the trim and the resampling lies wholly inside the water bands ({water_text} cm-1).",
       "i" = "Use {.code remove_water = FALSE}, or a wider {.arg trim}."
     ), kind = "input", call = call)
 
