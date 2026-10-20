@@ -457,7 +457,8 @@ missing_k <- function(k, properties) {
 #' returning a thinner neighbourhood. So is a target whose distances are all
 #' `NA`, which `metric = "cosine"` produces for a row on the pool's centroid:
 #' the ordering behind such a draw is the pool's own row order, so nothing is
-#' drawn for it at all.
+#' drawn for it at all. `select_training()` reports both in one `coverage`
+#' warning; this function raises nothing.
 #'
 #' @param St [Matrix.] Target scores, rows named.
 #' @param Sp [Matrix.] Pool scores, rows named.
@@ -556,8 +557,6 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
 
     }
 
-    undefined <- character(0)
-
     for (i in seq_len(nrow(St))) {
 
       tid  <- rownames(St)[i]
@@ -578,8 +577,6 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
           k_drawn     = 0L,
           reason      = "no defined distance to any pool row"
         )
-
-        undefined <- c(undefined, tid)
 
         next
 
@@ -637,16 +634,6 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
         nearest   = unname(dist[take_at][1]),
         mean_k    = mean(dist[take_at])
       )
-
-    }
-
-    if (length(undefined)) {
-
-      cli::cli_warn(c(
-        "{length(undefined)} target{?s} ha{?s/ve} no defined distance to any pool row for {.field {p}}; nothing was drawn for {?it/them}",
-        "x" = "{.val {utils::head(undefined, 5)}}{if (length(undefined) > 5) ', ...' else ''}",
-        "i" = "{.arg metric = \"cosine\"} has no angle for a row on the pool's centroid, since the scores are mean-centred; use {.val euclidean} or {.val mahalanobis} for these targets"
-      ), class = "horizons_select_warning")
 
     }
 

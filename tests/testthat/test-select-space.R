@@ -133,7 +133,7 @@ test_that("transform_similarity() aborts when the mask leaves too few columns", 
 
   ## Everything masked
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers, mask = rbind(c(0, 5000))),
-               regexp = "column", class = "horizons_input_error")
+               regexp = "column", class = "horizons_error_input")
 
   ## The floor is an argument, so a caller that needs room can ask for it
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers, min_cols = 10000L),
@@ -267,19 +267,22 @@ test_that("build_similarity_space() accepts a coarse but gap-free pool", {
 })
 
 
-test_that("build_similarity_space() aborts when a mask takes almost the whole spectrum", {
+test_that("build_similarity_space() refuses a mask that leaves too little to decompose, naming no cap", {
 
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  ## The message names the mask, because the mask is the fault
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, mask = rbind(c(0, 5000))),
-               regexp = "masked range", class = "horizons_input_error")
+  ## A mask over everything leaves no column. Most of the space masked is
+  ## allowed, and the verb's tree says how much the mask took.
+  err <- expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, mask = rbind(c(0, 5000))),
+                      regexp = "left with 0 columns, fewer than the 2", class = "horizons_error_input")
 
   ## And it does not name a component cap the caller never set
-  err <- tryCatch(build_similarity_space(pm$matrix, pm$wavenumbers, mask = rbind(c(0, 5000))),
-                  horizons_input_error = function(e) conditionMessage(e))
-  expect_false(grepl("cap", err))
+  expect_false(grepl("cap", conditionMessage(err)))
+
+  ## A mask over all but a stretch runs
+  sp <- build_similarity_space(pm$matrix, pm$wavenumbers, mask = rbind(c(1100, 5000), c(0, 1000)))
+  expect_length(sp$wavenumbers, 24L)
 
 })
 

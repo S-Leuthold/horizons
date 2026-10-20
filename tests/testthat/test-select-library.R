@@ -267,37 +267,6 @@ test_that("a cached library that no longer meets the object contract stops, nami
 
 })
 
-test_that("a library built but not moved into the cache stops, classed, and leaves the cache empty", {
-
-  ## The rename after a successful write fails only on a locked or network
-  ## filesystem; here it is made to fail, after the library was written to
-  ## its temporary name in the cache.
-  entry <- make_mini_ossl(withr::local_tempdir())
-  cache <- local_mini_registry(entry)
-  withr::local_options(horizons.library_download = TRUE)
-
-  written <- NULL
-
-  with_mocked_bindings(
-    expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
-                 "library was built but could not be moved into the cache", fixed = TRUE,
-                 class = "horizons_build_error"),
-    file.rename = function(from, to) {
-      written <<- file.exists(from)
-      FALSE
-    },
-    .package = "base"
-  )
-
-  ## The library was on disk under its temporary name when the rename failed;
-  ## the failed build removes it and the raw downloads rather than leaving
-  ## them in the cache.
-  expect_true(written)
-  expect_true(dir.exists(cache))
-  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
-
-})
-
 ## A mini release whose `table` ("mir", "lab" or "site") has been through
 ## `edit`, a function of the table as a data frame, with the raw paths
 ## build_ossl_library() takes.
@@ -634,7 +603,8 @@ test_that("resemblance is measured against the rows the draw can reach", {
   beyond_w <- Filter(function(w) grepl("beyond the pool", conditionMessage(w)), warned)
 
   expect_length(beyond_w, 1L)
-  expect_s3_class(beyond_w[[1]], "horizons_select_warning")
+  expect_s3_class(beyond_w[[1]], "horizons_warning_applicability")
+  expect_identical(beyond_w[[1]]$log$ids[[1]], beyond$target_id)
 
   msg <- gsub("\\s+", " ", conditionMessage(beyond_w[[1]]))
   expect_match(msg, sprintf("%d targets sit beyond", nrow(beyond)), fixed = TRUE)
@@ -784,7 +754,7 @@ test_that("a skipped resemblance check warns and never reports zero targets out"
   expect_warning(
     printed <- capture.output(out <- select_training(fx$targets, fx$pool, k = 5L, properties = "clay",
                                                      control = control_horizons(verbose = TRUE))),
-    "resemblance check did not run", class = "horizons_select_warning"
+    "resemblance check did not run", class = "horizons_warning_skipped"
   )
   expect_identical(out$selection$resemblance$skipped,
                    "only 20 rows the draw can reach; the check needs 30")

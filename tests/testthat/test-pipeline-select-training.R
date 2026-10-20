@@ -619,7 +619,7 @@ test_that("select_training() warns when pool and targets are in different units"
   fx <- select_fixture(n_pool = 60, target_scale = 100)
 
   w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 5),
-                      regexp = "photometric units", class = "horizons_select_warning")
+                      regexp = "photometric units", class = "horizons_warning_input")
 
   u <- out$selection$units
   expect_true(u$mismatch)
@@ -680,7 +680,7 @@ test_that("the unit check catches a log-base difference and lets an instrument g
   log_base <- select_fixture(n_pool = 30, target_scale = 2.303)
 
   expect_warning(select_training(log_base$targets, log_base$pool, k = 5),
-                 regexp = "photometric units", class = "horizons_select_warning")
+                 regexp = "photometric units", class = "horizons_warning_input")
 
 })
 
@@ -757,7 +757,7 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
   k  <- 60L
 
   w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = k, properties = "clay"),
-                      regexp = "could not reach k", class = "horizons_select_warning")
+                      regexp = "could not reach k", class = "horizons_warning_coverage")
 
   sd_tbl <- out$selection$short_draws
   expect_named(sd_tbl, c("target_id", "property", "k_requested", "k_drawn", "reason"))
@@ -766,9 +766,10 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
   expect_true(all(sd_tbl$k_requested == k))
   expect_true(all(sd_tbl$k_drawn < k))
 
-  ## The warning names the shortest draw
+  ## The warning names the shortest draw, and its log row the targets
   expect_match(gsub("\\s+", " ", conditionMessage(w)),
                sprintf("Smallest: %d of %d rows, on clay", min(sd_tbl$k_drawn), k), fixed = TRUE)
+  expect_setequal(w$log$ids[[1]], unique(sd_tbl$target_id))
 
   ## An ordinary draw records nothing and warns not at all
   ok <- quiet_select(fx, k = 10, properties = "clay")
@@ -778,6 +779,180 @@ test_that("a draw that cannot reach k is recorded and warned about once", {
   expect_no_warning(all_rows <- select_training(fx$targets, fx$pool, k = k, scope = "global",
                                                 properties = "clay"))
   expect_identical(nrow(all_rows$selection$short_draws), 0L)
+
+})
+
+
+test_that("a target with no defined distance is one coverage warning, with the cosine remedy", {
+
+  ## A target on the pool's centroid has no angle to any pool row under
+  ## cosine. The draw records it as a short draw of nothing; the verb says
+  ## so once, naming it.
+  fx   <- select_fixture(n_pool = 60)
+  real <- project_similarity
+
+  local_mocked_bindings(project_similarity = function(...) {
+    St <- real(...)
+    St[1, ] <- 0
+    St
+  })
+
+  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, properties = "clay",
+                                             metric = "cosine"),
+                      class = "horizons_warning_coverage")
+
+  bad <- fx$targets$data$analysis$sample_id[1]
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_match(msg, "1 target had no defined distance to any pool row, so nothing was drawn for it", fixed = TRUE)
+  expect_match(msg, "use \"euclidean\" or \"mahalanobis\" for these targets", fixed = TRUE)
+  expect_identical(w$log$ids[[1]], bad)
+  expect_false(bad %in% out$selection$membership$target_id)
+  expect_identical(out$selection$short_draws$k_drawn[out$selection$short_draws$target_id == bad], 0L)
+
+  ## With no distance it is not beyond the pool's spread either: no row of
+  ## the record, or of the log, without an id
+  expect_false(anyNA(out$selection$resemblance$beyond$target_id))
+  expect_false(anyNA(unlist(out$log$ids)))
+
+})
+
+
+test_that("a library row with no defined distance is left out of the resemblance reference", {
+
+  ## Under cosine a row on the pool's centroid has no angle, so no nearest
+  ## other row. A library whose rows pair off around one of them puts that
+  ## row exactly on the centroid: integer spectra, no SNV and no derivative,
+  ## so the centring is exact.
+  fx <- select_fixture(n_pool = 60)
+  p  <- length(fx$target_wn)
+
+  centre <- rep(10, p)
+  d      <- withr::with_seed(9, matrix(sample(-3:3, 15 * p, replace = TRUE), 15))
+  m      <- rbind(centre, sweep(d, 2, centre, "+"), sweep(-d, 2, centre, "+"))
+  colnames(m) <- paste0("wn_", fx$target_wn)
+
+  ids <- sprintf("C%03d", seq_len(nrow(m)))
+  utils::capture.output({
+    pool <- spectra(dplyr::bind_cols(tibble::tibble(sample_id = ids), tibble::as_tibble(m)))
+    pool <- add_response(pool, tibble::tibble(sample_id = ids, clay = seq_along(ids)), variable = "clay")
+  })
+
+  out <- suppressWarnings(select_training(fx$targets, pool, k = 5, properties = "clay", snv = FALSE,
+                                          derivative = 0L, metric = "cosine"))
+
+  expect_true(is.finite(out$selection$resemblance$threshold))
+  expect_false("C001" %in% out$selection$membership$pool_id)
+
+})
+
+
+test_that("every warning is recorded on the log, one row per topic, before it is raised", {
+
+  ## Units, a draw short of k and the resemblance check not run, in one call
+  fx   <- select_fixture(n_pool = 60, target_scale = 100)
+  args <- list(k = 60L, properties = "clay",
+               control = control_horizons(min_resemblance_rows = 1000L))
+
+  warned <- list()
+  out <- withCallingHandlers(
+    do.call(select_training, c(list(fx$targets, fx$pool), args)),
+    warning = function(w) {
+      warned[[length(warned) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  rows <- out$log[out$log$verb == "select_training", ]
+
+  ## Every warning a horizons warning with a topic, one per topic, each
+  ## carrying its own row
+  expect_true(all(vapply(warned, inherits, logical(1), "horizons_warning")))
+  expect_identical(rows$type, rep("warning", 3L))
+  expect_identical(rows$topic, c("input", "coverage", "skipped"))
+  expect_identical(vapply(warned, function(w) w$log$topic, character(1)), rows$topic)
+  expect_true(fx$twin_id %in% rows$ids[[2]])
+
+  ## The record does not depend on the signal
+  quiet <- suppressWarnings(do.call(select_training, c(list(fx$targets, fx$pool), args)))
+  expect_identical(quiet$log, out$log)
+
+  ## Under warn = 2, one error that keeps the selection and its warnings
+  withr::local_options(warn = 2)
+  err <- expect_error(do.call(select_training, c(list(fx$targets, fx$pool), args)),
+                      class = "horizons_error_promoted_warnings")
+
+  expect_identical(err$log$topic, c("input", "coverage", "skipped"))
+  expect_s3_class(err$object, "horizons_data")
+  expect_identical(err$object$log, out$log)
+
+})
+
+
+test_that("columns the library lacks and draws short of k are one coverage warning", {
+
+  ## One row per topic per call: the targets' columns past the library's
+  ## ends and the draws short of k share the coverage row, its ids holding
+  ## both
+  fx <- select_fixture(n_pool = 60, target_range = c(4096, 504))
+
+  w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 60L, properties = "clay"),
+                      class = "horizons_warning_coverage")
+
+  row <- out$log[out$log$verb == "select_training" & out$log$topic %in% "coverage", ]
+
+  expect_identical(nrow(row), 1L)
+  expect_identical(w$log, row)
+  expect_true(all(c("wn_4096", fx$twin_id) %in% row$ids[[1]]))
+  expect_match(row$message, "2 coverage warnings in `select_training()`", fixed = TRUE)
+
+})
+
+
+test_that("a mask over most of the similarity space runs, and the tree says how much it took", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  ## The fixture's pool runs 600 to 4000 cm-1; this mask leaves 400 to 600
+  ## of it, and 1000 to 1100 cm-1
+  mask <- rbind(c(1100, 5000), c(0, 1000))
+
+  txt <- utils::capture.output(
+    out <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay", mask = mask,
+                                            control = control_horizons(verbose = TRUE)))
+  )
+
+  expect_s3_class(out, "horizons_data")
+  line <- grep("Mask:", txt, value = TRUE)
+  expect_length(line, 1L)
+  expect_match(line, "Mask: removed 817 of the 841 columns of the similarity space; over 90 %, so check the ranges are in cm", fixed = TRUE)
+
+  ## A mask of a band says how much it took, without the hint
+  txt <- utils::capture.output(
+    suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay",
+                                     mask = rbind(c(1580, 1720)),
+                                     control = control_horizons(verbose = TRUE)))
+  )
+  line <- grep("Mask:", txt, value = TRUE)
+  expect_match(line, "Mask: removed 36 of the 841 columns of the similarity space", fixed = TRUE)
+  expect_no_match(line, "90 %", fixed = TRUE)
+
+  ## And nothing is printed without verbose
+  expect_silent(suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay",
+                                                 mask = mask)))
+
+})
+
+
+test_that("select_training() refuses keep_traces, which it has no row to keep on", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  err <- expect_error(select_training(fx$targets, fx$pool, k = 5,
+                                      control = control_horizons(keep_traces = TRUE)),
+                      class = "horizons_error_input")
+
+  expect_match(conditionMessage(err), "keep_traces: evaluate(), fit(), ensemble()", fixed = TRUE)
 
 })
 

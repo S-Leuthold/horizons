@@ -274,7 +274,7 @@ test_that("targets short by more than 50 cm-1 are searched on the overlap too, n
 
 })
 
-test_that("an unreadable or foreign cache file is rebuilt, not trusted", {
+test_that("an unreadable or foreign cache file is rebuilt, not trusted, with a note", {
 
   m <- use_mini()
   f <- file.path(m$cache, space_files(m$cache))
@@ -286,9 +286,13 @@ test_that("an unreadable or foreign cache file is rebuilt, not trusted", {
   expect_false(out$selection$search$cache$hit)
   expect_s3_class(qs2::qs_read(f), "horizons_space_cache")
 
+  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+  expect_identical(nrow(notes), 1L)
+  expect_match(notes$message, "could not be read or was built for other settings, so it was rebuilt", fixed = TRUE)
+
 })
 
-test_that("a space that cannot be cached is still returned, with a warning", {
+test_that("a space that cannot be cached is still returned, with a skipped warning on the collector", {
 
   ## Arrange: a cache directory under a regular file cannot be created by any
   ## user, so the write fails whatever the permissions. cached_space() stores
@@ -297,23 +301,26 @@ test_that("a space that cannot be cached is still returned, with a warning", {
   file.create(blocker)
   withr::local_options(horizons.cache_dir = file.path(blocker, "cache"))
 
-  space    <- structure(list(), class = "horizons_similarity_space")
-  settings <- list(snv = TRUE, derivative = 1L, window = 21L, poly = 2L, mask = NULL,
-                   ncomp = 0.99, sdev_floor = 0.1)
+  space     <- structure(list(), class = "horizons_similarity_space")
+  settings  <- list(snv = TRUE, derivative = 1L, window = 21L, poly = 2L, mask = NULL,
+                    ncomp = 0.99, sdev_floor = 0.1)
+  collector <- log_open("select_training")
 
-  ## Act
-  w <- expect_warning(
+  ## Act: nothing is raised here; the verb raises what its collector holds
+  expect_no_warning(
     out <- cached_space(structure("lib", label = "lib"), settings, seq(700, 600, by = -2),
-                        build = function() space, verbose = FALSE),
-    "The similarity space was built but could not be cached", fixed = TRUE,
-    class = "horizons_select_warning"
+                        build = function() space, verbose = FALSE, collector = collector)
   )
 
   ## Assert
   expect_identical(out$space, space)
   expect_false(out$hit)
   expect_null(out$path)
-  expect_match(conditionMessage(w), "options(horizons.cache_dir = )", fixed = TRUE)
+
+  rows <- log_rows(collector)
+  expect_identical(rows$topic, "skipped")
+  expect_match(rows$message, "The similarity space was built but could not be cached", fixed = TRUE)
+  expect_match(rows$message, "options(horizons.cache_dir = )", fixed = TRUE)
 
 })
 
@@ -372,29 +379,124 @@ test_that("a cache file that holds another key is rebuilt over, not trusted", {
 
 })
 
-test_that("a library whose default space cannot be built is still cached, with a warning", {
+test_that("a library narrower than the default window is cached, and its space left to a draw that fits", {
 
   ## Arrange: a library from 670 to 700 cm-1 has 16 columns, fewer than the
-  ## default space's 21-point window at 2 cm-1, so the space built at first
-  ## use fails.
+  ## default window's 21 points at 2 cm-1, which prospectr cannot filter.
+  ## The first-use space is not tried, so prospectr is never reached.
   entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 30L)
   entry$filters$wn_min <- 670L
   cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
 
+  local_mocked_bindings(savitzkyGolay = function(...) stop("the filter was run"), .package = "prospectr")
+
+  collector <- log_open("select_training")
+
   ## Act
-  w <- expect_warning(
-    res <- suppressMessages(resolve_source("mini", verbose = FALSE)),
-    "similarity space could not be built now", fixed = TRUE,
-    class = "horizons_select_warning"
+  expect_no_warning(
+    res <- suppressMessages(resolve_source("mini", verbose = FALSE, collector = collector))
   )
 
-  ## Assert: the build failed for the reason arranged, not another; the
-  ## library is built and cached; its space is left to the first draw
-  expect_match(conditionMessage(w), "filter length w must be lower than ncol(X)", fixed = TRUE)
+  ## Assert: the library is built and cached, no space was written, and the
+  ## note says why
   expect_s3_class(res$pool, "horizons_data")
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
   expect_length(space_files(cache), 0L)
+
+  rows <- log_rows(collector)
+  expect_identical(rows$type, "note")
+  expect_match(rows$message, "the default `window` of 40 cm-1 is 21 points on its 16 columns, and the filter needs fewer", fixed = TRUE)
+
+})
+
+
+test_that("a first-use space that fails to build is a note, and stops the call under debug", {
+
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  x <- mini_targets(build_ossl_library(
+    stats::setNames(sub("^file://", "", entry$sources$url), entry$sources$table), entry, verbose = FALSE))
+
+  ## The first build fails, once: the prime's; the draw's own build works
+  calls <- 0L
+  real  <- build_similarity_space
+  local_mocked_bindings(build_similarity_space = function(...) {
+    calls <<- calls + 1L
+    if (calls == 1L) stop("out of memory {in the prime}")
+    real(...)
+  })
+
+  out   <- suppressWarnings(suppressMessages(select_training(x, "mini", k = 5L)))
+  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+
+  expect_identical(nrow(notes), 1L)
+  expect_match(notes$message, "similarity space could not be built at first use; the first draw builds it", fixed = TRUE)
+  expect_match(notes$message, "out of memory {in the prime}", fixed = TRUE)
+  expect_false(any(out$log$type[out$log$verb == "select_training"] == "warning" &
+                     grepl("first use", out$log$message[out$log$verb == "select_training"])))
+
+  ## With debug on, nothing is contained: the prime's failure stops the call
+  file.remove(list.files(library_cache_dir(), full.names = TRUE))
+  calls <- 0L
+
+  expect_error(suppressMessages(select_training(x, "mini", k = 5L, control = control_horizons(debug = TRUE))),
+               "out of memory {in the prime}", fixed = TRUE)
+
+})
+
+
+test_that("a library built but not moved into the cache is returned, with one skipped warning, and leaves the cache empty", {
+
+  ## The rename after a successful write fails only on a locked or network
+  ## filesystem; here every rename fails, the library's after it was written
+  ## to its temporary name in the cache. The draw goes on with the library
+  ## built in memory, and says every later draw builds it again.
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  x <- mini_targets(build_ossl_library(
+    stats::setNames(sub("^file://", "", entry$sources$url), entry$sources$table), entry, verbose = FALSE))
+
+  written <- NULL
+  local_mocked_bindings(
+    file.rename = function(from, to) {
+      written <<- c(written, file.exists(from))
+      FALSE
+    },
+    .package = "base"
+  )
+
+  warned <- list()
+  out <- withCallingHandlers(
+    suppressMessages(select_training(x, "mini", k = 5L)),
+    warning = function(w) {
+      warned[[length(warned) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), warned)
+  expect_length(skipped, 1L)
+
+  msg <- gsub("\\s+", " ", conditionMessage(skipped[[1]]))
+  expect_match(msg, "library was built but could not be moved into the cache, so every later draw downloads and builds it again", fixed = TRUE)
+  expect_match(msg, "check that", fixed = TRUE)
+
+  ## The record says it is not cached, and no space was written either
+  expect_s3_class(out, "horizons_data")
+  expect_true("path" %in% names(out$selection$library))
+  expect_null(out$selection$library$path)
+
+  ## The library was on disk under its temporary name when the rename
+  ## failed; the build removes it and the raw downloads rather than leaving
+  ## them in the cache
+  expect_true(written[1])
+  expect_true(dir.exists(cache))
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
 
 })
 
@@ -442,7 +544,7 @@ test_that("the cache key carries the space algorithm's version and tells masks a
 
 })
 
-test_that("a cached space whose rows are not the library's is rebuilt over, with a warning", {
+test_that("a cached space whose rows are not the library's is rebuilt over, with a note", {
 
   m <- use_mini()
   f <- file.path(m$cache, space_files(m$cache))
@@ -451,9 +553,14 @@ test_that("a cached space whose rows are not the library's is rebuilt over, with
   rownames(obj$space$scores) <- rev(rownames(obj$space$scores))
   qs2::qs_save(obj, f)
 
-  x <- mini_targets(m$pool)
-  expect_warning(select_training(x, "mini", k = 5L),
-                 "does not match this library's rows", class = "horizons_select_warning")
+  ## A rebuild costs only time, once: a note on the log, not a warning
+  x   <- mini_targets(m$pool)
+  out <- suppressWarnings(select_training(x, "mini", k = 5L))
+
+  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+  expect_identical(nrow(notes), 1L)
+  expect_match(notes$message, "did not match this library's rows, so it was rebuilt over", fixed = TRUE)
+  expect_false(any(grepl("rebuilt", out$log$message[out$log$type == "warning"])))
 
   fixed <- qs2::qs_read(f)
   expect_identical(rownames(fixed$space$scores), m$pool$data$analysis$sample_id)

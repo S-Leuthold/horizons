@@ -523,9 +523,9 @@ test_that("draw_neighbours() treats an undefined cosine target as a failed draw"
   St <- s$St
   St[1, ] <- 0
 
-  expect_warning(out <- draw_neighbours(St, s$Sp, responses = rsp, k = 5L,
-                                        properties = "clay", metric = "cosine"),
-                 regexp = "no defined distance", class = "horizons_select_warning")
+  ## Recorded, not raised: the verb reports it, with the other short draws
+  expect_no_warning(out <- draw_neighbours(St, s$Sp, responses = rsp, k = 5L,
+                                           properties = "clay", metric = "cosine"))
 
   bad <- rownames(St)[1]
 

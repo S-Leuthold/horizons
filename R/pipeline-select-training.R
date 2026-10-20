@@ -266,12 +266,13 @@
 #'   RNG state is saved and restored, so the verb does not advance it.
 #'   Default: `307`, as the other verbs'.
 #' @param control A [control_horizons()] object: how the run goes, not what
-#'   it computes. `select_training()` reads `verbose`, `debug`,
-#'   `keep_traces`, `chunk_size` (targets per distance chunk) and
-#'   `min_resemblance_rows` (the fewest library rows the resemblance check
-#'   takes its reference distribution from), and refuses any other field
-#'   that is set. The control it ran with, defaults filled in, is recorded
-#'   as `selection$settings$control`.
+#'   it computes. `select_training()` reads `verbose`, `debug` (a failure
+#'   building a registered library's first-use similarity space stops the
+#'   call, rather than being left to the first draw), `chunk_size` (targets
+#'   per distance chunk) and `min_resemblance_rows` (the fewest library rows
+#'   the resemblance check takes its reference distribution from), and
+#'   refuses any other field that is set. The control it ran with, defaults
+#'   filled in, is recorded as `selection$settings$control`.
 #'
 #' @return `horizons_data.` Rows drawn from `pool`, on the library's own
 #'   columns at the wavenumbers the targets share with it, with every
@@ -290,7 +291,14 @@
 #'   records the columns returned: `operation` (`"none"` when every library
 #'   column is returned, else `"subset"`), `n_shared`, `shared_range`, and
 #'   `target_only`, the targets' wavenumbers the library lacks. `x$log` is the
-#'   pool's, with a row for each `coverage` warning this call raised.
+#'   pool's, with this call's rows after it: one per warning topic, each
+#'   raised once at the end of the call (`horizons_warning_input` for pool
+#'   and targets in different photometric units, `coverage` for target
+#'   columns the library lacks, a search on the overlap and draws short of
+#'   `k`, `skipped` for the resemblance check not run and for a similarity
+#'   space or library that could not be cached, `applicability` for targets
+#'   beyond the library's spread), and a note for each cost paid once (a
+#'   cached space rebuilt, a first-use space not built).
 #'
 #' @examples
 #' \dontrun{
@@ -594,7 +602,8 @@ select_training <- function(x, library,
 
   }
 
-  resolved <- resolve_source(library, verbose = isTRUE(verbose), call = call)
+  resolved <- resolve_source(library, verbose = isTRUE(verbose), collector = collector,
+                             debug = control$debug, call = call)
   pool     <- validate_select_input(resolved$pool, arg = "library", what = "the pool")
   errors   <- check_pool_unpromoted(pool)
 
@@ -811,12 +820,12 @@ select_training <- function(x, library,
 
   if (units$mismatch) {
 
-    cli::cli_warn(c(
-      "The pool and the targets look like different photometric units or modes",
-      "i" = "Pool absorbance: median {signif(units$pool_median, 3)}, IQR {signif(units$pool_iqr, 3)}",
-      "i" = "Targets: median {signif(units$target_median, 3)}, IQR {signif(units$target_iqr, 3)}",
-      "i" = "Selection proceeds, but a model trained on one unit cannot predict the other"
-    ), class = "horizons_select_warning")
+    log_warning(collector, "input", c(
+      "The pool and the targets look like different photometric units or modes.",
+      "i" = "Pool absorbance: median {signif(units$pool_median, 3)}, IQR {signif(units$pool_iqr, 3)}.",
+      "i" = "Targets: median {signif(units$target_median, 3)}, IQR {signif(units$target_iqr, 3)}.",
+      "i" = "Selection proceeds, but a model trained on one unit cannot predict the other."
+    ))
 
   }
 
@@ -842,7 +851,7 @@ select_training <- function(x, library,
 
   n_search <- length(sa$wavenumbers)
 
-  if (derivative > 0 && window_points >= n_search) {
+  if (derivative > 0 && !sg_window_fits(window_points, n_search)) {
 
     searched <- range(sa$wavenumbers)
     span     <- searched[2] - searched[1]
@@ -882,20 +891,21 @@ select_training <- function(x, library,
 
   if (!is.null(identity)) {
 
-    cs <- cached_space(identity, space_settings, sa$wavenumbers, build_space, verbose = verbose)
+    cs <- cached_space(identity, space_settings, sa$wavenumbers, build_space, verbose = verbose,
+                       collector = collector)
 
     ### The space's rows are the library's rows in the library's order; a
-    ### cached space that disagrees is not this library's and is rebuilt.
+    ### cached space that disagrees is not this library's and is rebuilt,
+    ### which costs only time, so it is a note.
 
     if (!identical(rownames(cs$space$scores), pool_ids)) {
 
-      cli::cli_warn(c(
-        "The cached similarity space does not match this library's rows, so it was rebuilt",
-        "i" = "The cache file at {.path {cs$path}} is overwritten."
-      ), class = "horizons_select_warning")
+      log_note(collector, "The cached similarity space at {.path {cs$path}} did not match this library's rows, so it was rebuilt over.")
+
+      if (verbose) cat("\u2502  \u251C\u2500 The cached similarity space did not match this library's rows; rebuilding it\n")
 
       cs <- cached_space(identity, space_settings, sa$wavenumbers, build_space,
-                         verbose = verbose, force = TRUE)
+                         verbose = verbose, force = TRUE, collector = collector)
 
     }
 
@@ -950,6 +960,22 @@ select_training <- function(x, library,
     cat(paste0("\u2502  \u251C\u2500 Space: ", paste(chain, collapse = " \u2192 "), ", ",
                sp$ncomp, " components", floored, " on all ", length(pool_ids),
                " rows, ", metric, "\n"))
+
+    ### How much the mask took, from the columns the filter's edge trim
+    ### left and the columns the space kept. Most of the space masked is
+    ### allowed, and is most often ranges given in another unit.
+
+    if (!is.null(mask)) {
+
+      n_after_trim <- length(sa$wavenumbers) - (if (derivative > 0) window_points - 1L else 0L)
+      n_masked     <- n_after_trim - length(sp$wavenumbers)
+
+      cat(paste0("\u2502  \u251C\u2500 Mask: removed ", n_masked, " of the ", n_after_trim,
+                 " columns of the similarity space",
+                 if (n_masked > 0.9 * n_after_trim) "; over 90 %, so check the ranges are in cm\u207B\u00B9, low then high" else "",
+                 "\n"))
+
+    }
 
     depth_line <- if (depth_applied) {
       paste0("topsoil (upper depth < ", SELECT_TOPSOIL_MAX_CM, " cm), ", sum(eligible), " of ",
@@ -1275,34 +1301,45 @@ select_training <- function(x, library,
 
   if (verbose) report_selection(out$selection, n_targets = length(target_ids))
 
-  if (nrow(draw$short_draws)) {
+  ## Draws short of k: too few measured rows left after the twin
+  ## subtraction, or, under cosine, no defined distance at all. One coverage
+  ## warning, beside any of the axes', naming the targets.
 
-    sd_tbl <- draw$short_draws
+  sd_tbl <- draw$short_draws
 
-    cli::cli_warn(c(
-      "{nrow(sd_tbl)} target-property draw{?s} could not reach k after twin exclusions",
-      "i" = "Smallest: {min(sd_tbl$k_drawn)} of {max(sd_tbl$k_requested)} rows, on {.field {unique(sd_tbl$property)}}",
-      "i" = "The pool has too few measured rows left for those properties; see {.code x$selection$short_draws}"
-    ), class = "horizons_select_warning")
+  if (nrow(sd_tbl)) {
+
+    undefined <- startsWith(sd_tbl$reason, "no defined distance")
+    thin      <- sd_tbl[!undefined, , drop = FALSE]
+    no_angle  <- unique(sd_tbl$target_id[undefined])
+
+    log_warning(collector, "coverage", c(
+      "{nrow(sd_tbl)} target-property draw{?s} could not reach k.",
+      "i" = if (nrow(thin)) "{nrow(thin)} after twin exclusions, with too few measured rows left. Smallest: {min(thin$k_drawn)} of {max(thin$k_requested)} rows, on {.field {unique(thin$property)}}.",
+      "i" = if (length(no_angle)) "{length(no_angle)} target{?s} had no defined distance to any pool row, so nothing was drawn for {?it/them}: {.val {utils::head(no_angle, 5)}}{if (length(no_angle) > 5) ', ...' else ''}. {.code metric = \"cosine\"} has no angle for a row on the pool's centroid, since the scores are mean-centred; use {.val euclidean} or {.val mahalanobis} for these targets.",
+      "i" = "See {.code x$selection$short_draws}."
+    ), ids = unique(sd_tbl$target_id))
 
   }
 
   if (!is.null(resemblance$skipped)) {
 
-    cli::cli_warn(c(
-      "The resemblance check did not run: {resemblance$skipped}",
-      "i" = "Nothing says whether the targets resemble the rows they were drawn from; {.code depth = \"all\"} gives it more rows to measure against, and {.code control_horizons(min_resemblance_rows = )} sets how many it needs"
-    ), class = "horizons_select_warning")
+    log_warning(collector, "skipped", c(
+      "The resemblance check did not run: {resemblance$skipped}.",
+      "i" = "Nothing says whether the targets resemble the rows they were drawn from; {.code depth = \"all\"} gives it more rows to measure against, and {.code control_horizons(min_resemblance_rows = )} sets how many it needs."
+    ))
 
   }
 
-  if (nrow(resemblance$beyond)) {
+  beyond <- resemblance$beyond
 
-    cli::cli_warn(c(
-      "{nrow(resemblance$beyond)} target{?s} sit{?s/} beyond the pool's own nearest-neighbour spread",
-      "i" = "{.val {utils::head(resemblance$beyond$target_id, 5)}}{if (nrow(resemblance$beyond) > 5) ', ...' else ''}",
-      "i" = "Selection proceeds; treat their predictions with care. The check is made after SNV, so it cannot see a unit mismatch; that is reported separately"
-    ), class = "horizons_select_warning")
+  if (nrow(beyond)) {
+
+    log_warning(collector, "applicability", c(
+      "{nrow(beyond)} target{?s} sit{?s/} beyond the pool's own nearest-neighbour spread.",
+      "i" = "{.val {utils::head(beyond$target_id, 5)}}{if (nrow(beyond) > 5) ', ...' else ''}.",
+      "i" = "Selection proceeds; treat their predictions with care. The check is made after SNV, so it cannot see a unit mismatch; that is reported separately."
+    ), ids = beyond$target_id)
 
   }
 
@@ -1350,6 +1387,24 @@ window_to_points <- function(width, resolution) {
   ## arithmetic does not flip with floating-point noise in the resolution.
 
   2L * as.integer(floor(round(width / (2 * resolution), 8) + 0.5)) + 1L
+
+}
+
+
+#' Does a Savitzky-Golay window fit on a grid of so many columns?
+#'
+#' @description
+#' prospectr's filter needs fewer points than columns. The one rule for the
+#' verb's window door and for the first-use space of a registered library
+#' ([prime_library_space()]).
+#'
+#' @param points [Integer.] The window, in points.
+#' @param n_columns [Integer.] Columns of the grid it runs on.
+#' @return [Logical.]
+#' @noRd
+sg_window_fits <- function(points, n_columns) {
+
+  points < n_columns
 
 }
 
@@ -1795,15 +1850,19 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
   }
 
   nn_pool <- nearest_neighbours(ref, Sp, k = 2L, metric = metric, sdev = sp$sdev, chunk_size = chunk_size)
-  ## Column 1 is the row itself (distance 0); column 2 its nearest other row
+  ## Column 1 is the row itself (distance 0); column 2 its nearest other row.
+  ## A row with no defined distance (cosine, on the pool's centroid) has no
+  ## nearest other row, and is left out of the reference.
   pool_nn <- nn_pool$dist[, 2]
 
-  threshold <- unname(stats::quantile(pool_nn, 0.99))
+  threshold <- unname(stats::quantile(pool_nn, 0.99, na.rm = TRUE))
 
   nn_t <- nearest_neighbours(St, Sp, k = 1L, metric = metric, sdev = sp$sdev, chunk_size = chunk_size)
   nearest <- nn_t$dist[, 1]
 
-  beyond <- nearest > threshold
+  ## A target with no defined distance (cosine, on the pool's centroid) is
+  ## not beyond anything; the draw reports it as a short draw
+  beyond <- which(nearest > threshold)
 
   list(
     threshold   = threshold,

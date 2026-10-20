@@ -36,9 +36,8 @@
 #' @param min_cols [Integer.] Fewest columns the transform may leave, so the
 #'   decomposition is not reached with too little to decompose. Default:
 #'   `1L`; `build_similarity_space()` passes what its component count
-#'   actually needs, never the cap on it. A mask that removes more than 90 %
-#'   of the columns aborts separately, whatever `min_cols` is, because that
-#'   is a mask argument that did not mean what it said.
+#'   actually needs, never the cap on it. How much a mask removed is in
+#'   `select_training()`'s verbose output.
 #'
 #' @param call The frame a refusal reports: the verb's.
 #'
@@ -83,20 +82,6 @@ transform_similarity <- function(M, wn,
     for (i in seq_len(nrow(mask))) drop <- drop | (wn >= mask[i, 1] & wn <= mask[i, 2])
     m  <- m[, !drop, drop = FALSE]
     wn <- wn[!drop]
-
-    ### Separate from min_cols and checked first, because it is a different
-    ### fault with a different fix: a mask that takes almost everything is a
-    ### mask argument that did not mean what it said, and saying so is more
-    ### use than reporting the column count it happened to leave.
-
-    if (sum(drop) > 0.9 * length(drop)) {
-
-      cli::cli_abort(c(
-        "{nrow(mask)} masked range{?s} removed {sum(drop)} of the {length(drop)} columns of the similarity space",
-        "i" = "Masking more than 90 % of the spectrum leaves nothing to measure similarity on; check the ranges are in cm-1, low then high"
-      ), class = "horizons_input_error")
-
-    }
 
   }
 

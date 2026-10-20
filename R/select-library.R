@@ -152,6 +152,10 @@ library_registry <- function() {
 #' @param ask `logical.` Whether a registered library that is not yet cached
 #'   may ask before downloading. Default: `interactive()`.
 #' @param verbose `logical.` Print progress and the credit line.
+#' @param collector `select_training()`'s collector ([log_open()]): building
+#'   a registered library reports to it.
+#' @param debug `logical.` Passed to the first-use space's unit
+#'   ([prime_library_space()]).
 #' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` (a `horizons_data`) and `record`, the library's
@@ -160,6 +164,7 @@ library_registry <- function() {
 #'   apply), and `built_at` for a built library.
 #' @noRd
 resolve_source <- function(library, ask = interactive(), verbose = TRUE,
+                           collector = log_open("select_training"), debug = FALSE,
                            call = rlang::caller_env()) {
 
   UseMethod("resolve_source")
@@ -170,6 +175,7 @@ resolve_source <- function(library, ask = interactive(), verbose = TRUE,
 #' @exportS3Method
 #' @noRd
 resolve_source.horizons_library <- function(library, ask = interactive(), verbose = TRUE,
+                                            collector = log_open("select_training"), debug = FALSE,
                                             call = rlang::caller_env()) {
 
   list(pool = library$pool, record = utils::modifyList(library$record, list(form = "object")))
@@ -180,6 +186,7 @@ resolve_source.horizons_library <- function(library, ask = interactive(), verbos
 #' @exportS3Method
 #' @noRd
 resolve_source.horizons_data <- function(library, ask = interactive(), verbose = TRUE,
+                                         collector = log_open("select_training"), debug = FALSE,
                                          call = rlang::caller_env()) {
 
   list(pool = library, record = library_record("object"))
@@ -190,13 +197,15 @@ resolve_source.horizons_data <- function(library, ask = interactive(), verbose =
 #' @exportS3Method
 #' @noRd
 resolve_source.character <- function(library, ask = interactive(), verbose = TRUE,
+                                     collector = log_open("select_training"), debug = FALSE,
                                      call = rlang::caller_env()) {
 
   registry <- library_registry()
 
   if (library %in% names(registry)) {
 
-    return(resolve_registered(registry[[library]], ask = ask, verbose = verbose, call = call))
+    return(resolve_registered(registry[[library]], ask = ask, verbose = verbose,
+                              collector = collector, debug = debug, call = call))
 
   }
 
@@ -303,13 +312,20 @@ library_cache_path <- function(entry) {
 #' directory, verifies every MD5, runs the recipe, writes the library and
 #' removes the raw downloads.
 #'
+#' A library built but not moved into the cache (a rename that fails on a
+#' locked or network filesystem) is still returned, with its record's
+#' `path` `NULL` and one `skipped` warning, since every later draw downloads
+#' and builds it again until the cache directory is fixed; its first-use
+#' space is not built.
+#'
 #' @param entry A registry entry.
-#' @param ask,verbose As for [resolve_source()].
+#' @param ask,verbose,collector,debug As for [resolve_source()].
 #' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` and `record`.
 #' @noRd
 resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
+                               collector = log_open("select_training"), debug = FALSE,
                                call = rlang::caller_env()) {
 
   path <- library_cache_path(entry)
@@ -400,12 +416,17 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
 
   if (!file.rename(tmp, path)) {
 
-    cli::cli_abort(
-      c("The {.val {entry$name}} library was built but could not be moved into the cache",
-        "x" = "Rename to {.path {path}} failed.",
-        "i" = "Check that the cache directory is writable, or set {.code options(horizons.cache_dir = )}."),
-      class = "horizons_build_error"
-    )
+    log_warning(collector, "skipped", c(
+      "The {.val {entry$name}} library was built but could not be moved into the cache, so every later draw downloads and builds it again.",
+      "i" = "Rename to {.path {path}} failed; check that {.path {dirname(path)}} is writable, or set {.code options(horizons.cache_dir = )}."
+    ))
+
+    if (verbose) cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,
+                            " built, but not cached\n"))
+
+    lib$record["path"] <- list(NULL)
+
+    return(list(pool = lib$pool, record = lib$record))
 
   }
 
@@ -417,7 +438,7 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
 
   }
 
-  prime_library_space(lib$pool, lib$record, verbose = verbose)
+  prime_library_space(lib$pool, lib$record, verbose = verbose, collector = collector, debug = debug)
 
   list(pool = lib$pool, record = lib$record)
 

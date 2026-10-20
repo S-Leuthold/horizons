@@ -127,12 +127,13 @@ RNG state is saved and restored, so the verb does not advance it.
 Default: \code{307}, as the other verbs'.}
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
-it computes. \code{select_training()} reads \code{verbose}, \code{debug},
-\code{keep_traces}, \code{chunk_size} (targets per distance chunk) and
-\code{min_resemblance_rows} (the fewest library rows the resemblance check
-takes its reference distribution from), and refuses any other field
-that is set. The control it ran with, defaults filled in, is recorded
-as \code{selection$settings$control}.}
+it computes. \code{select_training()} reads \code{verbose}, \code{debug} (a failure
+building a registered library's first-use similarity space stops the
+call, rather than being left to the first draw), \code{chunk_size} (targets
+per distance chunk) and \code{min_resemblance_rows} (the fewest library rows
+the resemblance check takes its reference distribution from), and
+refuses any other field that is set. The control it ran with, defaults
+filled in, is recorded as \code{selection$settings$control}.}
 }
 \value{
 \code{horizons_data.} Rows drawn from \code{pool}, on the library's own
@@ -152,7 +153,14 @@ no record, and the training set gets none. \code{x$selection$reconciliation}
 records the columns returned: \code{operation} (\code{"none"} when every library
 column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range}, and
 \code{target_only}, the targets' wavenumbers the library lacks. \code{x$log} is the
-pool's, with a row for each \code{coverage} warning this call raised.
+pool's, with this call's rows after it: one per warning topic, each
+raised once at the end of the call (\code{horizons_warning_input} for pool
+and targets in different photometric units, \code{coverage} for target
+columns the library lacks, a search on the overlap and draws short of
+\code{k}, \code{skipped} for the resemblance check not run and for a similarity
+space or library that could not be cached, \code{applicability} for targets
+beyond the library's spread), and a note for each cost paid once (a
+cached space rebuilt, a first-use space not built).
 }
 \description{
 Draws a training set from a reference pool (a spectral library with
