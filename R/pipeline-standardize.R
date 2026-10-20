@@ -70,7 +70,7 @@ canonical_grid <- function(lo, hi, step) {
 ## Helper: resample_spectra()
 ## =============================================================================
 
-#' Resample spectral matrix to target resolution
+#' Resample spectral matrix onto a wavenumber grid
 #'
 #' @description
 #' Resamples spectra to a new wavenumber grid using spline interpolation.
@@ -79,15 +79,12 @@ canonical_grid <- function(lo, hi, step) {
 #' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
 #' @param current_wav `numeric.` Current wavenumber positions (column names).
-#' @param target_resolution `numeric.` Target resolution in cm⁻¹ (e.g., 2).
-#'   The grid is the multiples of this resolution inside the data's range
-#'   (`canonical_grid()`), not a sequence stepped from the data's own
-#'   maximum. Exactly one of `target_resolution` and `new_wav` must be given.
-#' @param new_wav `numeric.` An explicit target grid, in any order. Used by
+#' @param new_wav `numeric.` The target grid, in any order. Used by
 #'   `standardize()` for each contiguous run of the data, and by
 #'   `select_training()` to put the targets on the library's grid for its
-#'   search, so the package has one resampling routine. Must lie within the range of
-#'   `current_wav`; this function never extrapolates. Default: `NULL`.
+#'   search, so the package has one resampling routine. Every caller builds
+#'   it inside the range of `current_wav`, since this function never
+#'   extrapolates; one outside it is a bug, refused as an internal error.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Resampled spectral matrix
@@ -96,53 +93,22 @@ canonical_grid <- function(lo, hi, step) {
 #'   - `n_after`: Number of wavelengths after resampling
 #'
 #' @noRd
-resample_spectra <- function(spectra_matrix,
-                             current_wav,
-                             target_resolution = NULL,
-                             new_wav           = NULL) {
+resample_spectra <- function(spectra_matrix, current_wav, new_wav) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Resolve the target wavenumber grid
+  ## Step 1: The grid sits inside the data's range
   ## ---------------------------------------------------------------------------
-
-  if (is.null(target_resolution) == is.null(new_wav)) {
-
-    cli::cli_abort("Give exactly one of {.arg target_resolution} and {.arg new_wav}",
-                   class = "horizons_input_error")
-
-  }
 
   wn_min <- min(current_wav)
   wn_max <- max(current_wav)
 
-  if (is.null(new_wav)) {
+  ### Without this the spline would extrapolate silently: a wrong value.
+  if (min(new_wav) < wn_min || max(new_wav) > wn_max) {
 
-    ## Canonical grid inside the data's range (decreasing) ----------------------
-
-    new_wav <- canonical_grid(wn_min, wn_max, target_resolution)
-
-    if (length(new_wav) == 0) {
-
-      cli::cli_abort(c(
-        "No multiple of {target_resolution} cm-1 falls inside the data's range",
-        "x" = "The data covers {wn_min} to {wn_max} cm-1"
-      ), class = "horizons_input_error")
-
-    }
-
-  } else {
-
-    ## Explicit grid: must sit inside the data's range --------------------------
-
-    if (min(new_wav) < wn_min || max(new_wav) > wn_max) {
-
-      cli::cli_abort(c(
-        "{.arg new_wav} extends beyond the data's wavenumber range",
-        "x" = "Requested {min(new_wav)} to {max(new_wav)}, data covers {wn_min} to {wn_max}",
-        "i" = "Resampling never extrapolates; trim the target grid to the data"
-      ), class = "horizons_input_error")
-
-    }
+    abort_horizons(c(
+      "{.arg new_wav} extends beyond the data's wavenumber range.",
+      "x" = "Requested {min(new_wav)} to {max(new_wav)}, data covers {wn_min} to {wn_max}."
+    ), kind = "internal")
 
   }
 
@@ -225,19 +191,8 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
   wn_min <- min(range)
   wn_max <- max(range)
 
+  ### standardize() has checked that the range holds a wavelength.
   keep_idx <- which(wavelengths >= wn_min & wavelengths <= wn_max)
-
-  ## Validate result --------------------------------------------------------------
-
-  if (length(keep_idx) == 0) {
-
-    cli::cli_abort(c(
-      "Trim range does not overlap with wavelength data",
-      "i" = "Requested: {wn_min}-{wn_max} cm^-1",
-      "i" = "Available: {min(wavelengths)}-{max(wavelengths)} cm^-1"
-    ))
-
-  }
 
   ## One point beyond each bound, for the interpolation that follows ----------
 
@@ -288,6 +243,7 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 #' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
 #' @param wavelengths `numeric.` Current wavenumber positions (column names).
+#' @param call The frame a refusal reports: `standardize()`'s.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Spectral matrix with water bands removed
@@ -297,7 +253,7 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 #'   - `n_removed`: Number of wavelengths removed
 #'
 #' @noRd
-remove_water_bands <- function(spectra_matrix, wavelengths) {
+remove_water_bands <- function(spectra_matrix, wavelengths, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Identify columns in water band regions
@@ -322,10 +278,11 @@ remove_water_bands <- function(spectra_matrix, wavelengths) {
 
   if (length(keep_idx) == 0) {
 
-    cli::cli_abort(c(
-      "Water band removal would delete all wavelength data",
-      "i" = "Data range falls entirely within water absorption regions"
-    ))
+    abort_horizons(c(
+      "Water band removal would delete all wavelength data.",
+      "i" = "The axis left by the trim and the resampling lies wholly inside the water bands (1580 to 1720 and 3100 to 3700 cm-1).",
+      "i" = "Use {.code remove_water = FALSE}, or a wider {.arg trim}."
+    ), kind = "input", call = call)
 
   }
 
@@ -445,7 +402,11 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
     op_name <- op_names[i]
     op      <- operations[[op_name]]
 
-    if (op_name == "sort") {
+    if (op_name == "restandardize") {
+
+      msg <- "Re-standardizing (force = TRUE): the earlier record is replaced"
+
+    } else if (op_name == "sort") {
 
       msg <- "Sorting: wavenumber columns put in decreasing order"
 
@@ -556,8 +517,15 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' separate matter (see `select_training()`'s `mask`).
 #'
 #' **Idempotence:** If the object has already been standardized, calling
-#' `standardize()` again will warn and return the object unchanged. Use
-#' `force = TRUE` to override (not recommended).
+#' `standardize()` again returns the object unchanged, with one
+#' `horizons_warning_skipped`. Use `force = TRUE` to override (not
+#' recommended); as you asked for it, that is reported in verbose output and
+#' in a note on the log rather than warned.
+#'
+#' **Warnings** are collected as the call runs and raised once per topic at
+#' its end, each written to the object's `log` first: grid points dropped
+#' because the data does not reach them or they fall in a gap are one
+#' `horizons_warning_coverage`.
 #'
 #' @param x `horizons_data.` Object from `spectra()`.
 #' @param resample `numeric or NULL.` Target resolution in cm⁻¹. Default `2`
@@ -612,94 +580,52 @@ standardize <- function(x,
   ## ---------------------------------------------------------------------------
   ## Step 0: Input validation
   ## ---------------------------------------------------------------------------
+  ## One argument at a time, as every verb's door checks them.
 
-  errors <- character()
+  if (!inherits(x, "horizons_data")) {
 
-  ## Check x is horizons_data --------------------------------------------------
-
- if (!inherits(x, "horizons_data")) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg x} must be a horizons_data object"))
-
-  }
-
-  ## Check resample ------------------------------------------------------------
-
-  if (!is.null(resample)) {
-
-    if (!is.numeric(resample) || length(resample) != 1 || resample <= 0) {
-
-      errors <- c(errors,
-                  cli::format_inline("{.arg resample} must be a positive number or NULL"))
-
-    }
-
-  }
-
-  ## Check trim ----------------------------------------------------------------
-
-  if (!is.null(trim)) {
-
-    if (!is.numeric(trim) || length(trim) != 2) {
-
-      errors <- c(errors,
-                  cli::format_inline("{.arg trim} must be numeric(2) or NULL"))
-
-    } else if (trim[1] >= trim[2]) {
-
-      errors <- c(errors,
-                  cli::format_inline("{.arg trim} range must be (min, max) with min < max"))
-
-    }
-
-  }
-
-  ## Check logicals ------------------------------------------------------------
-
-  if (!is.logical(remove_water) || length(remove_water) != 1 || is.na(remove_water)) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg remove_water} must be TRUE or FALSE"))
-
-  }
-
-  if (!is.logical(baseline) || length(baseline) != 1 || is.na(baseline)) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg baseline} must be TRUE or FALSE"))
-
-  }
-
-  if (!is.logical(force) || length(force) != 1 || is.na(force)) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg force} must be TRUE or FALSE"))
-
-  }
-
-  ## Report errors -------------------------------------------------------------
-
-  if (length(errors) > 0) {
-
-    cat(cli::col_red(cli::style_bold("! Input validation failed:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Input validation failed:", errors), collapse = "\n"),
-      class = "horizons_input_error"
+    abort_horizons(
+      "{.arg x} must be a horizons_data object, not {.obj_type_friendly {x}}.",
+      kind = "input"
     )
 
   }
 
+  check_arg(rlang::check_number_decimal, resample, min = 0, allow_infinite = FALSE,
+            allow_null = TRUE)
+
+  if (isTRUE(resample == 0)) {
+
+    abort_horizons("{.arg resample} must be a positive number or {.code NULL}, not 0.",
+                   kind = "input")
+
+  }
+
+  if (!is.null(trim) && (!is.numeric(trim) || length(trim) != 2 || anyNA(trim))) {
+
+    abort_horizons(
+      "{.arg trim} must be numeric(2) or {.code NULL}, not {.obj_type_friendly {trim}}.",
+      kind = "input"
+    )
+
+  }
+
+  if (!is.null(trim) && trim[1] >= trim[2]) {
+
+    abort_horizons(c(
+      "{.arg trim} range must be (min, max) with min < max.",
+      "x" = "Got {trim[1]} and {trim[2]}."
+    ), kind = "input")
+
+  }
+
+  check_arg(rlang::check_bool, remove_water)
+  check_arg(rlang::check_bool, baseline)
+  check_arg(rlang::check_bool, force)
   check_arg(rlang::check_bool, verbose)
+
+  call      <- rlang::current_env()
+  collector <- log_open("standardize")
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Check idempotence
@@ -711,18 +637,27 @@ standardize <- function(x,
     ## standardized object is already on a decreasing axis.
     x <- validate_horizons_data(x, stage = "raw")
 
-    cli::cli_warn(c(
-      "Spectra already standardized",
-      "i" = "Returning unchanged. Use {.arg force = TRUE} to re-standardize."
+    ### Nothing ran that was asked for, which the returned object does not
+    ### show
+    log_warning(collector, "skipped", c(
+      "Spectra already standardized, so nothing was done.",
+      "i" = "Returning unchanged. Use {.code force = TRUE} to re-standardize."
     ))
+
+    x$log <- log_close(collector, x$log)
+    signal_log(collector, x)
 
     return(x)
 
   }
 
+  operations <- list()
+
   if (!is.null(x$provenance$standardization) && force) {
 
-    cli::cli_warn("Re-standardizing previously standardized data (force = TRUE)")
+    ### force = TRUE is the user's explicit choice: reported, not warned
+    log_note(collector, "Re-standardizing previously standardized data ({.code force = TRUE}).")
+    operations$restandardize <- list()
 
   }
 
@@ -737,8 +672,6 @@ standardize <- function(x,
 
   sorted <- sort_axis_decreasing(x)
   x      <- sorted$x
-
-  operations <- list()
 
   if (sorted$sorted) {
 
@@ -768,7 +701,7 @@ standardize <- function(x,
 
     ### The axis as it stands, recorded as the full path records it.
     axis_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
-    axis_wn   <- suppressWarnings(as.numeric(gsub("^wn_", "", axis_vars)))
+    axis_wn   <- wn_values(axis_vars)
 
     x$provenance$standardization <- list(
       resample         = NULL,
@@ -782,12 +715,14 @@ standardize <- function(x,
       wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_)
     )
 
+    x$log <- log_close(collector, x$log)
+
     if (verbose && length(operations) > 0) {
 
       report_standardize_summary(
         operations          = operations,
         n_samples           = nrow(x$data$analysis),
-        final_n_wavelengths = operations$sort$n
+        final_n_wavelengths = length(axis_vars)
       )
 
     } else if (verbose) {
@@ -797,6 +732,8 @@ standardize <- function(x,
       cat("\u2502\n")
 
     }
+
+    signal_log(collector, x)
 
     return(x)
 
@@ -827,7 +764,20 @@ standardize <- function(x,
 
   ## Extract wavenumbers from column names -------------------------------------
 
-  wavelengths <- as.numeric(gsub("^wn_", "", predictor_vars))
+  wavelengths <- wn_values(predictor_vars)
+
+  ## The trim window has to meet the data -----------------------------------
+
+  if (!is.null(trim) && !any(wavelengths >= min(trim) & wavelengths <= max(trim))) {
+
+    abort_horizons(c(
+      "{.arg trim} does not overlap the data's axis.",
+      "x" = "{.arg trim} is {min(trim)} to {max(trim)} cm-1; the data covers {min(wavelengths)} to {max(wavelengths)} cm-1."
+    ), kind = "input")
+
+  }
+
+  data_range <- range(wavelengths)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Apply trim (if requested)
@@ -874,7 +824,11 @@ standardize <- function(x,
 
     if (length(wavelengths) < 2) {
 
-      cli::cli_abort("Resampling requires at least two wavelength columns")
+      abort_horizons(c(
+        "Resampling requires at least two wavelength columns.",
+        "x" = "{length(wavelengths)} column{?s} {?is/are} left to resample.",
+        "i" = "Use {.code resample = NULL}, or a wider {.arg trim}."
+      ), kind = "input")
 
     }
 
@@ -910,10 +864,10 @@ standardize <- function(x,
         }
       )
 
-      cli::cli_warn(c(
-        "The data does not cover the {resample} cm-1 grid from {bounds[1]} to {bounds[2]} cm-1",
-        "i" = "Dropped {length(below) + length(above)} grid point{?s} rather than extrapolate: {paste(where, collapse = '; ')}"
-      ), class = "horizons_standardize_warning")
+      log_warning(collector, "coverage", c(
+        "The data does not cover the {resample} cm-1 grid from {bounds[1]} to {bounds[2]} cm-1.",
+        "i" = "Dropped {length(below) + length(above)} grid point{?s} rather than extrapolate: {paste(where, collapse = '; ')}."
+      ))
 
       grid <- grid[grid >= data_lo - GRID_TOL & grid <= data_hi + GRID_TOL]
 
@@ -936,10 +890,10 @@ standardize <- function(x,
 
         gap_text <- sprintf("%g to %g", gaps[, "low"], gaps[, "high"])
 
-        cli::cli_warn(c(
-          "The data's axis has {nrow(gaps)} gap{?s} in it: {paste(gap_text, collapse = ', ')} cm-1",
-          "i" = "Dropped {sum(in_gap)} grid point{?s} that fall in a gap rather than interpolate across it; each side of a gap is resampled on its own"
-        ), class = "horizons_standardize_warning")
+        log_warning(collector, "coverage", c(
+          "The data's axis has {nrow(gaps)} gap{?s} in it: {paste(gap_text, collapse = ', ')} cm-1.",
+          "i" = "Dropped {sum(in_gap)} grid point{?s} that fall in a gap rather than interpolate across it; each side of a gap is resampled on its own."
+        ))
 
         grid <- grid[!in_gap]
 
@@ -949,10 +903,11 @@ standardize <- function(x,
 
     if (length(grid) == 0) {
 
-      cli::cli_abort(c(
-        "No multiple of {resample} cm-1 between {bounds[1]} and {bounds[2]} cm-1 falls inside the data",
-        "x" = "The data covers {data_lo} to {data_hi} cm-1"
-      ), class = "horizons_input_error")
+      abort_horizons(c(
+        "No multiple of {resample} cm-1 between {bounds[1]} and {bounds[2]} cm-1 falls inside the data.",
+        "x" = "The data covers {data_range[1]} to {data_range[2]} cm-1.",
+        "i" = "The {.arg trim} window is narrower than one {resample} cm-1 step: widen {.arg trim} or reduce {.arg resample}."
+      ), kind = "input")
 
     }
 
@@ -1062,7 +1017,7 @@ standardize <- function(x,
 
   if (remove_water) {
 
-    result <- remove_water_bands(spectra_matrix, wavelengths)
+    result <- remove_water_bands(spectra_matrix, wavelengths, call = call)
 
     spectra_matrix <- result$matrix
     wavelengths    <- result$wavelengths
@@ -1151,6 +1106,8 @@ standardize <- function(x,
 
   x <- validate_horizons_data(x, stage = "raw")
 
+  x$log <- log_close(collector, x$log)
+
   ## ---------------------------------------------------------------------------
   ## Step 11: Report
   ## ---------------------------------------------------------------------------
@@ -1169,8 +1126,10 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 12: Return
+  ## Step 12: Raise what was recorded, and return
   ## ---------------------------------------------------------------------------
+
+  signal_log(collector, x)
 
   x
 

@@ -62,12 +62,12 @@ test_that("standardize() rejects non-horizons_data input", {
 
   expect_error(
     standardize(data.frame(x = 1:10)),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
   expect_error(
     standardize(list(a = 1)),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
 })
@@ -79,17 +79,17 @@ test_that("standardize() validates resample parameter", {
 
   expect_error(
     standardize(hd, resample = "two"),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
  )
 
   expect_error(
     standardize(hd, resample = -1),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
   expect_error(
     standardize(hd, resample = c(2, 4)),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
 })
@@ -101,17 +101,17 @@ test_that("standardize() validates trim parameter", {
 
   expect_error(
     standardize(hd, trim = 600),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
   expect_error(
     standardize(hd, trim = c("600", "4000")),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
   expect_error(
     standardize(hd, trim = c(4000, 600)),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
 })
@@ -123,18 +123,62 @@ test_that("standardize() validates logical parameters", {
 
   expect_error(
     standardize(hd, remove_water = "yes"),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
   expect_error(
     standardize(hd, baseline = NA),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
 
   expect_error(
     standardize(hd, force = 1),
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
+
+})
+
+
+test_that("standardize() refuses a trim that misses the data, naming both ranges, before anything is written", {
+
+  hd <- create_test_spectra(wn_min = 600, wn_max = 4000)
+
+  err <- expect_error(standardize(hd, resample = NULL, trim = c(5000, 6000)),
+                      "`trim` does not overlap the data's axis", fixed = TRUE,
+                      class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+  expect_match(msg, "`trim` is 5000 to 6000 cm-1; the data covers 600 to 4000 cm-1", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "standardize")
+
+})
+
+
+test_that("standardize() refuses water-band removal that would leave nothing, and resampling one column, saying what to change", {
+
+  ## An axis wholly inside the 3100-3700 band
+  hd <- create_test_spectra(n_wavelengths = 50, wn_min = 3200, wn_max = 3600)
+
+  err <- expect_error(standardize(hd, resample = NULL, trim = NULL, remove_water = TRUE),
+                      "Water band removal would delete all wavelength data", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "Use `remove_water = FALSE`, or a wider `trim`", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "standardize")
+
+  ## A spline needs two points: one column cannot be resampled
+  one <- spectra(tibble::tibble(sample_id = c("a", "b"), wn_2000 = c(0.1, 0.2)))
+  err <- expect_error(standardize(one, resample = 2, trim = NULL),
+                       "Resampling requires at least two wavelength columns", fixed = TRUE,
+                       class = "horizons_error_input")
+  expect_match(conditionMessage(err), "Use `resample = NULL`, or a wider `trim`", fixed = TRUE)
+
+})
+
+
+test_that("standardize() refuses a resample of zero", {
+
+  expect_error(standardize(create_test_spectra(), resample = 0),
+               "`resample` must be a positive number or `NULL`, not 0", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -142,27 +186,6 @@ test_that("standardize() validates logical parameters", {
 ## =============================================================================
 ## Resampling Tests
 ## =============================================================================
-
-test_that("resample_spectra(target_resolution =) uses the multiples inside the data's range, bit for bit the new_wav path", {
-
-  ## Arrange: an axis offset from the multiples of 2, as an instrument's is
-  set.seed(7)
-  wn   <- seq(3999.57, 599.57, by = -4)
-  m    <- matrix(stats::runif(5 * length(wn)), nrow = 5)
-  grid <- seq(3998, 600, by = -2)
-
-  ## Act
-  by_res  <- resample_spectra(m, wn, target_resolution = 2)
-  by_grid <- resample_spectra(m, wn, new_wav = grid)
-
-  ## Assert: the grid is the multiples, not a sequence stepped from 3999.57
-  expect_identical(by_res$wavelengths, grid)
-  expect_identical(by_grid$matrix,      by_res$matrix)
-  expect_identical(by_grid$wavelengths, by_res$wavelengths)
-  expect_identical(by_grid$n_after,     by_res$n_after)
-
-})
-
 
 test_that("resample_spectra(new_wav =) returns exactly the grid given, decreasing", {
 
@@ -200,27 +223,17 @@ test_that("resample_spectra(new_wav =) reproduces the input at its own knots", {
 })
 
 
-test_that("resample_spectra(new_wav =) refuses to extrapolate", {
+test_that("resample_spectra(new_wav =) refuses to extrapolate, as a bug in its caller", {
 
+  ## Every caller builds the grid inside the data, so a grid beyond it is a
+  ## broken invariant: without the check the spline would extrapolate
   wn <- seq(4000, 600, by = -4)
   m  <- matrix(stats::runif(2 * length(wn)), nrow = 2)
 
   expect_error(resample_spectra(m, wn, new_wav = seq(4100, 600, by = -4)),
-               regexp = "4100", class = "horizons_input_error")
+               regexp = "4100", class = "horizons_error_internal")
   expect_error(resample_spectra(m, wn, new_wav = seq(4000, 500, by = -4)),
-               regexp = "500", class = "horizons_input_error")
-
-})
-
-
-test_that("resample_spectra() needs exactly one of target_resolution and new_wav", {
-
-  wn <- seq(4000, 600, by = -4)
-  m  <- matrix(stats::runif(2 * length(wn)), nrow = 2)
-
-  expect_error(resample_spectra(m, wn), class = "horizons_input_error")
-  expect_error(resample_spectra(m, wn, target_resolution = 2, new_wav = wn),
-               class = "horizons_input_error")
+               regexp = "500", class = "horizons_error_internal")
 
 })
 
@@ -342,7 +355,7 @@ test_that("grid points the data does not reach are dropped with a warning, never
   caught <- list()
   out <- withCallingHandlers(
     no_output(standardize(short, resample = 4, trim = c(600, 4000))),
-    horizons_standardize_warning = function(w) {
+    horizons_warning_coverage = function(w) {
       caught[[length(caught) + 1]] <<- w
       invokeRestart("muffleWarning")
     }
@@ -363,17 +376,43 @@ test_that("grid points the data does not reach are dropped with a warning, never
 })
 
 
+test_that("an uncovered grid and a gap are one coverage warning with two bullets, written to the log first", {
+
+  ## Short of the trim at both ends, with a CO2 band cut out
+  short <- seq(3500, 651.5, by = -1.5)
+  hd    <- make_axis_spectra(short[short < 2300 | short > 2400])
+
+  w <- expect_warning(out <- no_output(standardize(hd, resample = 4, trim = c(600, 4000))),
+                      class = "horizons_warning_coverage")
+
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+  expect_match(msg, "2 coverage warnings in `standardize()`", fixed = TRUE)
+  expect_match(msg, "does not cover the 4 cm-1 grid", fixed = TRUE)
+  expect_match(msg, "gap in it", fixed = TRUE)
+
+  rows <- out$log[out$log$verb == "standardize", ]
+  expect_identical(rows$topic, "coverage")
+  expect_identical(rows$n, 2L)
+
+})
+
+
 test_that("a trim window holding no multiple of the resample step is refused", {
 
   ## Arrange — 1001 to 1003 holds no multiple of 4, so the grid is empty
   kssl <- make_axis_spectra(KSSL_WN)
 
   ## Act & Assert
-  expect_error(
+  err <- expect_error(
     no_output(standardize(kssl, resample = 4, trim = c(1001, 1003))),
     "No multiple of 4 cm-1 between 1001 and 1003 cm-1", fixed = TRUE,
-    class = "horizons_input_error"
+    class = "horizons_error_input"
   )
+
+  ## The data's own range, not the trimmed one, and what to change (#197)
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+  expect_match(msg, "The data covers 600 to 4000 cm-1", fixed = TRUE)
+  expect_match(msg, "narrower than one 4 cm-1 step: widen `trim` or reduce `resample`", fixed = TRUE)
 
 })
 
@@ -617,10 +656,17 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
 
   on_4 <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = 4))
 
-  expect_warning(
-    again <- no_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE)),
-    regexp = "Re-standardizing"
+  ## force = TRUE is the user's choice: a note on the log and a line in the
+  ## tree, not a warning
+  expect_no_warning(
+    again <- no_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE))
   )
+
+  note <- again$log[again$log$verb == "standardize", ]
+  expect_identical(note$type, "note")
+  expect_match(note$message, "Re-standardizing previously standardized data", fixed = TRUE)
+  expect_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE, verbose = TRUE),
+                "Re-standardizing (force = TRUE)", fixed = TRUE)
 
   expect_true(again$provenance$standardization$resampled)
   expect_identical(again$provenance$standardization$grid,
@@ -734,7 +780,7 @@ test_that("an axis with the water bands cut upstream is not spline-filled, and s
   out <- res$value
 
   ## One warning, naming both gaps
-  gap_warnings <- Filter(function(w) inherits(w, "horizons_standardize_warning"), res$warnings)
+  gap_warnings <- Filter(function(w) inherits(w, "horizons_warning_coverage"), res$warnings)
   expect_length(gap_warnings, 1L)
   msg <- gsub("\\s+", " ", conditionMessage(gap_warnings[[1]]))
   expect_match(msg, "2 gaps in it: 1578 to 1722, 3098 to 3702 cm-1", fixed = TRUE)
@@ -756,7 +802,7 @@ test_that("force = TRUE on an object standardized with remove_water = TRUE leave
   out <- res$value
 
   classes <- vapply(res$warnings, function(w) class(w)[1], character(1))
-  expect_true("horizons_standardize_warning" %in% classes)
+  expect_true("horizons_warning_coverage" %in% classes)
 
   expect_identical(predictor_names(out), predictor_names(cut))
   expect_identical(as.matrix(out$data$analysis[, predictor_names(out)]),
@@ -793,7 +839,7 @@ test_that("a CO2 gap in an off-grid axis is dropped, and each side is interpolat
   expect_warning(
     out <- no_output(standardize(offgrid, resample = 4)),
     regexp = "gap",
-    class  = "horizons_standardize_warning"
+    class  = "horizons_warning_coverage"
   )
 
   wn  <- as.numeric(sub("^wn_", "", predictor_names(out)))
@@ -1025,7 +1071,7 @@ test_that("baseline correction modifies spectral values", {
 ## Idempotence Tests
 ## =============================================================================
 
-test_that("standardize() warns on already-standardized object", {
+test_that("standardize() warns on already-standardized object, once, after writing it to the log", {
 
   hd <- create_test_spectra()
 
@@ -1033,9 +1079,19 @@ test_that("standardize() warns on already-standardized object", {
                         remove_water = FALSE, baseline = FALSE)
 
   expect_warning(
-    standardize(hd_std),
-    "already standardized"
+    again <- standardize(hd_std),
+    "already standardized", class = "horizons_warning_skipped"
   )
+
+  ## The object is unchanged but for its log
+  row <- again$log[again$log$verb == "standardize", ]
+  expect_identical(row$topic, "skipped")
+  again$log <- hd_std$log
+  expect_identical(again, hd_std)
+
+  ## Recorded whether or not the warning is seen
+  quiet <- suppressWarnings(standardize(hd_std))
+  expect_identical(quiet$log$topic[quiet$log$verb == "standardize"], "skipped")
 
 })
 

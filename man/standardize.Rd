@@ -116,8 +116,15 @@ derivative taken later still runs across the hole they leave, which is a
 separate matter (see \code{select_training()}'s \code{mask}).
 
 \strong{Idempotence:} If the object has already been standardized, calling
-\code{standardize()} again will warn and return the object unchanged. Use
-\code{force = TRUE} to override (not recommended).
+\code{standardize()} again returns the object unchanged, with one
+\code{horizons_warning_skipped}. Use \code{force = TRUE} to override (not
+recommended); as you asked for it, that is reported in verbose output and
+in a note on the log rather than warned.
+
+\strong{Warnings} are collected as the call runs and raised once per topic at
+its end, each written to the object's \code{log} first: grid points dropped
+because the data does not reach them or they fall in a gap are one
+\code{horizons_warning_coverage}.
 }
 \examples{
 \dontrun{
