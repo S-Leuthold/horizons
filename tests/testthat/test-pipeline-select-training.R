@@ -1479,6 +1479,9 @@ test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {
   expect_match(conditionMessage(err), "targets are in the pool")
   expect_no_match(conditionMessage(err), "lower it")
 
+  ## One bullet for the cause the two share, naming both
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "clay, oc: Each row was a target's own copy", fixed = TRUE)
+
   ## One row per property, each with its cause
   expect_identical(err$results$property, c("clay", "oc"))
   expect_true(all(grepl("targets are in the pool", err$results$cause, fixed = TRUE)))
@@ -1503,7 +1506,7 @@ test_that("a property the twin subtraction empties is left out with one partial_
 
   msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
   expect_match(msg, "Every row drawn for oc was flagged as some target's twin, so it was left out of the training set", fixed = TRUE)
-  expect_match(msg, "targets are in the pool", fixed = TRUE)
+  expect_match(msg, "oc: Each row was a target's own copy, at distance zero, so the targets are in the pool", fixed = TRUE)
   expect_identical(w[[1]]$log$ids[[1]], "oc")
 
   ## Out of the properties drawn for, and drawn none; clay drawn as usual

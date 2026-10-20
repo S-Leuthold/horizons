@@ -1315,11 +1315,10 @@ select_training <- function(x, library,
       cli::format_inline("A twin sits below {.arg twin_ratio} = {twin_ratio} times its target's reference distance, and at this value ordinary neighbours are being flagged; lower it (the default is {SELECT_TWIN_RATIO}).")
     ))
 
+    ### One bullet per cause, naming its properties
     by_cause <- split(emptied, causes)
-    bullets  <- if (length(by_cause) == 1L) names(by_cause) else {
-      paste0(vapply(by_cause, paste, character(1), collapse = ", "), ": ", names(by_cause))
-    }
-    bullets <- stats::setNames(cli_escape(bullets), rep("i", length(bullets)))
+    bullets  <- paste0(vapply(by_cause, paste, character(1), collapse = ", "), ": ", names(by_cause))
+    bullets  <- stats::setNames(cli_escape(bullets), rep("i", length(bullets)))
 
     if (length(emptied) == length(properties)) {
 
