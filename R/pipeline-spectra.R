@@ -16,6 +16,10 @@ ID_ALIASES <- c(
   "name", "Name"
 )
 
+#' The file types spectra() reads
+#' @noRd
+SPECTRA_TYPES <- c("opus", "csv")
+
 
 ## =============================================================================
 ## Section 2: Main Entry Point
@@ -106,7 +110,7 @@ spectra <- function(source,
 
   if (missing(source) || is.null(source)) {
 
-    cli::cli_abort("{.arg source} must be provided")
+    abort_horizons("{.arg source} must be provided.", kind = "input")
 
   }
 
@@ -119,10 +123,19 @@ spectra <- function(source,
 
   if (!is_path && !is_tibble) {
 
-    cli::cli_abort(c(
-      "{.arg source} must be a path or data frame",
-      "x" = "Got {.cls {class(source)}}"
-    ))
+    abort_horizons(
+      "{.arg source} must be a path or a data frame, not {.obj_type_friendly {source}}.",
+      kind = "input"
+    )
+
+  }
+
+  if (!is.null(type) && (!rlang::is_string(type) || !tolower(type) %in% SPECTRA_TYPES)) {
+
+    abort_horizons(c(
+      "{.arg type} must be one of {.val {SPECTRA_TYPES}}, or {.code NULL} to detect it.",
+      "x" = "Got {.val {type}}."
+    ), kind = "input")
 
   }
 
@@ -138,16 +151,36 @@ spectra <- function(source,
 
   }
 
+  ## Every path must exist, checked once before anything is read --------------
+
+  if (is_path) {
+
+    absent <- source[!file.exists(source)]
+
+    if (length(absent) > 0) {
+
+      abort_horizons(
+        "{length(absent)} path{?s} in {.arg source} {?does/do} not exist: {.path {absent}}.",
+        kind = "input"
+      )
+
+    }
+
+  }
+
   ## -------------------------------------------------------------------------
   ## Step 2: Dispatch based on input type
   ## -------------------------------------------------------------------------
+
+  call <- rlang::current_env()
 
   if (is_tibble) {
 
     result <- spectra_from_tibble(
       data            = source,
       id_col          = id_col,
-      wavelength_cols = wavelength_cols
+      wavelength_cols = wavelength_cols,
+      call            = call
     )
 
   } else if (is_path) {
@@ -157,7 +190,8 @@ spectra <- function(source,
       type            = type,
       id_col          = id_col,
       wavelength_cols = wavelength_cols,
-      recursive       = recursive
+      recursive       = recursive,
+      call            = call
     )
 
   }
@@ -233,88 +267,23 @@ spectra <- function(source,
 #' @param data A tibble or data.frame with spectral data.
 #' @param id_col Optional column name for sample ID.
 #' @param wavelength_cols Optional column names for wavelength data.
+#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return A horizons_data object.
 #'
 #' @noRd
 spectra_from_tibble <- function(data,
                                 id_col          = NULL,
-                                wavelength_cols = NULL) {
+                                wavelength_cols = NULL,
+                                call            = rlang::caller_env()) {
 
   ## -------------------------------------------------------------------------
-  ## Step 1: Detect ID column
+  ## Steps 1-3: The id and wavelength columns, checked
   ## -------------------------------------------------------------------------
 
-  if (!is.null(id_col)) {
-
-    if (!id_col %in% names(data)) {
-
-      cli::cli_abort(c(
-        "Specified {.arg id_col} not found in data",
-        "x" = "Column {.val {id_col}} does not exist",
-        "i" = "Available columns: {.val {names(data)}}"
-      ))
-
-    }
-
-    id_column <- id_col
-
-  } else {
-
-    id_column <- detect_id_column(names(data))
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Step 2: Detect wavelength columns
-  ## -------------------------------------------------------------------------
-
-  if (!is.null(wavelength_cols)) {
-
-    missing_cols <- setdiff(wavelength_cols, names(data))
-
-    if (length(missing_cols) > 0) {
-
-      cli::cli_abort(c(
-        "Specified wavelength columns not found in data",
-        "x" = "Missing: {.val {missing_cols}}"
-      ))
-
-    }
-
-    wn_cols <- wavelength_cols
-
-  } else {
-
-    wn_cols <- detect_wavelength_columns(names(data))
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Step 3: Validate wavelength columns contain numeric data
-  ## -------------------------------------------------------------------------
-
-  non_numeric_wn <- character()
-
-  for (col in wn_cols) {
-
-    if (!is.numeric(data[[col]])) {
-
-      non_numeric_wn <- c(non_numeric_wn, col)
-
-    }
-
-  }
-
-  if (length(non_numeric_wn) > 0) {
-
-    cli::cli_abort(c(
-      "Wavelength columns must contain numeric data",
-      "x" = "Non-numeric columns: {.val {non_numeric_wn}}",
-      "i" = "Check that spectral data columns contain absorbance/reflectance values"
-    ))
-
-  }
+  cols      <- check_source_columns(data, id_col, wavelength_cols, call = call)
+  id_column <- cols$id_column
+  wn_cols   <- cols$wn_cols
 
   ## -------------------------------------------------------------------------
   ## Step 4: Build analysis tibble
@@ -327,7 +296,6 @@ spectra_from_tibble <- function(data,
   ## Rename wavelength columns to wn_* format if needed ----------------------
 
   wn_names_new <- ensure_wn_prefix(wn_cols)
-  names_map    <- stats::setNames(wn_cols, wn_names_new)
 
   ## Build analysis tibble ---------------------------------------------------
 
@@ -383,11 +351,14 @@ spectra_from_tibble <- function(data,
 
 #' Load spectral data from file path
 #'
-#' @param source Path to file or directory.
-#' @param type File type ("opus", "csv", or NULL for auto-detect).
+#' @param source Path to file or directory, which `spectra()` has checked
+#'   exists.
+#' @param type File type ("opus", "csv", or NULL for auto-detect), which
+#'   `spectra()` has checked.
 #' @param id_col Optional column name for sample ID.
 #' @param wavelength_cols Optional column names for wavelength data.
 #' @param recursive Search subdirectories.
+#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return A horizons_data object.
 #'
@@ -396,28 +367,14 @@ spectra_from_path <- function(source,
                               type            = NULL,
                               id_col          = NULL,
                               wavelength_cols = NULL,
-                              recursive       = FALSE) {
+                              recursive       = FALSE,
+                              call            = rlang::caller_env()) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Determine file type
   ## -------------------------------------------------------------------------
 
-  if (is.null(type)) {
-
-    type <- detect_file_type(source)
-
-  }
-
-  type <- tolower(type)
-
-  if (!type %in% c("opus", "csv")) {
-
-    cli::cli_abort(c(
-      "{.arg type} must be 'opus' or 'csv'",
-      "x" = "Got {.val {type}}"
-    ))
-
-  }
+  type <- if (is.null(type)) detect_file_type(source, call = call) else tolower(type)
 
   ## -------------------------------------------------------------------------
   ## Step 2: Dispatch to type-specific loader
@@ -429,15 +386,17 @@ spectra_from_path <- function(source,
       source          = source,
       id_col          = id_col,
       wavelength_cols = wavelength_cols,
-      recursive       = recursive
+      recursive       = recursive,
+      call            = call
     )
 
-  } else if (type == "csv") {
+  } else {
 
     load_csv_files(
       source          = source,
       id_col          = id_col,
-      wavelength_cols = wavelength_cols
+      wavelength_cols = wavelength_cols,
+      call            = call
     )
 
   }
@@ -456,10 +415,12 @@ spectra_from_path <- function(source,
 
 #' Load spectral data from OPUS files
 #'
-#' @param source Path to OPUS file or directory.
+#' @param source Path to OPUS file or directory, which `spectra()` has
+#'   checked exists.
 #' @param id_col Not used for OPUS (ID comes from filename).
 #' @param wavelength_cols Optional wavelength columns.
 #' @param recursive Search subdirectories.
+#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return A horizons_data object.
 #'
@@ -467,7 +428,8 @@ spectra_from_path <- function(source,
 load_opus_files <- function(source,
                             id_col          = NULL,
                             wavelength_cols = NULL,
-                            recursive       = FALSE) {
+                            recursive       = FALSE,
+                            call            = rlang::caller_env()) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Find OPUS files
@@ -484,24 +446,17 @@ load_opus_files <- function(source,
 
     if (length(file_paths) == 0) {
 
-      cli::cli_abort(c(
-        "No OPUS files found in directory",
-        "i" = "Path: {.path {source}}",
+      abort_horizons(c(
+        "No OPUS files found in directory.",
+        "i" = "Path: {.path {source}}.",
         "i" = "OPUS files end with .0, .1, etc."
-      ))
+      ), kind = "input", call = call)
 
     }
 
-  } else if (file.exists(source)) {
-
-    file_paths <- source
-
   } else {
 
-    cli::cli_abort(c(
-      "Path does not exist",
-      "x" = "{.path {source}}"
-    ))
+    file_paths <- source
 
   }
 
@@ -513,17 +468,16 @@ load_opus_files <- function(source,
 
   if (!requireNamespace("opusreader2", quietly = TRUE)) {
 
-    cli::cli_abort(c(
-      "Package {.pkg opusreader2} required for OPUS files",
-      "i" = "Install with: {.code install.packages('opusreader2')}"
-    ))
+    abort_horizons(c(
+      "Package {.pkg opusreader2} required for OPUS files.",
+      "i" = "Install it with {.code install.packages('opusreader2')}."
+    ), kind = "dependency", call = call)
 
   }
 
   ## Read all files ----------------------------------------------------------
 
   n_files      <- length(file_paths)
-  n_failed     <- 0L
   spectra_list <- vector("list", n_files)
 
   cli::cli_progress_bar(
@@ -539,7 +493,6 @@ load_opus_files <- function(source,
 
     }, error = function(e) {
 
-      n_failed <<- n_failed + 1L
       cli::cli_warn("Failed to read {.path {file_paths[[i]]}}: {condition_summary(e)}")
       return(NULL)
 
@@ -686,17 +639,16 @@ load_opus_files <- function(source,
   id_cols    <- c("sample_id", "filename")
   other_cols <- setdiff(all_cols, id_cols)
 
-  ## Detect numeric column names (wavenumbers) -------------------------------
+  ## Wavenumber columns are the names that read as one -----------------------
 
-  numeric_names <- suppressWarnings(as.numeric(other_cols))
-  wn_cols       <- other_cols[!is.na(numeric_names)]
-  meta_cols     <- setdiff(other_cols, wn_cols)
+  wn_cols   <- other_cols[!is.na(wn_values(other_cols))]
+  meta_cols <- setdiff(other_cols, wn_cols)
 
-  ## Add wn_ prefix to wavelength columns ------------------------------------
+  ## Add wn_ prefix to wavelength columns, unless they carry it --------------
 
-  wn_cols_new <- paste0("wn_", wn_cols)
+  wn_cols_new <- ensure_wn_prefix(wn_cols)
 
-  names(combined)[names(combined) %in% wn_cols] <- wn_cols_new
+  names(combined)[match(wn_cols, names(combined))] <- wn_cols_new
 
   ## Reorder columns: sample_id, filename, meta, wn_* ------------------------
 
@@ -730,29 +682,22 @@ load_opus_files <- function(source,
 
 #' Load spectral data from CSV file
 #'
-#' @param source Path to CSV file.
+#' @param source Path to CSV file, which `spectra()` has checked exists.
 #' @param id_col Optional column name for sample ID.
 #' @param wavelength_cols Optional wavelength columns.
+#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return A horizons_data object.
 #'
 #' @noRd
 load_csv_files <- function(source,
                            id_col          = NULL,
-                           wavelength_cols = NULL) {
+                           wavelength_cols = NULL,
+                           call            = rlang::caller_env()) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Validate path
   ## -------------------------------------------------------------------------
-
-  if (!file.exists(source)) {
-
-    cli::cli_abort(c(
-      "CSV file not found",
-      "x" = "{.path {source}}"
-    ))
-
-  }
 
   if (dir.exists(source)) {
 
@@ -771,79 +716,12 @@ load_csv_files <- function(source,
   data <- readr::read_csv(source, show_col_types = FALSE)
 
   ## -------------------------------------------------------------------------
-  ## Step 3: Detect ID column
+  ## Steps 3-5: The id and wavelength columns, checked
   ## -------------------------------------------------------------------------
 
-  if (!is.null(id_col)) {
-
-    if (!id_col %in% names(data)) {
-
-      cli::cli_abort(c(
-        "Specified {.arg id_col} not found in data",
-        "x" = "Column {.val {id_col}} does not exist",
-        "i" = "Available: {.val {names(data)}}"
-      ))
-
-    }
-
-    id_column <- id_col
-
-  } else {
-
-    id_column <- detect_id_column(names(data))
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Step 4: Detect wavelength columns
-  ## -------------------------------------------------------------------------
-
-  if (!is.null(wavelength_cols)) {
-
-    missing_cols <- setdiff(wavelength_cols, names(data))
-
-    if (length(missing_cols) > 0) {
-
-      cli::cli_abort(c(
-        "Specified wavelength columns not found",
-        "x" = "Missing: {.val {missing_cols}}"
-      ))
-
-    }
-
-    wn_cols <- wavelength_cols
-
-  } else {
-
-    wn_cols <- detect_wavelength_columns(names(data))
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Step 5: Validate wavelength columns contain numeric data
-  ## -------------------------------------------------------------------------
-
-  non_numeric_wn <- character()
-
-  for (col in wn_cols) {
-
-    if (!is.numeric(data[[col]])) {
-
-      non_numeric_wn <- c(non_numeric_wn, col)
-
-    }
-
-  }
-
-  if (length(non_numeric_wn) > 0) {
-
-    cli::cli_abort(c(
-      "Wavelength columns must contain numeric data",
-      "x" = "Non-numeric columns: {.val {non_numeric_wn}}",
-      "i" = "Check that spectral data columns contain absorbance/reflectance values"
-    ))
-
-  }
+  cols      <- check_source_columns(data, id_col, wavelength_cols, call = call)
+  id_column <- cols$id_column
+  wn_cols   <- cols$wn_cols
 
   ## -------------------------------------------------------------------------
   ## Step 6: Build analysis tibble
@@ -906,17 +784,105 @@ load_csv_files <- function(source,
 
 
 ## ---------------------------------------------------------------------------
+## check_source_columns() — The id and wavelength columns of a table
+## ---------------------------------------------------------------------------
+
+#' The id and wavelength columns of a source table, checked
+#'
+#' @description
+#' The one door both table loaders (a data frame, a CSV file) use for the
+#' user's `id_col` and `wavelength_cols`: the columns named must exist, and
+#' the wavelength columns must hold numbers. Either is detected when not
+#' given ([detect_id_column()], [detect_wavelength_columns()]). Refusals
+#' report as `spectra()`.
+#'
+#' @param data The source table.
+#' @param id_col,wavelength_cols `spectra()`'s arguments.
+#' @param call The frame a refusal reports: `spectra()`'s.
+#' @return List: `id_column` (character(1)) and `wn_cols` (character), names
+#'   of `data`.
+#' @keywords internal
+#' @noRd
+check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::caller_env()) {
+
+  ## The id column ------------------------------------------------------------
+
+  if (!is.null(id_col)) {
+
+    if (!id_col %in% names(data)) {
+
+      abort_horizons(c(
+        "Specified {.arg id_col} not found in data.",
+        "x" = "Column {.val {id_col}} does not exist.",
+        "i" = "Available columns: {.val {names(data)}}."
+      ), kind = "input", call = call)
+
+    }
+
+    id_column <- id_col
+
+  } else {
+
+    id_column <- detect_id_column(names(data), call = call)
+
+  }
+
+  ## The wavelength columns ---------------------------------------------------
+
+  if (!is.null(wavelength_cols)) {
+
+    missing_cols <- setdiff(wavelength_cols, names(data))
+
+    if (length(missing_cols) > 0) {
+
+      abort_horizons(c(
+        "Specified wavelength columns not found in data.",
+        "x" = "Missing: {.val {missing_cols}}."
+      ), kind = "input", call = call)
+
+    }
+
+    wn_cols <- wavelength_cols
+
+  } else {
+
+    wn_cols <- detect_wavelength_columns(names(data), call = call)
+
+  }
+
+  ## Spectra are numbers ------------------------------------------------------
+
+  non_numeric_wn <- wn_cols[!vapply(data[wn_cols], is.numeric, logical(1))]
+
+  if (length(non_numeric_wn) > 0) {
+
+    abort_horizons(c(
+      "Wavelength columns must contain numeric data.",
+      "x" = "Non-numeric columns: {.val {non_numeric_wn}}.",
+      "i" = "Check that the spectral columns hold absorbance or reflectance values."
+    ), kind = "input", call = call)
+
+  }
+
+  list(id_column = id_column, wn_cols = wn_cols)
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## detect_file_type() — Auto-detect file type from path
 ## ---------------------------------------------------------------------------
 
 #' Detect file type from path
 #'
-#' @param source File or directory path.
+#' @param source File or directory path, which `spectra()` has checked
+#'   exists.
+#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character: "opus" or "csv".
 #'
 #' @noRd
-detect_file_type <- function(source) {
+detect_file_type <- function(source, call = rlang::caller_env()) {
 
   if (dir.exists(source)) {
 
@@ -933,41 +899,31 @@ detect_file_type <- function(source) {
 
       return("csv")
 
-    } else {
-
-      cli::cli_abort(c(
-        "Could not detect file type in directory",
-        "i" = "No OPUS (.0, .1, ...) or CSV files found",
-        "i" = "Specify {.arg type} explicitly"
-      ))
-
     }
 
-  } else if (file.exists(source)) {
-
-    if (grepl("\\.[0-9]+$", source)) {
-
-      return("opus")
-
-    } else if (grepl("\\.csv$", source, ignore.case = TRUE)) {
-
-      return("csv")
-
-    } else {
-
-      cli::cli_abort(c(
-        "Could not detect file type",
-        "i" = "File: {.path {source}}",
-        "i" = "Specify {.arg type} explicitly"
-      ))
-
-    }
-
-  } else {
-
-    cli::cli_abort("Path does not exist: {.path {source}}")
+    ### Naming the type cannot help: neither loader finds a file here.
+    abort_horizons(c(
+      "{.arg source} holds no OPUS (.0, .1, ...) or CSV files.",
+      "i" = "Directory: {.path {source}}."
+    ), kind = "input", call = call)
 
   }
+
+  if (grepl("\\.[0-9]+$", source)) {
+
+    return("opus")
+
+  } else if (grepl("\\.csv$", source, ignore.case = TRUE)) {
+
+    return("csv")
+
+  }
+
+  abort_horizons(c(
+    "Could not detect the type of {.arg source} from its extension.",
+    "i" = "File: {.path {source}}.",
+    "i" = "Specify {.arg type} explicitly."
+  ), kind = "input", call = call)
 
 }
 
@@ -979,11 +935,12 @@ detect_file_type <- function(source) {
 #' Detect ID column from common aliases
 #'
 #' @param col_names Character vector of column names.
+#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character: detected column name.
 #'
 #' @noRd
-detect_id_column <- function(col_names) {
+detect_id_column <- function(col_names, call = rlang::caller_env()) {
 
   for (alias in ID_ALIASES) {
 
@@ -995,12 +952,12 @@ detect_id_column <- function(col_names) {
 
   }
 
-  cli::cli_abort(c(
-    "Could not identify sample ID column",
-    "i" = "Checked aliases: {.val {ID_ALIASES}}",
-    "i" = "Available columns: {.val {col_names}}",
-    "i" = "Specify explicitly with {.arg id_col}"
-  ))
+  abort_horizons(c(
+    "Could not identify sample ID column.",
+    "i" = "Checked aliases: {.val {ID_ALIASES}}.",
+    "i" = "Available columns: {.val {col_names}}.",
+    "i" = "Specify it with {.arg id_col}."
+  ), kind = "input", call = call)
 
 }
 
@@ -1012,11 +969,12 @@ detect_id_column <- function(col_names) {
 #' Detect wavelength columns from column names
 #'
 #' @param col_names Character vector of column names.
+#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character vector of wavelength column names.
 #'
 #' @noRd
-detect_wavelength_columns <- function(col_names) {
+detect_wavelength_columns <- function(col_names, call = rlang::caller_env()) {
 
   ## Strategy 1: Columns starting with wn_ -----------------------------------
 
@@ -1040,12 +998,12 @@ detect_wavelength_columns <- function(col_names) {
 
   }
 
-  cli::cli_abort(c(
-    "Could not identify wavelength columns",
-    "i" = "Expected: columns starting with 'wn_' or numeric names (e.g., '4000', '3998')",
-    "i" = "Found columns: {.val {col_names}}",
-    "i" = "Specify explicitly with {.arg wavelength_cols}"
-  ))
+  abort_horizons(c(
+    "Could not identify wavelength columns.",
+    "i" = "Expected columns starting with {.val wn_} or numeric names (e.g. {.val 4000}, {.val 3998}).",
+    "i" = "Found columns: {.val {col_names}}.",
+    "i" = "Specify them with {.arg wavelength_cols}."
+  ), kind = "input", call = call)
 
 }
 

@@ -226,11 +226,10 @@ test_that("spectra() takes the wavelength columns it is given, and refuses one t
   expect_identical(predictor_cols, c("wn_4000", "wn_3000"))
   expect_identical(result$data$analysis$wn_3000, c(0.3, 0.4))
 
-  ## This abort carries no package class, so the message is the check.
   expect_error(
     spectra(test_data, wavelength_cols = c("4000", "9999")),
     "Specified wavelength columns not found in data",
-    fixed = TRUE
+    fixed = TRUE, class = "horizons_error_input"
   )
 
 })
@@ -500,11 +499,10 @@ test_that("spectra() refuses a directory with no OPUS files", {
 
   ## Act and assert --------------------------------------------------------
 
-  ## This abort carries no package class, so the message is the check.
   expect_error(
     spectra(empty, type = "opus"),
     "No OPUS files found in directory",
-    fixed = TRUE
+    fixed = TRUE, class = "horizons_error_input"
   )
 
 })
@@ -548,11 +546,10 @@ test_that("spectra() refuses OPUS input when opusreader2 is not installed, sayin
 
   ## Act and assert --------------------------------------------------------
 
-  ## This abort carries no package class, so the message is the check.
   expect_error(
     spectra(opus_dir(), type = "opus"),
     "Package opusreader2 required for OPUS files",
-    fixed = TRUE
+    fixed = TRUE, class = "horizons_error_dependency"
   )
 
 })
@@ -591,7 +588,7 @@ test_that("spectra() errors on NULL source", {
 
   expect_error(
     spectra(NULL),
-    "must be provided"
+    "must be provided", class = "horizons_error_input"
   )
 
 })
@@ -600,7 +597,7 @@ test_that("spectra() errors on non-existent file", {
 
   expect_error(
     spectra("/nonexistent/path/to/file.csv"),
-    "does not exist"
+    "does not exist", class = "horizons_error_input"
   )
 
 })
@@ -631,7 +628,7 @@ test_that("spectra() errors when ID column not found", {
 
   expect_error(
     spectra(test_data),
-    "Could not identify sample ID column"
+    "Could not identify sample ID column", class = "horizons_error_input"
   )
 
 })
@@ -646,7 +643,7 @@ test_that("spectra() errors when wavelength columns not found", {
 
   expect_error(
     spectra(test_data),
-    "Could not identify wavelength columns"
+    "Could not identify wavelength columns", class = "horizons_error_input"
   )
 
 })
@@ -660,7 +657,7 @@ test_that("spectra() errors on invalid id_col", {
 
   expect_error(
     spectra(test_data, id_col = "nonexistent"),
-    "not found"
+    "not found", class = "horizons_error_input"
   )
 
 })
@@ -679,8 +676,59 @@ test_that("spectra() errors when wavelength columns contain non-numeric data", {
 
   expect_error(
     spectra(test_data),
-    "Wavelength columns must contain numeric data"
+    "Wavelength columns must contain numeric data", class = "horizons_error_input"
   )
+
+})
+
+test_that("spectra() refuses a source that is neither a path nor a data frame, and a type it does not read", {
+
+  expect_error(spectra(42), "`source` must be a path or a data frame, not a number",
+               fixed = TRUE, class = "horizons_error_input")
+
+  ## Refused before the path is looked at: this one does not exist
+  expect_error(spectra("/nonexistent/x.spa", type = "spa"), "`type` must be one of",
+               fixed = TRUE, class = "horizons_error_input")
+
+})
+
+test_that("a CSV's columns are checked as a data frame's are, and the refusal names spectra()", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  csv <- withr::local_tempfile(fileext = ".csv")
+  readr::write_csv(tibble::tibble(Sample_ID = c("A", "B"), `4000` = c("high", "low"),
+                                  `3000` = c(0.2, 0.3)), csv)
+
+  ## Act & Assert ----------------------------------------------------------
+
+  err <- expect_error(spectra(csv, id_col = "nonexistent"), "Specified `id_col` not found in data",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "spectra")
+
+  expect_error(spectra(csv, wavelength_cols = "9999"), "Specified wavelength columns not found in data",
+               fixed = TRUE, class = "horizons_error_input")
+
+  err <- expect_error(spectra(csv), "Wavelength columns must contain numeric data",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "spectra")
+
+})
+
+test_that("spectra() refuses a directory with neither OPUS nor CSV files, and a file whose type it cannot tell", {
+
+  empty <- withr::local_tempdir()
+  writeLines("not a spectrum", file.path(empty, "notes.txt"))
+
+  ## Naming the type cannot help here, so the refusal does not suggest it
+  err <- expect_error(spectra(empty), "holds no OPUS (.0, .1, ...) or CSV files",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_false(grepl("type", conditionMessage(err), fixed = TRUE))
+  expect_identical(rlang::call_name(err$call), "spectra")
+
+  err <- expect_error(spectra(file.path(empty, "notes.txt")), "Could not detect the type",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_match(conditionMessage(err), "Specify `type` explicitly", fixed = TRUE)
 
 })
 
