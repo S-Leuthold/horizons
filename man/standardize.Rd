@@ -129,7 +129,11 @@ separate matter (see \code{select_training()}'s \code{mask}).
 value that is not finite once it is trimmed and resampled, or one with no
 spread (every value equal), is kept and flagged, never dropped: its
 \code{.flag} is \code{"standardize"} (a \code{meta} column, created when the first row
-is flagged), and one \code{horizons_warning_flagged} counts and names them.
+is flagged), and one \code{horizons_warning_flagged} counts and names them,
+by reason. With resampling, a spectrum whose own points do not reach
+every grid point (short at an end, as the scans of a narrower file bound
+with wider ones are, or with a hole) is flagged for that, and the warning
+gives the range such spectra cover, inside which a \code{trim} keeps them.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=predict]{predict()}} and \code{\link[=select_training]{select_training()}} leave flagged
 spectra out. The convex hull is fitted to the spectra not flagged, and a
 flagged spectrum keeps its values as they stood when it was flagged. The

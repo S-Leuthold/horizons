@@ -559,6 +559,39 @@ unusable_spectra <- function(M) {
 
 }
 
+#' The range each spectrum's own points cover
+#'
+#' @description
+#' Read before the resample, so a spectrum the grid outruns can be told from
+#' one with a value that is not finite, and its flag can say what it covers.
+#' Only spectra with a missing value can be short of the grid, so with none
+#' it returns `NULL` without reading the matrix further.
+#'
+#' @param M `matrix.` Spectra as rows, on `wavelengths`.
+#' @param wavelengths `numeric.` The axis.
+#' @return `NULL`, or a list: `has` (logical, the spectrum has a finite
+#'   value), `lo` and `hi` (numeric, the range of its finite points).
+#' @keywords internal
+#' @noRd
+own_points <- function(M, wavelengths) {
+
+  if (!anyNA(M)) return(NULL)
+
+  lo <- rep(Inf, nrow(M))
+  hi <- rep(-Inf, nrow(M))
+
+  for (j in seq_along(wavelengths)) {
+
+    at     <- is.finite(M[, j])
+    lo[at] <- pmin(lo[at], wavelengths[j])
+    hi[at] <- pmax(hi[at], wavelengths[j])
+
+  }
+
+  list(has = is.finite(lo), lo = lo, hi = hi)
+
+}
+
 #' Flag the spectra standardize() could not use
 #'
 #' @description
@@ -571,12 +604,18 @@ unusable_spectra <- function(M) {
 #'
 #' @param analysis,role_map The table and its roles.
 #' @param reason Character, one per row, from [unusable_spectra()]: `NA` for
-#'   a row left as it is.
+#'   a row left as it is. `standardize()` adds `"short of the grid"` for a
+#'   spectrum whose own points do not reach every grid point, which only it,
+#'   knowing the grid, can tell from a value that is not finite.
 #' @param collector `standardize()`'s collector, from [log_open()].
+#' @param short_range `numeric(2)` or `NULL`. The range every spectrum short
+#'   of the grid covers, which a `trim` inside keeps them.
+#' @param grid_range `numeric(2)` or `NULL`. The grid's range.
 #' @return List: `analysis` and `role_map`.
 #' @keywords internal
 #' @noRd
-flag_unusable <- function(analysis, role_map, reason, collector) {
+flag_unusable <- function(analysis, role_map, reason, collector,
+                          short_range = NULL, grid_range = NULL) {
 
   flag <- !is.na(reason)
 
@@ -612,13 +651,22 @@ flag_unusable <- function(analysis, role_map, reason, collector) {
   n          <- sum(flag)
   non_finite <- ids[flag & reason %in% "non-finite"]
   flat       <- ids[flag & reason %in% "no spread"]
+  short      <- ids[flag & reason %in% "short of the grid"]
   n_nf       <- sum(flag & reason %in% "non-finite")
   n_flat     <- sum(flag & reason %in% "no spread")
+  n_short    <- sum(flag & reason %in% "short of the grid")
+
+  ### A trim inside the range they all cover keeps them, unless every one
+  ### reaches both ends of the grid and is short only by a hole
+  trim_hint <- n_short > 0 && !is.null(short_range) && short_range[1] < short_range[2] &&
+               (short_range[1] > grid_range[1] + GRID_TOL || short_range[2] < grid_range[2] - GRID_TOL)
 
   log_warning(collector, "flagged", c(
     "{n} spectr{?um/a} could not be used and {?is/are} flagged ({.field .flag}); the modelling verbs leave {?it/them} out.",
     "i" = if (n_nf > 0) "{n_nf} {?has/have} a value that is not finite: {shown_ids(non_finite)}.",
-    "i" = if (n_flat > 0) "{n_flat} {?has/have} no spread (every value equal): {shown_ids(flat)}."
+    "i" = if (n_flat > 0) "{n_flat} {?has/have} no spread (every value equal): {shown_ids(flat)}.",
+    "i" = if (n_short > 0) "{n_short} {?does/do} not reach every point of the grid from {?its/their} own points, short at an end or with a hole: {shown_ids(short)}.",
+    "i" = if (trim_hint) "The range {cli::qty(n_short)}{?it covers/they all cover} is {short_range[1]} to {short_range[2]} cm-1; a {.arg trim} inside it keeps {cli::qty(n_short)}{?it/them}."
   ), ids = ids[flag], n = n)
 
   list(analysis = analysis, role_map = role_map)
@@ -803,7 +851,11 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' value that is not finite once it is trimmed and resampled, or one with no
 #' spread (every value equal), is kept and flagged, never dropped: its
 #' `.flag` is `"standardize"` (a `meta` column, created when the first row
-#' is flagged), and one `horizons_warning_flagged` counts and names them.
+#' is flagged), and one `horizons_warning_flagged` counts and names them,
+#' by reason. With resampling, a spectrum whose own points do not reach
+#' every grid point (short at an end, as the scans of a narrower file bound
+#' with wider ones are, or with a hole) is flagged for that, and the warning
+#' gives the range such spectra cover, inside which a `trim` keeps them.
 #' [evaluate()], [fit()], [predict()] and [select_training()] leave flagged
 #' spectra out. The convex hull is fitted to the spectra not flagged, and a
 #' flagged spectrum keeps its values as they stood when it was flagged. The
@@ -1133,6 +1185,7 @@ standardize <- function(x,
   ## dropped, and each contiguous run is interpolated on its own.
 
   grid_record <- NULL
+  own         <- NULL
 
   if (!is.null(resample)) {
 
@@ -1238,6 +1291,7 @@ standardize <- function(x,
 
       spectra_matrix <- spectra_matrix[, in_bounds, drop = FALSE]
       wavelengths    <- grid
+      own            <- own_points(spectra_matrix, wavelengths)
 
       operations$resample <- list(
         status            = "skipped",
@@ -1250,6 +1304,7 @@ standardize <- function(x,
 
       ### Each spectrum from its own points: one with missing values is never
       ### extrapolated or filled, the grid points it cannot reach left NA
+      own       <- own_points(spectra_matrix, wavelengths)
       resampled <- resample_onto_grid(spectra_matrix, wavelengths, grid)
 
       operations$resample <- list(
@@ -1284,10 +1339,29 @@ standardize <- function(x,
   ## trimmed native axis. Before water removal: the hull needs a continuous
   ## range.
 
+  ## Why a spectrum cannot be used. With resampling, a missing value is a
+  ## grid point the spectrum's own points do not reach, which is a reason of
+  ## its own: the remedy is the trim, not the source.
+
+  judge <- function(M) {
+
+    r <- unusable_spectra(M)
+
+    if (!is.null(own)) {
+
+      short    <- r %in% "non-finite" & own$has & rowSums(is.infinite(M)) == 0
+      r[short] <- "short of the grid"
+
+    }
+
+    r
+
+  }
+
   ## A spectrum it cannot use is flagged before the hull, which would fail
   ## the whole batch on it, and keeps its values as they stand here
 
-  before        <- unusable_spectra(spectra_matrix)
+  before        <- judge(spectra_matrix)
   now           <- !prior & is.na(reason) & !is.na(before)
   reason[now]   <- before[now]
 
@@ -1335,7 +1409,7 @@ standardize <- function(x,
   ## Kept and flagged, never dropped: rows are removed only where modelling
   ## happens.
 
-  after       <- unusable_spectra(spectra_matrix)
+  after       <- judge(spectra_matrix)
   now         <- !prior & is.na(reason) & !is.na(after)
   reason[now] <- after[now]
 
@@ -1377,7 +1451,14 @@ standardize <- function(x,
   ## set_analysis() is the one place that recomputes the stored counts, so
   ## the predictor count is never written by hand here.
 
-  flagged      <- flag_unusable(new_analysis, new_role_map, reason, collector)
+  short       <- reason %in% "short of the grid"
+  short_range <- if (any(short)) {
+    c(max(own$lo[short], grid_record$min), min(own$hi[short], grid_record$max))
+  }
+
+  flagged      <- flag_unusable(new_analysis, new_role_map, reason, collector,
+                                short_range = short_range,
+                                grid_range  = c(grid_record$min, grid_record$max))
   new_analysis <- flagged$analysis
   new_role_map <- flagged$role_map
 

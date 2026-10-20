@@ -1127,7 +1127,9 @@ test_that("a spectrum with a hole, or short at one end, is flagged rather than f
   ## Assert ----------------------------------------------------------------
 
   expect_identical(out$data$analysis$.flag, c(NA, "standardize", "standardize", NA))
-  expect_match(conditionMessage(w), '2 have a value that is not finite: "s2", "s3"', fixed = TRUE)
+  expect_match(conditionMessage(w), '2 do not reach every point of the grid from their own points, short at an end or with a hole: "s2", "s3"',
+               fixed = TRUE)
+  expect_no_match(conditionMessage(w), "not finite", fixed = TRUE)
 
   ## The grid points inside the hole, and below row 3's own start, are NA
   out_wn <- as.numeric(sub("^wn_", "", predictor_names(out)))
@@ -1139,6 +1141,47 @@ test_that("a spectrum with a hole, or short at one end, is flagged rather than f
   expect_lt(max(abs(block[2, ] - 2 * smooth_spectrum(out_wn)), na.rm = TRUE), 1e-5)
   expect_lt(max(abs(block[3, ] - 3 * smooth_spectrum(out_wn)), na.rm = TRUE), 1e-5)
   expect_false(anyNA(block[c(1, 4), ]))
+
+})
+
+test_that("a spectrum short of the grid is flagged for that, with the range it covers and trim as the remedy", {
+
+  ## Off-grid and on-grid alike: row 2 starts at 700, as a narrower file's
+  ## scans do once bound with wider ones
+  for (axis in list(OFFGRID_WN, rev(KSSL_WN))) {
+
+    hd   <- make_axis_spectra(axis, f = smooth_spectrum, n = 2)
+    pred <- predictor_names(hd)
+    wn   <- as.numeric(sub("^wn_", "", pred))
+    hd$data$analysis[2, pred[wn < 700]] <- NA_real_
+    lo   <- min(wn[wn >= 700])
+
+    w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
+                        class = "horizons_warning_flagged")
+
+    expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
+
+    msg <- gsub("\\s+", " ", conditionMessage(w))
+    expect_match(msg, '1 does not reach every point of the grid from its own points, short at an end or with a hole: "s2".',
+                 fixed = TRUE)
+    expect_match(msg, paste0("The range it covers is ", lo, " to 4000 cm-1; a `trim` inside it keeps it."),
+                 fixed = TRUE)
+    expect_no_match(msg, "not finite", fixed = TRUE)
+
+    ## The remedy works
+    expect_no_warning(out <- no_output(standardize(hd, resample = 2, trim = c(ceiling(lo / 2) * 2, 4000))))
+    expect_false(".flag" %in% names(out$data$analysis))
+
+  }
+
+  ## An Inf is a value that is not finite, short of nothing
+  hd <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 2)
+  hd$data$analysis$wn_2000[2] <- Inf
+
+  w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
+                      class = "horizons_warning_flagged")
+  expect_match(conditionMessage(w), '1 has a value that is not finite: "s2".', fixed = TRUE)
+  expect_no_match(conditionMessage(w), "reach", fixed = TRUE)
 
 })
 
