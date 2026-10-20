@@ -73,12 +73,12 @@ warning \code{opusreader2} or \code{readr} raises while reading is passed on, on
 per distinct message, as a \code{horizons_warning_quality}.
 
 \strong{Axes that drift:} scans from different sessions on one instrument can
-carry wavenumbers that differ in the last digits. A file's wavenumbers
-within 1\% of its own step of those read before it take their names, so
-the files bind into one set of columns; only the names move, never the
-values, and the files moved are named in one
-\code{horizons_warning_substitution}. A file at another resolution or range
-keeps its own points where none is that close.
+carry wavenumbers that differ in the last digits. A file whose every
+wavenumber, within the range of those read before it, lies within 1\% of
+its own step of one of them takes their names, so the files bind into one
+set of columns; only the names move, never the values, and the files
+moved are named in one \code{horizons_warning_substitution}. A file at another
+resolution keeps all its own names.
 
 \strong{Wavenumber order:} Predictor columns are sorted into decreasing
 wavenumber order before the object is returned, whatever order the source

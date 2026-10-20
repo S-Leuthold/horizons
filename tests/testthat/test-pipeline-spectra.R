@@ -860,6 +860,35 @@ test_that("the snap is a fraction of each file's step, and a drift past it keeps
 
 })
 
+test_that("a file at another resolution keeps every name, even where its points come close to the grid's (#224)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## A 1.93 cm-1 axis and a 2 cm-1 one: four of the second's points fall
+  ## within 1% of a step of a point of the first, by coincidence
+  wn_1  <- 4000 - 1.93 * (0:199)
+  wn_2  <- 4000.01 - 2 * (0:199)
+  near  <- vapply(wn_2, function(v) min(abs(v - wn_1)), numeric(1)) <= 0.02
+  expect_identical(sum(near), 4L)
+
+  files <- local_opus_files(c("a.0", "b.0"))
+  local_reads(list(a.0 = list(ab = fake_block(wn_1, seq_along(wn_1))),
+                   b.0 = list(ab = fake_block(wn_2, seq_along(wn_2)))))
+
+  ## Act -------------------------------------------------------------------
+
+  out <- expect_no_warning(spectra(files))
+
+  ## Assert ----------------------------------------------------------------
+
+  ## Both axes whole, each file's values under its own names (one point,
+  ## 3724.01, the two axes share exactly)
+  expect_identical(out$data$n_predictors, length(union(paste0("wn_", wn_1), paste0("wn_", wn_2))))
+  expect_identical(unname(unlist(out$data$analysis[2, paste0("wn_", wn_2)])), seq_along(wn_2))
+  expect_false("substitution" %in% out$log$topic)
+
+})
+
 test_that("spectra()'s tree counts scans under sample ids when they repeat, and the scans with no id", {
 
   df <- tibble::tibble(Sample_ID = c("A", "A", "B", "B", NA),

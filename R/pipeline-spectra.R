@@ -65,12 +65,12 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' per distinct message, as a `horizons_warning_quality`.
 #'
 #' **Axes that drift:** scans from different sessions on one instrument can
-#' carry wavenumbers that differ in the last digits. A file's wavenumbers
-#' within 1% of its own step of those read before it take their names, so
-#' the files bind into one set of columns; only the names move, never the
-#' values, and the files moved are named in one
-#' `horizons_warning_substitution`. A file at another resolution or range
-#' keeps its own points where none is that close.
+#' carry wavenumbers that differ in the last digits. A file whose every
+#' wavenumber, within the range of those read before it, lies within 1% of
+#' its own step of one of them takes their names, so the files bind into one
+#' set of columns; only the names move, never the values, and the files
+#' moved are named in one `horizons_warning_substitution`. A file at another
+#' resolution keeps all its own names.
 #'
 #' **Wavenumber order:** Predictor columns are sorted into decreasing
 #' wavenumber order before the object is returned, whatever order the source
@@ -690,12 +690,14 @@ read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL, call = rl
 #' rows.
 #'
 #' Before the bind, each file's wavenumbers are matched to the grid read so
-#' far, the first file's axis to start (#224). A point within
-#' `WN_SNAP_FRACTION` of the file's own median step from a point already on
-#' the grid takes that point's name; one with no such neighbour joins the
-#' grid. Only names move, never values, so scans from sessions whose axes
-#' differ in the last digits bind into one column set, and a file at another
-#' resolution or range keeps its own points where none is near. The files
+#' far, the first file's axis to start (#224). A file whose every point
+#' inside the grid's range lies within `WN_SNAP_FRACTION` of its own median
+#' step of a grid point has drifted as a whole: those points take the grid's
+#' names, and its points beyond the grid join it. Any other file keeps all
+#' its names. Only names move, never values, so scans from sessions whose
+#' axes differ in the last digits bind into one column set, and a file at
+#' another resolution, whose points meet the grid's only here and there,
+#' keeps its own. The files
 #' whose names moved are collected as one `substitution` warning with the
 #' largest distance moved.
 #'
@@ -739,10 +741,16 @@ bind_spectra_files <- function(tables, collector) {
       drift   <- abs(values - sorted[nearest])
       target  <- grid_names[ord][nearest]
 
+      ### A file is moved only when its whole axis drifted: every point inside
+      ### the grid's range has a grid point that close. A file at another
+      ### resolution meets the grid only here and there, and keeps its names.
+      inside <- values >= min(sorted) - tol & values <= max(sorted) + tol
+      whole  <- all(drift[inside] <= tol)
+
       ### A point takes a grid name only when it is that close, the name is
       ### not already one of the file's own, and no other point of the file
       ### takes it
-      snap        <- drift <= tol & !target %in% own
+      snap        <- whole & drift <= tol & !target %in% own
       snap[snap]  <- !duplicated(target[snap])
 
       if (any(snap)) {
