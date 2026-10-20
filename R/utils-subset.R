@@ -321,7 +321,8 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 
       x$selection <- subset_selection(selection = x$selection,
                                       keep_ids  = new_ids,
-                                      n_removed = length(setdiff(old_ids, new_ids)))
+                                      n_removed = length(setdiff(old_ids, new_ids)),
+                                      analysis  = analysis)
 
     }
 
@@ -652,8 +653,8 @@ subset_rows <- function(x, keep) {
 #' analysis table, and are kept so the draw stays readable. Each group's
 #' `pool_ids` is filtered to the survivors and `n_rows` is recounted from it.
 #' `pool_sizes$drawn` is recounted per property from the retained membership
-#' rows — except under `scope = "global"`, where the draw is the whole pool,
-#' so every surviving row is drawn for every property.
+#' rows — except under `scope = "global"`, where the draw is every eligible
+#' row, so a property's count is the surviving rows that carry it (#153).
 #'
 #' Scope is read from `settings$scope` rather than inferred from an empty
 #' `membership`: a batch draw whose rows have all left is also empty, and
@@ -672,12 +673,14 @@ subset_rows <- function(x, keep) {
 #' @param selection [List.] The record from `x$selection`.
 #' @param keep_ids [Character.] `sample_id`s still in the object.
 #' @param n_removed [Integer.] Rows dropped by this subset.
+#' @param analysis [Data frame.] The object's analysis table after the
+#'   subset, whose response columns a global record's counts are read from.
 #'
 #' @return [List.] The recomputed record.
 #'
 #' @seealso [subset_rows()]
 #' @noRd
-subset_selection <- function(selection, keep_ids, n_removed) {
+subset_selection <- function(selection, keep_ids, n_removed, analysis) {
 
   membership <- selection$membership
   retained   <- NULL
@@ -716,8 +719,12 @@ subset_selection <- function(selection, keep_ids, n_removed) {
 
     if (identical(selection$settings$scope, "global")) {
 
-      ### scope = "global" draws the pool entire, so the survivors are the draw.
-      pool_sizes$drawn <- rep(length(keep_ids), nrow(pool_sizes))
+      ### scope = "global" draws every eligible row, so the survivors are the
+      ### draw, and each property's are those that carry it (#153)
+      kept             <- analysis$sample_id %in% keep_ids
+      pool_sizes$drawn <- vapply(pool_sizes$property,
+                                 function(p) sum(!is.na(analysis[[p]][kept])),
+                                 integer(1), USE.NAMES = FALSE)
 
       selection$pool_sizes <- pool_sizes
 

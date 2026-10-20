@@ -163,6 +163,10 @@ check_arg <- function(check,
 #'     One row per failure travels as `results`: its `unit` (`"configuration"`, or
 #'     `"combination"` for an ensemble's), `config_id` (`NA` for the
 #'     combination), `step`, `class` and `error_message`.}
+#'   \item{`horizons_error_selection_failed`}{(run) [select_training()] had
+#'     nothing to return: the twin subtraction left no training rows for any
+#'     property it drew for. One row per property travels as `results`: its
+#'     `property` and the `cause`.}
 #'   \item{`horizons_error_ensemble_failed`}{(run) [ensemble()]'s
 #'     meta-learner could not be built, so there is no ensemble to return: a
 #'     step of its tuning, its fit, its out-of-fold pass or the members'
@@ -203,11 +207,13 @@ check_arg <- function(check,
 #'     package raised while predicting under this topic, naming the
 #'     configurations (or an ensemble's units) that raised it.}
 #'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
-#'     as a member's prediction intervals.}
+#'     as a member's prediction intervals, or a response [select_training()]
+#'     could not draw for under `properties = NULL`.}
 #'   \item{`horizons_warning_flagged`}{A step kept samples it could not use;
 #'     modelling leaves them out. From `predict()`, the rows it returned `NA`
 #'     because they were flagged on arrival (`.flag`) or were not finite after
-#'     a configuration's recipe.}
+#'     a configuration's recipe; from [select_training()], the targets it drew
+#'     no training set for because they were flagged on arrival.}
 #'   \item{`horizons_warning_partial_failure`}{Some units failed and the rest
 #'     returned.}
 #'   \item{`horizons_warning_coverage`}{The data only partly covers what is

@@ -516,6 +516,37 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
+  it("searches grids whose every candidate fits and keeps a member, so tune keeps no note on the search", {
+
+    skip_unless_slow_tier()
+
+    fitted   <- ens_fitted()
+    real     <- select_complete
+    searched <- NULL
+
+    local_mocked_bindings(select_complete = function(results, metric, n_folds, debug = FALSE) {
+      searched <<- results
+      real(results, metric, n_folds, debug)
+    })
+
+    ## tune notes a candidate that fails to fit (an xgboost setting it
+    ## refuses) as an error, and one whose predictions are constant (a
+    ## penalty at which glmnet keeps no member) as a warning that the
+    ## correlation is undefined. ensemble() muffles tune's console and keeps
+    ## only the chosen candidate's warnings, so the search is read here.
+    for (method in c("penalized", "xgb")) {
+
+      searched <- NULL
+      suppressWarnings(ensemble(fitted, method = method, optimize = TRUE, compute_uq = FALSE))
+
+      expect_s3_class(searched, "tune_results")
+      expect_gt(length(unique(tune::collect_metrics(searched)$.config)), 1L)
+      expect_identical(nrow(tune::collect_notes(searched)), 0L, info = method)
+
+    }
+
+  })
+
   it("keeps only the chosen candidate's tune warnings when it tunes, and says when it cannot tell them apart (#109)", {
 
     fitted <- ens_fitted()

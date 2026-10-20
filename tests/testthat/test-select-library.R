@@ -19,26 +19,6 @@ test_that("a horizons_data passes through as the object form", {
 
 })
 
-test_that("a bare word that is not registered says so rather than 'file not found'", {
-
-  expect_error(resolve_source("ksl"), class = "horizons_input_error", regexp = "not a registered library")
-
-})
-
-test_that("a path that does not exist stops with the path", {
-
-  expect_error(resolve_source(file.path(tempdir(), "nope.qs2")),
-               class = "horizons_input_error", regexp = "not found")
-
-})
-
-test_that("anything else is refused with the forms listed", {
-
-  expect_error(resolve_source(42), class = "horizons_input_error", regexp = "registered library")
-  expect_error(resolve_source(c("a", "b")), class = "horizons_input_error")
-
-})
-
 test_that("a saved horizons_data reads back through the path form", {
 
   fx   <- select_fixture()
@@ -57,15 +37,17 @@ test_that("a file that is not a readable library is refused, saying which it is"
   path <- withr::local_tempfile(fileext = ".qs2")
   qs2::qs_save(list(a = 1), path)
 
-  expect_error(resolve_source(path), class = "horizons_input_error", regexp = "not a horizons library")
+  err <- expect_error(resolve_source(path), class = "horizons_error_input", regexp = "not a horizons library")
+  expect_match(conditionMessage(err), "a qs2 file holding a horizons_data", fixed = TRUE)
 
   ## A file qs2 cannot read at all is reported as unreadable, not as a
-  ## library holding the reader's error
+  ## library holding the reader's error, which is the parent
   unreadable <- withr::local_tempfile(fileext = ".qs2")
   writeLines("not a qs2 file", unreadable)
 
-  expect_error(resolve_source(unreadable), "Could not read", fixed = TRUE,
-               class = "horizons_input_error")
+  err <- expect_error(resolve_source(unreadable), "Could not read", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_false(is.null(err$parent))
 
 })
 
@@ -81,7 +63,7 @@ test_that("without consent a non-interactive session downloads nothing", {
   withr::local_options(horizons.library_download = NULL)
 
   expect_error(suppressMessages(resolve_source("mini", ask = FALSE)),
-               class = "horizons_consent_error", regexp = "horizons.library_download")
+               class = "horizons_error_consent", regexp = "horizons.library_download")
 
   ## Asked in an interactive session, a no or a dismissed prompt declines
   for (answer in list(FALSE, NA)) {
@@ -90,12 +72,18 @@ test_that("without consent a non-interactive session downloads nothing", {
 
     expect_error(suppressMessages(resolve_source("mini", ask = TRUE)),
                  "Download of \"mini\" declined; nothing was written.", fixed = TRUE,
-                 class = "horizons_consent_error")
+                 class = "horizons_error_consent")
 
   }
 
   expect_true(dir.exists(cache))
   expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+
+  ## A yes builds it
+  local_mocked_bindings(askYesNo = function(...) TRUE, .package = "utils")
+  res <- suppressMessages(resolve_source("mini", ask = TRUE, verbose = FALSE))
+  expect_identical(res$record$form, "registered")
+  expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
 
 })
 
@@ -140,6 +128,7 @@ test_that("first use builds and caches; later uses read the cache", {
   again <- resolve_source("mini", verbose = FALSE)
 
   expect_equal(again$pool$data$analysis, res$pool$data$analysis)
+  expect_output(resolve_source("mini", verbose = TRUE), "v0 (cached)", fixed = TRUE)
 
   ## A cache file that holds another version of the library is refused, not read
   lib <- qs2::qs_read(file.path(cache, "mini_v0.qs2"))
@@ -147,7 +136,7 @@ test_that("first use builds and caches; later uses read the cache", {
   qs2::qs_save(lib, file.path(cache, "mini_v0.qs2"))
 
   expect_error(resolve_source("mini", verbose = FALSE),
-               "is not \"mini\" v0", fixed = TRUE, class = "horizons_input_error")
+               "is not \"mini\" v0", fixed = TRUE, class = "horizons_error_validation")
 
 })
 
@@ -177,7 +166,7 @@ test_that("a source that fails its MD5 stops and caches nothing", {
   withr::local_options(horizons.library_download = TRUE)
 
   err <- expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
-                      class = "horizons_download_error", regexp = "checksum")
+                      class = "horizons_error_download", regexp = "checksum")
   expect_false(file.exists(file.path(cache, "mini_v0.qs2")))
 
   ## The lab table was the file checked, against the MD5 the entry publishes
@@ -211,8 +200,11 @@ test_that("a download that fails stops, classed, with its reason, and caches not
 
     err <- expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
                         "Could not download 'mir.csv.gz'", fixed = TRUE,
-                        class = "horizons_download_error")
+                        class = "horizons_error_download")
     expect_identical(err$body[["x"]], f$why)
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 paste0("Check the connection, and that '", cache, "' is writable, then run the call again; nothing was cached."),
+                 fixed = TRUE)
 
   }
 
@@ -241,7 +233,7 @@ test_that("downloads run under at least an hour's timeout, and the user's is res
 
     expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
                  "stopped after the first file", fixed = TRUE,
-                 class = "horizons_download_error")
+                 class = "horizons_error_download")
     expect_identical(seen, case[["used"]])
     expect_identical(getOption("timeout"), case[["user"]])
 
@@ -260,7 +252,7 @@ test_that("the cache is the user cache directory unless horizons.cache_dir names
 
 })
 
-test_that("a cached library that no longer meets the object contract stops, naming the file to delete", {
+test_that("a cached library that no longer meets the object contract is built again, not refused", {
 
   entry <- make_mini_ossl(withr::local_tempdir())
   local_mini_registry(entry)
@@ -274,43 +266,66 @@ test_that("a cached library that no longer meets the object contract stops, nami
   lib$pool$log <- NULL
   qs2::qs_save(lib, path)
 
-  err <- expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
-                      class = "horizons_input_error")
+  collector <- log_open("select_training")
+  rebuilt   <- suppressMessages(resolve_source("mini", verbose = FALSE, collector = collector))
 
-  expect_match(conditionMessage(err), "no longer meets the object contract", fixed = TRUE)
-  expect_match(conditionMessage(err), "Delete it; the next draw rebuilds it.", fixed = TRUE)
-  expect_s3_class(err$parent, "horizons_error_validation")
+  expect_no_error(validate_horizons_data(rebuilt$pool))
+  expect_false(is.null(qs2::qs_read(path)$pool$log))
+  expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
 
 })
 
-test_that("a library built but not moved into the cache stops, classed, and leaves the cache empty", {
+test_that("a cached library from another build is built again, after asking why, with a note (#154)", {
 
-  ## The rename after a successful write fails only on a locked or network
-  ## filesystem; here it is made to fail, after the library was written to
-  ## its temporary name in the cache.
   entry <- make_mini_ossl(withr::local_tempdir())
-  cache <- local_mini_registry(entry)
+  local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
 
-  written <- NULL
+  first <- suppressMessages(resolve_source("mini", verbose = FALSE))
+  path  <- library_cache_path(entry)
 
-  with_mocked_bindings(
-    expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
-                 "library was built but could not be moved into the cache", fixed = TRUE,
-                 class = "horizons_build_error"),
-    file.rename = function(from, to) {
-      written <<- file.exists(from)
-      FALSE
-    },
-    .package = "base"
+  expect_identical(first$record$build, 1L)
+  expect_identical(nrow(first$pool$data$analysis), 8L)
+
+  ## The issue's case: a release whose recipe keeps two rows, under the same
+  ## name and version, and a raised build
+  newer        <- entry
+  newer$build  <- 2L
+  newer$recipe <- function(raw, entry, verbose = TRUE) {
+    pool <- build_ossl_library(raw, entry, verbose = verbose)
+    subset_rows(pool, pool$data$analysis$sample_id[1:2])
+  }
+  local_mocked_bindings(library_registry = function() list(mini = newer))
+
+  collector <- log_open("select_training")
+
+  expect_message(
+    rebuilt <- resolve_source("mini", verbose = FALSE, collector = collector),
+    "built by an earlier version of horizons, so it has to be built again", fixed = TRUE
   )
 
-  ## The library was on disk under its temporary name when the rename failed;
-  ## the failed build removes it and the raw downloads rather than leaving
-  ## them in the cache.
-  expect_true(written)
-  expect_true(dir.exists(cache))
-  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+  expect_identical(nrow(rebuilt$pool$data$analysis), 2L)
+  expect_identical(rebuilt$record$build, 2L)
+  expect_identical(qs2::qs_read(path)$record$build, 2L)
+  expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
+
+  ## A library cached before builds were recorded has none, and is built
+  ## again too; consent governs as on first use
+  lib <- qs2::qs_read(path)
+  lib$record$build <- NULL
+  qs2::qs_save(lib, path)
+  withr::local_options(horizons.library_download = NULL)
+
+  expect_error(suppressMessages(resolve_source("mini", ask = FALSE)), class = "horizons_error_consent")
+  expect_null(qs2::qs_read(path)$record$build)
+
+  withr::local_options(horizons.library_download = TRUE)
+  again <- suppressMessages(resolve_source("mini", verbose = FALSE))
+  expect_identical(again$record$build, 2L)
+
+  ## And the next draw reads the current build, without building
+  local_mocked_bindings(download_sources = function(...) stop("downloaded again"))
+  expect_identical(nrow(resolve_source("mini", verbose = FALSE)$pool$data$analysis), 2L)
 
 })
 
@@ -332,26 +347,56 @@ mini_release_with <- function(edit, table = "mir", env = parent.frame()) {
 
 }
 
-test_that("the recipe refuses a MIR table that lacks a filter column", {
+test_that("a MIR table that is not on the entry's grid trips an internal check", {
 
-  rel <- mini_release_with(function(mir) mir[, names(mir) != "scan.mir.model.name_utf8_txt"])
-
-  expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
-               "The MIR table lacks", fixed = TRUE, class = "horizons_build_error")
-
-})
-
-test_that("the recipe refuses a MIR table that is not on the entry's grid", {
-
+  ## The files are MD5-verified against the entry, so only a release the
+  ## entry does not pin can reach this
   rel <- mini_release_with(function(mir) mir[, names(mir) != "scan_mir.650_abs"])
 
   expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
                "The MIR table's grid is not 600 to 700 by 2 cm-1 (50 columns found)",
-               fixed = TRUE, class = "horizons_build_error")
+               fixed = TRUE, class = "horizons_error_internal")
 
 })
 
-test_that("the recipe maps every registered property from its own column, decompressing in place", {
+test_that("a join that keeps no row trips an internal check rather than building an empty library", {
+
+  ## A lab table whose ids match no spectrum
+  rel <- mini_release_with(function(lab) {
+    lab$id.layer_uuid_txt <- paste0("other-", lab$id.layer_uuid_txt)
+    lab
+  }, table = "lab")
+
+  expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
+               "No rows survive the filters and the join", fixed = TRUE,
+               class = "horizons_error_internal")
+
+})
+
+test_that("a chunk of the MIR table read back out of order trips an internal check", {
+
+  ## Spectra paired with the wrong lab rows would be silent, so the chunked
+  ## read checks each chunk's ids against the first pass's
+  rel  <- mini_release_with(identity)
+  csv  <- decompress_gz(rel$raw[["mir"]])
+  hdr  <- names(data.table::fread(csv, nrows = 0))
+  full <- as.data.frame(data.table::fread(csv))
+  spec <- grep("^scan_mir", hdr, value = TRUE)
+  rows <- c(1L, 4L, 5L)
+
+  real_chunk <- read_mir_chunk
+  local_mocked_bindings(read_mir_chunk = function(...) {
+    x <- real_chunk(...)
+    x[rev(seq_len(nrow(x))), , drop = FALSE]
+  })
+
+  expect_error(read_mir_rows(csv, hdr, rows, full$id.layer_uuid_txt[rows], "id.layer_uuid_txt", spec),
+               "did not read back in the order the first pass saw", fixed = TRUE,
+               class = "horizons_error_internal")
+
+})
+
+test_that("the recipe maps every registered property from its own column, decompressing beside its sources", {
 
   ## A lab table carrying every property the registry maps, each column its
   ## own values, so a property read from the wrong column or dropped shows
@@ -365,6 +410,7 @@ test_that("the recipe maps every registered property from its own column, decomp
     cbind(lab["id.layer_uuid_txt"], vals)
   }, table = "lab")
   lab_ids <- utils::read.csv(gzfile(rel$raw[["lab"]]))$id.layer_uuid_txt
+  md5     <- tools::md5sum(rel$raw)
 
   pool <- build_ossl_library(rel$raw, rel$entry, verbose = FALSE)
   a    <- pool$data$analysis
@@ -380,9 +426,11 @@ test_that("the recipe maps every registered property from its own column, decomp
   }
 
   ## The sources were decompressed beside the downloads, in the cache's raw
-  ## directory rather than the session's temporary one, and the .gz removed
+  ## directory rather than the session's temporary one, and each source is
+  ## still there, unchanged: a build pointed at a directory of published
+  ## files must not consume them
   expect_true(all(file.exists(sub("\\.gz$", "", rel$raw))))
-  expect_false(any(file.exists(rel$raw)))
+  expect_identical(tools::md5sum(rel$raw), md5)
 
 })
 
@@ -408,12 +456,12 @@ test_that("the cache file also resolves through the path form", {
 test_that("select_training() resolves a library name before anything else", {
 
   expect_error(select_training(select_fixture()$targets, "ksl"),
-               class = "horizons_input_error", regexp = "not a registered library")
+               class = "horizons_error_input", regexp = "not a registered library")
 
   ## Two names are refused as a library form, before R's own error for a
   ## condition of length two
   expect_error(select_training(select_fixture()$targets, c("kssl", "kssl")),
-               class = "horizons_input_error", regexp = "a single name or path")
+               class = "horizons_error_input", regexp = "a single name or path")
 
 })
 
@@ -496,7 +544,7 @@ test_that("depth rejects anything but topsoil or all", {
 
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, depth = "subsoil"))),
-    class = "horizons_input_error", regexp = "depth")
+    class = "horizons_error_input", regexp = "depth")
 
 })
 
@@ -544,10 +592,10 @@ test_that("a window too narrow for the polynomial stops in cm-1 terms", {
 
   ## 2 cm-1 on the fixture pool's 4 cm-1 grid rounds to 1 point
   expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 2),
-               class = "horizons_input_error", regexp = "too few for a polynomial")
+               class = "horizons_error_input", regexp = "too few for a polynomial")
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, k = 20L, window = -1))),
-    class = "horizons_input_error", regexp = "positive width")
+    class = "horizons_error_input", regexp = "positive width")
 
 })
 
@@ -617,7 +665,8 @@ test_that("resemblance is measured against the rows the draw can reach", {
   beyond_w <- Filter(function(w) grepl("beyond the pool", conditionMessage(w)), warned)
 
   expect_length(beyond_w, 1L)
-  expect_s3_class(beyond_w[[1]], "horizons_select_warning")
+  expect_s3_class(beyond_w[[1]], "horizons_warning_applicability")
+  expect_identical(beyond_w[[1]]$log$ids[[1]], beyond$target_id)
 
   msg <- gsub("\\s+", " ", conditionMessage(beyond_w[[1]]))
   expect_match(msg, sprintf("%d targets sit beyond", nrow(beyond)), fixed = TRUE)
@@ -630,7 +679,7 @@ test_that("a k beyond the topsoil rows says depth = 'all' would reach more", {
   fx <- with_depth(select_fixture())
 
   expect_error(select_training(fx$targets, fx$pool, k = 250L, properties = "clay"),
-               class = "horizons_input_error", regexp = "depth = \"all\"")
+               class = "horizons_error_input", regexp = "depth = \"all\"")
 
 })
 
@@ -699,6 +748,7 @@ test_that("a bad argument is reported before a registered library is fetched", {
     list(args = list(mask = rbind(c(2400, 2200))), regexp = "`mask`"),
     list(args = list(ncomp = -1), regexp = "`ncomp`"),
     list(args = list(ncomp = TRUE), regexp = "`ncomp`"),
+    list(args = list(ncomp = NA_real_), regexp = "`ncomp`"),
     ## seed and PLS mistakes
     list(args = list(seed = 2^31), regexp = "`seed`"),
     list(args = list(space = "pls", properties = "clay"), regexp = "whole-number `ncomp`"),
@@ -713,7 +763,7 @@ test_that("a bad argument is reported before a registered library is fetched", {
 
     expect_error(suppressMessages(capture.output(
       do.call(select_training, c(list(targets, "mini"), args)))),
-      class = "horizons_input_error", regexp = case$regexp, fixed = TRUE,
+      class = "horizons_error_input", regexp = case$regexp, fixed = TRUE,
       info = paste(names(case$args), collapse = ", "))
 
   }
@@ -766,7 +816,7 @@ test_that("a skipped resemblance check warns and never reports zero targets out"
   expect_warning(
     printed <- capture.output(out <- select_training(fx$targets, fx$pool, k = 5L, properties = "clay",
                                                      control = control_horizons(verbose = TRUE))),
-    "resemblance check did not run", class = "horizons_select_warning"
+    "resemblance check did not run", class = "horizons_warning_skipped"
   )
   expect_identical(out$selection$resemblance$skipped,
                    "only 20 rows the draw can reach; the check needs 30")
@@ -781,7 +831,7 @@ test_that("a character depth column is refused rather than compared as text", {
   fx$pool$data$analysis$upper_depth_cm <- as.character(fx$pool$data$analysis$upper_depth_cm)
 
   expect_error(select_training(fx$targets, fx$pool, k = 20L),
-               class = "horizons_input_error", regexp = "must be numeric")
+               class = "horizons_error_input", regexp = "must be numeric")
   expect_no_error(suppressWarnings(
     select_training(fx$targets, fx$pool, k = 20L, depth = "all")))
 

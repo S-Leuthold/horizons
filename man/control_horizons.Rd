@@ -53,7 +53,8 @@ same way; \code{FALSE} turns the breaker off. Default 3. \code{\link[=evaluate]{
 \code{\link[=fit]{fit()}}.}
 
 \item{keep_traces}{\code{logical(1)}. Keep a failed unit's backtrace on its row
-of the results. Default \code{FALSE}. All four verbs.}
+of the results. Default \code{FALSE}. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=ensemble]{ensemble()}}:
+\code{\link[=select_training]{select_training()}} has no unit that leaves a row to keep one on.}
 
 \item{chunk_size}{A whole number. Targets per chunk in
 \code{\link[=select_training]{select_training()}}'s neighbour search. Default 500.}

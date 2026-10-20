@@ -93,9 +93,10 @@ space_cache_key <- function(identity, settings, wn) {
 #' @description
 #' The cache file sits in `library_cache_dir()`, named
 #' `<label>.space-<key>.qs2`. A file that fails to read or holds another key
-#' is rebuilt over. A cache that cannot be written (a read-only directory)
-#' costs the speed, not the draw: the space is returned and a warning says
-#' why it was not kept.
+#' is rebuilt over, which costs only time once, so it is a note on the
+#' verb's log. A cache that cannot be written (a read-only directory) costs
+#' the speed of every later draw, not this one: the space is returned and a
+#' `skipped` warning says why it was not kept.
 #'
 #' @param identity [Character.] From `space_cache_identity()`.
 #' @param settings,wn As for `space_cache_key()`.
@@ -103,9 +104,12 @@ space_cache_key <- function(identity, settings, wn) {
 #' @param verbose [Logical.] Print the tree line for a build.
 #' @param force [Logical.] Rebuild and overwrite even when a matching file
 #'   exists. Default: `FALSE`.
+#' @param collector `select_training()`'s collector ([log_open()]), which the
+#'   note and the warning go to.
 #' @return [List.] `space`, `hit` (logical), `key`, `path`.
 #' @noRd
-cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = FALSE) {
+cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = FALSE,
+                         collector = log_open("select_training")) {
 
   key  <- space_cache_key(identity, settings, wn)
   path <- file.path(library_cache_dir(),
@@ -121,6 +125,10 @@ cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = 
       return(list(space = obj$space, hit = TRUE, key = key, path = path))
 
     }
+
+    log_note(collector, "The cached similarity space at {.path {path}} could not be read or was built for other settings, so it was rebuilt.")
+
+    if (verbose) cat("\u2502  \u251C\u2500 The cached similarity space could not be used; rebuilding it\n")
 
   }
 
@@ -148,10 +156,10 @@ cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = 
 
   if (!isTRUE(written)) {
 
-    cli::cli_warn(c(
-      "The similarity space was built but could not be cached",
-      "i" = "Cache directory: {.path {dirname(path)}}. The next draw rebuilds it; set {.code options(horizons.cache_dir = )} to a writable directory."
-    ), class = "horizons_select_warning")
+    log_warning(collector, "skipped", c(
+      "The similarity space was built but could not be cached, so every draw at these settings builds it again.",
+      "i" = "Cache directory: {.path {dirname(path)}}; set {.code options(horizons.cache_dir = )} to a writable directory."
+    ))
 
   }
 
@@ -195,21 +203,54 @@ default_space_settings <- function(resolution) {
 #' Build and cache a new library's default similarity space
 #'
 #' @description
-#' Called right after a registered library is built, so the one-time wait at
-#' first use covers the space too and every default draw after it is fast.
-#' A failure here costs nothing but time: the first draw builds the space.
+#' Called right after a registered library is built and cached, so the
+#' one-time wait at first use covers the space too and every default draw
+#' after it is fast. It is one unit ([run_unit()]): a run failure costs
+#' nothing but time, since the first draw builds the space, so it is a note
+#' on the verb's log, and with `debug` it stops the call with its
+#' backtrace. An input or internal error propagates, as from any unit. A
+#' library narrower than the default window is not primed: the filter needs
+#' fewer points than the library has columns ([sg_window_fits()]), and a
+#' default draw refuses that window at its door. The space is fit without
+#' the library's flagged rows, as a draw fits it, so the two agree.
 #'
 #' @param pool [horizons_data.] The library just built.
 #' @param record [List.] Its record.
 #' @param verbose [Logical.]
+#' @param collector `select_training()`'s collector ([log_open()]).
+#' @param debug [Logical.] Passed to [run_unit()].
+#' @return `NULL`, invisibly.
 #' @noRd
-prime_library_space <- function(pool, record, verbose = TRUE) {
+prime_library_space <- function(pool, record, verbose = TRUE,
+                                collector = log_open("select_training"), debug = FALSE) {
 
   identity <- space_cache_identity(record)
   if (is.null(identity)) return(invisible(NULL))
 
-  pm <- predictor_matrix(pool)
+  ## The space a draw builds: without the rows an earlier step flagged, the
+  ## matrix copied only when one leaves it
+  pm       <- predictor_matrix(pool)
+  flagged  <- flagged_rows(pool$data$analysis)
+  if (any(flagged)) pm$matrix <- pm$matrix[!flagged, , drop = FALSE]
   settings <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
+  n_cols   <- length(pm$wavenumbers)
+
+  if (settings$derivative > 0L && !sg_window_fits(settings$window, n_cols)) {
+
+    width <- eval(formals(select_training)$window)
+
+    log_note(collector, c(
+      "The {record$name} library's similarity space was not built at first use: the default {.arg window} of {width} cm-1 is {settings$window} points on its {n_cols} columns, and the filter needs fewer.",
+      "i" = "A draw at the default window is refused; pass a narrower {.arg window}."
+    ))
+
+    if (verbose) {
+      cat("\u251C\u2500 The library is narrower than the default window, so its similarity space is built at the first draw that fits\n")
+    }
+
+    return(invisible(NULL))
+
+  }
 
   if (verbose) {
 
@@ -217,19 +258,32 @@ prime_library_space <- function(pool, record, verbose = TRUE) {
 
   }
 
-  tryCatch(
-    cached_space(identity, settings, pm$wavenumbers, verbose = FALSE, build = function() {
-      build_similarity_space(pm$matrix, pm$wavenumbers,
-                             snv = settings$snv, derivative = settings$derivative,
-                             window = settings$window, poly = settings$poly,
-                             mask = settings$mask, space = "pca", ncomp = settings$ncomp,
-                             sdev_floor = settings$sdev_floor)
-    }),
-    error = function(e) {
-      cli::cli_warn(c("The library's similarity space could not be built now; the first draw will build it",
-                      "x" = "{conditionMessage(e)}"), class = "horizons_select_warning")
-    }
+  ## cached_space() writes its own note or warning to the collector, so the
+  ## unit's records hold only a failure
+  out <- run_unit(
+    cached_space(identity, settings, pm$wavenumbers, verbose = FALSE, collector = collector,
+                 build = function() {
+                   build_similarity_space(pm$matrix, pm$wavenumbers,
+                                          snv = settings$snv, derivative = settings$derivative,
+                                          window = settings$window, poly = settings$poly,
+                                          mask = settings$mask, space = "pca", ncomp = settings$ncomp,
+                                          sdev_floor = settings$sdev_floor)
+                 }),
+    unit = "library_space", id = record$name, debug = debug
   )
+
+  if (out$failed) {
+
+    cause <- unit_failure_message(out$records, outside = NULL)
+
+    log_note(collector, c(
+      "The {record$name} library's similarity space could not be built at first use; the first draw builds it.",
+      "x" = "{cause}"
+    ))
+
+    if (verbose) cat("\u251C\u2500 The library's similarity space could not be built now; the first draw will build it\n")
+
+  }
 
   invisible(NULL)
 

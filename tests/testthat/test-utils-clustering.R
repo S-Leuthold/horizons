@@ -23,7 +23,7 @@ band_families <- function() {
 
 describe("cluster_spectral_predictors() clusters", {
 
-  it("groups each family and represents it by its median band, under every method", {
+  it("groups each family and represents it by its median band, under every method, and by shape alone under correlation", {
 
     m <- band_families()
 
@@ -44,6 +44,18 @@ describe("cluster_spectral_predictors() clusters", {
       expect_identical(res$reduced_mat, as.data.frame(m)[, c("3998", "1998")], info = info)
 
     }
+
+    ## A band a hundred times larger still follows its family's signal:
+    ## correlation, which the steps use because preprocessing rescales bands,
+    ## keeps the families, and euclidean distance sets the large band apart
+    scaled <- m
+    scaled[, "3996"] <- 100 * scaled[, "3996"]
+
+    by_shape <- cluster_spectral_predictors(scaled, k = 2, method = "correlation")
+    by_size  <- cluster_spectral_predictors(scaled, k = 2, method = "euclidean")
+
+    expect_equal(unname(by_shape$cluster_map), list(c("4000", "3998", "3996"), c("2000", "1998", "1996")))
+    expect_equal(unname(by_size$cluster_map), list(c("4000", "3998", "2000", "1998", "1996"), "3996"))
 
     one <- cluster_spectral_predictors(m, k = 1)
     expect_s3_class(one$reduced_mat, "data.frame")

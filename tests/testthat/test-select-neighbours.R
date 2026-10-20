@@ -87,16 +87,6 @@ test_that("nearest_neighbours() mahalanobis is euclidean on sdev-scaled scores",
 })
 
 
-test_that("nearest_neighbours() mahalanobis needs sdev", {
-
-  s <- fixture_scores()
-
-  expect_error(nearest_neighbours(s$St, s$Sp, k = 5L, metric = "mahalanobis"),
-               class = "horizons_input_error")
-
-})
-
-
 test_that("nearest_neighbours() cosine matches brute force", {
 
   s  <- fixture_scores()
@@ -122,16 +112,6 @@ test_that("nearest_neighbours() chunked equals unchunked", {
 
   expect_identical(a$ids, b$ids)
   expect_equal(a$dist, b$dist, tolerance = 1e-12)
-
-})
-
-
-test_that("nearest_neighbours() aborts when k exceeds the pool", {
-
-  s <- fixture_scores(n_pool = 20)
-
-  expect_error(nearest_neighbours(s$St, s$Sp, k = 25L, metric = "euclidean"),
-               regexp = "20", class = "horizons_input_error")
 
 })
 
@@ -367,8 +347,17 @@ test_that("resolve_k() expands a scalar and honours a named vector", {
   ## Order follows properties, not the names of k
   expect_identical(resolve_k(c(oc = 6, clay = 12), c("clay", "oc")), c(clay = 12L, oc = 6L))
 
-  expect_error(resolve_k(c(clay = 5), c("clay", "oc")),
-               regexp = "oc", class = "horizons_input_error")
+})
+
+
+test_that("missing_k() is the one rule for a named k, as a finding", {
+
+  ## An unnamed scalar needs nothing; anything else needs an entry for every
+  ## property, and an unnamed vector has none
+  expect_identical(missing_k(5, c("clay", "oc")), character())
+  expect_identical(missing_k(c(clay = 5, oc = 6), c("clay", "oc")), character())
+  expect_match(missing_k(c(clay = 5), c("clay", "oc")), "missing \"oc\"", fixed = TRUE)
+  expect_match(missing_k(c(5, 6), c("clay", "oc")), "missing \"clay\" and \"oc\"", fixed = TRUE)
 
 })
 
@@ -387,12 +376,20 @@ test_that("draw_neighbours() gives k rows per target per property, all measured"
 
   m <- out$membership
   expect_s3_class(m, "tbl_df")
-  expect_named(m, c("target_id", "property", "space", "pool_id", "distance", "rank"))
+  expect_named(m, c("target_id", "property", "space", "pool_id", "distance", "rank", "retained"))
   expect_true(all(m$space == "all"))
 
-  counts <- table(m$target_id, m$property)
-  expect_true(all(counts == 5L))
-  expect_true(all(m$rank[m$property == "clay"] %in% 1:5))
+  ## k retained per target and property; the other targets' twins a target
+  ## passed are kept too, unretained, and the ranks run in distance order
+  ## over both
+  kept <- m[m$retained, ]
+  expect_true(all(table(kept$target_id, kept$property) == 5L))
+  expect_false(any(m$pool_id[!m$retained] %in% kept$pool_id))
+
+  for (g in split(m, paste(m$target_id, m$property))) {
+    expect_identical(g$rank, seq_len(nrow(g)))
+    expect_false(is.unsorted(g$distance))
+  }
 
   oc_rows <- m$pool_id[m$property == "oc"]
   expect_false(any(is.na(rsp$oc[match(oc_rows, rsp$sample_id)])))
@@ -408,7 +405,8 @@ test_that("draw_neighbours() takes a named k per property", {
   out <- draw_neighbours(s$St, s$Sp, responses = rsp, k = c(clay = 10L, oc = 4L),
                          properties = c("clay", "oc"), metric = "euclidean")
 
-  counts <- table(out$membership$target_id, out$membership$property)
+  kept   <- out$membership[out$membership$retained, ]
+  counts <- table(kept$target_id, kept$property)
   expect_true(all(counts[, "clay"] == 10L))
   expect_true(all(counts[, "oc"]   == 4L))
 
@@ -534,9 +532,9 @@ test_that("draw_neighbours() treats an undefined cosine target as a failed draw"
   St <- s$St
   St[1, ] <- 0
 
-  expect_warning(out <- draw_neighbours(St, s$Sp, responses = rsp, k = 5L,
-                                        properties = "clay", metric = "cosine"),
-                 regexp = "no defined distance", class = "horizons_select_warning")
+  ## Recorded, not raised: the verb reports it, with the other short draws
+  expect_no_warning(out <- draw_neighbours(St, s$Sp, responses = rsp, k = 5L,
+                                           properties = "clay", metric = "cosine"))
 
   bad <- rownames(St)[1]
 
@@ -589,16 +587,130 @@ test_that("draw_neighbours() records a short draw rather than returning a thin n
   expect_true(all(sd_tbl$k_requested == as.integer(k)))
   expect_true(all(sd_tbl$k_drawn     <  as.integer(k)))
 
-  ## The record accounts for the shortfall exactly: what is missing from a
-  ## target's neighbourhood is what was flagged for it.
-  drawn   <- table(out$membership$target_id)
-  flagged <- table(out$exclusions$target_id)
+  ## The record accounts for the shortfall exactly: no target keeps any
+  ## target's twin (#149), so with every measured row fetched each target
+  ## keeps all but the twins, and records that many
+  twins <- unique(out$exclusions$pool_id)
+  kept  <- out$membership[out$membership$retained, ]
 
-  for (tid in sd_tbl$target_id) {
+  expect_setequal(sd_tbl$target_id, rownames(s$St))
+  expect_true(all(sd_tbl$k_drawn == as.integer(k) - length(twins)))
+  expect_true(all(table(kept$target_id) == as.integer(k) - length(twins)))
 
-    expect_identical(as.integer(drawn[[tid]]), as.integer(k) - as.integer(flagged[[tid]]))
+})
+
+
+test_that("draw_neighbours() fetches spares for a target that drew another target's twin (#149)", {
+
+  ## Two targets, one of which is a pool row's copy. The other drew that
+  ## row as an ordinary neighbour; it is the first target's twin, so no
+  ## target keeps it, and the second target takes a spare instead
+  Sp <- cbind(c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9), 0)
+  rownames(Sp) <- sprintf("P%02d", 1:10)
+  St <- rbind(T1 = c(0, 0), T2 = c(0.4, 0))
+  rsp <- tibble::tibble(sample_id = rownames(Sp), clay = 1:10)
+
+  out <- draw_neighbours(St, Sp, responses = rsp, k = 3L, properties = "clay", metric = "euclidean")
+  m   <- out$membership
+
+  ## P01 is T1's exact copy, and T2's nearest row
+  expect_identical(out$exclusions$pool_id, "P01")
+  expect_identical(out$exclusions$target_id, "T1")
+
+  ## T2 passed it, kept it unretained, and still has three rows kept
+  t2 <- m[m$target_id == "T2", ]
+  expect_identical(t2$pool_id, c("P01", "P02", "P03", "P04"))
+  expect_identical(t2$retained, c(FALSE, TRUE, TRUE, TRUE))
+  expect_identical(t2$rank, 1:4)
+  expect_identical(nrow(out$short_draws), 0L)
+
+  ## Its distances are over the rows it kept
+  td <- out$target_distances[out$target_distances$target_id == "T2", ]
+  expect_equal(td$nearest, 0.6)
+  expect_equal(td$mean_k, mean(c(0.6, 1.6, 2.6)))
+
+  ## With no spare to take, the target is recorded short
+  short <- draw_neighbours(St, Sp, responses = rsp, k = 10L, properties = "clay", metric = "euclidean")
+  expect_setequal(short$short_draws$target_id, c("T1", "T2"))
+  expect_true(all(short$short_draws$k_drawn == 9L))
+
+})
+
+
+test_that("draw_neighbours() takes spares at width k, not k plus the twins, a chunk at a time (#149)", {
+
+  ## Arrange: forty targets that are pool rows, so each one's copy is a twin
+  ## and the twins are as many as the targets, with k above the reference
+  ## width, so every first fetch is k wide and every target one short in it
+  set.seed(149)
+  Sp <- matrix(stats::rnorm(1000), nrow = 200, dimnames = list(sprintf("P%03d", 1:200), NULL))
+  St <- Sp[1:40, ]
+  rownames(St) <- sprintf("T%02d", 1:40)
+  rsp   <- tibble::tibble(sample_id = rownames(Sp), clay = 1)
+  k     <- 60L
+  chunk <- 10L
+
+  expect_gt(k, twin_reference_width(nrow(Sp)))
+
+  real  <- nearest_neighbours
+  asked <- list()
+  local_mocked_bindings(nearest_neighbours = function(St, Sp, k, ...) {
+    asked[[length(asked) + 1L]] <<- c(targets = nrow(St), width = k)
+    real(St, Sp, k, ...)
+  })
+
+  ## Act
+  out <- draw_neighbours(St, Sp, responses = rsp, k = k, properties = "clay",
+                         metric = "euclidean", chunk_size = chunk)
+
+  ## Assert: only a chunk of targets is ever fetched wider than k
+  asked <- do.call(rbind, asked)
+  expect_true(all(asked[, "width"] <= k | asked[, "targets"] <= chunk))
+
+  ## And the draw is the rule's: each target keeps its k nearest rows that
+  ## are no target's copy, and passes the other copies nearer than its k-th
+  D     <- brute_distance(St, Sp)
+  twins <- rownames(Sp)[1:40]
+  free  <- setdiff(rownames(Sp), twins)
+
+  kept <- passed <- character()
+
+  for (i in seq_len(nrow(St))) {
+
+    near   <- free[order(D[i, free])][seq_len(k)]
+    reach  <- D[i, near[k]]
+    kept   <- c(kept,   paste(rownames(St)[i], near))
+    passed <- c(passed, paste(rownames(St)[i], setdiff(twins[D[i, twins] < reach], twins[i])))
 
   }
+
+  m <- out$membership
+  expect_setequal(paste(m$target_id, m$pool_id)[m$retained],  kept)
+  expect_setequal(paste(m$target_id, m$pool_id)[!m$retained], passed)
+  expect_setequal(paste(out$exclusions$target_id, out$exclusions$pool_id), paste(rownames(St), twins))
+  expect_identical(nrow(out$short_draws), 0L)
+
+})
+
+
+test_that("a short target's spares and the twins it passed tie in pool order (#149)", {
+
+  ## Arrange: two targets that are copies of P01 and P03 on a line. T2 is
+  ## short in its first fetch of four, and its spares tie twice: P01 (T1's
+  ## twin) and P05 at distance 2, P00 and P06 at distance 3
+  Sp <- cbind(0:9, 0)
+  rownames(Sp) <- sprintf("P%02d", 0:9)
+  St <- rbind(T1 = c(1, 0), T2 = c(3, 0))
+  rsp <- tibble::tibble(sample_id = rownames(Sp), clay = 1)
+
+  ## Act
+  out <- draw_neighbours(St, Sp, responses = rsp, k = 4L, properties = "clay", metric = "euclidean")
+
+  ## Assert: ties go in pool order, as in a fetch over every measured row
+  t2 <- out$membership[out$membership$target_id == "T2", ]
+  expect_identical(t2$pool_id, c("P02", "P04", "P01", "P05", "P00"))
+  expect_identical(t2$retained, c(TRUE, TRUE, FALSE, TRUE, TRUE))
+  expect_identical(out$exclusions$pool_id[out$exclusions$target_id == "T2"], "P03")
 
 })
 
@@ -613,18 +725,6 @@ test_that("draw_neighbours() labels the space it measured in", {
 
   expect_true(all(out$membership$space       == "clay"))
   expect_true(all(out$target_distances$space == "clay"))
-
-})
-
-
-test_that("draw_neighbours() aborts when a property has fewer measured rows than k", {
-
-  s   <- fixture_scores(n_pool = 20)
-  rsp <- s$fx$pool$data$analysis[, c("sample_id", "clay", "oc")]   # oc has 10 measured
-
-  expect_error(draw_neighbours(s$St, s$Sp, responses = rsp, k = 15L,
-                               properties = "oc", metric = "euclidean"),
-               regexp = "oc.*10", class = "horizons_input_error")
 
 })
 

@@ -140,10 +140,12 @@ CONTROL_FIELDS <- list(
     verbs   = c("evaluate", "fit")
   ),
 
+  ### select_training() has no unit that leaves a failure row to keep a
+  ### trace on, and the log keeps none
   keep_traces = list(
     default = function() FALSE,
     check   = control_check_bool,
-    verbs   = CONTROL_VERBS
+    verbs   = c("evaluate", "fit", "ensemble")
   ),
 
   chunk_size = list(
@@ -238,7 +240,8 @@ CONTROL_FIELDS <- list(
 #'   same way; `FALSE` turns the breaker off. Default 3. [evaluate()],
 #'   [fit()].
 #' @param keep_traces `logical(1)`. Keep a failed unit's backtrace on its row
-#'   of the results. Default `FALSE`. All four verbs.
+#'   of the results. Default `FALSE`. [evaluate()], [fit()], [ensemble()]:
+#'   [select_training()] has no unit that leaves a row to keep one on.
 #' @param chunk_size A whole number. Targets per chunk in
 #'   [select_training()]'s neighbour search. Default 500.
 #' @param min_calib_rows A whole number of at least 9. The fewest calibration

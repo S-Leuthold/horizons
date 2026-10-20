@@ -54,8 +54,12 @@ on KSSL. Default: \code{100}.}
 \code{"global"}. Default: \code{"batch"}.}
 
 \item{properties}{\verb{character or NULL.} Response columns of the pool to
-draw for. \code{NULL} means all of them. Each needs at least one measured
-pool row, under every scope. Default: \code{NULL}.}
+draw for. \code{NULL} means all of them. A property named here needs at
+least one measured pool row at the depth asked for, under every scope,
+and at least \code{k} under the drawing scopes, or the call is refused;
+under \code{NULL} a response short of either is skipped, with one
+\code{horizons_warning_skipped}, and the call is refused only when none is
+left. Default: \code{NULL}.}
 
 \item{snv}{\code{logical.} SNV in the similarity space. Default: \code{TRUE}.}
 
@@ -127,19 +131,23 @@ RNG state is saved and restored, so the verb does not advance it.
 Default: \code{307}, as the other verbs'.}
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
-it computes. \code{select_training()} reads \code{verbose}, \code{debug},
-\code{keep_traces}, \code{chunk_size} (targets per distance chunk) and
-\code{min_resemblance_rows} (the fewest library rows the resemblance check
-takes its reference distribution from), and refuses any other field
-that is set. The control it ran with, defaults filled in, is recorded
-as \code{selection$settings$control}.}
+it computes. \code{select_training()} reads \code{verbose}, \code{debug} (a failure
+building a registered library's first-use similarity space stops the
+call, rather than being left to the first draw), \code{chunk_size} (targets
+per distance chunk) and \code{min_resemblance_rows} (the fewest library rows
+the resemblance check takes its reference distribution from), and
+refuses any other field that is set. The control it ran with, defaults
+filled in, is recorded as \code{selection$settings$control}.}
 }
 \value{
 \code{horizons_data.} Rows drawn from \code{pool}, on the library's own
 columns at the wavenumbers the targets share with it, with every
 response column the pool carried, three provenance columns with role
 \code{meta} (\code{.drawn_by}, \code{.min_distance}, and \code{.group} except under
-\code{scope = "sample"}), and the record in \code{x$selection}.
+\code{scope = "sample"}), and the record in \code{x$selection}, whose
+\code{settings$properties} are the properties drawn for (a skipped or
+emptied property is not among them, so \code{\link[=configure]{configure()}} warns when one is
+chosen as the outcome).
 \code{provenance$standardization} is the library's, describing the returned
 axis: when only some of the library's columns are returned (targets on a
 coarser or narrower grid), \code{n_wavelengths}, \code{wavelength_range} and \code{grid}
@@ -152,7 +160,19 @@ no record, and the training set gets none. \code{x$selection$reconciliation}
 records the columns returned: \code{operation} (\code{"none"} when every library
 column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range}, and
 \code{target_only}, the targets' wavenumbers the library lacks. \code{x$log} is the
-pool's, with a row for each \code{coverage} warning this call raised.
+pool's, with this call's rows after it: one per warning topic, each
+raised once at the end of the call (\code{horizons_warning_input} for pool
+and targets in different photometric units; \code{flagged} for targets an
+earlier step flagged, which get no training set; \code{coverage} for target
+columns the library lacks, a search on the overlap and draws short of
+\code{k}; \code{skipped} for a property left out under \code{properties = NULL} (no
+measured rows, or fewer than \code{k}), the resemblance check not run, and a
+similarity space or library that could not be cached; \code{partial_failure}
+for a property every drawn row of which was some target's twin, left
+out, so the call did not complete in full; \code{applicability} for targets
+beyond the library's spread), and a note for each cost paid once (a
+cached library or similarity space rebuilt, a first-use space not
+built).
 }
 \description{
 Draws a training set from a reference pool (a spectral library with
@@ -178,10 +198,12 @@ the record (\code{x$selection$groups}), not in the shape of the return:
 (k-means, count by silhouette unless \code{clusters} fixes it, clusters
 under \code{cluster_min} merged into the nearest); one group per cluster.
 \item \code{"sample"}: one group per target, its own \code{k} nearest.
-\item \code{"global"}: no draw; the whole pool, kept so the comparison is one
-argument away. \code{k} only sets how many rows the recorded \code{mean_k}
-averages over, so a \code{k} above a property's measured rows is capped
-there under global, where the drawing scopes refuse it.
+\item \code{"global"}: no draw; every row the others draw from (the library's
+rows at the depth asked for, less the flagged ones), kept so the
+comparison is one argument away. \code{k} only sets how many rows the
+recorded \code{mean_k} averages over, so a \code{k} above a property's measured
+rows is capped there under global, where the drawing scopes refuse or
+skip the property (see \code{properties}).
 }
 
 For \code{"cluster"} and \code{"sample"} the return is still the single union, and
@@ -273,21 +295,36 @@ both sets or scanned twice. The reference is the 75th percentile of the
 target's 50 nearest rows with the property measured, or of a quarter of
 the measured rows when fewer than 200 have it: a fixed width rather than
 the \code{k} being drawn, so a cluster of replicate scans cannot set the very
-number it is measured against. Every flagged row is dropped from that
-target's neighbourhood, spares are fetched so the target still reaches
-\code{k}, and the exclusion is recorded with its target, property, distance and
-reason. Except under \code{scope = "global"}, the flagged rows are also
-subtracted from the returned object, since a row excluded from one
-neighbourhood would otherwise walk back in through any other target that
-drew it. Under \code{scope = "global"} the same check runs, per property, in
+number it is measured against. The exclusion is recorded with its
+target, property, distance and reason. Except under \code{scope = "global"},
+no target takes any target's twin, under any property, since a row
+excluded from one neighbourhood would otherwise walk back into the
+returned object through any other target that drew it: every target
+takes its first \code{k} rows outside the twins, spares fetched for any it
+passed, and one that still cannot reach \code{k} is recorded in
+\code{x$selection$short_draws} and warned about. Under \code{scope = "global"} the
+same check runs, per property, in
 the same space and with the same width, and its exclusions and target
 distances are the ones a batch-scope call with the same arguments
-records. The flagged rows are recorded but stay in the returned rows,
-because global returns the whole pool by definition, so a comparison that
+records. The twins are recorded but stay in the returned rows, because
+global returns every row the others draw from, so a comparison that
 scores global against batch has to act on \code{x$selection$exclusions}
-itself. The membership table keeps the subtracted rows with
+itself. The membership table keeps the twins a target passed with
 \code{retained = FALSE} rather than dropping them, so the record still says
-what each neighbourhood was.
+what each neighbourhood was, and a target's \code{target_distances} are over
+the rows it kept. When the subtraction leaves a property with
+no rows at all (every row drawn for it was some target's twin), the
+property is left out with one \code{horizons_warning_partial_failure} saying
+why, and the call fails with \code{horizons_error_selection_failed} only when
+it leaves every property empty.
+
+\strong{Unusable spectra.} A target or library spectrum an earlier step has
+flagged (\code{.flag}, see \code{\link[=standardize]{standardize()}}) is left out of the similarity
+space and the draw. A flagged target gets no training set and is named in
+one \code{horizons_warning_flagged}; flagged library rows are left out as
+\code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} leave them out, with a line in the verbose tree.
+The call is refused only when every target, or every library row, is
+flagged.
 
 \strong{Units.} The pool and the targets are compared on raw absorbance
 magnitude before the similarity space is built. The comparison is of
@@ -316,8 +353,11 @@ The first draw downloads OSSL's public files (about 436 MB), verifies their
 published MD5s, builds the library and caches it; it asks first in an
 interactive session, and a non-interactive one needs
 \code{options(horizons.library_download = TRUE)}. The option
-\code{horizons.cache_dir} moves the cache. Every later draw reads the cache.
-\code{x$selection$library} records which library was drawn from.
+\code{horizons.cache_dir} moves the cache. Every later draw reads the cache,
+until a version of horizons that builds the library differently: a
+library cached by an earlier build is built again, after asking as on
+first use, and the log notes it. \code{x$selection$library} records which
+library was drawn from, and its \code{build}.
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 columns returned, the pool's identity, the targets' identity (their source,

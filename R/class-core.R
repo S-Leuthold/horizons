@@ -1273,19 +1273,53 @@ abort_validation <- function(findings,
                              remedy     = VALIDATION_REMEDY,
                              call       = rlang::caller_env()) {
 
+  abort_findings(findings, "The {.cls {class_name}} object failed validation.",
+                 kind = "validation", remedy = remedy, call = call)
+
+}
+
+
+#' Abort with every finding a check collected
+#'
+#' @description
+#' The one shape for a refusal that carries several findings, used by
+#' [abort_validation()] and `select_training()`'s argument checks: the
+#' header, each finding an `x` bullet, the first five shown and the rest
+#' counted, and the remedy, if any, as the closing `i` bullet. Every finding
+#' is kept on the condition as `findings`. The findings are text already
+#' rendered, so they go in as values and their braces are never read as a
+#' cli template.
+#'
+#' @param findings [Character.] One message per failed check.
+#' @param header [Character.] The first line, a cli template interpolated in
+#'   `.envir`.
+#' @param kind [Character.] The condition kind, as [abort_horizons()] takes
+#'   it.
+#' @param remedy [Character or NULL.] What the user can do about it. `NULL`
+#'   when each finding names its own. Default: `NULL`.
+#' @param call The frame the error reports.
+#' @param .envir The environment `header` is interpolated in.
+#'
+#' @return Does not return.
+#' @noRd
+abort_findings <- function(findings, header, kind, remedy = NULL,
+                           call   = rlang::caller_env(),
+                           .envir = rlang::caller_env()) {
+
   shown  <- utils::head(findings, 5L)
   n_more <- length(findings) - length(shown)
 
   abort_horizons(
-    c("The {.cls {class_name}} object failed validation.",
+    c(header,
       stats::setNames(cli_escape(shown), rep("x", length(shown))),
       if (n_more > 0) c("i" = paste0(n_more, " more finding", if (n_more > 1) "s", " not shown; all are in the error's `findings` field.")),
-      "i" = remedy),
-    kind     = "validation",
+      if (!is.null(remedy)) c("i" = remedy)),
+    kind     = kind,
     ## Plain text: cli styles the findings in a colour session, and a field
     ## is data a handler matches or writes out
     findings = cli::ansi_strip(findings),
-    call     = call
+    call     = call,
+    .envir   = .envir
   )
 
 }
