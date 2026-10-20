@@ -703,7 +703,7 @@ test_that("force = TRUE keeps the record of a hull an earlier call fitted, and t
   expect_identical(again$provenance$standardization$baseline_range, c(600, 4000))
 
   ## A narrower trim without a hull: the hull is the first call's, over its range
-  narrower <- suppressWarnings(no_output(standardize(hulled, resample = 4, trim = c(1000, 3000), force = TRUE)))
+  narrower <- no_output(standardize(hulled, resample = 4, trim = c(1000, 3000), force = TRUE))
   expect_true(narrower$provenance$standardization$baseline)
   expect_identical(narrower$provenance$standardization$wavelength_range, c(1000, 3000))
   expect_identical(narrower$provenance$standardization$baseline_range, c(600, 4000))

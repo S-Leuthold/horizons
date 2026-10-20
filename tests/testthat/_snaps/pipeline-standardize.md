@@ -45,7 +45,7 @@
       x <- standardize(on_4, resample = NULL, trim = NULL, force = TRUE, verbose = TRUE)
     Output
       ├─ Standardizing...
-      │  ├─ Re-standardizing (force = TRUE): the earlier record is replaced
+      │  ├─ Re-standardizing (force = TRUE): a new record, keeping any hull an earlier call fitted
       │  └─ 3 samples × 851 predictors
       │
 

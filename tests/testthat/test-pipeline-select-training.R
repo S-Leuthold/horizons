@@ -2285,10 +2285,10 @@ test_that("a hull carried through standardize(force = TRUE) is compared over the
     pool    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
     targets <- standardize(fx$targets, resample = 8, trim = c(1000, 3000), baseline = TRUE)
     ## Trimmed further without a new hull: still the 1000 to 3000 hull
-    forced  <- suppressWarnings(standardize(targets, resample = 8, trim = c(1200, 2800), force = TRUE))
+    forced  <- standardize(targets, resample = 8, trim = c(1200, 2800), force = TRUE)
     ## Hulled over the library's range, then trimmed: still the library's hull
     same    <- standardize(fx$targets, resample = 8, baseline = TRUE)
-    same    <- suppressWarnings(standardize(same, resample = 8, trim = c(1000, 3000), force = TRUE))
+    same    <- standardize(same, resample = 8, trim = c(1000, 3000), force = TRUE)
   })
 
   err <- expect_error(select_training(forced, pool, k = 5), class = "horizons_error_input")

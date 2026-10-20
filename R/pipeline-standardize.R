@@ -742,7 +742,7 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 
     if (op_name == "restandardize") {
 
-      msg <- "Re-standardizing (force = TRUE): the earlier record is replaced"
+      msg <- "Re-standardizing (force = TRUE): a new record, keeping any hull an earlier call fitted"
 
     } else if (op_name == "sort") {
 
