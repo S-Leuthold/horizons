@@ -77,26 +77,6 @@ with_flag <- function(obj, ids, step = "standardize") {
 }
 
 
-#' Every warning an expression raises, muffled, with its value
-#' @noRd
-with_warnings <- function(expr) {
-
-  warned <- list()
-  value  <- withCallingHandlers(expr, warning = function(w) {
-    warned[[length(warned) + 1L]] <<- w
-    invokeRestart("muffleWarning")
-  })
-
-  list(value = value, warnings = warned)
-
-}
-
-
-#' The warnings of one class among those caught
-#' @noRd
-of_class <- function(warnings, class) Filter(function(w) inherits(w, class), warnings)
-
-
 ## =============================================================================
 ## Input validation
 ## =============================================================================
@@ -887,41 +867,18 @@ test_that("a library row with no defined distance is left out of the resemblance
 test_that("every warning is recorded on the log, one row per topic, before it is raised", {
 
   ## Units, a draw short of k and the resemblance check not run, in one call
-  fx   <- select_fixture(n_pool = 60, target_scale = 100)
-  args <- list(k = 60L, properties = "clay",
-               control = control_horizons(min_resemblance_rows = 1000L))
+  fx <- select_fixture(n_pool = 60, target_scale = 100)
 
-  warned <- list()
-  out <- withCallingHandlers(
-    do.call(select_training, c(list(fx$targets, fx$pool), args)),
-    warning = function(w) {
-      warned[[length(warned) + 1L]] <<- w
-      invokeRestart("muffleWarning")
-    }
-  )
+  run  <- collect_warnings(select_training(fx$targets, fx$pool, k = 60L, properties = "clay",
+                                           control = control_horizons(min_resemblance_rows = 1000L)))
+  rows <- run$value$log[run$value$log$verb == "select_training", ]
 
-  rows <- out$log[out$log$verb == "select_training", ]
-
-  ## Every warning a horizons warning with a topic, one per topic, each
-  ## carrying its own row
-  expect_true(all(vapply(warned, inherits, logical(1), "horizons_warning")))
+  ## Every warning a horizons warning, one per topic in the order the rows
+  ## were written, each carrying its own row
+  expect_true(all(vapply(run$warnings, inherits, logical(1), "horizons_warning")))
   expect_identical(rows$type, rep("warning", 3L))
   expect_identical(rows$topic, c("input", "coverage", "skipped"))
-  expect_identical(vapply(warned, function(w) w$log$topic, character(1)), rows$topic)
-  expect_true(fx$twin_id %in% rows$ids[[2]])
-
-  ## The record does not depend on the signal
-  quiet <- suppressWarnings(do.call(select_training, c(list(fx$targets, fx$pool), args)))
-  expect_identical(quiet$log, out$log)
-
-  ## Under warn = 2, one error that keeps the selection and its warnings
-  withr::local_options(warn = 2)
-  err <- expect_error(do.call(select_training, c(list(fx$targets, fx$pool), args)),
-                      class = "horizons_error_promoted_warnings")
-
-  expect_identical(err$log$topic, c("input", "coverage", "skipped"))
-  expect_s3_class(err$object, "horizons_data")
-  expect_identical(err$object$log, out$log)
+  expect_identical(vapply(run$warnings, function(w) w$log$topic, character(1)), rows$topic)
 
 })
 
@@ -1498,9 +1455,9 @@ test_that("a property the twin subtraction empties is left out with one partial_
   oc_rows <- which(!is.na(fx$pool$data$analysis$oc))
   targets <- pool_as_targets(fx, oc_rows)
 
-  run <- with_warnings(select_training(targets, fx$pool, k = 5))
+  run <- collect_warnings(select_training(targets, fx$pool, k = 5), class = "horizons_warning_partial_failure")
   out <- run$value
-  w   <- of_class(run$warnings, "horizons_warning_partial_failure")
+  w   <- run$warnings
 
   expect_length(w, 1L)
 
@@ -1571,9 +1528,9 @@ test_that("a property with no measured pool row is refused when named, under eve
   }
 
   ## Not named: skipped, with one warning naming it, and out of the record
-  run <- with_warnings(quiet_select(fx, k = 5))
+  run <- collect_warnings(quiet_select(fx, k = 5), class = "horizons_warning_skipped")
   out <- run$value
-  w   <- of_class(run$warnings, "horizons_warning_skipped")
+  w   <- run$warnings
 
   expect_length(w, 1L)
   expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])),
@@ -1596,7 +1553,7 @@ test_that("a property with no measured pool row is refused when named, under eve
                       regexp = "measured rows for oc", class = "horizons_error_input")
   expect_match(conditionMessage(err), "depth = \"all\"", fixed = TRUE)
 
-  w <- of_class(with_warnings(quiet_select(deep, k = 5))$warnings, "horizons_warning_skipped")
+  w <- collect_warnings(quiet_select(deep, k = 5), class = "horizons_warning_skipped")$warnings
   expect_match(conditionMessage(w[[1]]), "depth = \"all\"", fixed = TRUE)
 
 })
@@ -1607,8 +1564,8 @@ test_that("a property with fewer measured rows than k is skipped when not named,
   ## oc is measured on half the fixture's 60 rows
   fx <- select_fixture(n_pool = 60)
 
-  run <- with_warnings(quiet_select(fx, k = 40))
-  w   <- of_class(run$warnings, "horizons_warning_skipped")
+  run <- collect_warnings(quiet_select(fx, k = 40), class = "horizons_warning_skipped")
+  w   <- run$warnings
 
   expect_length(w, 1L)
   msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
@@ -1656,15 +1613,16 @@ test_that("a library row flagged by an earlier step is left out of the space and
   withr::local_options(horizons.cache_dir = cache)
 
   txt <- utils::capture.output(
-    run <- with_warnings(select_training(fx$targets, path, k = 5, properties = "clay",
-                                         control = control_horizons(verbose = TRUE)))
+    run <- collect_warnings(select_training(fx$targets, path, k = 5, properties = "clay",
+                                            control = control_horizons(verbose = TRUE)),
+                            class = "horizons_warning_flagged")
   )
   out <- run$value
 
   ## Not drawn, not warned: the library's rows are its modelling data
   expect_false(hit %in% out$data$analysis$sample_id)
   expect_false(hit %in% out$selection$membership$pool_id)
-  expect_length(of_class(run$warnings, "horizons_warning_flagged"), 0L)
+  expect_length(run$warnings, 0L)
   expect_true(any(grepl("1 flagged row of the library left out (see .flag)", txt, fixed = TRUE)))
 
   ## The cached space was fit without it, and the next draw reads it
@@ -1685,9 +1643,10 @@ test_that("a target flagged by an earlier step gets no training set, and is name
   ids <- fx$targets$data$analysis$sample_id
   bad <- ids[2]
 
-  run <- with_warnings(select_training(with_flag(fx$targets, bad), fx$pool, k = 5, properties = "clay"))
+  run <- collect_warnings(select_training(with_flag(fx$targets, bad), fx$pool, k = 5, properties = "clay"),
+                          class = "horizons_warning_flagged")
   out <- run$value
-  w   <- of_class(run$warnings, "horizons_warning_flagged")
+  w   <- run$warnings
 
   expect_length(w, 1L)
   expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])),

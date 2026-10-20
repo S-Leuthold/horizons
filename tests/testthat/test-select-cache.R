@@ -419,10 +419,42 @@ test_that("a library narrower than the default window is cached, and its space l
 })
 
 
+test_that("the first-use space leaves out the library's flagged rows, as a draw's does", {
+
+  ## Arrange: a release whose recipe flags one row, as a step that could not
+  ## use it would
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  entry$recipe <- function(raw, entry, verbose = TRUE) {
+    pool <- build_ossl_library(raw, entry, verbose = verbose)
+    pool$data$analysis$.flag <- c("standardize", rep(NA_character_, nrow(pool$data$analysis) - 1L))
+    pool$data$role_map <- rbind(pool$data$role_map, tibble::tibble(variable = ".flag", role = "meta"))
+    pool
+  }
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  ## Act: the first use builds the library and its space
+  pool <- suppressMessages(resolve_source("mini", verbose = FALSE))$pool
+
+  ## Assert: the cached space holds every row but the flagged one
+  files <- space_files(cache)
+  expect_length(files, 1L)
+  expect_identical(rownames(qs2::qs_read(file.path(cache, files))$space$scores),
+                   pool$data$analysis$sample_id[-1])
+
+  ## And a default draw reads it as it is, with no note
+  out <- suppressWarnings(select_training(mini_targets(pool), "mini", k = 5L))
+
+  expect_true(out$selection$search$cache$hit)
+  expect_false(any(out$log$type[out$log$verb == "select_training"] == "note"))
+
+})
+
+
 test_that("a first-use space that fails to build is a note, and stops the call under debug", {
 
   entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
-  local_mini_registry(entry)
+  cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
 
   x <- mini_targets(build_ossl_library(
@@ -452,7 +484,7 @@ test_that("a first-use space that fails to build is a note, and stops the call u
                      grepl("first use", out$log$message[out$log$verb == "select_training"])))
 
   ## With debug on, nothing is contained: the prime's failure stops the call
-  file.remove(list.files(library_cache_dir(), full.names = TRUE))
+  file.remove(list.files(cache, full.names = TRUE))
   calls <- 0L
 
   expect_error(suppressMessages(select_training(x, "mini", k = 5L, control = control_horizons(debug = TRUE))),
@@ -483,19 +515,16 @@ test_that("a library built but not moved into the cache is returned, with one sk
     .package = "base"
   )
 
-  warned <- list()
   txt <- utils::capture.output(
-    out <- withCallingHandlers(
+    run <- collect_warnings(
       suppressMessages(select_training(x, "mini", k = 5L, control = control_horizons(verbose = TRUE))),
-      warning = function(w) {
-        warned[[length(warned) + 1L]] <<- w
-        invokeRestart("muffleWarning")
-      }
+      class = "horizons_warning_skipped"
     )
   )
   expect_true(any(grepl("mini v0 built, but not cached", cli::ansi_strip(txt), fixed = TRUE)))
 
-  skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), warned)
+  out     <- run$value
+  skipped <- run$warnings
   expect_length(skipped, 1L)
 
   msg <- gsub("\\s+", " ", conditionMessage(skipped[[1]]))
