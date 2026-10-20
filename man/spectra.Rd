@@ -72,6 +72,14 @@ object's \code{log}. When no file can be read the call aborts with
 warning \code{opusreader2} or \code{readr} raises while reading is passed on, once
 per distinct message, as a \code{horizons_warning_quality}.
 
+\strong{Axes that drift:} scans from different sessions on one instrument can
+carry wavenumbers that differ in the last digits. A file's wavenumbers
+within 1\% of its own step of those read before it take their names, so
+the files bind into one set of columns; only the names move, never the
+values, and the files moved are named in one
+\code{horizons_warning_substitution}. A file at another resolution or range
+keeps its own points where none is that close.
+
 \strong{Wavenumber order:} Predictor columns are sorted into decreasing
 wavenumber order before the object is returned, whatever order the source
 gave them (a KSSL-shaped library, for one, is stored increasing). Names

@@ -64,6 +64,14 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' warning `opusreader2` or `readr` raises while reading is passed on, once
 #' per distinct message, as a `horizons_warning_quality`.
 #'
+#' **Axes that drift:** scans from different sessions on one instrument can
+#' carry wavenumbers that differ in the last digits. A file's wavenumbers
+#' within 1% of its own step of those read before it take their names, so
+#' the files bind into one set of columns; only the names move, never the
+#' values, and the files moved are named in one
+#' `horizons_warning_substitution`. A file at another resolution or range
+#' keeps its own points where none is that close.
+#'
 #' **Wavenumber order:** Predictor columns are sorted into decreasing
 #' wavenumber order before the object is returned, whatever order the source
 #' gave them (a KSSL-shaped library, for one, is stored increasing). Names
@@ -183,7 +191,7 @@ spectra <- function(source,
 
   if (is_tibble) {
 
-    tables      <- list(spectra_from_tibble(source, id_col, wavelength_cols, call = call))
+    tables      <- list(tibble = spectra_from_tibble(source, id_col, wavelength_cols, call = call))
     source_type <- "tibble"
     source_name <- "tibble"
 
@@ -197,7 +205,7 @@ spectra <- function(source,
 
   }
 
-  analysis <- bind_spectra_files(tables)
+  analysis <- bind_spectra_files(tables, collector)
 
   result <- new_horizons_data(
     analysis       = analysis,
@@ -518,7 +526,8 @@ spectra_from_path <- function(source,
   log_unit_records(collector, records)
   log_foreign_warnings(collector, records, while_doing = "reading")
 
-  list(type = type, tables = lapply(units[!failed], `[[`, "value"))
+  list(type = type,
+       tables = stats::setNames(lapply(units[!failed], `[[`, "value"), file_paths[!failed]))
 
 }
 
@@ -666,32 +675,115 @@ read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL, call = rl
 
 
 ## ---------------------------------------------------------------------------
-## bind_spectra_files() — The files' tables as one
+## bind_spectra_files() — The files' tables as one, on one grid
 ## ---------------------------------------------------------------------------
 
-#' Bind the files' tables into one
+#' Bind the files' tables into one, putting drifted axes on one grid
 #'
 #' @description
 #' The one place the tables `spectra()` read are bound, whatever their type.
 #' Rows keep the files' order; a wavenumber one file lacks is `NA` in its
 #' rows.
 #'
-#' @param tables List of tables, as [spectra_from_tibble()] and
-#'   [read_opus_file()] return them.
+#' Before the bind, each file's wavenumbers are matched to the grid read so
+#' far, the first file's axis to start (#224). A point within
+#' `WN_SNAP_FRACTION` of the file's own median step from a point already on
+#' the grid takes that point's name; one with no such neighbour joins the
+#' grid. Only names move, never values, so scans from sessions whose axes
+#' differ in the last digits bind into one column set, and a file at another
+#' resolution or range keeps its own points where none is near. The files
+#' whose names moved are collected as one `substitution` warning with the
+#' largest distance moved.
+#'
+#' @param tables Named list of tables, as [spectra_from_tibble()] and
+#'   [read_opus_file()] return them, named by file.
+#' @param collector `spectra()`'s collector, from [log_open()].
 #'
 #' @return A tibble: `sample_id`, the meta columns, then the wavelength
 #'   columns, whose names are its attribute `"wn_cols"`.
 #'
 #' @noRd
-bind_spectra_files <- function(tables) {
+bind_spectra_files <- function(tables, collector) {
 
-  wn_cols <- unique(unlist(lapply(tables, attr, "wn_cols")))
+  ## -------------------------------------------------------------------------
+  ## Step 1: Each file's wavenumbers on the grid read before it
+  ## -------------------------------------------------------------------------
 
-  bound <- dplyr::bind_rows(tables)
-  meta  <- setdiff(names(bound), c("sample_id", wn_cols))
-  bound <- bound[, c("sample_id", meta, wn_cols), drop = FALSE]
+  grid_names  <- character(0)
+  grid_values <- numeric(0)
+  moved       <- character(0)
+  max_drift   <- 0
 
-  attr(bound, "wn_cols") <- wn_cols
+  for (i in seq_along(tables)) {
+
+    own    <- attr(tables[[i]], "wn_cols")
+    values <- wn_values(own)
+    named  <- own
+
+    if (length(grid_values) > 0 && length(values) > 1) {
+
+      tol <- WN_SNAP_FRACTION * stats::median(abs(diff(sort(values))))
+
+      ### The nearest grid point to each of the file's, by its two neighbours
+      ### on the sorted grid
+      ord     <- order(grid_values)
+      sorted  <- grid_values[ord]
+      at      <- findInterval(values, sorted, all.inside = length(sorted) > 1)
+      lower   <- pmax(at, 1L)
+      upper   <- pmin(at + 1L, length(sorted))
+      nearest <- ifelse(abs(values - sorted[lower]) <= abs(values - sorted[upper]), lower, upper)
+      drift   <- abs(values - sorted[nearest])
+      target  <- grid_names[ord][nearest]
+
+      ### A point takes a grid name only when it is that close, the name is
+      ### not already one of the file's own, and no other point of the file
+      ### takes it
+      snap        <- drift <= tol & !target %in% own
+      snap[snap]  <- !duplicated(target[snap])
+
+      if (any(snap)) {
+
+        named[snap] <- target[snap]
+        moved       <- c(moved, names(tables)[i])
+        max_drift   <- max(max_drift, drift[snap])
+
+        names(tables[[i]])[match(own[snap], names(tables[[i]]))] <- target[snap]
+
+      }
+
+    }
+
+    new         <- !named %in% grid_names
+    grid_names  <- c(grid_names, named[new])
+    grid_values <- c(grid_values, values[new])
+
+    attr(tables[[i]], "wn_cols") <- named
+
+  }
+
+  if (length(moved) > 0) {
+
+    n_moved <- length(moved)
+    drift   <- signif(max_drift, 3)
+    pct     <- 100 * WN_SNAP_FRACTION
+
+    log_warning(collector, "substitution", c(
+      "{n_moved} file{?s} had wavenumbers within {pct}% of a step of those read before {?it/them}, and {?its/their} columns were put on the same grid.",
+      "i" = "Only names moved, by at most {drift} cm-1; the values are as read.",
+      "i" = "{cli::qty(n_moved)}File{?s}: {shown_ids(moved)}."
+    ), ids = moved)
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## Step 2: Bind
+  ## -------------------------------------------------------------------------
+
+  bound <- dplyr::bind_rows(unname(tables))
+  meta  <- setdiff(names(bound), c("sample_id", grid_names))
+  bound <- bound[, c("sample_id", meta, grid_names), drop = FALSE]
+
+  attr(bound, "wn_cols") <- grid_names
 
   bound
 

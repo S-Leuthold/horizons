@@ -796,6 +796,62 @@ test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, neve
 
 })
 
+test_that("scans whose wavenumbers drift by a fraction of the step are put on one grid, and average() then runs (#224)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## Two sessions on one instrument: the second axis 0.00066 cm-1 off the
+  ## first at a 1.93 cm-1 step, and one point longer at the low end
+  wn_1  <- 4000 - 1.93 * (0:9)
+  wn_2  <- c(wn_1 + 0.00066, min(wn_1) - 1.93)
+  files <- local_opus_files(c("S1-1.0", "S1-1.1"))
+  local_reads(list(`S1-1.0` = list(ab = fake_block(wn_1, seq_along(wn_1))),
+                   `S1-1.1` = list(ab = fake_block(wn_2, seq_along(wn_2) + 0.5))))
+
+  ## Act -------------------------------------------------------------------
+
+  w <- expect_warning(out <- spectra(files), class = "horizons_warning_substitution")
+
+  ## Assert ----------------------------------------------------------------
+
+  ## One column set: the first file's ten names, and the second's extra point
+  expect_identical(predictor_names(out), paste0("wn_", c(wn_1, min(wn_1) - 1.93)))
+  expect_false(anyNA(out$data$analysis[2, predictor_names(out)]))
+  expect_identical(unname(unlist(out$data$analysis[2, paste0("wn_", wn_1)])), seq_along(wn_1) + 0.5)
+
+  msg <- conditionMessage(w)
+  expect_match(msg, "by at most 0.00066 cm-1", fixed = TRUE)
+  expect_match(msg, '"S1-1.1"', fixed = TRUE)
+  expect_identical(out$log$ids[out$log$topic %in% "substitution"][[1]], "S1-1.1")
+
+  ## The documented order now runs: the two scans are one sample's replicates
+  avg <- out |>
+    parse_ids(format = "{sampleid}") |>
+    average(quality_check = FALSE)
+  expect_identical(avg$data$n_rows, 1L)
+  expect_identical(avg$data$n_predictors, 11L)
+
+})
+
+test_that("the snap is a fraction of each file's step, and a drift past it keeps its own columns (#224)", {
+
+  ## At a 4 cm-1 step, 0.03 cm-1 is under 1% of the step, so the names snap
+  wn    <- seq(4000, by = -4, length.out = 6)
+  files <- local_opus_files(c("a.0", "b.0", "c.0"))
+  local_reads(list(a.0 = list(ab = fake_block(wn, 1:6)),
+                   b.0 = list(ab = fake_block(wn + 0.03, 1:6)),
+                   c.0 = list(ab = fake_block(wn + 0.12, 1:6))))
+
+  ## 0.12 cm-1 is 3% of the step: c.0 keeps its own columns, NA for the others
+  w   <- expect_warning(out <- spectra(files), class = "horizons_warning_substitution")
+  ids <- out$log$ids[out$log$topic %in% "substitution"][[1]]
+
+  expect_identical(ids, "b.0")
+  expect_identical(out$data$n_predictors, 12L)
+  expect_identical(sum(is.na(out$data$analysis[3, ])), 6L)
+
+})
+
 test_that("spectra()'s tree counts scans under sample ids when they repeat, and the scans with no id", {
 
   df <- tibble::tibble(Sample_ID = c("A", "A", "B", "B", NA),
