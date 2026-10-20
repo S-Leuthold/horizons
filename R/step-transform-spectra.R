@@ -28,6 +28,20 @@
 #' @param skip Logical. Skip during bake()? Default FALSE.
 #' @param id Character. Unique step identifier.
 #'
+#' @details
+#' A spectrum the step cannot use, one with a value that is not finite or
+#' with no spread (every value equal), is returned as `NA` in every output
+#' column, whatever the method: SNV would otherwise turn a flat spectrum
+#' into zeros, and a single missing value would leave a partly `NA` row.
+#' The rule is the one [standardize()] flags by. The rows are named, by the
+#' column with the `id` role when the recipe has one and by position
+#' otherwise, in one `horizons_warning_flagged`, which carries the field
+#' `step`.
+#'
+#' When you `tidy()` this step, a tibble is returned with columns `terms`,
+#' `preprocessing`, `window_size` and `id`: before `prep()`, `terms` holds
+#' the selectors; after, the columns the step transforms.
+#'
 #' @return Updated recipe with spectral preprocessing step.
 #' @keywords internal
 #' @export
@@ -98,7 +112,8 @@ step_transform_spectra_new <- function(terms,
                                        trained,
                                        skip,
                                        id,
-                                       trained_columns = NULL) {
+                                       trained_columns = NULL,
+                                       id_column       = NULL) {
 
   out <- list(
     terms           = terms,
@@ -109,7 +124,8 @@ step_transform_spectra_new <- function(terms,
     trained         = trained,
     skip            = skip,
     id              = id,
-    trained_columns = trained_columns
+    trained_columns = trained_columns,
+    id_column       = id_column
   )
 
   class(out) <- c("step_transform_spectra", "step")
@@ -171,6 +187,10 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 
   check_transform_name_collision(new_colnames, setdiff(names(training), col_names))
 
+  ## The column with the id role names the spectra bake() cannot use; a
+  ## recipe without one names them by position
+  id_column <- if (!is.null(info)) info$variable[info$role %in% "id"][1] else NA_character_
+
   step_transform_spectra_new(
     terms           = selectors,
     columns         = col_names,
@@ -180,7 +200,8 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
     trained         = TRUE,
     skip            = x$skip,
     id              = x$id,
-    trained_columns = new_colnames
+    trained_columns = new_colnames,
+    id_column       = if (is.na(id_column)) NULL else id_column
   )
 
 }
@@ -217,26 +238,39 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
     }
   )
 
-  ## Failures are visible, not silent. A non-finite spectrum raises no error
-  ## in prospectr but comes back as an all-NA row of the expected width, which
-  ## the width check above cannot see — so without this accounting a malformed
-  ## sample returns NA predictions at predict time, or injects NA rows into the
-  ## model matrix at train time, with no signal either way. See #52.
+  ## A spectrum it cannot use is NA, whatever the method -------------------
+  ## The rule standardize() flags by (unusable_spectra()): prospectr raises no
+  ## error on such a spectrum, but SNV turns a flat one into zeros and a
+  ## Savitzky-Golay window leaves NA only around a missing value, so the rows
+  ## are set NA here and named, not left to whatever the method made of them.
+  ## Without this a malformed sample returns NA predictions, or injects NA
+  ## rows into the model matrix, with no signal either way. See #52.
 
-  bad_rows <- which(rowSums(!is.na(transformed_matrix)) == 0L)
+  unusable <- unusable_spectra(spectral_matrix)
+  bad      <- !is.na(unusable)
 
-  if (length(bad_rows) > 0) {
+  if (any(bad)) {
 
-    shown <- paste(utils::head(bad_rows, 10), collapse = ", ")
-    if (length(bad_rows) > 10) shown <- paste0(shown, ", ...")
+    transformed_matrix[bad, ] <- NA_real_
 
-    rlang::warn(paste0(
-      "step_transform_spectra: ", length(bad_rows), " of ",
-      nrow(spectral_matrix), " spectra produced no usable output and were ",
-      "returned as NA (rows: ", shown, ").",
-      " No error was raised, so the input was likely non-finite.",
-      " Downstream predictions for these rows are NA."
-    ))
+    id_col <- object$id_column
+    named  <- if (!is.null(id_col) && id_col %in% names(new_data)) {
+      as.character(new_data[[id_col]])
+    } else {
+      paste("row", seq_len(nrow(new_data)))
+    }
+
+    n          <- sum(bad)
+    non_finite <- named[bad & unusable %in% "non-finite"]
+    flat       <- named[bad & unusable %in% "no spread"]
+    n_nf       <- length(non_finite)
+    n_flat     <- length(flat)
+
+    warn_in_unit("flagged", c(
+      "{n} spectr{?um/a} could not be used by {.fn step_transform_spectra} and {?is/are} returned as {.code NA}.",
+      "i" = if (n_nf > 0) "{n_nf} {?has/have} a value that is not finite: {shown_ids(non_finite)}.",
+      "i" = if (n_flat > 0) "{n_flat} {?has/have} no spread (every value equal): {shown_ids(flat)}."
+    ), step = "step_transform_spectra")
 
   }
 
@@ -322,6 +356,43 @@ is_valid_sg_window <- function(w) {
 }
 
 ## ---------------------------------------------------------------------------
+## tidy method
+## ---------------------------------------------------------------------------
+
+#' What step_transform_spectra() transforms, and how
+#'
+#' @description
+#' Follows recipes' convention: before `prep()`, `terms` holds the
+#' selectors as text; after, the columns the step transforms (#109).
+#'
+#' @param x A `step_transform_spectra` step.
+#' @param ... Not used.
+#' @return Tibble with `terms`, `preprocessing`, `window_size` and `id`, one
+#'   row per term.
+#' @importFrom recipes tidy
+#' @keywords internal
+#' @noRd
+#' @export
+tidy.step_transform_spectra <- function(x, ...) {
+
+  terms <- if (isTRUE(x$trained)) {
+    x$columns
+  } else {
+    recipes::sel2char(step_selectors(x, "step_transform_spectra"))
+  }
+
+  n <- length(terms)
+
+  tibble::tibble(
+    terms         = as.character(terms),
+    preprocessing = rep(x$preprocessing, n),
+    window_size   = rep(x$window_size, n),
+    id            = rep(x$id, n)
+  )
+
+}
+
+## ---------------------------------------------------------------------------
 ## print method
 ## ---------------------------------------------------------------------------
 
@@ -361,7 +432,8 @@ print.step_transform_spectra <- function(x, width = max(20, options()$width - 30
 #' @return A numeric matrix with `nrow(X)` rows and
 #'   `ncol(X) - (window_size - 1)` columns, without dimnames. Rows whose input
 #'   is entirely non-finite come back entirely `NA`; no error is raised for
-#'   them, so callers that need to surface such rows must check.
+#'   them, and a flat row comes back as whatever the method makes of it, so
+#'   the step's `bake()` applies [standardize()]'s rule to the rows itself.
 #' @keywords internal
 transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
 

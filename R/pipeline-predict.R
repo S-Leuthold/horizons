@@ -1245,6 +1245,13 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 #' what `predict()` checks for non-finite rows, and what the applicability
 #' domain is measured in.
 #'
+#' A step that returns rows it cannot use as `NA` names them in a `flagged`
+#' warning carrying the field `step` (`step_transform_spectra()`). Those
+#' rows are not finite after the recipe, so `predict()` names them itself,
+#' by sample id, in its own `flagged` warning ([log_flagged()]); the step's
+#' is muffled here so a sample is not named twice, as
+#' [quiet_selection_warnings()] muffles what a verb reports itself.
+#'
 #' @param workflow A fitted (possibly butchered) workflow.
 #' @param new_data The rows to bake.
 #' @return Numeric matrix, one row per row of `new_data`.
@@ -1254,7 +1261,14 @@ bake_predictors <- function(workflow, new_data) {
 
   prepped <- workflows::extract_recipe(workflow, estimated = TRUE)
 
-  as.matrix(recipes::bake(prepped, new_data = new_data, recipes::all_predictors()))
+  baked <- withCallingHandlers(
+    recipes::bake(prepped, new_data = new_data, recipes::all_predictors()),
+    horizons_warning_flagged = function(w) {
+      if (!is.null(w[["step"]])) rlang::cnd_muffle(w)
+    }
+  )
+
+  as.matrix(baked)
 
 }
 

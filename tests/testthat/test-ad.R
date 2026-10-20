@@ -368,7 +368,8 @@ test_that("fit_ad refuses a calibration spectrum that bakes to a value that is n
     expect_error(fit_ad(fx$workflow, calib_data = one_na),
                  "1 of the 60 calibration rows has a feature that is not finite", fixed = TRUE,
                  class = "horizons_error_run"),
-    "produced no usable output", fixed = TRUE
+    "could not be used by `step_transform_spectra()`", fixed = TRUE,
+    class = "horizons_warning_flagged"
   )
 
 })

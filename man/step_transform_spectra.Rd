@@ -56,4 +56,18 @@ Supported preprocessing methods:
 \item \code{"snv_deriv2"} — SNV then 2nd derivative
 }
 }
+\details{
+A spectrum the step cannot use, one with a value that is not finite or
+with no spread (every value equal), is returned as \code{NA} in every output
+column, whatever the method: SNV would otherwise turn a flat spectrum
+into zeros, and a single missing value would leave a partly \code{NA} row.
+The rule is the one \code{\link[=standardize]{standardize()}} flags by. The rows are named, by the
+column with the \code{id} role when the recipe has one and by position
+otherwise, in one \code{horizons_warning_flagged}, which carries the field
+\code{step}.
+
+When you \code{tidy()} this step, a tibble is returned with columns \code{terms},
+\code{preprocessing}, \code{window_size} and \code{id}: before \code{prep()}, \code{terms} holds
+the selectors; after, the columns the step transforms.
+}
 \keyword{internal}

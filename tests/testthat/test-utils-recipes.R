@@ -506,28 +506,52 @@ describe("build_recipe() serialization footprint", {
 
 describe("step_transform_spectra() surfaces unusable spectra", {
 
-  it("warns, naming the rows, when a spectrum cannot be processed", {
+  it("returns a spectrum it cannot use as NA whatever the method, naming it by sample id", {
 
-    td     <- make_test_data(n = 30, n_wn = 40)
-    config <- make_config_row(preprocessing = "snv", feature_selection = "none")
+    td <- make_test_data(n = 30, n_wn = 40)
 
-    rec <- build_recipe(config, td$data, td$role_map)
-    prepped <- recipes::prep(rec)
-
-    ## A wholly non-finite spectrum is the case the length check is blind to:
-    ## the fallback row is built to the expected width, so lengths agree and
-    ## nothing downstream can tell it apart from a real result. Note a *single*
-    ## NA does not reach this path — prospectr's SNV tolerates it.
+    ## Row 3 is flat, row 11 carries one missing value. Under SNV the flat
+    ## row would otherwise come back as zeros, and under a derivative the
+    ## missing value would leave the row only partly NA.
     bad <- td$data
     wn  <- grep("^wn_", names(bad), value = TRUE)
-    bad[3,  wn] <- NA_real_
-    bad[11, wn] <- NA_real_
+    bad[3, wn]       <- 0.5
+    bad$wn_3990[11]  <- NA_real_
 
-    expect_warning(recipes::bake(prepped, new_data = bad),
-                   "produced no usable output")
+    for (pp in c("snv", "deriv1")) {
 
-    ## The message has to name the rows to be actionable.
-    expect_warning(recipes::bake(prepped, new_data = bad), "3, 11")
+      prepped <- recipes::prep(build_recipe(make_config_row(preprocessing = pp), td$data, td$role_map))
+
+      w <- expect_warning(baked <- recipes::bake(prepped, new_data = bad),
+                          class = "horizons_warning_flagged")
+      spec <- as.matrix(baked[, grep("^spec", names(baked))])
+
+      expect_true(all(is.na(spec[c(3, 11), ])), info = pp)
+      expect_false(anyNA(spec[-c(3, 11), ]), info = pp)
+
+      msg <- conditionMessage(w)
+      expect_match(msg, "2 spectra could not be used by `step_transform_spectra()`", fixed = TRUE, info = pp)
+      expect_match(msg, 'not finite: "S011"', fixed = TRUE, info = pp)
+      expect_match(msg, 'no spread (every value equal): "S003"', fixed = TRUE, info = pp)
+      expect_identical(w$step, "step_transform_spectra")
+
+    }
+
+  })
+
+  it("names the rows by position in a recipe with no id role", {
+
+    td  <- make_test_data(n = 10, n_wn = 20)
+    dat <- dplyr::select(td$data, -sample_id)
+
+    prepped <- recipes::recipe(SOC ~ ., data = dat) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "raw") |>
+      recipes::prep()
+
+    dat[4, grep("^wn_", names(dat))] <- NA_real_
+
+    expect_warning(recipes::bake(prepped, new_data = dat), '"row 4"', fixed = TRUE,
+                   class = "horizons_warning_flagged")
 
   })
 
@@ -540,6 +564,29 @@ describe("step_transform_spectra() surfaces unusable spectra", {
     prepped <- recipes::prep(rec)
 
     expect_no_warning(recipes::bake(prepped, new_data = td$data))
+
+  })
+
+})
+
+describe("tidy() on step_transform_spectra() (#109)", {
+
+  it("reports the selectors before prep, and each column with its method and window after", {
+
+    td  <- make_test_data(n = 10, n_wn = 20)
+    dat <- dplyr::select(td$data, -sample_id)
+    rec <- recipes::recipe(SOC ~ ., data = dat) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv1", window_size = 7)
+
+    before <- recipes::tidy(rec, number = 1)
+    expect_identical(names(before), c("terms", "preprocessing", "window_size", "id"))
+    expect_identical(before$terms, 'dplyr::starts_with("wn_")')
+
+    after <- recipes::tidy(recipes::prep(rec), number = 1)
+    expect_identical(after$terms, grep("^wn_", names(dat), value = TRUE))
+    expect_identical(unique(after$preprocessing), "deriv1")
+    expect_identical(unique(after$window_size), 7)
+    expect_identical(unique(after$id), rec$steps[[1]]$id)
 
   })
 

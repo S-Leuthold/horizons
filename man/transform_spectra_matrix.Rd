@@ -19,7 +19,8 @@ spectrum per row.}
 A numeric matrix with \code{nrow(X)} rows and
 \code{ncol(X) - (window_size - 1)} columns, without dimnames. Rows whose input
 is entirely non-finite come back entirely \code{NA}; no error is raised for
-them, so callers that need to surface such rows must check.
+them, and a flat row comes back as whatever the method makes of it, so
+the step's \code{bake()} applies \code{\link[=standardize]{standardize()}}'s rule to the rows itself.
 }
 \description{
 Applies one of the supported preprocessing methods to a whole spectral
