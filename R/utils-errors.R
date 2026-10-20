@@ -210,13 +210,17 @@ check_arg <- function(check,
 #'     is weaker than its output shows (small folds, every member below the
 #'     prune threshold). `predict()` raises each distinct warning another
 #'     package raised while predicting under this topic, naming the
-#'     configurations (or an ensemble's units) that raised it.}
+#'     configurations (or an ensemble's units) that raised it, and
+#'     [spectra()] each one raised while reading, naming the files.}
 #'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
 #'     as a member's prediction intervals, or a response [select_training()]
 #'     could not draw for under `properties = NULL`.}
 #'   \item{`horizons_warning_flagged`}{A step kept samples it could not use;
-#'     modelling leaves them out. From `predict()`, the rows it returned `NA`
-#'     because they were flagged on arrival (`.flag`) or were not finite after
+#'     modelling leaves them out. From [standardize()], the spectra it
+#'     flagged (`.flag`); from `step_transform_spectra()`, the spectra its
+#'     bake returned `NA`, with the field `step`. From `predict()`, the
+#'     rows it returned `NA` because they were flagged on arrival (`.flag`)
+#'     or were not finite after
 #'     a configuration's recipe; from [select_training()], the targets it drew
 #'     no training set for because they were flagged on arrival.}
 #'   \item{`horizons_warning_partial_failure`}{Some units failed and the rest

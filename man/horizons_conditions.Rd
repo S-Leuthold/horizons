@@ -94,13 +94,17 @@ asked ran, under a documented fallback.}
 is weaker than its output shows (small folds, every member below the
 prune threshold). \code{predict()} raises each distinct warning another
 package raised while predicting under this topic, naming the
-configurations (or an ensemble's units) that raised it.}
+configurations (or an ensemble's units) that raised it, and
+\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such
 as a member's prediction intervals, or a response \code{\link[=select_training]{select_training()}}
 could not draw for under \code{properties = NULL}.}
 \item{\code{horizons_warning_flagged}}{A step kept samples it could not use;
-modelling leaves them out. From \code{predict()}, the rows it returned \code{NA}
-because they were flagged on arrival (\code{.flag}) or were not finite after
+modelling leaves them out. From \code{\link[=standardize]{standardize()}}, the spectra it
+flagged (\code{.flag}); from \code{step_transform_spectra()}, the spectra its
+bake returned \code{NA}, with the field \code{step}. From \code{predict()}, the
+rows it returned \code{NA} because they were flagged on arrival (\code{.flag})
+or were not finite after
 a configuration's recipe; from \code{\link[=select_training]{select_training()}}, the targets it drew
 no training set for because they were flagged on arrival.}
 \item{\code{horizons_warning_partial_failure}}{Some units failed and the rest

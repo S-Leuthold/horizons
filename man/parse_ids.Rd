@@ -27,7 +27,8 @@ columns and unnamed elements are separators. Mutually exclusive with \code{forma
 with one \code{horizons_warning_substitution} naming the files.
 \item \code{"error"}: Abort with list of non-matching files.
 \item \code{"na"}: Set \code{sample_id} to NA. As you asked for it, it is not warned:
-the files are named in verbose output and in a note on the log.
+the files are counted in verbose output and named in a note on the
+log.
 }}
 
 \item{verbose}{Logical. Print progress messages. Default:
