@@ -199,7 +199,7 @@ spectra <- function(source,
   } else {
 
     read        <- spectra_from_path(source, type, id_col, wavelength_cols, recursive,
-                                     collector = collector, call = call)
+                                     verbose = verbose, collector = collector, call = call)
     tables      <- read$tables
     source_type <- read$type
     source_name <- source
@@ -387,6 +387,7 @@ spectra_from_tibble <- function(data,
 #' @param type `spectra()`'s `type`, checked, or `NULL`.
 #' @param id_col,wavelength_cols `spectra()`'s arguments, for CSV files.
 #' @param recursive Logical. Search subdirectories.
+#' @param verbose Logical. Show the progress bar.
 #' @param collector `spectra()`'s collector, from [log_open()].
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
@@ -399,6 +400,7 @@ spectra_from_path <- function(source,
                               id_col          = NULL,
                               wavelength_cols = NULL,
                               recursive       = FALSE,
+                              verbose         = TRUE,
                               collector,
                               call            = rlang::caller_env()) {
 
@@ -468,10 +470,14 @@ spectra_from_path <- function(source,
   n_files <- length(file_paths)
   units   <- vector("list", n_files)
 
-  cli::cli_progress_bar(
-    format = "Reading {n_files} {label} files {cli::pb_bar} {cli::pb_current}/{n_files} ({cli::pb_percent})",
-    total  = n_files
-  )
+  if (verbose) {
+
+    cli::cli_progress_bar(
+      format = "Reading {n_files} {label} files {cli::pb_bar} {cli::pb_current}/{n_files} ({cli::pb_percent})",
+      total  = n_files
+    )
+
+  }
 
   for (i in seq_along(file_paths)) {
 
@@ -485,11 +491,11 @@ spectra_from_path <- function(source,
       id   = file_paths[[i]]
     )
 
-    cli::cli_progress_update()
+    if (verbose) cli::cli_progress_update()
 
   }
 
-  cli::cli_progress_done()
+  if (verbose) cli::cli_progress_done()
 
   ## -------------------------------------------------------------------------
   ## Step 4: What the units reported

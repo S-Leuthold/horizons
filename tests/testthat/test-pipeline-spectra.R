@@ -709,6 +709,28 @@ test_that("spectra() refuses a source that mixes OPUS and CSV files, and names a
 
 })
 
+test_that("the progress bar of a read shows only under verbose = TRUE", {
+
+  paths <- file.path(opus_dir(), c("S01-1.0", "S02-1.0"))
+
+  ## Whether cli prints a bar depends on the terminal, so the calls are counted
+  calls <- character(0)
+  local_mocked_bindings(
+    cli_progress_bar    = function(...) { calls <<- c(calls, "bar"); invisible("id") },
+    cli_progress_update = function(...) { calls <<- c(calls, "update"); invisible("id") },
+    cli_progress_done   = function(...) { calls <<- c(calls, "done"); invisible(TRUE) },
+    .package = "cli"
+  )
+
+  utils::capture.output(spectra(paths, verbose = TRUE))
+  expect_identical(calls, c("bar", "update", "update", "done"))
+
+  calls <- character(0)
+  spectra(paths, verbose = FALSE)
+  expect_identical(calls, character(0))
+
+})
+
 test_that("a file that cannot be read is dropped by name, and the rest returned, with one partial_failure warning", {
 
   ## Arrange ---------------------------------------------------------------
