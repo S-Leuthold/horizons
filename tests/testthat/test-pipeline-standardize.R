@@ -1198,13 +1198,41 @@ test_that("a spectrum short of the grid is flagged for that, with the range it c
 
   }
 
-  ## An Inf is a value that is not finite, short of nothing
-  hd <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 2)
-  hd$data$analysis$wn_2000[2] <- Inf
+  ## An Inf is a value that is not finite, short of nothing, mid-axis or
+  ## at its end
+  for (at in c("wn_2000", "wn_4000")) {
+
+    hd <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 2)
+    hd$data$analysis[[at]][2] <- Inf
+
+    w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
+                        class = "horizons_warning_flagged")
+    expect_match(conditionMessage(w), '1 has a value missing inside its own range, or not finite: "s2".', fixed = TRUE,
+                 info = at)
+    expect_no_match(conditionMessage(w), "short of the grid", fixed = TRUE, info = at)
+
+  }
+
+  ## A grid point inside a spectrum's own range that it cannot reach is not
+  ## short of the grid: here a 35 cm-1 spacing among 25 cm-1 ones, no hole
+  ## by the spectrum's rule but a gap by the axis's, filled on the union
+  ## axis by a 2 cm-1 file
+  own_axis <- c(seq(600, 2000, by = 2), 2000 + 25 * (1:20), 2535 + 25 * (0:58))
+  hd <- local({
+    union <- sort(unique(c(own_axis, KSSL_WN)), decreasing = TRUE)
+    m     <- matrix(NA_real_, nrow = 2, ncol = length(union), dimnames = list(NULL, paste0("wn_", union)))
+    m[1, match(KSSL_WN, union)]  <- smooth_spectrum(KSSL_WN)
+    m[2, match(own_axis, union)] <- 2 * smooth_spectrum(own_axis)
+    new_horizons_data(
+      analysis = dplyr::bind_cols(tibble::tibble(sample_id = c("s1", "s2")), tibble::as_tibble(m)),
+      role_map = tibble::tibble(variable = c("sample_id", colnames(m)), role = c("id", rep("predictor", ncol(m)))))
+  })
 
   w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
                       class = "horizons_warning_flagged")
-  expect_match(conditionMessage(w), '1 has a value missing inside its own range, or not finite: "s2".', fixed = TRUE)
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
+  expect_true(anyNA(unlist(out$data$analysis[2, c("wn_2510", "wn_2520")])))
+  expect_match(conditionMessage(w), "missing inside its own range, or not finite", fixed = TRUE)
   expect_no_match(conditionMessage(w), "short of the grid", fixed = TRUE)
 
 })
@@ -1369,6 +1397,11 @@ test_that("spectrum_holes() tells a missing value from a coarser grid of a spect
   ## Missing at an end is short, not a hole
   expect_false(holes_in(off, 1:5))
   expect_false(holes_in(off, length(off)))
+
+  ## A gap in the axis itself, which every spectrum shares, is no one's hole
+  cut <- kssl[!(kssl >= 1580 & kssl <= 1720)]
+  expect_false(holes_in(cut))
+  expect_true(holes_in(cut, 100))
 
   ## Spectra each complete on their own grid, bound on a union axis
   fine_coarse <- list(
