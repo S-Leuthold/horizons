@@ -2765,6 +2765,13 @@ test_that("summary.horizons_data mirrors the selection block and names it in the
 
   obj <- make_selected_object()
 
+  ## Targets read from many files: the source and the targets lines both show
+  ## the first and count the rest
+  paths <- c("scans/T01.0", "scans/T02.0", "scans/T03.0")
+  obj$provenance$spectra_source <- paths
+  obj$provenance$spectra_type   <- "opus"
+  obj$selection$targets$source  <- paths
+
   expect_snapshot(summary(obj), transform = scrub_summary)
 
 })

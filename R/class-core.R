@@ -1223,7 +1223,7 @@ describe_selection <- function(selection) {
     groups         = groups,
     k              = k_str,
     target_rows    = or_unknown(selection$targets$n_rows),
-    target_source  = or_unknown(selection$targets$source),
+    target_source  = or_unknown(source_label(selection$targets$source)),
     pool_rows      = or_unknown(selection$pool$n_rows),
     drawn          = drawn,
     space          = space,

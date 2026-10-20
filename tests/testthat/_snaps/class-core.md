@@ -193,8 +193,8 @@
          └─ Memory: <size>
       
       Provenance
-         ├─ Spectra source: tibble
-         ├─ Spectra type: tibble
+         ├─ Spectra source: scans/T01.0 and 2 more
+         ├─ Spectra type: opus
          ├─ Created: <time>
          └─ Horizons version: <version>
       
@@ -202,7 +202,7 @@
          ├─ Scope: batch (2 groups)
          ├─ Properties: clay, oc
          ├─ k: 3
-         ├─ Targets: 4 rows (source: tibble)
+         ├─ Targets: 4 rows (source: scans/T01.0 and 2 more)
          ├─ Pool: 12 rows
          │     ├─ Drawn per property: clay 12/12, oc 12/12
          │     └─ Membership rows: 24
