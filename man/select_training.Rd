@@ -162,12 +162,17 @@ column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range},
 \code{target_only}, the targets' wavenumbers the library lacks. \code{x$log} is the
 pool's, with this call's rows after it: one per warning topic, each
 raised once at the end of the call (\code{horizons_warning_input} for pool
-and targets in different photometric units, \code{coverage} for target
+and targets in different photometric units; \code{flagged} for targets an
+earlier step flagged, which get no training set; \code{coverage} for target
 columns the library lacks, a search on the overlap and draws short of
-\code{k}, \code{skipped} for the resemblance check not run and for a similarity
-space or library that could not be cached, \code{applicability} for targets
+\code{k}; \code{skipped} for a property left out under \code{properties = NULL} (no
+measured rows, or fewer than \code{k}), the resemblance check not run, and a
+similarity space or library that could not be cached; \code{partial_failure}
+for a property every drawn row of which was some target's twin, left
+out, so the call did not complete in full; \code{applicability} for targets
 beyond the library's spread), and a note for each cost paid once (a
-cached space rebuilt, a first-use space not built).
+cached library or similarity space rebuilt, a first-use space not
+built).
 }
 \description{
 Draws a training set from a reference pool (a spectral library with

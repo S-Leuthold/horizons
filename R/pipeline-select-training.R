@@ -320,12 +320,17 @@
 #'   `target_only`, the targets' wavenumbers the library lacks. `x$log` is the
 #'   pool's, with this call's rows after it: one per warning topic, each
 #'   raised once at the end of the call (`horizons_warning_input` for pool
-#'   and targets in different photometric units, `coverage` for target
+#'   and targets in different photometric units; `flagged` for targets an
+#'   earlier step flagged, which get no training set; `coverage` for target
 #'   columns the library lacks, a search on the overlap and draws short of
-#'   `k`, `skipped` for the resemblance check not run and for a similarity
-#'   space or library that could not be cached, `applicability` for targets
+#'   `k`; `skipped` for a property left out under `properties = NULL` (no
+#'   measured rows, or fewer than `k`), the resemblance check not run, and a
+#'   similarity space or library that could not be cached; `partial_failure`
+#'   for a property every drawn row of which was some target's twin, left
+#'   out, so the call did not complete in full; `applicability` for targets
 #'   beyond the library's spread), and a note for each cost paid once (a
-#'   cached space rebuilt, a first-use space not built).
+#'   cached library or similarity space rebuilt, a first-use space not
+#'   built).
 #'
 #' @examples
 #' \dontrun{
