@@ -70,10 +70,10 @@ test_that("select_training() rejects inputs that are not horizons_data", {
 
   expect_error(select_training(data.frame(a = 1), fx$pool),
                regexp = "`x` must be a horizons_data object", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_input")
   expect_error(select_training(fx$targets, data.frame(a = 1)),
                regexp = "`library` must be a horizons_data", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_input")
 
 })
 
@@ -83,7 +83,7 @@ test_that("select_training() needs a pool with at least one response", {
   fx <- select_fixture(n_pool = 60)
 
   expect_error(select_training(fx$targets, fx$targets),
-               regexp = "response", class = "horizons_input_error")
+               regexp = "response", class = "horizons_error_input")
 
 })
 
@@ -93,7 +93,7 @@ test_that("select_training() rejects unknown properties", {
   fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, properties = "ph"),
-               regexp = "ph", class = "horizons_input_error")
+               regexp = "ph", class = "horizons_error_input")
 
 })
 
@@ -103,10 +103,10 @@ test_that("select_training() rejects a bad k", {
   fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, k = 0),   regexp = "`k` must be", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_input")
   expect_error(quiet_select(fx, k = 2.5), regexp = "`k` must be", fixed = TRUE,
-               class = "horizons_input_error")
-  expect_error(quiet_select(fx, k = c(clay = 5)), regexp = "oc", class = "horizons_input_error")
+               class = "horizons_error_input")
+  expect_error(quiet_select(fx, k = c(clay = 5)), regexp = "oc", class = "horizons_error_input")
 
 })
 
@@ -116,11 +116,93 @@ test_that("select_training() rejects bad scope, metric and space", {
   fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, k = 5, scope  = "nope"), regexp = "`scope` must be",
-               fixed = TRUE, class = "horizons_input_error")
+               fixed = TRUE, class = "horizons_error_input")
   expect_error(quiet_select(fx, k = 5, metric = "nope"), regexp = "`metric` must be",
-               fixed = TRUE, class = "horizons_input_error")
+               fixed = TRUE, class = "horizons_error_input")
   expect_error(quiet_select(fx, k = 5, space  = "nope"), regexp = "`space` must be",
-               fixed = TRUE, class = "horizons_input_error")
+               fixed = TRUE, class = "horizons_error_input")
+
+})
+
+
+test_that("select_training() refuses every argument problem at once, in one condition carrying its findings", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  ## Six mistakes: one refusal, nothing printed, the first five shown as
+  ## bullets and the sixth counted, every one of them in `findings`
+  expect_silent(
+    err <- expect_error(
+      select_training(fx$targets, fx$pool, scope = "nope", space = "nope", metric = "nope",
+                      depth = "nope", k = 0, twin_ratio = 2),
+      class = "horizons_error_input", inherit = FALSE
+    )
+  )
+
+  msg <- cli::ansi_strip(conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(msg, "The inputs failed 6 checks.", fixed = TRUE)
+  expect_match(msg, "1 more not shown; all are in the error's `findings` field.", fixed = TRUE)
+  expect_length(err$findings, 6L)
+
+  for (arg in c("scope", "space", "metric", "depth", "k")) {
+    expect_match(msg, paste0("`", arg, "` must be"), fixed = TRUE, info = arg)
+  }
+
+  expect_no_match(msg, "twin_ratio", fixed = TRUE)
+  expect_match(err$findings[6], "`twin_ratio` must be a single number in (0, 1)", fixed = TRUE)
+
+})
+
+
+test_that("select_training() refuses a library it cannot resolve at its door, before the targets are validated", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  ## A library object whose pool is not data, and the forms resolve_source()
+  ## has no method for; each refused before anything is validated or read
+  local_mocked_bindings(validate_select_input = function(...) stop("the targets were validated"))
+
+  not_data <- structure(list(pool = list(a = 1), record = library_record("object")),
+                        class = "horizons_library")
+
+  cases <- list(
+    list(library = 42,                                  finding = "`library` must be a horizons_data, the name of a registered library (\"kssl\"), or a path to a library file, not a number"),
+    list(library = c("kssl", "kssl"),                   finding = "`library` must be a single name or path, not a character vector"),
+    list(library = NA_character_,                       finding = "`library` must be a single name or path"),
+    list(library = "ksl",                               finding = "\"ksl\" is not a registered library (registered: \"kssl\"); for a library file, pass its path"),
+    list(library = file.path(tempdir(), "nope.qs2"),    finding = "does not exist; check the path, or pass a registered name (\"kssl\")"),
+    list(library = not_data,                            finding = "is a <horizons_library> whose pool is a list, not a horizons_data")
+  )
+
+  for (case in cases) {
+
+    err <- expect_error(select_training(fx$targets, case$library, k = 5),
+                        class = "horizons_error_input", inherit = FALSE)
+
+    expect_length(err$findings, 1L)
+    expect_match(err$findings, case$finding, fixed = TRUE, info = case$finding)
+    expect_identical(rlang::call_name(err$call), "select_training")
+
+  }
+
+})
+
+
+test_that("a named k missing a property is reported with the pool's other problems", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  validated <- fx$pool
+  validated$validation$passed <- TRUE
+
+  err <- expect_error(select_training(fx$targets, validated, k = c(clay = 5)),
+                      class = "horizons_error_input", inherit = FALSE)
+
+  expect_length(err$findings, 2L)
+  expect_match(err$findings[1], "a verdict in validation$passed", fixed = TRUE)
+  expect_match(err$findings[2], "A named `k` needs an entry for every property; missing \"oc\"", fixed = TRUE)
 
 })
 
@@ -136,7 +218,7 @@ test_that("select_training() rejects a twin_ratio outside (0, 1)", {
   for (bad in list(1, 1.5, NA_real_, NA, c(0.05, 0.1))) {
 
     expect_error(quiet_select(fx, k = 5, twin_ratio = bad),
-                 regexp = "twin_ratio", class = "horizons_input_error")
+                 regexp = "twin_ratio", class = "horizons_error_input")
 
   }
 
@@ -150,10 +232,10 @@ test_that("select_training(space = 'pls') needs exactly one property and an inte
   fx <- select_fixture(n_pool = 60)
 
   expect_error(quiet_select(fx, k = 5, space = "pls", ncomp = 3L),
-               regexp = "one property", class = "horizons_input_error")
+               regexp = "one property", class = "horizons_error_input")
   expect_error(quiet_select(fx, k = 5, space = "pls", ncomp = 0.99, properties = "clay"),
                regexp = "needs a whole-number `ncomp`", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_input")
 
 })
 
@@ -308,13 +390,13 @@ test_that("select_training() refuses a pool that carries state from later verbs"
 
   expect_error(select_training(fx$targets, fitted, k = 5),
                "`library` is a <horizons_fit>; it must be a plain horizons_data", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_input")
 
   validated <- fx$pool
   validated$validation$passed <- TRUE
 
   expect_error(select_training(fx$targets, validated, k = 5),
-               regexp = "validation\\$passed", class = "horizons_input_error")
+               regexp = "validation\\$passed", class = "horizons_error_input")
 
 })
 
@@ -345,7 +427,7 @@ test_that("select_training() refuses a configured pool and says to use it before
   utils::capture.output(configured <- configure(fx$pool, outcome = "clay", models = "plsr"))
 
   expect_error(select_training(fx$targets, configured, k = 5),
-               regexp = "config\\$configs", class = "horizons_input_error")
+               regexp = "config\\$configs", class = "horizons_error_input")
   expect_error(select_training(fx$targets, configured, k = 5),
                regexp = "before `configure\\(\\)` and `validate\\(\\)`")
 
@@ -355,7 +437,7 @@ test_that("select_training() refuses a configured pool and says to use it before
   outcome_only <- set_analysis(fx$pool, fx$pool$data$analysis, role_map)
 
   expect_error(select_training(fx$targets, outcome_only, k = 5),
-               regexp = "outcome role \\(clay\\)", class = "horizons_input_error")
+               regexp = "outcome role \\(clay\\)", class = "horizons_error_input")
 
 })
 
@@ -368,14 +450,14 @@ test_that("select_training() refuses a pool whose validation failed or that carr
   failed$validation$passed <- FALSE
 
   expect_error(select_training(fx$targets, failed, k = 5),
-               regexp = "validation\\$passed", class = "horizons_input_error")
+               regexp = "validation\\$passed", class = "horizons_error_input")
 
   removed <- fx$pool
   removed$validation$outliers$removed_ids <- "P999"
   removed$validation$outliers$removed     <- TRUE
 
   expect_error(select_training(fx$targets, removed, k = 5),
-               regexp = "removal record", class = "horizons_input_error")
+               regexp = "removal record", class = "horizons_error_input")
 
   ## Any one part of a removal record is enough
   parts <- list(
@@ -407,9 +489,18 @@ test_that("select_training() refuses targets that fail the base contract", {
   replicates$data$analysis$sample_id[2] <- replicates$data$analysis$sample_id[1]
 
   utils::capture.output(
-    expect_error(select_training(replicates, fx$pool, k = 5),
-                 regexp = "`x`, the targets.*Duplicate", class = "horizons_validation_error")
+    err <- expect_error(select_training(replicates, fx$pool, k = 5),
+                        regexp = "`x`, the targets.*Duplicate", class = "horizons_error_validation")
   )
+
+  ## One validation error naming the verb, with a remedy, carrying the
+  ## validator's findings and the validator's error as its parent
+  expect_s3_class(err, "horizons_error_validation")
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(conditionMessage(err), "Average replicate scans with `average()`", fixed = TRUE)
+  expect_s3_class(err$parent, "horizons_error_validation")
+  expect_identical(err$findings, err$parent$findings)
+  expect_true(any(grepl("Duplicate", err$findings)))
 
   ## A non-finite spectrum, which the similarity space cannot take
   non_finite <- fx$targets
@@ -417,14 +508,14 @@ test_that("select_training() refuses targets that fail the base contract", {
 
   utils::capture.output(
     expect_error(select_training(non_finite, fx$pool, k = 5),
-                 regexp = "NA values in predictor", class = "horizons_validation_error")
+                 regexp = "NA values in predictor", class = "horizons_error_validation")
   )
 
   ## Checked before the library resolves, so a registered library is not
   ## fetched for targets the verb would refuse.
   utils::capture.output(
     expect_error(select_training(replicates, "kssl", k = 5),
-                 regexp = "the targets", class = "horizons_validation_error")
+                 regexp = "the targets", class = "horizons_error_validation")
   )
 
 })
@@ -439,7 +530,7 @@ test_that("select_training() refuses a pool that fails the base contract", {
 
   utils::capture.output(
     expect_error(select_training(fx$targets, broken, k = 5),
-                 regexp = "`library`, the pool.*Infinite", class = "horizons_validation_error")
+                 regexp = "`library`, the pool.*Infinite", class = "horizons_error_validation")
   )
 
 })
@@ -500,7 +591,7 @@ test_that("select_training() refuses a pool that is itself a selection", {
   ## The provenance columns would collide under bind_cols and then surface as
   ## a confusing role-map abort. Say what is actually wrong instead.
   expect_error(select_training(fx$targets, prior, k = 5),
-               regexp = "itself a selection", class = "horizons_input_error")
+               regexp = "itself a selection", class = "horizons_error_input")
 
   ## Any one of the three is enough, and is named
   for (col in c(".drawn_by", ".min_distance", ".group")) {
@@ -510,7 +601,7 @@ test_that("select_training() refuses a pool that is itself a selection", {
     pool$data$role_map <- rbind(pool$data$role_map, tibble::tibble(variable = col, role = "meta"))
 
     err <- expect_error(select_training(fx$targets, pool, k = 5),
-                        class = "horizons_input_error")
+                        class = "horizons_error_input")
     expect_match(gsub("\\s+", " ", conditionMessage(err)),
                  sprintf("provenance column \"%s\", so it is itself a selection", col),
                  fixed = TRUE, info = col)
@@ -1161,7 +1252,7 @@ test_that("a property with no measured pool row stops every scope", {
   for (scope in c("batch", "global")) {
 
     err <- expect_error(quiet_select(fx, k = 5, scope = scope),
-                        regexp = "measured rows for oc", class = "horizons_input_error")
+                        regexp = "measured rows for oc", class = "horizons_error_input")
 
     ## No depth column, so no depth was applied and no hint about it
     expect_no_match(conditionMessage(err), "depth = \"all\"", fixed = TRUE)
@@ -1178,7 +1269,7 @@ test_that("a property with no measured pool row stops every scope", {
                                    tibble::tibble(variable = "upper_depth_cm", role = "meta"))
 
   err <- expect_error(quiet_select(deep, k = 5),
-                      regexp = "measured rows for oc", class = "horizons_input_error")
+                      regexp = "measured rows for oc", class = "horizons_error_input")
   expect_match(conditionMessage(err), "depth = \"all\"", fixed = TRUE)
 
 })
@@ -1186,15 +1277,14 @@ test_that("a property with no measured pool row stops every scope", {
 
 test_that("report_selection() prints a record with missing tables rather than erroring", {
 
-  ## A record built by hand, or one a future field has not been added to,
-  ## has to print. nrow(NULL) is NULL and if (NULL) is an error naming
-  ## neither the field nor the verb.
+  ## nrow(NULL) is NULL and if (NULL) is an error naming neither the field
+  ## nor the verb, so a table that may be missing is read through
+  ## n_rows_of(). Its one caller passes the record it has just built.
 
   sel <- list(settings = list(scope = "batch", k = c(clay = 10L)))
 
   expect_silent(txt <- utils::capture.output(report_selection(sel, n_targets = 8L)))
   expect_true(any(grepl("Twins flagged: 0", txt)))
-  expect_true(any(grepl("unknown", txt)))
   expect_true(any(grepl("scope = batch", txt)))
 
   ## And an entirely empty one
@@ -1758,9 +1848,9 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
   expect_gt(off$selection$settings$ncomp_retained, s$ncomp_retained)
 
   expect_error(quiet_select(fx, k = 10, sdev_floor = 1),   regexp = "`sdev_floor` must be",
-               fixed = TRUE, class = "horizons_input_error")
+               fixed = TRUE, class = "horizons_error_input")
   expect_error(quiet_select(fx, k = 10, sdev_floor = -0.1), regexp = "`sdev_floor` must be",
-               fixed = TRUE, class = "horizons_input_error")
+               fixed = TRUE, class = "horizons_error_input")
 
 })
 

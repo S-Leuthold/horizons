@@ -87,16 +87,6 @@ test_that("nearest_neighbours() mahalanobis is euclidean on sdev-scaled scores",
 })
 
 
-test_that("nearest_neighbours() mahalanobis needs sdev", {
-
-  s <- fixture_scores()
-
-  expect_error(nearest_neighbours(s$St, s$Sp, k = 5L, metric = "mahalanobis"),
-               class = "horizons_input_error")
-
-})
-
-
 test_that("nearest_neighbours() cosine matches brute force", {
 
   s  <- fixture_scores()
@@ -122,16 +112,6 @@ test_that("nearest_neighbours() chunked equals unchunked", {
 
   expect_identical(a$ids, b$ids)
   expect_equal(a$dist, b$dist, tolerance = 1e-12)
-
-})
-
-
-test_that("nearest_neighbours() aborts when k exceeds the pool", {
-
-  s <- fixture_scores(n_pool = 20)
-
-  expect_error(nearest_neighbours(s$St, s$Sp, k = 25L, metric = "euclidean"),
-               regexp = "20", class = "horizons_input_error")
 
 })
 
@@ -367,8 +347,17 @@ test_that("resolve_k() expands a scalar and honours a named vector", {
   ## Order follows properties, not the names of k
   expect_identical(resolve_k(c(oc = 6, clay = 12), c("clay", "oc")), c(clay = 12L, oc = 6L))
 
-  expect_error(resolve_k(c(clay = 5), c("clay", "oc")),
-               regexp = "oc", class = "horizons_input_error")
+})
+
+
+test_that("missing_k() is the one rule for a named k, as a finding", {
+
+  ## An unnamed scalar needs nothing; anything else needs an entry for every
+  ## property, and an unnamed vector has none
+  expect_identical(missing_k(5, c("clay", "oc")), character())
+  expect_identical(missing_k(c(clay = 5, oc = 6), c("clay", "oc")), character())
+  expect_match(missing_k(c(clay = 5), c("clay", "oc")), "missing \"oc\"", fixed = TRUE)
+  expect_match(missing_k(c(5, 6), c("clay", "oc")), "missing \"clay\" and \"oc\"", fixed = TRUE)
 
 })
 

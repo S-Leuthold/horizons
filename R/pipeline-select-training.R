@@ -331,6 +331,10 @@ select_training <- function(x, library,
   ## Step 0: Input validation
   ## ---------------------------------------------------------------------------
 
+  ## The frame every refusal reports, including those raised in the helpers
+  ## the verb hands work to
+  call <- rlang::current_env()
+
   ## How the run goes: the fields select_training() reads, defaults filled
   ## in, and the record of it on the selection
   control    <- resolve_control(control, "select_training")
@@ -403,10 +407,9 @@ select_training <- function(x, library,
 
   }
 
-  ## The similarity space's levers, and the draw's own, are checked here too
+  ## The similarity space's levers, and the draw's own, are checked here
   ## rather than where they are used, so none of them is first found wrong
-  ## after a registered library has been downloaded and built. The space
-  ## functions keep their own checks for callers that reach them directly.
+  ## after a registered library has been downloaded and built.
 
   is_count <- function(v, min = 1) {
     is.numeric(v) && length(v) == 1L && is.finite(v) && v >= min && v == round(v)
@@ -430,13 +433,59 @@ select_training <- function(x, library,
 
   }
 
+  ## library's form: a horizons_data, a library object holding one, a
+  ## registered name, or the path of a file that exists. Checked with the
+  ## other arguments, so a mistyped name or a missing file is reported with
+  ## them, before the targets are validated or anything is downloaded.
+
+  registry   <- names(library_registry())
+  registered <- FALSE
+
+  if (is.character(library)) {
+
+    if (length(library) != 1L || is.na(library) || !nzchar(library)) {
+
+      errors <- c(errors, cli::format_inline("{.arg library} must be a single name or path, not {.obj_type_friendly {library}}"))
+
+    } else if (library %in% registry) {
+
+      registered <- TRUE
+
+    } else if (!grepl("[/\\\\]", library) && !grepl("\\.[A-Za-z0-9]+$", library) &&
+               !file.exists(library)) {
+
+      ### No path separator, no file suffix and nothing on disk: a bare word
+      ### is a mistyped name, and saying so beats "file not found"
+      errors <- c(errors, cli::format_inline(
+        "{.val {library}} is not a registered library (registered: {.val {registry}}); for a library file, pass its path"))
+
+    } else if (!file.exists(library)) {
+
+      errors <- c(errors, cli::format_inline(
+        "The library file {.path {library}} does not exist; check the path, or pass a registered name ({.val {registry}})"))
+
+    }
+
+  } else if (inherits(library, "horizons_library")) {
+
+    if (!inherits(library$pool, "horizons_data")) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.arg library} is a {.cls horizons_library} whose pool is {.obj_type_friendly {library$pool}}, not a horizons_data; rebuild it, or pass the pool itself"))
+
+    }
+
+  } else if (!inherits(library, "horizons_data")) {
+
+    errors <- c(errors, cli::format_inline(
+      "{.arg library} must be a horizons_data, the name of a registered library ({.val {registry}}), or a path to a library file, not {.obj_type_friendly {library}}"))
+
+  }
+
   ## The window becomes points on the library's grid. A registered library's
   ## grid is known from the registry, so a window too narrow for poly is
   ## caught here, before the download; any other library is in hand already
   ## and is checked once it resolves (Step 2), before anything is built.
-
-  registered <- is.character(library) && length(library) == 1L &&
-                library %in% names(library_registry())
 
   if (registered && window_ok && deriv_ok && poly_ok && derivative > 0) {
 
@@ -545,74 +594,51 @@ select_training <- function(x, library,
 
   }
 
-  resolved <- resolve_source(library, verbose = isTRUE(verbose))
-  pool     <- resolved$pool
-
-  if (!inherits(pool, "horizons_data")) {
-
-    errors <- c(errors, cli::format_inline("{.arg library} must be a horizons_data object"))
-
-  } else {
-
-    pool   <- validate_select_input(pool, arg = "library", what = "the pool")
-    errors <- c(errors, check_pool_unpromoted(pool))
-
-  }
+  resolved <- resolve_source(library, verbose = isTRUE(verbose), call = call)
+  pool     <- validate_select_input(resolved$pool, arg = "library", what = "the pool")
+  errors   <- check_pool_unpromoted(pool)
 
   ## Properties: the pool's responses ---------------------------------------
 
-  if (inherits(pool, "horizons_data")) {
+  responses <- pool$data$role_map$variable[pool$data$role_map$role == "response"]
 
-    responses <- pool$data$role_map$variable[pool$data$role_map$role == "response"]
+  if (!length(responses)) {
 
-    if (!length(responses)) {
+    errors <- c(errors, cli::format_inline("{.arg library} has no response columns; add the library's lab values first"))
 
-      errors <- c(errors, cli::format_inline("{.arg library} has no response columns; add the library's lab values first"))
+  } else if (is.null(properties)) {
 
-    } else if (is.null(properties)) {
+    properties <- responses
 
-      properties <- responses
+  } else {
 
-    } else {
+    unknown <- setdiff(properties, responses)
 
-      unknown <- setdiff(properties, responses)
+    if (length(unknown)) {
 
-      if (length(unknown)) {
-
-        errors <- c(errors, cli::format_inline("{.arg properties} not in the pool's responses: {.val {unknown}} (available: {.val {responses}})"))
-
-      }
+      errors <- c(errors, cli::format_inline("{.arg properties} not in the pool's responses: {.val {unknown}} (available: {.val {responses}})"))
 
     }
 
-    if (k_ok && (length(k) > 1L || !is.null(names(k)))) {
+  }
 
-      missing_k <- setdiff(properties, names(k))
+  ## One rule for a named k, which resolve_k() relies on below
+  errors <- c(errors, missing_k(k, properties))
 
-      if (length(missing_k)) {
+  if (identical(space, "pls") && length(properties) != 1L) {
 
-        errors <- c(errors, cli::format_inline("A named {.arg k} needs an entry for every property; missing {.val {missing_k}}"))
+    errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
 
-      }
+  }
 
-    }
+  ## A prior selection's provenance columns would collide on bind_cols ------
 
-    if (identical(space, "pls") && length(properties) != 1L) {
+  prior <- intersect(c(".drawn_by", ".min_distance", ".group"), names(pool$data$analysis))
 
-      errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
+  if (length(prior)) {
 
-    }
-
-    ## A prior selection's provenance columns would collide on bind_cols ------
-
-    prior <- intersect(c(".drawn_by", ".min_distance", ".group"), names(pool$data$analysis))
-
-    if (length(prior)) {
-
-      errors <- c(errors, cli::format_inline(
-        "{.arg library} already carries the provenance column{?s} {.val {prior}}, so it is itself a selection; pass the library as it comes from standardize()"))
-
-    }
+    errors <- c(errors, cli::format_inline(
+      "{.arg library} already carries the provenance column{?s} {.val {prior}}, so it is itself a selection; pass the library as it comes from standardize()"))
 
   }
 
@@ -747,10 +773,10 @@ select_training <- function(x, library,
 
     if (!is.numeric(upper)) {
 
-      cli::cli_abort(c(
-        "{.field upper_depth_cm} must be numeric for {.code depth = \"topsoil\"}; it is {.cls {class(upper)[1]}}",
-        "i" = "Convert it to centimetres as numbers, or pass {.code depth = \"all\"}"
-      ), class = "horizons_input_error")
+      abort_horizons(c(
+        "{.field upper_depth_cm} must be numeric for {.code depth = \"topsoil\"}; it is {.cls {class(upper)[1]}}.",
+        "i" = "Convert it to centimetres as numbers, or pass {.code depth = \"all\"}."
+      ), kind = "input")
 
     }
 
@@ -770,11 +796,11 @@ select_training <- function(x, library,
 
   if (length(unmeasured)) {
 
-    cli::cli_abort(c(
-      "{.arg library} has no measured rows for {.field {unmeasured}}",
-      "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the library first",
-      if (depth_applied) c("i" = "Only topsoil rows (upper depth < {SELECT_TOPSOIL_MAX_CM} cm) count under {.code depth = \"topsoil\"}; {.code depth = \"all\"} draws from every depth")
-    ), class = "horizons_input_error")
+    abort_horizons(c(
+      "{.arg library} has no measured rows for {.field {unmeasured}}.",
+      "i" = "Drop {cli::qty(unmeasured)}{?it/them} from {.arg properties}, or add the lab values to the library first.",
+      if (depth_applied) c("i" = "Only topsoil rows (upper depth < {SELECT_TOPSOIL_MAX_CM} cm) count under {.code depth = \"topsoil\"}; {.code depth = \"all\"} draws from every depth.")
+    ), kind = "input")
 
   }
 
@@ -803,10 +829,10 @@ select_training <- function(x, library,
 
   if (derivative > 0 && window_points <= poly) {
 
-    cli::cli_abort(c(
-      "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the library's {search_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}",
+    abort_horizons(c(
+      "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the library's {search_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}.",
       "i" = "Widen {.arg window} or lower {.arg poly}."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -842,7 +868,8 @@ select_training <- function(x, library,
                            snv = space_settings$snv, derivative = space_settings$derivative,
                            window = space_settings$window, poly = space_settings$poly,
                            mask = mask, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
-                           y = if (space == "pls") pool$data$analysis[[properties]] else NULL)
+                           y = if (space == "pls") pool$data$analysis[[properties]] else NULL,
+                           call = call)
 
   }
 
@@ -992,7 +1019,6 @@ select_training <- function(x, library,
                                        distance = numeric(), rank = integer(),
                                        retained = logical())
     draw$short_draws <- empty_short_draws()
-    draw$k           <- k_by
 
   }
 
@@ -1329,25 +1355,40 @@ window_to_points <- function(width, resolution) {
 
 
 ## ---------------------------------------------------------------------------
-## abort_select_inputs() — the validation tree, then the error
+## abort_select_inputs() — every collected argument problem, in one error
 ## ---------------------------------------------------------------------------
 
-#' Print collected input errors as a tree and abort
+#' Refuse the call with every argument problem found
+#'
+#' @description
+#' `select_training()` checks its arguments, and then the pool's data, all
+#' at once before any work, so a call is refused once with everything wrong
+#' with it rather than once per mistake. Shaped as [abort_validation()]
+#' shapes a validation error: each finding an `x` bullet, the first five
+#' shown and the rest counted, every finding kept on the condition as
+#' `findings`. The findings are text the verb has already rendered, so they
+#' go in as values and their braces are never read as a cli template. Each
+#' finding names its own remedy.
+#'
+#' @param findings [Character.] One message per problem.
+#' @param call The frame the error reports: the verb's.
+#'
+#' @return Does not return; aborts with class `horizons_error_input`.
 #' @noRd
-abort_select_inputs <- function(errors) {
+abort_select_inputs <- function(findings, call = rlang::caller_env()) {
 
-  cat(cli::col_red(cli::style_bold("! Input validation failed:\n")))
+  shown  <- utils::head(findings, 5L)
+  n_more <- length(findings) - length(shown)
 
-  for (i in seq_along(errors)) {
-
-    branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-    cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-  }
-
-  cat("\n")
-  rlang::abort(paste(c("Input validation failed:", errors), collapse = "\n"),
-               class = "horizons_input_error")
+  abort_horizons(
+    c("The inputs failed {length(findings)} check{?s}.",
+      stats::setNames(cli_escape(shown), rep("x", length(shown))),
+      if (n_more > 0) c("i" = paste0(n_more, " more not shown; all are in the error's `findings` field."))),
+    kind     = "input",
+    ## Plain text: a field is data a handler matches or writes out
+    findings = cli::ansi_strip(findings),
+    call     = call
+  )
 
 }
 
@@ -1366,20 +1407,22 @@ abort_select_inputs <- function(errors) {
 #' @param obj [horizons_data.] The targets or the pool.
 #' @param arg [Character.] The argument name, `"x"` or `"library"`.
 #' @param what [Character.] What the argument is, for the message.
+#' @param call The frame the error reports: the verb's.
 #'
 #' @return [horizons_data.] `obj`, unchanged. Aborts with class
-#'   `horizons_validation_error`, the validator's error as its parent.
+#'   `horizons_error_validation`, the validator's error as its parent and its
+#'   `findings` carried.
 #' @noRd
-validate_select_input <- function(obj, arg, what) {
+validate_select_input <- function(obj, arg, what, call = rlang::caller_env()) {
 
-  call <- rlang::caller_env()
-
-  tryCatch(
+  rlang::try_fetch(
     validate_horizons_data(obj),
     horizons_error_validation = function(e) {
 
-      cli::cli_abort("{.arg {arg}}, {what}, failed validation",
-                     parent = e, call = call, class = "horizons_validation_error")
+      abort_horizons(c(
+        "{.arg {arg}}, {what}, failed validation.",
+        "i" = "Average replicate scans with {.fn average}; rebuild an object edited by hand or saved by an older version of horizons with the verbs that wrote it."
+      ), kind = "validation", parent = e, findings = e$findings, call = call)
 
     }
   )
@@ -1779,11 +1822,10 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
 #' Print the selection report
 #'
 #' @details
-#' Every dereference is guarded the way `describe_selection()` guards its
-#' own: a record built by hand, or one a future field is missing from, has to
-#' print rather than error inside a report. `nrow(NULL)` is `NULL`, and
-#' `if (NULL)` is an error with a message that names neither the field nor
-#' the verb.
+#' Its one caller passes the record it has just built. A table that may be
+#' missing is still read through `n_rows_of()`, since `nrow(NULL)` is `NULL`
+#' and `if (NULL)` is an error with a message that names neither the field
+#' nor the verb.
 #'
 #' @param sel [List.] `x$selection`.
 #' @param n_targets [Integer.] Targets in the batch.
@@ -1836,8 +1878,6 @@ report_selection <- function(sel, n_targets) {
 
   union_note <- if (identical(scope, "global")) {
     "0 (scope = global keeps the whole pool; the check is reported, not applied)"
-  } else if (is.null(n_un) || !length(n_un)) {
-    "unknown"
   } else {
     paste0(n_un, " removed from the union")
   }
@@ -1863,13 +1903,10 @@ report_selection <- function(sel, n_targets) {
   ## A skipped check has an empty beyond table; printing its count would
   ## read as "every target resembles the library" when nothing was checked.
 
-  n_far <- if (is.data.frame(sel$resemblance$beyond)) nrow(sel$resemblance$beyond) else NA_integer_
-  far   <- if (!is.null(sel$resemblance$skipped)) {
+  far <- if (!is.null(sel$resemblance$skipped)) {
     paste0("not checked (", sel$resemblance$skipped, ")")
-  } else if (is.na(n_far)) {
-    "unknown"
   } else {
-    n_far
+    nrow(sel$resemblance$beyond)
   }
   cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ", far, "\n"))
 

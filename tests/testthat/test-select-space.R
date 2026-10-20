@@ -126,42 +126,6 @@ test_that("transform_similarity() aborts on a row that goes non-finite, naming i
 })
 
 
-test_that("transform_similarity() rejects a bad mask", {
-
-  fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
-
-  expect_error(transform_similarity(pm$matrix, pm$wavenumbers, mask = c(1580, 1720)),
-               class = "horizons_input_error")
-  expect_error(transform_similarity(pm$matrix, pm$wavenumbers, mask = rbind(c(1720, 1580))),
-               class = "horizons_input_error")
-
-})
-
-
-test_that("transform_similarity() validates the filter arguments itself", {
-
-  fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
-
-  ## Even window: the edge-trim bookkeeping assumes an odd one
-  expect_error(transform_similarity(pm$matrix, pm$wavenumbers, window = 10L),
-               regexp = "odd", class = "horizons_input_error")
-
-  ## Polynomial order at or above the window
-  expect_error(transform_similarity(pm$matrix, pm$wavenumbers, window = 5L, poly = 5L),
-               class = "horizons_input_error")
-
-  ## Polynomial order below the derivative asked of it
-  expect_error(transform_similarity(pm$matrix, pm$wavenumbers, derivative = 2L, poly = 1L),
-               class = "horizons_input_error")
-
-  ## None of this fires when the derivative is off
-  expect_silent(transform_similarity(pm$matrix, pm$wavenumbers, derivative = 0L, window = 10L))
-
-})
-
-
 test_that("transform_similarity() aborts when the mask leaves too few columns", {
 
   fx <- select_fixture(n_pool = 30)
@@ -173,7 +137,7 @@ test_that("transform_similarity() aborts when the mask leaves too few columns", 
 
   ## The floor is an argument, so a caller that needs room can ask for it
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers, min_cols = 10000L),
-               class = "horizons_input_error")
+               class = "horizons_error_input")
 
 })
 
@@ -298,7 +262,7 @@ test_that("build_similarity_space() accepts a coarse but gap-free pool", {
 
   ## An integer ncomp still has to fit in the columns it is given
   expect_error(build_similarity_space(M, wn, ncomp = 200L),
-               regexp = "column", class = "horizons_input_error")
+               regexp = "column", class = "horizons_error_input")
 
 })
 
@@ -435,64 +399,21 @@ test_that("the default floor trims the fixture's variance-chosen set", {
 })
 
 
-test_that("build_similarity_space() rejects a nonsense sdev_floor", {
-
-  fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
-
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, sdev_floor = 1),
-               class = "horizons_input_error")
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, sdev_floor = -0.1),
-               class = "horizons_input_error")
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, sdev_floor = c(0.1, 0.2)),
-               class = "horizons_input_error")
-
-})
-
-
-test_that("build_similarity_space() rejects an ncomp that is neither a proportion nor a count", {
-
-  fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
-
-  for (bad in list(0, -1, 1.5, "5", c(2, 3))) {
-
-    expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = bad),
-                 "must be a proportion in (0, 1) or a positive integer", fixed = TRUE,
-                 class = "horizons_input_error", info = paste("ncomp =", deparse(bad)))
-
-  }
-
-})
-
-
 ## =============================================================================
 ## build_similarity_space() — PLS
 ## =============================================================================
 
-test_that("build_similarity_space(space = 'pls') needs y and an integer ncomp", {
+test_that("build_similarity_space(space = 'pls') trips an internal check on a y that is not one value per pool row", {
 
-  fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
-
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 5L),
-               class = "horizons_input_error")
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 0.99,
-                                      y = fx$pool$data$analysis$clay),
-               class = "horizons_input_error")
-
-})
-
-
-test_that("build_similarity_space(space = 'pls') refuses a y that is not one value per pool row", {
-
+  ## The verb passes the pool's own column, so only a bug can misalign it,
+  ## and recycling would fit against the wrong rows silently
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
   expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
                                       y = fx$pool$data$analysis$clay[-1]),
                "must have one value per pool row (60), got 59", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_internal")
 
 })
 
@@ -593,8 +514,10 @@ test_that("project_similarity() places the exact twin on its pool row", {
 })
 
 
-test_that("project_similarity() aborts on a wavenumber mismatch", {
+test_that("project_similarity() trips an internal check on a wavenumber mismatch", {
 
+  ## search_axis() puts the targets on the space's grid; off it, the
+  ## projection would score columns against the wrong loadings
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
   tm <- predictor_matrix(fx$targets)   # the targets' 8 cm-1 grid, not the space's 4
@@ -602,20 +525,7 @@ test_that("project_similarity() aborts on a wavenumber mismatch", {
   sp <- build_similarity_space(pm$matrix, pm$wavenumbers)
 
   expect_error(project_similarity(sp, tm$matrix, tm$wavenumbers),
-               class = "horizons_input_error")
-
-})
-
-
-test_that("project_similarity() refuses a space build_similarity_space() did not return", {
-
-  fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
-
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers)
-
-  ## The contents are a fitted space's; only the class is missing.
-  expect_error(project_similarity(unclass(sp), pm$matrix, pm$wavenumbers),
-               "must come from", fixed = TRUE, class = "horizons_input_error")
+               "not on the wavenumbers the similarity space was built on", fixed = TRUE,
+               class = "horizons_error_internal")
 
 })

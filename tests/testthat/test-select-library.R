@@ -19,26 +19,6 @@ test_that("a horizons_data passes through as the object form", {
 
 })
 
-test_that("a bare word that is not registered says so rather than 'file not found'", {
-
-  expect_error(resolve_source("ksl"), class = "horizons_input_error", regexp = "not a registered library")
-
-})
-
-test_that("a path that does not exist stops with the path", {
-
-  expect_error(resolve_source(file.path(tempdir(), "nope.qs2")),
-               class = "horizons_input_error", regexp = "not found")
-
-})
-
-test_that("anything else is refused with the forms listed", {
-
-  expect_error(resolve_source(42), class = "horizons_input_error", regexp = "registered library")
-  expect_error(resolve_source(c("a", "b")), class = "horizons_input_error")
-
-})
-
 test_that("a saved horizons_data reads back through the path form", {
 
   fx   <- select_fixture()
@@ -57,15 +37,17 @@ test_that("a file that is not a readable library is refused, saying which it is"
   path <- withr::local_tempfile(fileext = ".qs2")
   qs2::qs_save(list(a = 1), path)
 
-  expect_error(resolve_source(path), class = "horizons_input_error", regexp = "not a horizons library")
+  err <- expect_error(resolve_source(path), class = "horizons_error_input", regexp = "not a horizons library")
+  expect_match(conditionMessage(err), "a qs2 file holding a horizons_data", fixed = TRUE)
 
   ## A file qs2 cannot read at all is reported as unreadable, not as a
-  ## library holding the reader's error
+  ## library holding the reader's error, which is the parent
   unreadable <- withr::local_tempfile(fileext = ".qs2")
   writeLines("not a qs2 file", unreadable)
 
-  expect_error(resolve_source(unreadable), "Could not read", fixed = TRUE,
-               class = "horizons_input_error")
+  err <- expect_error(resolve_source(unreadable), "Could not read", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_false(is.null(err$parent))
 
 })
 
@@ -81,7 +63,7 @@ test_that("without consent a non-interactive session downloads nothing", {
   withr::local_options(horizons.library_download = NULL)
 
   expect_error(suppressMessages(resolve_source("mini", ask = FALSE)),
-               class = "horizons_consent_error", regexp = "horizons.library_download")
+               class = "horizons_error_consent", regexp = "horizons.library_download")
 
   ## Asked in an interactive session, a no or a dismissed prompt declines
   for (answer in list(FALSE, NA)) {
@@ -90,7 +72,7 @@ test_that("without consent a non-interactive session downloads nothing", {
 
     expect_error(suppressMessages(resolve_source("mini", ask = TRUE)),
                  "Download of \"mini\" declined; nothing was written.", fixed = TRUE,
-                 class = "horizons_consent_error")
+                 class = "horizons_error_consent")
 
   }
 
@@ -147,7 +129,7 @@ test_that("first use builds and caches; later uses read the cache", {
   qs2::qs_save(lib, file.path(cache, "mini_v0.qs2"))
 
   expect_error(resolve_source("mini", verbose = FALSE),
-               "is not \"mini\" v0", fixed = TRUE, class = "horizons_input_error")
+               "is not \"mini\" v0", fixed = TRUE, class = "horizons_error_validation")
 
 })
 
@@ -177,7 +159,7 @@ test_that("a source that fails its MD5 stops and caches nothing", {
   withr::local_options(horizons.library_download = TRUE)
 
   err <- expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
-                      class = "horizons_download_error", regexp = "checksum")
+                      class = "horizons_error_download", regexp = "checksum")
   expect_false(file.exists(file.path(cache, "mini_v0.qs2")))
 
   ## The lab table was the file checked, against the MD5 the entry publishes
@@ -211,8 +193,10 @@ test_that("a download that fails stops, classed, with its reason, and caches not
 
     err <- expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
                         "Could not download 'mir.csv.gz'", fixed = TRUE,
-                        class = "horizons_download_error")
+                        class = "horizons_error_download")
     expect_identical(err$body[["x"]], f$why)
+    expect_match(conditionMessage(err), "Check the connection and run the call again; nothing was cached.",
+                 fixed = TRUE)
 
   }
 
@@ -241,7 +225,7 @@ test_that("downloads run under at least an hour's timeout, and the user's is res
 
     expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
                  "stopped after the first file", fixed = TRUE,
-                 class = "horizons_download_error")
+                 class = "horizons_error_download")
     expect_identical(seen, case[["used"]])
     expect_identical(getOption("timeout"), case[["user"]])
 
@@ -332,22 +316,52 @@ mini_release_with <- function(edit, table = "mir", env = parent.frame()) {
 
 }
 
-test_that("the recipe refuses a MIR table that lacks a filter column", {
+test_that("a MIR table that is not on the entry's grid trips an internal check", {
 
-  rel <- mini_release_with(function(mir) mir[, names(mir) != "scan.mir.model.name_utf8_txt"])
-
-  expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
-               "The MIR table lacks", fixed = TRUE, class = "horizons_build_error")
-
-})
-
-test_that("the recipe refuses a MIR table that is not on the entry's grid", {
-
+  ## The files are MD5-verified against the entry, so only a release the
+  ## entry does not pin can reach this
   rel <- mini_release_with(function(mir) mir[, names(mir) != "scan_mir.650_abs"])
 
   expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
                "The MIR table's grid is not 600 to 700 by 2 cm-1 (50 columns found)",
-               fixed = TRUE, class = "horizons_build_error")
+               fixed = TRUE, class = "horizons_error_internal")
+
+})
+
+test_that("a join that keeps no row trips an internal check rather than building an empty library", {
+
+  ## A lab table whose ids match no spectrum
+  rel <- mini_release_with(function(lab) {
+    lab$id.layer_uuid_txt <- paste0("other-", lab$id.layer_uuid_txt)
+    lab
+  }, table = "lab")
+
+  expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
+               "No rows survive the filters and the join", fixed = TRUE,
+               class = "horizons_error_internal")
+
+})
+
+test_that("a chunk of the MIR table read back out of order trips an internal check", {
+
+  ## Spectra paired with the wrong lab rows would be silent, so the chunked
+  ## read checks each chunk's ids against the first pass's
+  rel  <- mini_release_with(identity)
+  csv  <- decompress_gz(rel$raw[["mir"]])
+  hdr  <- names(data.table::fread(csv, nrows = 0))
+  full <- as.data.frame(data.table::fread(csv))
+  spec <- grep("^scan_mir", hdr, value = TRUE)
+  rows <- c(1L, 4L, 5L)
+
+  real_chunk <- read_mir_chunk
+  local_mocked_bindings(read_mir_chunk = function(...) {
+    x <- real_chunk(...)
+    x[rev(seq_len(nrow(x))), , drop = FALSE]
+  })
+
+  expect_error(read_mir_rows(csv, hdr, rows, full$id.layer_uuid_txt[rows], "id.layer_uuid_txt", spec),
+               "did not read back in the order the first pass saw", fixed = TRUE,
+               class = "horizons_error_internal")
 
 })
 
@@ -411,12 +425,12 @@ test_that("the cache file also resolves through the path form", {
 test_that("select_training() resolves a library name before anything else", {
 
   expect_error(select_training(select_fixture()$targets, "ksl"),
-               class = "horizons_input_error", regexp = "not a registered library")
+               class = "horizons_error_input", regexp = "not a registered library")
 
   ## Two names are refused as a library form, before R's own error for a
   ## condition of length two
   expect_error(select_training(select_fixture()$targets, c("kssl", "kssl")),
-               class = "horizons_input_error", regexp = "a single name or path")
+               class = "horizons_error_input", regexp = "a single name or path")
 
 })
 
@@ -499,7 +513,7 @@ test_that("depth rejects anything but topsoil or all", {
 
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, depth = "subsoil"))),
-    class = "horizons_input_error", regexp = "depth")
+    class = "horizons_error_input", regexp = "depth")
 
 })
 
@@ -547,10 +561,10 @@ test_that("a window too narrow for the polynomial stops in cm-1 terms", {
 
   ## 2 cm-1 on the fixture pool's 4 cm-1 grid rounds to 1 point
   expect_error(select_training(fx$targets, fx$pool, k = 20L, window = 2),
-               class = "horizons_input_error", regexp = "too few for a polynomial")
+               class = "horizons_error_input", regexp = "too few for a polynomial")
   expect_error(suppressMessages(capture.output(
     select_training(fx$targets, fx$pool, k = 20L, window = -1))),
-    class = "horizons_input_error", regexp = "positive width")
+    class = "horizons_error_input", regexp = "positive width")
 
 })
 
@@ -702,6 +716,7 @@ test_that("a bad argument is reported before a registered library is fetched", {
     list(args = list(mask = rbind(c(2400, 2200))), regexp = "`mask`"),
     list(args = list(ncomp = -1), regexp = "`ncomp`"),
     list(args = list(ncomp = TRUE), regexp = "`ncomp`"),
+    list(args = list(ncomp = NA_real_), regexp = "`ncomp`"),
     ## seed and PLS mistakes
     list(args = list(seed = 2^31), regexp = "`seed`"),
     list(args = list(space = "pls", properties = "clay"), regexp = "whole-number `ncomp`"),
@@ -716,7 +731,7 @@ test_that("a bad argument is reported before a registered library is fetched", {
 
     expect_error(suppressMessages(capture.output(
       do.call(select_training, c(list(targets, "mini"), args)))),
-      class = "horizons_input_error", regexp = case$regexp, fixed = TRUE,
+      class = "horizons_error_input", regexp = case$regexp, fixed = TRUE,
       info = paste(names(case$args), collapse = ", "))
 
   }
@@ -784,7 +799,7 @@ test_that("a character depth column is refused rather than compared as text", {
   fx$pool$data$analysis$upper_depth_cm <- as.character(fx$pool$data$analysis$upper_depth_cm)
 
   expect_error(select_training(fx$targets, fx$pool, k = 20L),
-               class = "horizons_input_error", regexp = "must be numeric")
+               class = "horizons_error_input", regexp = "must be numeric")
   expect_no_error(suppressWarnings(
     select_training(fx$targets, fx$pool, k = 20L, depth = "all")))
 

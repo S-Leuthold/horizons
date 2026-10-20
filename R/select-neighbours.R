@@ -41,8 +41,8 @@
 #' @param Sp [Matrix.] Pool scores, rows named, same columns as `St`.
 #' @param k [Integer.] Neighbours to keep per target.
 #' @param metric [Character.] `"euclidean"`, `"mahalanobis"` or `"cosine"`.
-#' @param sdev [Numeric or NULL.] Per-component sd, required for
-#'   `"mahalanobis"`. Default: `NULL`.
+#' @param sdev [Numeric or NULL.] Per-component sd, which `"mahalanobis"`
+#'   divides by. Default: `NULL`.
 #' @param chunk_size [Integer.] Targets per chunk. Default: `500L`.
 #'
 #' @return [List.] `ids` (character matrix, targets by k, row names the
@@ -59,21 +59,11 @@ nearest_neighbours <- function(St, Sp, k,
   metric <- match.arg(metric)
   k      <- as.integer(k)
 
-  if (k > nrow(Sp)) {
-
-    cli::cli_abort("{.arg k} = {k} exceeds the pool of {nrow(Sp)} rows",
-                   class = "horizons_input_error")
-
-  }
+  ## Its callers ask for at most the rows there are (draw_neighbours() for
+  ## the measured rows, check_resemblance() for 2 of at least
+  ## min_resemblance_rows), and pass the space's sdev.
 
   if (metric == "mahalanobis") {
-
-    if (is.null(sdev)) {
-
-      cli::cli_abort("{.arg metric = \"mahalanobis\"} needs {.arg sdev}, the per-component sd of the space",
-                     class = "horizons_input_error")
-
-    }
 
     St <- sweep(St, 2, sdev, "/")
     Sp <- sweep(Sp, 2, sdev, "/")
@@ -393,9 +383,9 @@ empty_short_draws <- function() {
 #' Expand k to one integer per property
 #'
 #' @description
-#' A scalar `k` applies to every property; a named `k` needs an entry for
-#' each. The rule lives here so `select_training()`'s validation block and
-#' `draw_neighbours()` cannot drift apart.
+#' A scalar `k` applies to every property; a named `k` has an entry for
+#' each, which `select_training()` has checked with [missing_k()] at its
+#' door.
 #'
 #' @param k [Numeric.] A scalar, or a vector named by property.
 #' @param properties [Character.] Properties being drawn for.
@@ -410,16 +400,30 @@ resolve_k <- function(k, properties) {
 
   }
 
-  missing_k <- setdiff(properties, names(k))
-
-  if (length(missing_k)) {
-
-    cli::cli_abort("A named {.arg k} needs an entry for every property; missing {.val {missing_k}}",
-                   class = "horizons_input_error")
-
-  }
-
   stats::setNames(as.integer(k[properties]), properties)
+
+}
+
+
+#' The properties a named k has no entry for, as a finding
+#'
+#' @description
+#' The one rule for a named `k`: anything but an unnamed scalar needs an
+#' entry for every property. `select_training()` collects the finding with
+#' its other checks of the pool, and [resolve_k()] relies on it.
+#'
+#' @inheritParams resolve_k
+#' @return [Character.] Zero or one finding.
+#' @noRd
+missing_k <- function(k, properties) {
+
+  if (length(k) == 1L && is.null(names(k))) return(character())
+
+  absent <- setdiff(properties, names(k))
+
+  if (!length(absent)) return(character())
+
+  cli::format_inline("A named {.arg k} needs an entry for every property; missing {.val {absent}}")
 
 }
 

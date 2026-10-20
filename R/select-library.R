@@ -144,18 +144,23 @@ library_registry <- function() {
 #' memory. A character string that names a registered
 #' library resolves through the registry to the local cache, building the
 #' library on first use. Any other string is a path to a saved library file.
+#' `select_training()` has checked the form at its door: one of these, a
+#' library object holding a `horizons_data`, a single string, and a path
+#' that exists.
 #'
-#' @param library `horizons_data` or `character(1)`.
+#' @param library `horizons_data`, `horizons_library` or `character(1)`.
 #' @param ask `logical.` Whether a registered library that is not yet cached
 #'   may ask before downloading. Default: `interactive()`.
 #' @param verbose `logical.` Print progress and the credit line.
+#' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` (a `horizons_data`) and `record`, the library's
 #'   provenance: `form` (`"object"`, `"path"` or `"registered"`), `name`,
 #'   `version`, `path`, `citation` and `license` (`NULL` where they do not
 #'   apply), and `built_at` for a built library.
 #' @noRd
-resolve_source <- function(library, ask = interactive(), verbose = TRUE) {
+resolve_source <- function(library, ask = interactive(), verbose = TRUE,
+                           call = rlang::caller_env()) {
 
   UseMethod("resolve_source")
 
@@ -164,27 +169,8 @@ resolve_source <- function(library, ask = interactive(), verbose = TRUE) {
 
 #' @exportS3Method
 #' @noRd
-resolve_source.default <- function(library, ask = interactive(), verbose = TRUE) {
-
-  cli::cli_abort(
-    c("{.arg library} must be a horizons_data, the name of a registered library, or a path to a library file",
-      "x" = "Got {.cls {class(library)[1]}}.",
-      "i" = "Registered: {.val {names(library_registry())}}."),
-    class = "horizons_input_error"
-  )
-
-}
-
-
-#' @exportS3Method
-#' @noRd
-resolve_source.horizons_library <- function(library, ask = interactive(), verbose = TRUE) {
-
-  if (!inherits(library$pool, "horizons_data")) {
-
-    cli::cli_abort("A {.cls horizons_library} must hold a horizons_data pool", class = "horizons_input_error")
-
-  }
+resolve_source.horizons_library <- function(library, ask = interactive(), verbose = TRUE,
+                                            call = rlang::caller_env()) {
 
   list(pool = library$pool, record = utils::modifyList(library$record, list(form = "object")))
 
@@ -193,7 +179,8 @@ resolve_source.horizons_library <- function(library, ask = interactive(), verbos
 
 #' @exportS3Method
 #' @noRd
-resolve_source.horizons_data <- function(library, ask = interactive(), verbose = TRUE) {
+resolve_source.horizons_data <- function(library, ask = interactive(), verbose = TRUE,
+                                         call = rlang::caller_env()) {
 
   list(pool = library, record = library_record("object"))
 
@@ -202,47 +189,18 @@ resolve_source.horizons_data <- function(library, ask = interactive(), verbose =
 
 #' @exportS3Method
 #' @noRd
-resolve_source.character <- function(library, ask = interactive(), verbose = TRUE) {
-
-  if (length(library) != 1L || is.na(library) || !nzchar(library)) {
-
-    cli::cli_abort("{.arg library} must be a single name or path", class = "horizons_input_error")
-
-  }
+resolve_source.character <- function(library, ask = interactive(), verbose = TRUE,
+                                     call = rlang::caller_env()) {
 
   registry <- library_registry()
 
   if (library %in% names(registry)) {
 
-    return(resolve_registered(registry[[library]], ask = ask, verbose = verbose))
+    return(resolve_registered(registry[[library]], ask = ask, verbose = verbose, call = call))
 
   }
 
-  ## Not a registered name. A string with a path separator or a file suffix,
-  ## or one that exists on disk, is a path; a bare word is a mistyped name,
-  ## and saying so beats "file not found".
-
-  looks_like_path <- grepl("[/\\\\]", library) || grepl("\\.[A-Za-z0-9]+$", library) ||
-                     file.exists(library)
-
-  if (!looks_like_path) {
-
-    cli::cli_abort(
-      c("{.val {library}} is not a registered library",
-        "i" = "Registered: {.val {names(registry)}}.",
-        "i" = "For a library file, pass its path."),
-      class = "horizons_input_error"
-    )
-
-  }
-
-  if (!file.exists(library)) {
-
-    cli::cli_abort("Library file not found: {.path {library}}", class = "horizons_input_error")
-
-  }
-
-  lib <- read_library_file(library)
+  lib <- read_library_file(library, call = call)
 
   record <- utils::modifyList(lib$record, list(form = "path", path = normalizePath(library)))
 
@@ -273,22 +231,22 @@ library_record <- function(form, name = NULL, version = NULL, path = NULL,
 #' its record, as the cache writes it) or a bare `horizons_data`, which is a
 #' user's own pool saved with `qs2::qs_save()`.
 #'
+#' @param path [Character.] The file.
+#' @param call The frame a refusal reports: the verb's.
+#'
 #' @return `list` with `pool` and `record`.
 #' @noRd
-read_library_file <- function(path) {
+read_library_file <- function(path, call = rlang::caller_env()) {
 
-  obj <- tryCatch(qs2::qs_read(path), error = function(e) e)
-
-  if (inherits(obj, "error")) {
-
-    cli::cli_abort(
-      c("Could not read {.path {path}} as a library file",
-        "x" = "{conditionMessage(obj)}",
-        "i" = "A library file is written by qs2. If this is a cached registered library, delete it and the next draw rebuilds it."),
-      class = "horizons_input_error"
-    )
-
-  }
+  obj <- rlang::try_fetch(
+    qs2::qs_read(path),
+    error = function(e) {
+      abort_horizons(c(
+        "Could not read {.path {path}} as a library file.",
+        "i" = "A library file is written by qs2. If this is a cached registered library, delete it and the next draw rebuilds it."
+      ), kind = "input", parent = e, call = call)
+    }
+  )
 
   if (inherits(obj, "horizons_data")) {
 
@@ -298,11 +256,11 @@ read_library_file <- function(path) {
 
   if (!inherits(obj, "horizons_library") || !inherits(obj$pool, "horizons_data")) {
 
-    cli::cli_abort(
-      c("{.path {path}} is not a horizons library",
-        "x" = "It holds a {.cls {class(obj)[1]}}."),
-      class = "horizons_input_error"
-    )
+    abort_horizons(c(
+      "{.path {path}} is not a horizons library.",
+      "x" = "It holds {.obj_type_friendly {obj}}.",
+      "i" = "A library file is a qs2 file holding a horizons_data, saved with {.code qs2::qs_save()}, or a library horizons wrote."
+    ), kind = "input", call = call)
 
   }
 
@@ -345,23 +303,27 @@ library_cache_path <- function(entry) {
 #' directory, verifies every MD5, runs the recipe, writes the library and
 #' removes the raw downloads.
 #'
+#' @param entry A registry entry.
+#' @param ask,verbose As for [resolve_source()].
+#' @param call The frame a refusal reports: the verb's.
+#'
 #' @return `list` with `pool` and `record`.
 #' @noRd
-resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
+resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
+                               call = rlang::caller_env()) {
 
   path <- library_cache_path(entry)
 
   if (file.exists(path)) {
 
-    lib <- read_library_file(path)
+    lib <- read_library_file(path, call = call)
 
     if (!identical(lib$record$name, entry$name) || !identical(lib$record$version, entry$version)) {
 
-      cli::cli_abort(
-        c("The cached library at {.path {path}} is not {.val {entry$name}} {entry$version}",
-          "i" = "Delete it; the next draw rebuilds it."),
-        class = "horizons_input_error"
-      )
+      abort_horizons(c(
+        "The cached library at {.path {path}} is not {.val {entry$name}} {entry$version}.",
+        "i" = "Delete it; the next draw rebuilds it."
+      ), kind = "validation", call = call)
 
     }
 
@@ -391,7 +353,7 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
 
   }
 
-  library_consent(entry, path, ask = ask)
+  library_consent(entry, path, ask = ask, call = call)
 
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   clear_stale_builds(entry, dirname(path))
@@ -410,7 +372,7 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE) {
   raw_dir <- tempfile(paste0(".raw-", entry$name, "-", entry$version, "-"), tmpdir = dirname(path))
   on.exit(unlink(raw_dir, recursive = TRUE), add = TRUE)
 
-  raw  <- download_sources(entry, raw_dir, verbose = verbose)
+  raw  <- download_sources(entry, raw_dir, verbose = verbose, call = call)
   pool <- entry$recipe(raw, entry, verbose = verbose)
 
   record <- library_record(
@@ -497,8 +459,12 @@ clear_stale_builds <- function(entry, dir, max_age_hours = 24) {
 #' the credit. Proceeds without asking when `horizons.library_download` is
 #' `TRUE`; otherwise asks in an interactive session and stops in a
 #' non-interactive one, naming the option.
+#'
+#' @param call The frame a refusal reports: the verb's.
+#' @return `NULL`, invisibly, once consent is given; aborts with
+#'   `horizons_error_consent` otherwise.
 #' @noRd
-library_consent <- function(entry, path, ask = interactive()) {
+library_consent <- function(entry, path, ask = interactive(), call = rlang::caller_env()) {
 
   mb <- round(sum(entry$sources$bytes) / 1e6)
 
@@ -512,15 +478,14 @@ library_consent <- function(entry, path, ask = interactive()) {
     " " = ""
   ))
 
-  if (isTRUE(getOption("horizons.library_download"))) return(invisible(TRUE))
+  if (isTRUE(getOption("horizons.library_download"))) return(invisible(NULL))
 
   if (!isTRUE(ask)) {
 
-    cli::cli_abort(
-      c("Not downloading {.val {entry$name}} without consent",
-        "i" = "Set {.code options(horizons.library_download = TRUE)} to allow it in a non-interactive session."),
-      class = "horizons_consent_error"
-    )
+    abort_horizons(c(
+      "Not downloading {.val {entry$name}} without consent.",
+      "i" = "Set {.code options(horizons.library_download = TRUE)} to allow it in a non-interactive session."
+    ), kind = "input", class = "horizons_error_consent", call = call)
 
   }
 
@@ -528,23 +493,27 @@ library_consent <- function(entry, path, ask = interactive()) {
 
   if (!isTRUE(answer)) {
 
-    cli::cli_abort("Download of {.val {entry$name}} declined; nothing was written.",
-                   class = "horizons_consent_error")
+    abort_horizons("Download of {.val {entry$name}} declined; nothing was written.",
+                   kind = "input", class = "horizons_error_consent", call = call)
 
   }
 
-  invisible(TRUE)
+  invisible(NULL)
 
 }
 
 
 #' Download and verify a registry entry's source files
 #'
+#' @param dir [Character.] The directory to download into, inside the cache
+#'   directory [resolve_registered()] has made.
+#' @param call The frame a refusal reports: the verb's.
+#'
 #' @return Named character vector of local paths, named by `table`.
 #' @noRd
-download_sources <- function(entry, dir, verbose = TRUE) {
+download_sources <- function(entry, dir, verbose = TRUE, call = rlang::caller_env()) {
 
-  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(dir, showWarnings = FALSE)
 
   ## The default 60 s timeout cannot move 400 MB.
 
@@ -558,34 +527,31 @@ download_sources <- function(entry, dir, verbose = TRUE) {
 
     if (verbose) cat(paste0("\u251C\u2500 Downloading ", src$file[i], "...\n"))
 
-    status <- tryCatch(
+    failed <- function(why, parent = NULL) {
+      abort_horizons(c(
+        "Could not download {.file {src$file[i]}}.",
+        "x" = "{why}",
+        "i" = "Source: {.url {src$url[i]}}.",
+        "i" = "Check the connection and run the call again; nothing was cached."
+      ), kind = "run", class = "horizons_error_download", parent = parent, call = call)
+    }
+
+    status <- rlang::try_fetch(
       utils::download.file(src$url[i], paths[[i]], mode = "wb", quiet = TRUE),
-      error = function(e) e
+      error = function(e) failed(conditionMessage(e), parent = e)
     )
 
-    if (inherits(status, "error") || !identical(as.integer(status), 0L)) {
-
-      why <- if (inherits(status, "error")) conditionMessage(status) else paste("status", status)
-
-      cli::cli_abort(
-        c("Could not download {.file {src$file[i]}}",
-          "x" = "{why}",
-          "i" = "Source: {.url {src$url[i]}}"),
-        class = "horizons_download_error"
-      )
-
-    }
+    if (!identical(as.integer(status), 0L)) failed(paste("status", status))
 
     md5 <- unname(tools::md5sum(paths[[i]]))
 
     if (!identical(md5, src$md5[i])) {
 
-      cli::cli_abort(
-        c("{.file {src$file[i]}} does not match its published checksum",
-          "x" = "MD5 {md5}, expected {src$md5[i]}.",
-          "i" = "The source may have changed or the download was corrupted; nothing was cached."),
-        class = "horizons_download_error"
-      )
+      abort_horizons(c(
+        "{.file {src$file[i]}} does not match its published checksum.",
+        "x" = "MD5 {md5}, expected {src$md5[i]}.",
+        "i" = "The source may have changed or the download was corrupted; nothing was cached."
+      ), kind = "run", class = "horizons_error_download", call = call)
 
     }
 
@@ -643,22 +609,20 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
   spec_cols <- grep(f$spectral_pattern, hdr, value = TRUE)
   need      <- c(f$id_col, f$dataset_col, f$instrument_col)
 
-  if (length(setdiff(need, hdr))) {
-
-    cli::cli_abort("The MIR table lacks {.val {setdiff(need, hdr)}}", class = "horizons_build_error")
-
-  }
-
   wn        <- as.integer(sub(f$spectral_pattern, "\\1", spec_cols))
   keep      <- wn >= f$wn_min & wn <= f$wn_max
   spec_cols <- spec_cols[keep][order(wn[keep])]
   wn        <- sort(wn[keep])
 
+  ## The files are MD5-verified against the registry, so this holds for the
+  ## release the entry pins; a column missing from the grid would otherwise
+  ## shift every wavenumber name past it.
+
   if (!identical(wn, seq.int(f$wn_min, f$wn_max, by = f$wn_step))) {
 
-    cli::cli_abort(
-      "The MIR table's grid is not {f$wn_min} to {f$wn_max} by {f$wn_step} cm-1 ({length(wn)} columns found)",
-      class = "horizons_build_error"
+    abort_horizons(
+      "The MIR table's grid is not {f$wn_min} to {f$wn_max} by {f$wn_step} cm-1 ({length(wn)} columns found).",
+      kind = "internal"
     )
 
   }
@@ -692,9 +656,12 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
 
   ids <- sort(Reduce(intersect, list(mir_ids, lab$sample_id, site$sample_id)))
 
+  ## The registry's filters select the rows the release it pins holds; an
+  ## empty join would otherwise build a library of no rows.
+
   if (!length(ids)) {
 
-    cli::cli_abort("No rows survive the filters and the join", class = "horizons_build_error")
+    abort_horizons("No rows survive the filters and the join.", kind = "internal")
 
   }
 
@@ -797,17 +764,16 @@ read_mir_rows <- function(path, hdr, rows, ids, id_col, spec_cols, chunk = 5000L
 
     if (!length(want)) next
 
-    x <- data.table::fread(path, skip = a, nrows = b - a + 1L, header = FALSE,
-                           select = cols, showProgress = FALSE)
-    x <- as.data.frame(x)
-    names(x) <- hdr[cols]
-
+    x  <- read_mir_chunk(path, a, b, hdr, cols)
     at <- rows[want] - a + 1L
+
+    ## A chunk read out of order would pair spectra with the wrong lab rows,
+    ## silently
 
     if (!identical(as.character(x[[id_col]][at]), as.character(ids[want]))) {
 
-      cli::cli_abort("The MIR table's rows {a} to {b} did not read back in the order the first pass saw",
-                     class = "horizons_build_error")
+      abort_horizons("The MIR table's rows {a} to {b} did not read back in the order the first pass saw.",
+                     kind = "internal")
 
     }
 
@@ -816,5 +782,28 @@ read_mir_rows <- function(path, hdr, rows, ids, id_col, spec_cols, chunk = 5000L
   }
 
   out
+
+}
+
+
+#' Read one chunk of the MIR table's data rows
+#'
+#' @description
+#' The one place the chunked read calls `data.table::fread()`, so a test can
+#' rebind it and reach the row-order check in [read_mir_rows()].
+#'
+#' @param a,b [Integer.] The first and last data rows (1 is the first row
+#'   after the header).
+#' @param hdr [Character.] The table's header.
+#' @param cols [Integer.] The columns to read, by position.
+#'
+#' @return `data.frame` of rows `a` to `b`, named by `hdr[cols]`.
+#' @noRd
+read_mir_chunk <- function(path, a, b, hdr, cols) {
+
+  x <- as.data.frame(data.table::fread(path, skip = a, nrows = b - a + 1L, header = FALSE,
+                                       select = cols, showProgress = FALSE))
+  names(x) <- hdr[cols]
+  x
 
 }

@@ -40,12 +40,13 @@
 #'   of the columns aborts separately, whatever `min_cols` is, because that
 #'   is a mask argument that did not mean what it said.
 #'
+#' @param call The frame a refusal reports: the verb's.
+#'
 #' @return [List.] `matrix` (transformed, row names kept) and `wavenumbers`
 #'   (the columns that survive the filter's edge trim and the mask).
-#'   Errors of class `horizons_input_error` on a bad mask, on filter
-#'   arguments the window cannot honour, when the mask leaves too few
-#'   columns, or when a row goes non-finite (a constant spectrum under SNV,
-#'   for instance).
+#'   Errors of class `horizons_error_input` when the mask leaves too few
+#'   columns, and of class `horizons_input_error` when a row goes
+#'   non-finite.
 #'
 #' @seealso [build_similarity_space()]
 #' @noRd
@@ -55,57 +56,12 @@ transform_similarity <- function(M, wn,
                                  window     = 11L,
                                  poly       = 2L,
                                  mask       = NULL,
-                                 min_cols   = 1L) {
+                                 min_cols   = 1L,
+                                 call       = rlang::caller_env()) {
 
-  if (!is.null(mask)) {
-
-    ok <- is.matrix(mask) && is.numeric(mask) && ncol(mask) == 2L &&
-          all(is.finite(mask)) && all(mask[, 1] <= mask[, 2])
-
-    if (!ok) {
-
-      cli::cli_abort(c(
-        "{.arg mask} must be a numeric matrix with two columns, low then high",
-        "i" = "One wavenumber range per row, e.g. {.code rbind(c(2200, 2400))}"
-      ), class = "horizons_input_error")
-
-    }
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Filter arguments — the window bookkeeping below assumes all of this
-  ## -------------------------------------------------------------------------
-
-  if (derivative > 0L) {
-
-    window <- as.integer(window)
-    poly   <- as.integer(poly)
-
-    if (window %% 2L != 1L) {
-
-      cli::cli_abort(c(
-        "{.arg window} must be odd, got {window}",
-        "i" = "A Savitzky-Golay window is centred on a point, so it loses {.code (window - 1) / 2} columns at each end"
-      ), class = "horizons_input_error")
-
-    }
-
-    if (poly >= window) {
-
-      cli::cli_abort("{.arg poly} ({poly}) must be smaller than {.arg window} ({window})",
-                     class = "horizons_input_error")
-
-    }
-
-    if (poly < derivative) {
-
-      cli::cli_abort("{.arg poly} ({poly}) must be at least {.arg derivative} ({derivative}); a lower-order polynomial has no such derivative",
-                     class = "horizons_input_error")
-
-    }
-
-  }
+  ## The mask and the filter's arguments are select_training()'s, checked at
+  ## its door: an odd window (window_to_points()), a polynomial below it and
+  ## at least the derivative.
 
   ids <- rownames(M)
   m   <- M
@@ -114,7 +70,8 @@ transform_similarity <- function(M, wn,
 
   if (derivative > 0L) {
 
-    m <- prospectr::savitzkyGolay(m, m = derivative, p = poly, w = window)
+    window <- as.integer(window)
+    m <- prospectr::savitzkyGolay(m, m = derivative, p = as.integer(poly), w = window)
     h  <- (window - 1L) %/% 2L
     wn <- wn[(h + 1L):(length(wn) - h)]
 
@@ -143,12 +100,15 @@ transform_similarity <- function(M, wn,
 
   }
 
+  ## Kept here rather than at the verb: it reads the columns the filter's
+  ## edge trim and the mask leave, which the verb would have to recount.
+
   if (ncol(m) < min_cols) {
 
-    cli::cli_abort(c(
-      "The similarity space is left with {ncol(m)} column{?s}, fewer than the {min_cols} the decomposition needs",
-      "i" = "Standardize to a finer resolution, widen the wavenumber range, or ask for fewer components"
-    ), class = "horizons_input_error")
+    abort_horizons(c(
+      "The similarity space is left with {ncol(m)} column{?s}, fewer than the {min_cols} the decomposition needs.",
+      "i" = "Standardize to a finer resolution, widen the wavenumber range, or ask for fewer components."
+    ), kind = "input", call = call)
 
   }
 
@@ -225,6 +185,7 @@ transform_similarity <- function(M, wn,
 #' @param sdev_floor [Numeric.] Noise floor as a fraction of the first
 #'   component's standard deviation; retained components below it are
 #'   dropped. `0` disables. PCA only. Default: `0.10`.
+#' @param call The frame a refusal reports: the verb's.
 #'
 #' @return [horizons_similarity_space.] A list with `settings`,
 #'   `input_wavenumbers` (what `project_similarity()` expects),
@@ -250,50 +211,20 @@ build_similarity_space <- function(M, wn,
                                    ncomp      = 0.99,
                                    y          = NULL,
                                    max_comp   = SELECT_PCA_MAX_COMP,
-                                   sdev_floor = 0.10) {
+                                   sdev_floor = 0.10,
+                                   call       = rlang::caller_env()) {
 
   space <- match.arg(space)
 
-  is_prop <- is.numeric(ncomp) && length(ncomp) == 1L && ncomp > 0 && ncomp < 1
-  is_int  <- is.numeric(ncomp) && length(ncomp) == 1L && ncomp >= 1 && ncomp == round(ncomp)
+  ## ncomp, sdev_floor and a PLS space's y and ncomp are select_training()'s,
+  ## checked at its door. y is horizons' own, one value per pool row.
 
-  if (!is_prop && !is_int) {
+  is_prop <- ncomp > 0 && ncomp < 1
 
-    cli::cli_abort("{.arg ncomp} must be a proportion in (0, 1) or a positive integer",
-                   class = "horizons_input_error")
+  if (space == "pls" && length(y) != nrow(M)) {
 
-  }
-
-  if (!is.numeric(sdev_floor) || length(sdev_floor) != 1L || is.na(sdev_floor) ||
-      sdev_floor < 0 || sdev_floor >= 1) {
-
-    cli::cli_abort("{.arg sdev_floor} must be a single number in [0, 1); {.val 0} disables the floor",
-                   class = "horizons_input_error")
-
-  }
-
-  if (space == "pls") {
-
-    if (is.null(y)) {
-
-      cli::cli_abort("{.arg space = \"pls\"} needs {.arg y}, the property to fit against",
-                     class = "horizons_input_error")
-
-    }
-
-    if (!is_int) {
-
-      cli::cli_abort("{.arg space = \"pls\"} needs an integer {.arg ncomp}; a variance proportion has no meaning for PLS",
-                     class = "horizons_input_error")
-
-    }
-
-    if (length(y) != nrow(M)) {
-
-      cli::cli_abort("{.arg y} must have one value per pool row ({nrow(M)}), got {length(y)}",
-                     class = "horizons_input_error")
-
-    }
+    abort_horizons("{.arg y} must have one value per pool row ({nrow(M)}), got {length(y)}.",
+                   kind = "internal")
 
   }
 
@@ -310,7 +241,7 @@ build_similarity_space <- function(M, wn,
 
   tr <- transform_similarity(M, wn, snv = snv, derivative = derivative,
                              window = window, poly = poly, mask = mask,
-                             min_cols = min_cols)
+                             min_cols = min_cols, call = call)
 
   out <- list(
     settings = list(snv = snv, derivative = as.integer(derivative),
@@ -337,7 +268,8 @@ build_similarity_space <- function(M, wn,
     k_var <- k
     ratio <- if (pca$sdev[1] > 0) pca$sdev / pca$sdev[1] else rep(1, length(pca$sdev))
 
-    if (sdev_floor > 0) k <- max(1L, sum(ratio[seq_len(k_var)] >= sdev_floor))
+    ### PC1's ratio is 1 and the floor is below 1, so at least one stays
+    if (sdev_floor > 0) k <- sum(ratio[seq_len(k_var)] >= sdev_floor)
 
     out$ncomp             <- k
     out$ncomp_variance    <- k_var
@@ -380,7 +312,7 @@ build_similarity_space <- function(M, wn,
     out$ncomp      <- k
     out$n_fit      <- sum(keep)
     out$sdev       <- sdev
-    out$sdev_ratio <- if (sdev[1] > 0) sdev / sdev[1] else rep(NA_real_, length(sdev))
+    out$sdev_ratio <- sdev / sdev[1]
     out$sdev_floor <- 0
     out$scores     <- scores
     out$fit        <- fit
@@ -435,19 +367,15 @@ pls_space_scores <- function(fit, X, k) {
 #' @noRd
 project_similarity <- function(space, M, wn) {
 
-  if (!inherits(space, "horizons_similarity_space")) {
-
-    cli::cli_abort("{.arg space} must come from {.fn build_similarity_space}",
-                   class = "horizons_input_error")
-
-  }
+  ## search_axis() puts the targets on the library's grid, the space's; a
+  ## projection off it would score columns against the wrong loadings.
 
   if (!isTRUE(all.equal(wn, space$input_wavenumbers))) {
 
-    cli::cli_abort(c(
-      "The rows are not on the wavenumbers the similarity space was built on",
-      "x" = "Space: {length(space$input_wavenumbers)} wavenumbers from {max(space$input_wavenumbers)} to {min(space$input_wavenumbers)}; rows: {length(wn)} from {max(wn)} to {min(wn)}"
-    ), class = "horizons_input_error")
+    abort_horizons(c(
+      "The rows are not on the wavenumbers the similarity space was built on.",
+      "x" = "Space: {length(space$input_wavenumbers)} wavenumbers from {max(space$input_wavenumbers)} to {min(space$input_wavenumbers)}; rows: {length(wn)} from {max(wn)} to {min(wn)}."
+    ), kind = "internal")
 
   }
 
