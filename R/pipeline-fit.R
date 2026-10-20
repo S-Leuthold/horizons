@@ -316,11 +316,6 @@ fit <- function(x,
   ## (#137). A cold start reads the request itself.
   if (!cold_start) check_trim_request(x)
 
-  ## The axis has to be in order for the spectral steps; the same for every
-  ## member, so checked once, before anything is drawn, as evaluate() checks
-  ## it (#121)
-  check_band_order(x$data$role_map$variable[x$data$role_map$role == "predictor"])
-
   ## Notes on the draws and the member count are printed inside the tree,
   ## after its header in Step 3; they used to print above it (#91).
 

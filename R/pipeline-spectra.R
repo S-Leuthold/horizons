@@ -803,8 +803,9 @@ bind_spectra_files <- function(tables, collector) {
 #'
 #' @description
 #' The one door both table loaders (a data frame, a CSV file) use for the
-#' user's `id_col` and `wavelength_cols`: the columns named must exist, and
-#' the wavelength columns must hold numbers. Either is detected when not
+#' user's `id_col` and `wavelength_cols`: the columns named must exist, the
+#' wavelength columns must be named by wavenumber (#121), and they must
+#' hold numbers. Either is detected when not
 #' given ([detect_id_column()], [detect_wavelength_columns()]). Refusals
 #' report as `spectra()`.
 #'
@@ -859,6 +860,22 @@ check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::ca
   } else {
 
     wn_cols <- detect_wavelength_columns(names(data), call = call)
+
+  }
+
+  ## Their names are wavenumbers (#121) ----------------------------------------
+  ## The axis is read from the names, and the validator refuses a predictor
+  ## whose name it cannot read, so the source is refused here, naming them.
+
+  unnamed <- wn_cols[is.na(wn_values(wn_cols))]
+
+  if (length(unnamed) > 0) {
+
+    abort_horizons(c(
+      "Wavelength column names must be wavenumbers.",
+      "x" = "Not a wavenumber: {.val {unnamed}}.",
+      "i" = "Name each by its wavenumber, as {.val 4000} or {.val wn_4000}, or leave it out of {.arg wavelength_cols}."
+    ), kind = "input", call = call)
 
   }
 

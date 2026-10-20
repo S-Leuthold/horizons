@@ -301,10 +301,6 @@ evaluate <- function(x,
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   analysis    <- x$data$analysis
 
-  ## The axis has to be in order for the spectral steps; the same for every
-  ## configuration, so checked once, before anything is drawn (#121)
-  check_band_order(role_map$variable[role_map$role == "predictor"])
-
   ## -----------------------------------------------------------------------
   ## Step 2: Handle NA outcome rows
   ## -----------------------------------------------------------------------

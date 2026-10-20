@@ -215,10 +215,11 @@ describe("build_recipe()", {
 
   })
 
-  it("refuses an axis out of order whose names the validator does not parse (#121)", {
+  it("is not reached by an axis whose names are not wavenumbers: the object holding it is invalid (#121)", {
 
-    ## The door validator checks the order of names like wn_4000; one named
-    ## wn_X4000 reaches the recipe unchecked until #121
+    ## build_recipe() reads the axis from the role map as given; every verb
+    ## that builds a recipe validates its object first, and an axis named
+    ## like wn_X4000 is refused there, whatever its order
     withr::local_seed(1)
     td   <- make_test_data(n_wn = 10)
     pred <- td$role_map$role == "predictor"
@@ -227,8 +228,10 @@ describe("build_recipe()", {
     names(td$data)[match(olds, names(td$data))] <- news
     td$role_map$variable[pred] <- sample(news)
 
-    expect_error(build_recipe(make_config_row(), td$data, td$role_map),
-                 "not monotonically ordered", class = "horizons_error_input")
+    obj <- new_horizons_data(analysis = td$data, role_map = td$role_map)
+
+    err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+    expect_true(any(grepl("do not parse as a wavenumber: wn_X", err$findings, fixed = TRUE)))
 
   })
 

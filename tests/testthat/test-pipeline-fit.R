@@ -113,10 +113,10 @@ describe("fit() - preflight validation", {
 
   })
 
-  it("refuses a predictor axis out of order at its door, before anything is drawn (#121)", {
+  it("refuses a predictor axis whose names are not wavenumbers at its door, before anything is drawn (#121)", {
 
-    ## Names the validator's wavenumber pattern does not parse, so only the
-    ## band-order check can see the order
+    ## Names the validator cannot read as wavenumbers, so it cannot check
+    ## their order either: refused as an invalid object
     obj <- mfo()
     wn  <- obj$data$role_map$variable[obj$data$role_map$role == "predictor"]
     new <- paste0("wn_X", c(3990, 4000, rev(seq(3900, by = 2, length.out = length(wn) - 2))))
@@ -129,8 +129,8 @@ describe("fit() - preflight validation", {
       fit_single_config = function(...) stop("a member was fitted")
     )
 
-    expect_error(fit(obj, n_best = 1L), "not monotonically ordered",
-                 class = "horizons_error_input")
+    err <- expect_error(fit(obj, n_best = 1L), class = "horizons_error_validation")
+    expect_true(any(grepl("do not parse as a wavenumber: wn_X3990", err$findings, fixed = TRUE)))
 
   })
 

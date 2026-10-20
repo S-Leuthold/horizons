@@ -322,13 +322,13 @@ new_horizons_data <- function(analysis       = NULL,
 #'    trimming and resampling, so this is only enforced from `average()` on.
 #'    First 3 problematic columns are named.
 #'
-#' 6. **Wavelength naming and order**: Predictor names that look like
-#'    wavenumbers (`wn_<number>` or a bare number) must parse to distinct
-#'    numeric values in strictly decreasing order (e.g., 4000, 3998,
-#'    3996...). A name that does not parse (e.g. two decimal points) or a
-#'    value that repeats (`600` and `600.0`) is named directly rather than
-#'    folded into a generic "must be strictly decreasing" message. Always
-#'    checked, in both stages.
+#' 6. **Wavelength naming and order**: Every predictor name must be a
+#'    wavenumber (`wn_<number>` or a bare number, #121) and parse to a
+#'    distinct numeric value, in strictly decreasing order (e.g., 4000,
+#'    3998, 3996...). A name that does not parse (`wn_X4000`, two decimal
+#'    points) or a value that repeats (`600` and `600.0`) is named directly
+#'    rather than folded into a generic "must be strictly decreasing"
+#'    message. Always checked, in both stages.
 #'
 #' 7. **role_map completeness**: Every column in `analysis` must appear in
 #'    `role_map`, and every `role_map` row must name a real column
@@ -584,40 +584,43 @@ validate_horizons_data <- function(x,
 
   }
 
-  # Check wavelength naming and order (numeric column names should be
-  # decreasing) ------------------------------------------------------------
-  # Predictors are minted as wn_<wavenumber> everywhere in the package, so the
-  # pattern has to admit the prefix; without it this check matched nothing and
-  # invariant I2 went unenforced.
+  # Check wavelength naming and order ---------------------------------------
+  # Every predictor is a wavenumber, named wn_<number> or a bare number (#121):
+  # the spectral steps and the grid comparisons read the axis from the names,
+  # so a name that does not parse would leave its band's place unchecked.
 
-  numeric_predictors <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
+  if (length(predictor_vars) > 0) {
 
-  if (length(numeric_predictors) > 1) {
+    wn_num <- wn_values(predictor_vars)
 
-    wn_num <- wn_values(numeric_predictors)
+    ## A name that does not parse is named directly, rather than reaching
+    ## `diff()` as NA or disappearing into a generic message. The first 5 are
+    ## named: an axis of 1,700 such names is unreadable in full.
 
-    ## A name that matches the wn_<digits> pattern but does not parse (e.g.
-    ## two decimal points) would otherwise reach `diff()`/`all()` as NA and
-    ## either crash ("missing value where TRUE/FALSE needed") or disappear
-    ## into a generic message; name it directly instead.
-
-    unparseable <- numeric_predictors[is.na(wn_num)]
+    unparseable <- predictor_vars[is.na(wn_num)]
 
     if (length(unparseable) > 0) {
 
-      col_list <- paste(unparseable, collapse = ", ")
-      errors   <- c(errors, cli::format_inline(
+      col_list <- paste(utils::head(unparseable, 5), collapse = ", ")
+
+      if (length(unparseable) > 5) {
+
+        col_list <- paste0(col_list, ", and ", length(unparseable) - 5, " more")
+
+      }
+
+      errors <- c(errors, cli::format_inline(
         "{cli::qty(length(unparseable))}Predictor column name{?s} that {?does/do} not parse as a wavenumber: {col_list}"
       ))
 
-    } else {
+    } else if (length(wn_num) > 1) {
 
       ## Two columns naming the same wavenumber (e.g. "600" and "600.0")
       ## trivially fail strict decrease once sorted; name every column in
       ## the pair (not just the later occurrence duplicated() flags) rather
       ## than reporting the generic order failure.
 
-      dup_wn <- numeric_predictors[wn_num %in% wn_num[duplicated(wn_num)]]
+      dup_wn <- predictor_vars[wn_num %in% wn_num[duplicated(wn_num)]]
 
       if (length(dup_wn) > 0) {
 
@@ -631,6 +634,7 @@ validate_horizons_data <- function(x,
       }
 
     }
+
   }
 
   ## role_map completeness checks ----------------------------------------------

@@ -953,6 +953,24 @@ test_that("spectra() errors when wavelength columns contain non-numeric data", {
 
 })
 
+test_that("spectra() refuses a wavelength column whose name is not a wavenumber, given or detected (#121)", {
+
+  ## The issue's case: an axis out of order, with one name no parser reads
+  d <- tibble::tibble(Sample_ID = c("A", "B"), `602` = c(0.1, 0.2), `600` = c(0.3, 0.4),
+                      X4000 = c(0.5, 0.6))
+
+  err <- expect_error(spectra(d, wavelength_cols = c("602", "600", "X4000")),
+                      "Wavelength column names must be wavenumbers", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "Not a wavenumber: \"X4000\"", fixed = TRUE)
+
+  ## Detected by its prefix
+  d2 <- tibble::tibble(Sample_ID = c("A", "B"), wn_4002 = c(0.1, 0.2), wn_X4000 = c(0.3, 0.4))
+  expect_error(spectra(d2), "Not a wavenumber: \"wn_X4000\"", fixed = TRUE,
+               class = "horizons_error_input")
+
+})
+
 test_that("spectra() refuses a source that is neither a path nor a data frame, and a type it does not read", {
 
   expect_error(spectra(42), "`source` must be a path or a data frame, not a number",

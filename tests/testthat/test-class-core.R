@@ -446,6 +446,39 @@ test_that("validate_horizons_data errors when wavelength columns not decreasing"
 
 })
 
+test_that("validate_horizons_data refuses a predictor whose name is not a wavenumber, naming the first five (#121)", {
+
+  ## Arrange — one predictor named like a wavenumber with a letter in it
+  test_analysis <- tibble::tibble(sample_id = c("A", "B"), wn_4000 = c(0.1, 0.2),
+                                  wn_X3998 = c(0.3, 0.4))
+  test_role_map <- tibble::tibble(variable = names(test_analysis),
+                                  role     = c("id", "predictor", "predictor"))
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  ## Act & Assert — at both stages
+  for (stage in c("raw", "full")) {
+
+    err <- expect_error(validate_horizons_data(obj, stage = stage), class = "horizons_error_validation")
+    expect_true(any(grepl("does not parse as a wavenumber: wn_X3998", err$findings, fixed = TRUE)),
+                info = stage)
+
+  }
+
+  ## A single such predictor is checked too, and a long list is counted
+  one <- new_horizons_data(analysis = test_analysis[, c("sample_id", "wn_X3998")],
+                           role_map = test_role_map[c(1, 3), ])
+  expect_error(validate_horizons_data(one), class = "horizons_error_validation")
+
+  wide     <- tibble::as_tibble(stats::setNames(as.list(1:7), paste0("band", 1:7)))
+  wide_obj <- new_horizons_data(analysis = dplyr::bind_cols(tibble::tibble(sample_id = "A"), wide),
+                                role_map = tibble::tibble(variable = c("sample_id", names(wide)),
+                                                          role     = c("id", rep("predictor", 7))))
+  err <- expect_error(validate_horizons_data(wide_obj), class = "horizons_error_validation")
+  expect_true(any(grepl("band1, band2, band3, band4, band5, and 2 more", err$findings, fixed = TRUE)))
+
+})
+
 test_that("validate_horizons_data names duplicate wavenumber columns rather than a generic order failure (#24)", {
 
   ## Arrange — "600" and "600.0" both parse to the same wavenumber; sorted,
