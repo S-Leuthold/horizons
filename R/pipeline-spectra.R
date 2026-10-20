@@ -406,7 +406,7 @@ spectra_from_path <- function(source,
   ## -------------------------------------------------------------------------
 
   types <- if (is.null(type)) {
-    vapply(source, detect_file_type, character(1), call = call, USE.NAMES = FALSE)
+    vapply(source, detect_file_type, character(1), recursive = recursive, call = call, USE.NAMES = FALSE)
   } else {
     rep(tolower(type), length(source))
   }
@@ -967,19 +967,21 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
 #'
 #' @param source File or directory path, which `spectra()` has checked
 #'   exists.
+#' @param recursive Logical. Look in a directory's subdirectories too, as
+#'   the read will.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character: "opus" or "csv".
 #'
 #' @noRd
-detect_file_type <- function(source, call = rlang::caller_env()) {
+detect_file_type <- function(source, recursive = FALSE, call = rlang::caller_env()) {
 
   if (dir.exists(source)) {
 
     ## Check for OPUS files --------------------------------------------------
 
-    opus_files <- list.files(source, pattern = "\\.[0-9]+$")
-    csv_files  <- list.files(source, pattern = "\\.csv$", ignore.case = TRUE)
+    opus_files <- list.files(source, pattern = "\\.[0-9]+$", recursive = recursive)
+    csv_files  <- list.files(source, pattern = "\\.csv$", ignore.case = TRUE, recursive = recursive)
 
     if (length(opus_files) > 0) {
 

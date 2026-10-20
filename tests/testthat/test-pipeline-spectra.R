@@ -671,6 +671,20 @@ test_that("spectra() reads a vector of CSV files, and a directory of them", {
 
 })
 
+test_that("spectra(recursive = TRUE) detects the type of a directory whose files sit in subdirectories", {
+
+  top <- withr::local_tempdir()
+  dir.create(file.path(top, "batch_1"))
+  readr::write_csv(tibble::tibble(Sample_ID = "A", `4000` = 0.1, `3998` = 0.2),
+                   file.path(top, "batch_1", "one.csv"))
+
+  out <- spectra(top, recursive = TRUE)
+
+  expect_identical(out$data$analysis$sample_id, "A")
+  expect_identical(out$provenance$spectra_type, "csv")
+
+})
+
 test_that("spectra() refuses a source that mixes OPUS and CSV files, and names a missing path before reading any", {
 
   csv <- withr::local_tempfile(fileext = ".csv")
