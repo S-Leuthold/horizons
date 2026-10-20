@@ -505,31 +505,55 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths, call = rlang:
 #' Which spectra cannot be used, and why
 #'
 #' @description
-#' The one rule `standardize()` and `step_transform_spectra()`'s bake share
-#' (decision 5), so a spectrum gets the same answer whichever way it comes.
-#' A spectrum is unusable when any value is not finite, or when it has no
-#' spread: every value equal, as `prospectr`'s own SNV check reads it.
-#' Under prospectr 0.2.10 SNV turns such a spectrum into zeros rather than
-#' `NaN`, so the second test cannot be left to a non-finite value appearing
-#' later.
+#' The one rule `standardize()`, `step_transform_spectra()`'s bake and the
+#' object's validator share (decision 5), so a spectrum gets the same answer
+#' whichever way it comes. A spectrum is unusable when any value is not
+#' finite, or when it has no spread: two or more values, every one equal, as
+#' `prospectr`'s own SNV check reads it. Under prospectr 0.2.10 SNV turns
+#' such a spectrum into zeros rather than `NaN`, so the second test cannot be
+#' left to a non-finite value appearing later.
 #'
-#' @param M Numeric matrix, one spectrum per row.
+#' @details
+#' A spectrum of one value has no spread to judge, so the second test needs
+#' two columns; an axis of one wavenumber is refused where it cannot be
+#' used, by the verb that needs more (`select_training()`, the transform
+#' step's window), with that verb's reason.
+#'
+#' The rule runs one column at a time, over a matrix or a data frame alike,
+#' so the validator applies it to a library's table at its door without
+#' copying it into a matrix.
+#'
+#' @param M Numeric matrix or data frame, one spectrum per row.
 #' @return Character, one per row: `NA` for a usable spectrum,
-#'   `"non-finite"` or `"no spread"`.
+#'   `"non-finite"` or `"no spread"`; `NA` for every row when there are no
+#'   columns.
 #' @keywords internal
 #' @noRd
 unusable_spectra <- function(M) {
 
-  M      <- as.matrix(M)
-  reason <- rep(NA_character_, nrow(M))
+  n      <- NROW(M)
+  p      <- NCOL(M)
+  reason <- rep(NA_character_, n)
 
-  non_finite <- rowSums(!is.finite(M)) > 0
+  if (p == 0) return(reason)
 
-  ### Every value equal to the row's first: M[, 1] recycles down each column
-  flat <- !non_finite & rowSums(M != M[, 1]) == 0
+  column <- if (is.data.frame(M)) function(j) M[[j]] else function(j) M[, j]
+  first  <- column(1)
 
-  reason[non_finite] <- "non-finite"
-  reason[flat]       <- "no spread"
+  non_finite <- rep(FALSE, n)
+  flat       <- rep(TRUE, n)
+
+  for (j in seq_len(p)) {
+
+    v          <- column(j)
+    non_finite <- non_finite | !is.finite(v)
+    flat       <- flat & v == first
+
+  }
+
+  ### A missing value leaves flat NA, which the non-finite reason covers
+  reason[non_finite]                             <- "non-finite"
+  reason[!non_finite & flat %in% TRUE & p >= 2]  <- "no spread"
 
   reason
 

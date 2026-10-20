@@ -314,13 +314,16 @@ new_horizons_data <- function(analysis       = NULL,
 #'    see check 3). An error at `stage = "full"`, naming the duplicates and
 #'    pointing at [average()]; not checked at `stage = "raw"`.
 #'
-#' 5. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
-#'    must not contain `NA` or `Inf` values. Checked only at `stage =
-#'    "full"`: a non-finite value outside `standardize()`'s eventual trim
-#'    range is legitimately still there before the trim runs, and
-#'    `standardize()` itself aborts on any non-finite value that survives
-#'    trimming and resampling, so this is only enforced from `average()` on.
-#'    First 3 problematic columns are named.
+#' 5. **Predictor columns**: In a row not flagged (`.flag`), the
+#'    wavelength/predictor columns (role = "predictor") must not contain
+#'    `NA` or `Inf` values, and the spectrum must have spread: one whose
+#'    every value is equal is refused, by the rule `standardize()` flags by
+#'    ([unusable_spectra()]). Checked only at `stage = "full"`: a non-finite
+#'    value outside `standardize()`'s eventual trim range is legitimately
+#'    still there before the trim runs, and `standardize()` itself flags a
+#'    spectrum with a non-finite value left after trimming and resampling,
+#'    or with no spread, so this is only enforced from `average()` on. The
+#'    first 3 problematic columns, or the first 5 flat spectra, are named.
 #'
 #' 6. **Wavelength naming and order**: Every predictor name must be a
 #'    wavenumber (`wn_<number>` or a bare number, #121) and parse to a
@@ -554,11 +557,11 @@ validate_horizons_data <- function(x,
   ### Flagged rows are left out of the non-finite check below.
   predictor_cols <- analysis[!flagged, predictor_vars, drop = FALSE]
 
-  # Check for NA and Inf — full stage only --------------------------------------
+  # Check for NA, Inf and no spread — full stage only ------------------------
   # A non-finite value outside standardize()'s trim range is legitimately
-  # there before the trim runs (Inf no less than NA); standardize() aborts on
-  # any non-finite value that survives trimming and resampling, so this is
-  # only enforced from average() on.
+  # there before the trim runs (Inf no less than NA); standardize() flags a
+  # row with a non-finite value that survives trimming and resampling, or
+  # with no spread, so this is only enforced from average() on.
 
   if (stage != "raw") {
 
@@ -579,6 +582,19 @@ validate_horizons_data <- function(x,
       inf_cols <- names(inf_check)[inf_check]
       col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
       errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
+
+    }
+
+    ### The rule standardize() flags by; the non-finite rows are named above
+    flat <- unusable_spectra(predictor_cols) %in% "no spread"
+
+    if (any(flat)) {
+
+      n_flat   <- sum(flat)
+      flat_ids <- analysis$sample_id[!flagged][flat]
+      errors   <- c(errors, cli::format_inline(
+        "{n_flat} spectr{?um/a} with no spread (every value equal): {shown_ids(flat_ids)}; {.fn standardize} flags {cli::qty(n_flat)}{?it/them}, or fix the source spectra"
+      ))
 
     }
 

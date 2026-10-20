@@ -3236,4 +3236,27 @@ describe("the log and flagged rows in the base validator", {
 
   })
 
+  it("refuses a spectrum with no spread unless it is flagged, by the rule standardize() flags by", {
+
+    obj <- spectra(tibble::tibble(Sample_ID = c("A", "B"), `4000` = c(0.5, 0.1), `3998` = c(0.5, 0.3)),
+                   verbose = FALSE)
+
+    finding <- finding_of(validate_horizons_data(obj))
+    expect_true(any(grepl('1 spectrum with no spread (every value equal): "A"; `standardize()` flags it',
+                          finding, fixed = TRUE)))
+
+    ## One wavenumber has no spread to judge: the verbs that need more say so
+    one <- spectra(tibble::tibble(Sample_ID = c("A", "B"), `4000` = c(0.5, 0.1)), verbose = FALSE)
+    expect_identical(validate_horizons_data(one), one)
+
+    ## Not at the raw stage, where standardize() has yet to run
+    expect_identical(validate_horizons_data(obj, stage = "raw"), obj)
+
+    ## Flagged, it passes, as a non-finite one does
+    obj$data$analysis$.flag <- c("standardize", NA)
+    obj$data$role_map <- rbind(obj$data$role_map, tibble::tibble(variable = ".flag", role = "meta"))
+    expect_identical(validate_horizons_data(obj), obj)
+
+  })
+
 })

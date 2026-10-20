@@ -619,11 +619,12 @@ describe("validate() spectral outlier detection", {
 
     hd <- make_configured_hd(n_samples = 100, n_predictors = 50)
 
-    ## Inject 3 extreme spectral outliers — values far from the distribution
-    ## (mean=0.3, sd=0.1 → 1000 is ~10000 SDs away)
+    ## Inject 3 extreme spectral outliers, scaled far from the distribution
+    ## (mean=0.3, sd=0.1, so 300 is ~3000 SDs away). Scaled, not set to one
+    ## value: a spectrum with no spread is refused before validate() runs
     for (col in names(hd$data$analysis)[2:51]) {
 
-      hd$data$analysis[[col]][1:3] <- 1000
+      hd$data$analysis[[col]][1:3] <- 1000 * hd$data$analysis[[col]][1:3]
 
     }
 
@@ -640,7 +641,7 @@ describe("validate() spectral outlier detection", {
     ## Inject 1 outlier
     for (col in names(hd$data$analysis)[2:51]) {
 
-      hd$data$analysis[[col]][1] <- 100
+      hd$data$analysis[[col]][1] <- 100 * hd$data$analysis[[col]][1]
 
     }
 
@@ -693,8 +694,9 @@ describe("validate() spectral outlier detection", {
 
   test_that("P005 skips with fewer than 2 clean predictors after NZV", {
 
-    ## 2 predictors, both constant → 0 clean → skip
-    hd <- make_configured_hd(n_predictors = 2, constant_cols = c(1L, 2L))
+    ## 3 predictors, 2 constant → 1 clean → skip. (Every predictor constant
+    ## would leave each spectrum with no spread, refused before validate().)
+    hd <- make_configured_hd(n_predictors = 3, constant_cols = c(1L, 2L))
 
     ## Don't use quiet_validate — we need to capture the warning
     expect_warning(
@@ -849,7 +851,7 @@ describe("validate() outlier removal", {
     ## Inject 5 spectral outliers (samples 1-5)
     for (col in names(hd$data$analysis)[2:21]) {
 
-      hd$data$analysis[[col]][1:5] <- 100
+      hd$data$analysis[[col]][1:5] <- 100 * hd$data$analysis[[col]][1:5]
 
     }
 
@@ -1013,7 +1015,7 @@ describe("validate() keeps the removal record", {
 
     for (col in names(hd$data$analysis)[2:21]) {
 
-      hd$data$analysis[[col]][1:5] <- 100
+      hd$data$analysis[[col]][1:5] <- 100 * hd$data$analysis[[col]][1:5]
 
     }
 
@@ -1063,7 +1065,7 @@ describe("validate() keeps the removal record", {
     reconfigured <- quiet_reconfigure(v1, "pH")
     analysis     <- reconfigured$data$analysis
     spec_cols    <- reconfigured$data$role_map$variable[reconfigured$data$role_map$role == "predictor"]
-    analysis[analysis$sample_id %in% c("S050", "S051"), spec_cols] <- 100
+    analysis[analysis$sample_id %in% c("S050", "S051"), spec_cols] <- 100 * analysis[analysis$sample_id %in% c("S050", "S051"), spec_cols]
     reconfigured <- set_analysis(reconfigured, analysis)
 
     v3 <- quiet_validate(reconfigured, remove_outliers = "spectral")
@@ -1133,7 +1135,7 @@ describe("validate() passed logic and CLI output", {
     hd <- make_configured_hd()
     for (col in names(hd$data$analysis)[2:51]) {
 
-      hd$data$analysis[[col]][1:3] <- 100
+      hd$data$analysis[[col]][1:3] <- 100 * hd$data$analysis[[col]][1:3]
 
     }
 
@@ -1163,7 +1165,7 @@ describe("validate() passed logic and CLI output", {
     hd <- make_configured_hd()
     for (col in names(hd$data$analysis)[2:51]) {
 
-      hd$data$analysis[[col]][1:3] <- 100
+      hd$data$analysis[[col]][1:3] <- 100 * hd$data$analysis[[col]][1:3]
 
     }
 
@@ -1243,7 +1245,7 @@ describe("validate() and the selection record", {
     ## Inject 5 spectral outliers
     for (col in names(hd$data$analysis)[2:21]) {
 
-      hd$data$analysis[[col]][1:5] <- 100
+      hd$data$analysis[[col]][1:5] <- 100 * hd$data$analysis[[col]][1:5]
 
     }
 

@@ -840,11 +840,12 @@ test_that("a library row with no defined distance is left out of the resemblance
   ## Under cosine a row on the pool's centroid has no angle, so no nearest
   ## other row. A library whose rows pair off around one of them puts that
   ## row exactly on the centroid: integer spectra, no SNV and no derivative,
-  ## so the centring is exact.
+  ## so the centring is exact. The centre has spread, as every spectrum a
+  ## verb takes must.
   fx <- select_fixture(n_pool = 60)
   p  <- length(fx$target_wn)
 
-  centre <- rep(10, p)
+  centre <- 10 + seq_len(p) %% 3
   d      <- withr::with_seed(9, matrix(sample(-3:3, 15 * p, replace = TRUE), 15))
   m      <- rbind(centre, sweep(d, 2, centre, "+"), sweep(-d, 2, centre, "+"))
   colnames(m) <- paste0("wn_", fx$target_wn)
