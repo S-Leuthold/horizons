@@ -348,8 +348,11 @@ The first draw downloads OSSL's public files (about 436 MB), verifies their
 published MD5s, builds the library and caches it; it asks first in an
 interactive session, and a non-interactive one needs
 \code{options(horizons.library_download = TRUE)}. The option
-\code{horizons.cache_dir} moves the cache. Every later draw reads the cache.
-\code{x$selection$library} records which library was drawn from.
+\code{horizons.cache_dir} moves the cache. Every later draw reads the cache,
+until a version of horizons that builds the library differently: a
+library cached by an earlier build is built again, after asking as on
+first use, and the log notes it. \code{x$selection$library} records which
+library was drawn from, and its \code{build}.
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 columns returned, the pool's identity, the targets' identity (their source,

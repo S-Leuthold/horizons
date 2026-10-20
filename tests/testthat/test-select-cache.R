@@ -65,6 +65,7 @@ test_that("a cached space draws exactly what a fresh one does", {
   fresh  <- suppressWarnings(select_training(x, m$pool, k = 5L))
 
   expect_true(cached$selection$search$cache$hit)
+  expect_identical(cached$selection$library$build, 1L)
   expect_false(fresh$selection$search$cache$used)
   expect_identical(cached$data$analysis$sample_id, fresh$data$analysis$sample_id)
   expect_equal(cached$selection$membership$distance, fresh$selection$membership$distance, tolerance = 1e-10)

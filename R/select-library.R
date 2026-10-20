@@ -27,7 +27,7 @@
 #' function rather than a constant so tests can substitute a small registry.
 #'
 #' @return `list.` Named by library name. Each entry has `name`, `version`,
-#'   `title`, `sources` (a data.frame of `table`, `file`, `url`, `bytes`,
+#'   `title`, `build` (see the entry), `sources` (a data.frame of `table`, `file`, `url`, `bytes`,
 #'   `md5`), `filters`, `properties` (short name, source column, unit),
 #'   `license`, `short_cite`, `citation`, `credit`, and
 #'   `recipe`, the
@@ -47,6 +47,12 @@ library_registry <- function() {
       name    = "kssl",
       version = "v1.2",
       title   = "USDA NRCS KSSL mid-infrared library, from the Open Soil Spectral Library v1.2",
+
+      ## The build of the library this version of horizons makes, recorded
+      ## on every built library. Raise it whenever build_ossl_library(), the
+      ## filters or the property map change what is built: a library cached
+      ## from another build is then rebuilt rather than read (#154).
+      build = 1L,
 
       ## Sizes and MD5s as published, verified by HTTP HEAD on 2026-09-11.
       ## OSSL's KSSL MIR data is the laboratory's July 2022 snapshot.
@@ -219,12 +225,18 @@ resolve_source.character <- function(library, ask = interactive(), verbose = TRU
 
 
 #' Build a library provenance record
+#'
+#' @description
+#' `build` is the registry entry's build number for a registered library, so
+#' a cached library from another build is rebuilt (#154); `NULL` otherwise.
 #' @noRd
 library_record <- function(form, name = NULL, version = NULL, path = NULL,
-                           citation = NULL, license = NULL, built_at = NULL) {
+                           citation = NULL, license = NULL, built_at = NULL,
+                           build = NULL) {
 
   list(form = form, name = name, version = version, path = path,
-       citation = citation, license = license, built_at = built_at)
+       citation = citation, license = license, built_at = built_at,
+       build = build)
 
 }
 
@@ -307,10 +319,13 @@ library_cache_path <- function(entry) {
 #' Resolve a registered library
 #'
 #' @description
-#' Reads the cached library when it exists. Otherwise asks (or checks the
-#' `horizons.library_download` option), downloads the sources into the cache
-#' directory, verifies every MD5, runs the recipe, writes the library and
-#' removes the raw downloads.
+#' Reads the cached library when it exists and was built by this version
+#' of horizons (the entry's `build`, and the object contract). Otherwise,
+#' for a library not cached yet or cached from an earlier build, asks (or
+#' checks the `horizons.library_download` option), downloads the sources
+#' into the cache directory, verifies every MD5, runs the recipe, writes the
+#' library and removes the raw downloads; a rebuild is a note on the verb's
+#' log. A cached file that holds another library is refused.
 #'
 #' A library built but not moved into the cache (a rename that fails on a
 #' locked or network filesystem) is still returned, with its record's
@@ -343,33 +358,39 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
 
     }
 
-    ## A library cached by an earlier version of horizons can lack a field the
-    ## object contract now requires. The cache is keyed on the library's name
-    ## and version only, so it is never rebuilt on its own.
-    tryCatch(
-      validate_horizons_data(lib$pool),
-      horizons_error_validation = function(e) {
-        cli::cli_abort(
-          c("The cached library at {.path {path}} was built by an earlier version of horizons and no longer meets the object contract.",
-            "i" = "Delete it; the next draw rebuilds it."),
-          class = "horizons_input_error", parent = e
-        )
-      }
+    ## A library cached by an earlier version of horizons was built by an
+    ## earlier recipe (another build number, or none, from before #154), or
+    ## lacks a field the object contract now requires. The cache file is
+    ## named by the library's name and version only, so it is rebuilt here.
+
+    meets_contract <- rlang::try_fetch(
+      { validate_horizons_data(lib$pool); TRUE },
+      horizons_error_validation = function(e) FALSE
     )
 
-    if (verbose) {
+    if (identical(lib$record$build, entry$build) && meets_contract) {
 
-      cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,
-                 " (cached). Data: ", entry$title, ". Cite: ",
-                 entry$short_cite, ", ", entry$license, ".\n"))
+      if (verbose) {
+
+        cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,
+                   " (cached). Data: ", entry$title, ". Cite: ",
+                   entry$short_cite, ", ", entry$license, ".\n"))
+
+      }
+
+      return(lib)
 
     }
 
-    return(lib)
+    library_consent(entry, path, ask = ask, rebuild = TRUE, call = call)
+
+    log_note(collector, "The cached {.val {entry$name}} library at {.path {path}} was built by an earlier version of horizons, so it was rebuilt.")
+
+  } else {
+
+    library_consent(entry, path, ask = ask, call = call)
 
   }
-
-  library_consent(entry, path, ask = ask, call = call)
 
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   clear_stale_builds(entry, dirname(path))
@@ -398,7 +419,8 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
     path     = path,
     citation = entry$citation,
     license  = entry$license,
-    built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
+    built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+    build    = entry$build
   )
 
   lib <- structure(list(pool    = pool,
@@ -481,16 +503,24 @@ clear_stale_builds <- function(entry, dir, max_age_hours = 24) {
 #' `TRUE`; otherwise asks in an interactive session and stops in a
 #' non-interactive one, naming the option.
 #'
+#' @param rebuild `logical.` Whether a cached library from an earlier
+#'   build is being replaced, which the message says instead of "not cached
+#'   yet".
 #' @param call The frame a refusal reports: the verb's.
 #' @return `NULL`, invisibly, once consent is given; aborts with
 #'   `horizons_error_consent` otherwise.
 #' @noRd
-library_consent <- function(entry, path, ask = interactive(), call = rlang::caller_env()) {
+library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
+                            call = rlang::caller_env()) {
 
   mb <- round(sum(entry$sources$bytes) / 1e6)
 
   cli::cli_inform(c(
-    "i" = "The {.val {entry$name}} library is not cached yet.",
+    "i" = if (rebuild) {
+      "The cached {.val {entry$name}} library was built by an earlier version of horizons, so it has to be built again."
+    } else {
+      "The {.val {entry$name}} library is not cached yet."
+    },
     " " = "horizons will download {mb} MB of public source files, verify them, and build the library in {.path {dirname(path)}}. The raw downloads are removed once it is built.",
     " " = "",
     " " = entry$credit,

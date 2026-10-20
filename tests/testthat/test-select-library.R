@@ -244,7 +244,7 @@ test_that("the cache is the user cache directory unless horizons.cache_dir names
 
 })
 
-test_that("a cached library that no longer meets the object contract stops, naming the file to delete", {
+test_that("a cached library that no longer meets the object contract is built again, not refused", {
 
   entry <- make_mini_ossl(withr::local_tempdir())
   local_mini_registry(entry)
@@ -258,12 +258,66 @@ test_that("a cached library that no longer meets the object contract stops, nami
   lib$pool$log <- NULL
   qs2::qs_save(lib, path)
 
-  err <- expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
-                      class = "horizons_input_error")
+  collector <- log_open("select_training")
+  rebuilt   <- suppressMessages(resolve_source("mini", verbose = FALSE, collector = collector))
 
-  expect_match(conditionMessage(err), "no longer meets the object contract", fixed = TRUE)
-  expect_match(conditionMessage(err), "Delete it; the next draw rebuilds it.", fixed = TRUE)
-  expect_s3_class(err$parent, "horizons_error_validation")
+  expect_no_error(validate_horizons_data(rebuilt$pool))
+  expect_false(is.null(qs2::qs_read(path)$pool$log))
+  expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
+
+})
+
+test_that("a cached library from another build is built again, after asking why, with a note (#154)", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  first <- suppressMessages(resolve_source("mini", verbose = FALSE))
+  path  <- library_cache_path(entry)
+
+  expect_identical(first$record$build, 1L)
+  expect_identical(nrow(first$pool$data$analysis), 8L)
+
+  ## The issue's case: a release whose recipe keeps two rows, under the same
+  ## name and version, and a raised build
+  newer        <- entry
+  newer$build  <- 2L
+  newer$recipe <- function(raw, entry, verbose = TRUE) {
+    pool <- build_ossl_library(raw, entry, verbose = verbose)
+    subset_rows(pool, pool$data$analysis$sample_id[1:2])
+  }
+  local_mocked_bindings(library_registry = function() list(mini = newer))
+
+  collector <- log_open("select_training")
+
+  expect_message(
+    rebuilt <- resolve_source("mini", verbose = FALSE, collector = collector),
+    "built by an earlier version of horizons, so it has to be built again", fixed = TRUE
+  )
+
+  expect_identical(nrow(rebuilt$pool$data$analysis), 2L)
+  expect_identical(rebuilt$record$build, 2L)
+  expect_identical(qs2::qs_read(path)$record$build, 2L)
+  expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
+
+  ## A library cached before builds were recorded has none, and is built
+  ## again too; consent governs as on first use
+  lib <- qs2::qs_read(path)
+  lib$record$build <- NULL
+  qs2::qs_save(lib, path)
+  withr::local_options(horizons.library_download = NULL)
+
+  expect_error(suppressMessages(resolve_source("mini", ask = FALSE)), class = "horizons_error_consent")
+  expect_null(qs2::qs_read(path)$record$build)
+
+  withr::local_options(horizons.library_download = TRUE)
+  again <- suppressMessages(resolve_source("mini", verbose = FALSE))
+  expect_identical(again$record$build, 2L)
+
+  ## And the next draw reads the current build, without building
+  local_mocked_bindings(download_sources = function(...) stop("downloaded again"))
+  expect_identical(nrow(resolve_source("mini", verbose = FALSE)$pool$data$analysis), 2L)
 
 })
 

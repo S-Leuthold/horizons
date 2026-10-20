@@ -189,8 +189,11 @@
 #' published MD5s, builds the library and caches it; it asks first in an
 #' interactive session, and a non-interactive one needs
 #' `options(horizons.library_download = TRUE)`. The option
-#' `horizons.cache_dir` moves the cache. Every later draw reads the cache.
-#' `x$selection$library` records which library was drawn from.
+#' `horizons.cache_dir` moves the cache. Every later draw reads the cache,
+#' until a version of horizons that builds the library differently: a
+#' library cached by an earlier build is built again, after asking as on
+#' first use, and the log notes it. `x$selection$library` records which
+#' library was drawn from, and its `build`.
 #'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
 #' columns returned, the pool's identity, the targets' identity (their source,
