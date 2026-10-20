@@ -36,7 +36,7 @@ test_that("spectra() creates horizons_data from tibble", {
 
 })
 
-test_that("spectra() prints its banner, with the sorting line only when it sorts", {
+test_that("spectra() prints its banner, with the sorting line only when it sorts, and scans under ids when they repeat", {
 
   test_data <- tibble::tibble(
     Sample_ID = c("S001", "S002", "S003"),
@@ -45,9 +45,14 @@ test_that("spectra() prints its banner, with the sorting line only when it sorts
     `2000`    = c(0.3, 0.4, 0.5)
   )
 
+  ## Replicate scans share an id until average(), and one has none
+  scans <- tibble::tibble(Sample_ID = c("A", "A", "B", "B", NA),
+                          `4000` = 1:5 / 10, `3998` = 1:5 / 10)
+
   expect_snapshot({
     invisible(spectra(test_data, verbose = TRUE))
     invisible(spectra(test_data[, c("Sample_ID", "2000", "4000", "3000")], verbose = TRUE))
+    invisible(spectra(scans, verbose = TRUE))
   })
 
 })
@@ -510,32 +515,6 @@ test_that("spectra() refuses a directory with no OPUS files", {
 
 })
 
-test_that("spectra() refuses OPUS files that hold no absorbance block, naming the blocks they hold", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  ## A file opusreader2 reads but that carries only metadata cannot be cut
-  ## from a real scan cheaply, so read_opus() is stubbed to return that.
-  local_mocked_bindings(
-    read_opus = function(dsn, ...) {
-      list(file = list(basic_metadata = data.frame(dsn_filename = basename(dsn))))
-    },
-    .package = "opusreader2"
-  )
-
-  ## Act and assert --------------------------------------------------------
-
-  ## Every file fails its unit, so nothing usable came out
-  err <- expect_error(spectra(opus_dir(), type = "opus"),
-                      "holds no absorbance block", class = "horizons_error_read_failed")
-  expect_true(inherits(err, "horizons_error_run"))
-
-  expect_identical(nrow(err$results), 3L)
-  expect_identical(err$results$step, rep("file_block", 3))
-  expect_match(err$results$cause, "Its blocks: \"basic_metadata\"", fixed = TRUE)
-
-})
-
 test_that("spectra() refuses OPUS input when opusreader2 is not installed, saying so", {
 
   ## Arrange ---------------------------------------------------------------
@@ -638,9 +617,8 @@ test_that("spectra() reads a vector of OPUS files as it reads their directory, a
   both <- spectra(c(file.path(opus_dir(), "S02-1.0"), opus_dir()))
   expect_identical(both$data$analysis$sample_id, c("S02-1", "S01-1", "S01-1", "S02-1"))
 
-  ## print() and summary() show the first path and count the rest
-  expect_true(any(grepl("S01-1.0 and 2 more", capture.output(print(by_vector)), fixed = TRUE)))
-  expect_true(any(grepl("S01-1.0 and 2 more", capture.output(summary(by_vector)), fixed = TRUE)))
+  ## print() and summary() show the first path and count the rest: the
+  ## selection snapshots in test-class-core.R
 
 })
 
@@ -762,17 +740,19 @@ test_that("a file that cannot be read is dropped by name, and the rest returned,
 
 })
 
-test_that("spectra() aborts with every file's failure when none can be read", {
+test_that("spectra() aborts with every file's failure when none can be read, naming the blocks a file holds", {
 
   ## Arrange ---------------------------------------------------------------
 
+  ## One file opusreader2 cannot read, one holding only a single-channel block
   files <- local_opus_files(c("a.0", "b.0"))
   local_reads(list(a.0 = function() stop("corrupt header"),
                    b.0 = list(sc_sample = fake_block(FAKE_WN, 1:3))))
 
   ## Act -------------------------------------------------------------------
 
-  err <- expect_error(spectra(files), class = "horizons_error_read_failed")
+  err <- expect_error(spectra(files), "None of the 2 OPUS files in `source` could be read",
+                      fixed = TRUE, class = "horizons_error_read_failed")
 
   ## Assert ----------------------------------------------------------------
 
@@ -781,6 +761,8 @@ test_that("spectra() aborts with every file's failure when none can be read", {
   expect_identical(err$results$step, c("file_read", "file_block"))
   expect_identical(err$results$class[1], "simpleError")
   expect_identical(err$results$cause[1], "File read failed: corrupt header")
+  expect_match(err$results$cause[2], 'holds no absorbance block ("ab" or "ab_no_atm_comp"). Its blocks: "sc_sample"',
+               fixed = TRUE)
 
   ## The causes are in the message, not only on the condition
   expect_snapshot(spectra(files), error = TRUE)
@@ -927,23 +909,6 @@ test_that("a file at another resolution keeps every name, even where its points 
   expect_false("substitution" %in% out$log$topic)
 
 })
-
-test_that("spectra()'s tree counts scans under sample ids when they repeat, and the scans with no id", {
-
-  df <- tibble::tibble(Sample_ID = c("A", "A", "B", "B", NA),
-                       `4000` = 1:5 / 10, `3998` = 1:5 / 10)
-
-  out <- capture.output(spectra(df, verbose = TRUE))
-
-  expect_true(any(grepl("5 scans under 2 sample ids × 2 predictors", out, fixed = TRUE)))
-  expect_true(any(grepl("1 scan with no sample id (`NA`)", out, fixed = TRUE)))
-
-  ## Unique ids: the samples line as before
-  out <- capture.output(spectra(df[c(1, 3), ], verbose = TRUE))
-  expect_true(any(grepl("2 samples × 2 predictors", out, fixed = TRUE)))
-
-})
-
 
 ## ---------------------------------------------------------------------------
 ## spectra() — Validation and errors

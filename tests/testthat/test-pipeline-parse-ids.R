@@ -186,8 +186,7 @@ test_that("parse_ids() too_few='na' sets sample_id to NA, with or without a samp
   expect_identical(note$ids[[1]], "nomatch")
   expect_match(note$message, "Pattern did not match 1 filename", fixed = TRUE)
 
-  expect_output(parse_ids(hd, format = "{project}_{sampleid}", too_few = "na", verbose = TRUE),
-                "1 sample id set to `NA`", fixed = TRUE)
+  ## Its tree line: the snapshot of "records and reports the unmatched count"
 
   ## Without a sampleid token the matched rows keep their ids and the
   ## unmatched one still loses its own
@@ -321,7 +320,6 @@ test_that("parse_ids() prints nothing under verbose = FALSE, and refuses a verbo
   hd <- make_test_hd(c("A_B", "C_D"))
 
   expect_silent(parse_ids(hd, format = "{first}_{second}", verbose = FALSE))
-  expect_output(parse_ids(hd, format = "{first}_{second}", verbose = TRUE), "2 IDs extracted")
 
   expect_error(parse_ids(hd, format = "{first}_{second}", verbose = NA),
                "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE, class = "horizons_error_input")
@@ -336,8 +334,12 @@ test_that("parse_ids() records and reports the unmatched count", {
 
   ## Act -------------------------------------------------------------------
 
-  ## The warning and the tree line both carry the count
-  expect_snapshot(result <- parse_ids(hd, format = "{first}_{second}", verbose = TRUE))
+  ## The warning and the tree line both carry the count; under too_few =
+  ## "na" the tree says the ids were set to NA, and nothing is warned
+  expect_snapshot({
+    result <- parse_ids(hd, format = "{first}_{second}", verbose = TRUE)
+    invisible(parse_ids(hd, format = "{first}_{second}", too_few = "na", verbose = TRUE))
+  })
 
   ## Assert ----------------------------------------------------------------
 

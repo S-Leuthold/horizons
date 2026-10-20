@@ -440,10 +440,8 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
   kssl <- make_axis_spectra(rev(KSSL_WN))
   before <- as.matrix(kssl$data$analysis[, predictor_names(kssl)])
 
-  expect_output(
-    out <- standardize(kssl, resample = 2, trim = c(600, 4000), verbose = TRUE),
-    regexp = "already on the 2 cm"
-  )
+  ## The console says so: the tree snapshot
+  out <- no_output(standardize(kssl, resample = 2, trim = c(600, 4000)))
 
   ## Values untouched, bit for bit; a spline through its own knots would only
   ## agree to about 1e-12
@@ -677,8 +675,6 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
   note <- again$log[again$log$verb == "standardize", ]
   expect_identical(note$type, "note")
   expect_match(note$message, "Re-standardizing previously standardized data", fixed = TRUE)
-  expect_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE, verbose = TRUE),
-                "Re-standardizing (force = TRUE)", fixed = TRUE)
 
   expect_true(again$provenance$standardization$resampled)
   expect_identical(again$provenance$standardization$grid,
@@ -721,35 +717,38 @@ test_that("force = TRUE keeps the record of a hull an earlier call fitted, and t
 })
 
 
-test_that("the trim line counts the columns inside the bounds, not the interpolation margin", {
-
-  ## Off-grid: 1761 points inside 600-4000, plus 599.74 and one above 4000
-  expect_output(
-    standardize(make_axis_spectra(OFFGRID_WN), resample = 4, trim = c(600, 4000), verbose = TRUE),
-    regexp = "Trimming: 600-4000 cm⁻¹ \\(3575 → 1761\\)"
-  )
-
-})
-
-
 test_that("standardize() prints nothing under verbose = FALSE, on either path, and refuses a verbose that is not TRUE or FALSE", {
 
   kssl <- make_axis_spectra(KSSL_WN)
 
   expect_silent(standardize(kssl, resample = 4, verbose = FALSE))
   expect_silent(standardize(kssl, resample = NULL, trim = NULL, verbose = FALSE))
-  expect_output(standardize(kssl, resample = NULL, trim = NULL, verbose = TRUE), "Sorting")
-
-  ## The tree names each operation that ran, and says when none did
-  dec <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum)
-  expect_output(standardize(dec, resample = NULL, trim = NULL, verbose = TRUE), "No operations applied")
-
-  tree <- capture.output(standardize(dec, resample = 4, remove_water = TRUE, baseline = TRUE, verbose = TRUE))
-  expect_true(any(grepl("Water bands: ", tree, fixed = TRUE)))
-  expect_true(any(grepl("Baseline correction (convex hull)", tree, fixed = TRUE)))
 
   expect_error(standardize(kssl, verbose = c(TRUE, FALSE)),
                "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE, class = "horizons_error_input")
+
+})
+
+
+test_that("standardize()'s tree names each operation that ran, and says when none did", {
+
+  kssl    <- make_axis_spectra(KSSL_WN)
+  dec     <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum)
+  offgrid <- make_axis_spectra(OFFGRID_WN)
+  on_4    <- no_output(standardize(dec, resample = 4))
+
+  expect_snapshot({
+    ## Sorted, and nothing else
+    x <- standardize(kssl, resample = NULL, trim = NULL, verbose = TRUE)
+    x <- standardize(dec, resample = NULL, trim = NULL, verbose = TRUE)
+    ## Every operation; the trim counts the columns inside the bounds, not
+    ## the interpolation margin
+    x <- standardize(dec, resample = 4, remove_water = TRUE, baseline = TRUE, verbose = TRUE)
+    x <- standardize(offgrid, resample = 4, trim = c(600, 4000), verbose = TRUE)
+    ## Already on the grid, so not re-interpolated
+    x <- standardize(dec, resample = 2, trim = c(600, 4000), verbose = TRUE)
+    x <- standardize(on_4, resample = NULL, trim = NULL, force = TRUE, verbose = TRUE)
+  })
 
 })
 

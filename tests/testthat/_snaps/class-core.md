@@ -164,8 +164,8 @@
          └─ Responses: clay, oc
       
       Provenance
-         ├─ Source: tibble
-         └─ Type: tibble
+         ├─ Source: scans/T01.0 and 2 more
+         └─ Type: opus
       
       Selection
          ├─ Scope: batch (2 groups)

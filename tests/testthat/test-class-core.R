@@ -468,7 +468,8 @@ test_that("validate_horizons_data refuses a predictor whose name is not a wavenu
   ## A single such predictor is checked too, and a long list is counted
   one <- new_horizons_data(analysis = test_analysis[, c("sample_id", "wn_X3998")],
                            role_map = test_role_map[c(1, 3), ])
-  expect_error(validate_horizons_data(one), class = "horizons_error_validation")
+  err <- expect_error(validate_horizons_data(one), class = "horizons_error_validation")
+  expect_true(any(grepl("does not parse as a wavenumber: wn_X3998", err$findings, fixed = TRUE)))
 
   wide     <- tibble::as_tibble(stats::setNames(as.list(1:7), paste0("band", 1:7)))
   wide_obj <- new_horizons_data(analysis = dplyr::bind_cols(tibble::tibble(sample_id = "A"), wide),
@@ -2739,6 +2740,10 @@ test_that("the committed ensemble fixture carries the current contract and valid
 test_that("print.horizons_data shows the selection section", {
 
   obj <- make_selected_object()
+
+  ## Read from many files: the source line shows the first and counts the rest
+  obj$provenance$spectra_source <- c("scans/T01.0", "scans/T02.0", "scans/T03.0")
+  obj$provenance$spectra_type   <- "opus"
 
   expect_snapshot(print(obj))
 
