@@ -547,6 +547,7 @@ describe("evaluate() - all configs fail", {
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "5 configurations were loaded from checkpoints in runs/soc rather than run (cfg_001, cfg_002, cfg_003 and 2 more).",
                  fixed = TRUE)
+    expect_match(msg, "To re-run them, delete their files, checkpoints/<config_id>.rds.", fixed = TRUE)
 
   })
 

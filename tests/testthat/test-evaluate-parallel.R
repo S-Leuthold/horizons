@@ -252,6 +252,38 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("says on the console, under verbose only, how many configurations it sends out and where to monitor them", {
+
+    ## The dispatch is stopped at furrr, so this runs under load_all() too
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      worker_horizons_version = function() as.character(utils::packageVersion("horizons")),
+      check_parallel_backend  = function(...) TRUE,
+      registered_workers      = function() 2L,
+      registered_plan_label   = function() "multisession"
+    )
+    local_mocked_bindings(future_map = function(...) rlang::abort("stop", class = "dispatched"),
+                          .package = "furrr")
+
+    run <- function(verbose) {
+      dir <- withr::local_tempdir(.local_envir = parent.frame())
+      utils::capture.output(tryCatch(
+        suppressWarnings(evaluate(make_eval_object(n_configs = 4), seed = 42L,
+                                  control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                             output_dir = dir, verbose = verbose))),
+        dispatched = function(e) NULL
+      ))
+    }
+
+    shown <- run(verbose = TRUE)
+    expect_true(any(grepl("Processing 4 pending configs...", shown, fixed = TRUE)))
+    expect_true(any(grepl("Monitor: horizons::monitor_evaluate(", shown, fixed = TRUE)))
+
+    quiet <- run(verbose = FALSE)
+    expect_false(any(grepl("Processing|Monitor:", quiet)))
+
+  })
+
   it("asks a worker of the registered plan which horizons it loads", {
 
     ## On a sequential plan the future runs here, so it loads this one
