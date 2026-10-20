@@ -9,7 +9,8 @@ spectra(
   type = NULL,
   id_col = NULL,
   wavelength_cols = NULL,
-  recursive = FALSE
+  recursive = FALSE,
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -26,6 +27,9 @@ If \code{NULL}, auto-detects numeric column names or \verb{wn_*} prefix. Default
 
 \item{recursive}{Logical. For directory paths, search subdirectories.
 Default: \code{FALSE}.}
+
+\item{verbose}{Logical. Print progress messages. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 A \code{horizons_data} S3 object with:

@@ -71,6 +71,8 @@ ID_ALIASES <- c(
 #'   If `NULL`, auto-detects numeric column names or `wn_*` prefix. Default: `NULL`.
 #' @param recursive Logical. For directory paths, search subdirectories.
 #'   Default: `FALSE`.
+#' @param verbose Logical. Print progress messages. Default:
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return A `horizons_data` S3 object with:
 #'   * `data$analysis`: tibble with `sample_id`, `filename`, `wn_*` columns, and
@@ -95,7 +97,8 @@ spectra <- function(source,
                     type            = NULL,
                     id_col          = NULL,
                     wavelength_cols = NULL,
-                    recursive       = FALSE) {
+                    recursive       = FALSE,
+                    verbose         = getOption("horizons.verbose", TRUE)) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Input validation
@@ -106,6 +109,8 @@ spectra <- function(source,
     cli::cli_abort("{.arg source} must be provided")
 
   }
+
+  check_arg(rlang::check_bool, verbose)
 
   ## Determine input type ----------------------------------------------------
 
@@ -189,21 +194,25 @@ spectra <- function(source,
   ## Step 3: CLI output
   ## -------------------------------------------------------------------------
 
-  cat(paste0("\u2500\u2500 ", cli::style_bold("horizons pipeline"),
-             " ", paste(rep("\u2500", 46), collapse = ""), "\n"))
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Loading spectra"), "...\n"))
+  if (verbose) {
 
-  count_branch <- if (sorted_result$sorted) "\u251C\u2500" else "\u2514\u2500"
-  cat(paste0("\u2502  ", count_branch, " ", result$data$n_rows, " samples \u00D7 ",
-             result$data$n_predictors, " predictors\n"))
+    cat(paste0("\u2500\u2500 ", cli::style_bold("horizons pipeline"),
+               " ", paste(rep("\u2500", 46), collapse = ""), "\n"))
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Loading spectra"), "...\n"))
 
-  if (sorted_result$sorted) {
+    count_branch <- if (sorted_result$sorted) "\u251C\u2500" else "\u2514\u2500"
+    cat(paste0("\u2502  ", count_branch, " ", result$data$n_rows, " samples \u00D7 ",
+               result$data$n_predictors, " predictors\n"))
 
-    cat("\u2502  \u2514\u2500 Sorting: wavenumber columns put in decreasing order\n")
+    if (sorted_result$sorted) {
+
+      cat("\u2502  \u2514\u2500 Sorting: wavenumber columns put in decreasing order\n")
+
+    }
+
+    cat("\u2502\n")
 
   }
-
-  cat("\u2502\n")
 
   result
 

@@ -384,7 +384,7 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
   before <- as.matrix(kssl$data$analysis[, predictor_names(kssl)])
 
   expect_output(
-    out <- standardize(kssl, resample = 2, trim = c(600, 4000)),
+    out <- standardize(kssl, resample = 2, trim = c(600, 4000), verbose = TRUE),
     regexp = "already on the 2 cm"
   )
 
@@ -640,9 +640,23 @@ test_that("the trim line counts the columns inside the bounds, not the interpola
 
   ## Off-grid: 1761 points inside 600-4000, plus 599.74 and one above 4000
   expect_output(
-    standardize(make_axis_spectra(OFFGRID_WN), resample = 4, trim = c(600, 4000)),
+    standardize(make_axis_spectra(OFFGRID_WN), resample = 4, trim = c(600, 4000), verbose = TRUE),
     regexp = "Trimming: 600-4000 cm⁻¹ \\(3575 → 1761\\)"
   )
+
+})
+
+
+test_that("standardize() prints nothing under verbose = FALSE, on either path, and refuses a verbose that is not TRUE or FALSE", {
+
+  kssl <- make_axis_spectra(KSSL_WN)
+
+  expect_silent(standardize(kssl, resample = 4, verbose = FALSE))
+  expect_silent(standardize(kssl, resample = NULL, trim = NULL, verbose = FALSE))
+  expect_output(standardize(kssl, resample = NULL, trim = NULL, verbose = TRUE), "Sorting")
+
+  expect_error(standardize(kssl, verbose = c(TRUE, FALSE)),
+               "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE, class = "horizons_error_input")
 
 })
 

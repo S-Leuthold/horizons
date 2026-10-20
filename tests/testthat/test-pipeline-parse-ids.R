@@ -300,6 +300,18 @@ test_that("parse_ids() records provenance", {
 
 })
 
+test_that("parse_ids() prints nothing under verbose = FALSE, and refuses a verbose that is not TRUE or FALSE", {
+
+  hd <- make_test_hd(c("A_B", "C_D"))
+
+  expect_silent(parse_ids(hd, format = "{first}_{second}", verbose = FALSE))
+  expect_output(parse_ids(hd, format = "{first}_{second}", verbose = TRUE), "2 IDs extracted")
+
+  expect_error(parse_ids(hd, format = "{first}_{second}", verbose = NA),
+               "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE, class = "horizons_error_input")
+
+})
+
 test_that("parse_ids() records and reports the unmatched count", {
 
   ## Arrange ---------------------------------------------------------------
@@ -309,7 +321,7 @@ test_that("parse_ids() records and reports the unmatched count", {
   ## Act -------------------------------------------------------------------
 
   ## The warning and the tree line both carry the count
-  expect_snapshot(result <- parse_ids(hd, format = "{first}_{second}"))
+  expect_snapshot(result <- parse_ids(hd, format = "{first}_{second}", verbose = TRUE))
 
   ## Assert ----------------------------------------------------------------
 

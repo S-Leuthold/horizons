@@ -43,9 +43,20 @@ test_that("spectra() prints its banner, with the sorting line only when it sorts
   )
 
   expect_snapshot({
-    invisible(spectra(test_data))
-    invisible(spectra(test_data[, c("Sample_ID", "2000", "4000", "3000")]))
+    invisible(spectra(test_data, verbose = TRUE))
+    invisible(spectra(test_data[, c("Sample_ID", "2000", "4000", "3000")], verbose = TRUE))
   })
+
+})
+
+test_that("spectra() prints nothing under verbose = FALSE, and refuses a verbose that is not TRUE or FALSE", {
+
+  test_data <- tibble::tibble(Sample_ID = c("S001", "S002"), `4000` = c(0.1, 0.2), `3000` = c(0.2, 0.3))
+
+  expect_silent(spectra(test_data, verbose = FALSE))
+
+  expect_error(spectra(test_data, verbose = "yes"), "`verbose` must be `TRUE` or `FALSE`",
+               fixed = TRUE, class = "horizons_error_input")
 
 })
 

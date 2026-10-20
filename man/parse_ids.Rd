@@ -4,7 +4,13 @@
 \alias{parse_ids}
 \title{Parse sample IDs and metadata from filenames}
 \usage{
-parse_ids(x, format = NULL, patterns = NULL, too_few = "keep_original")
+parse_ids(
+  x,
+  format = NULL,
+  patterns = NULL,
+  too_few = "keep_original",
+  verbose = getOption("horizons.verbose", TRUE)
+)
 }
 \arguments{
 \item{x}{A \code{horizons_data} object from \code{spectra()}.}
@@ -21,6 +27,9 @@ columns and unnamed elements are separators. Mutually exclusive with \code{forma
 \item \code{"error"}: Abort with list of non-matching files.
 \item \code{"na"}: Set \code{sample_id} to NA, warn.
 }}
+
+\item{verbose}{Logical. Print progress messages. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 The input \code{horizons_data} object with:

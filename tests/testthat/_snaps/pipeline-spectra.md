@@ -1,14 +1,14 @@
 # spectra() prints its banner, with the sorting line only when it sorts
 
     Code
-      invisible(spectra(test_data))
+      invisible(spectra(test_data, verbose = TRUE))
     Output
       ── horizons pipeline ──────────────────────────────────────────────
       ├─ Loading spectra...
       │  └─ 3 samples × 3 predictors
       │
     Code
-      invisible(spectra(test_data[, c("Sample_ID", "2000", "4000", "3000")]))
+      invisible(spectra(test_data[, c("Sample_ID", "2000", "4000", "3000")], verbose = TRUE))
     Output
       ── horizons pipeline ──────────────────────────────────────────────
       ├─ Loading spectra...

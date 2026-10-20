@@ -10,7 +10,8 @@ standardize(
   trim = c(600, 4000),
   remove_water = FALSE,
   baseline = FALSE,
-  force = FALSE
+  force = FALSE,
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -36,6 +37,9 @@ Default \code{FALSE}.}
 
 \item{force}{\code{logical.} Re-standardize even if already standardized?
 Default \code{FALSE}. Not recommended — may cause data quality issues.}
+
+\item{verbose}{\code{logical.} Print progress messages. Default
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 \code{horizons_data.} The input object with standardized spectra.

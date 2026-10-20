@@ -61,6 +61,8 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   * `"keep_original"` (default): Keep original filename as `sample_id`, warn.
 #'   * `"error"`: Abort with list of non-matching files.
 #'   * `"na"`: Set `sample_id` to NA, warn.
+#' @param verbose Logical. Print progress messages. Default:
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @details
 #' **Duplicate or missing sample ids:** Several filenames parsing to the same
@@ -102,7 +104,8 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 parse_ids <- function(x,
                       format   = NULL,
                       patterns = NULL,
-                      too_few  = "keep_original") {
+                      too_few  = "keep_original",
+                      verbose  = getOption("horizons.verbose", TRUE)) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Input validation
@@ -123,6 +126,8 @@ parse_ids <- function(x,
   ## ids until average() collapses them.
 
   x <- validate_horizons_data(x, stage = "raw")
+
+  check_arg(rlang::check_bool, verbose)
 
   ## Refuse a promoted object ------------------------------------------------
   ## Rewriting sample_id is a row change: evaluation and model splits are
@@ -400,17 +405,21 @@ parse_ids <- function(x,
   ## Step 9: CLI output
   ## -------------------------------------------------------------------------
 
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Parsing sample IDs"), "...\n"))
+  if (verbose) {
 
-  id_str <- paste0(n_matched, " IDs extracted")
-  if (n_unmatched > 0) {
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Parsing sample IDs"), "...\n"))
 
-    id_str <- paste0(id_str, " (", n_unmatched, " unmatched)")
+    id_str <- paste0(n_matched, " IDs extracted")
+    if (n_unmatched > 0) {
+
+      id_str <- paste0(id_str, " (", n_unmatched, " unmatched)")
+
+    }
+
+    cat(paste0("\u2502  \u2514\u2500 ", id_str, "\n"))
+    cat("\u2502\n")
 
   }
-
-  cat(paste0("\u2502  \u2514\u2500 ", id_str, "\n"))
-  cat("\u2502\n")
 
   x
 

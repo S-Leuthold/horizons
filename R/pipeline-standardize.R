@@ -576,6 +576,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   Default `FALSE`.
 #' @param force `logical.` Re-standardize even if already standardized?
 #'   Default `FALSE`. Not recommended — may cause data quality issues.
+#' @param verbose `logical.` Print progress messages. Default
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return `horizons_data.` The input object with standardized spectra.
 #'   `provenance$standardization` records the arguments, whether the spectra
@@ -604,7 +606,8 @@ standardize <- function(x,
                         trim         = c(600, 4000),
                         remove_water = FALSE,
                         baseline     = FALSE,
-                        force        = FALSE) {
+                        force        = FALSE,
+                        verbose      = getOption("horizons.verbose", TRUE)) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Input validation
@@ -696,6 +699,8 @@ standardize <- function(x,
 
   }
 
+  check_arg(rlang::check_bool, verbose)
+
   ## ---------------------------------------------------------------------------
   ## Step 1: Check idempotence
   ## ---------------------------------------------------------------------------
@@ -777,7 +782,7 @@ standardize <- function(x,
       wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_)
     )
 
-    if (length(operations) > 0) {
+    if (verbose && length(operations) > 0) {
 
       report_standardize_summary(
         operations          = operations,
@@ -785,7 +790,7 @@ standardize <- function(x,
         final_n_wavelengths = operations$sort$n
       )
 
-    } else {
+    } else if (verbose) {
 
       cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
       cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
@@ -1153,11 +1158,15 @@ standardize <- function(x,
   ### Every operation requested on this path records itself, and the no-op
   ### call returned at Step 1c, so there is always something to report.
 
-  report_standardize_summary(
-    operations          = operations,
-    n_samples           = nrow(new_analysis),
-    final_n_wavelengths = length(new_predictor_names)
-  )
+  if (verbose) {
+
+    report_standardize_summary(
+      operations          = operations,
+      n_samples           = nrow(new_analysis),
+      final_n_wavelengths = length(new_predictor_names)
+    )
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 12: Return

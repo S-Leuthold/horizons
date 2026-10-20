@@ -1,7 +1,7 @@
 # parse_ids() records and reports the unmatched count
 
     Code
-      result <- parse_ids(hd, format = "{first}_{second}")
+      result <- parse_ids(hd, format = "{first}_{second}", verbose = TRUE)
     Condition
       Warning:
       Pattern did not match 1 filename
