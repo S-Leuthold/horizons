@@ -126,8 +126,8 @@ derivative taken later still runs across the hole they leave, which is a
 separate matter (see \code{select_training()}'s \code{mask}).
 
 \strong{Unusable spectra:} a spectrum \code{standardize()} cannot use, one with a
-value that is not finite once it is trimmed and resampled, or one with no
-spread (every value equal), is kept and flagged, never dropped: its
+value that is not finite among those it returns, or one with no spread
+(every value equal), is kept and flagged, never dropped: its
 \code{.flag} is \code{"standardize"} (a \code{meta} column, created when the first row
 is flagged), and one \code{horizons_warning_flagged} counts and names them,
 by reason. With resampling, a spectrum whose own points do not reach
@@ -136,8 +136,10 @@ with wider ones are, or with a hole) is flagged for that, and the warning
 gives the range such spectra cover, inside which a \code{trim} keeps them.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=predict]{predict()}} and \code{\link[=select_training]{select_training()}} leave flagged
 spectra out. The convex hull is fitted to the spectra not flagged, and a
-flagged spectrum keeps its values as they stood when it was flagged. The
-rule holds with every operation off too. A row an earlier step flagged
+flagged spectrum keeps its values as they stood when it was flagged, so
+with \code{baseline = TRUE} a spectrum with a value missing anywhere the hull
+is fitted is flagged, a water band it then removes included. The rule
+holds with every operation off too. A row an earlier step flagged
 keeps its flag.
 
 \strong{Idempotence:} If the object has already been standardized, calling

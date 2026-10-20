@@ -1185,6 +1185,24 @@ test_that("a spectrum short of the grid is flagged for that, with the range it c
 
 })
 
+test_that("a value missing only inside a water band it removes flags nothing, unless the hull needs it", {
+
+  hd <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 2)
+  hd$data$analysis$wn_1650[2] <- NA_real_
+
+  ## The values returned are all finite
+  expect_no_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000), remove_water = TRUE)))
+  expect_false(".flag" %in% names(out$data$analysis))
+  expect_false(anyNA(predictor_block(out)))
+
+  ## The hull is fitted across the band, before it is removed
+  w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000),
+                                                   remove_water = TRUE, baseline = TRUE)),
+                      class = "horizons_warning_flagged")
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
+
+})
+
 test_that("a point standing alone between two holes in a spectrum carries the grid point it sits on", {
 
   ## On a 2 cm-1 axis resampled to 4, row 2 has holes either side of 2000

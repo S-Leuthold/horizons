@@ -848,8 +848,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' separate matter (see `select_training()`'s `mask`).
 #'
 #' **Unusable spectra:** a spectrum `standardize()` cannot use, one with a
-#' value that is not finite once it is trimmed and resampled, or one with no
-#' spread (every value equal), is kept and flagged, never dropped: its
+#' value that is not finite among those it returns, or one with no spread
+#' (every value equal), is kept and flagged, never dropped: its
 #' `.flag` is `"standardize"` (a `meta` column, created when the first row
 #' is flagged), and one `horizons_warning_flagged` counts and names them,
 #' by reason. With resampling, a spectrum whose own points do not reach
@@ -858,8 +858,10 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' gives the range such spectra cover, inside which a `trim` keeps them.
 #' [evaluate()], [fit()], [predict()] and [select_training()] leave flagged
 #' spectra out. The convex hull is fitted to the spectra not flagged, and a
-#' flagged spectrum keeps its values as they stood when it was flagged. The
-#' rule holds with every operation off too. A row an earlier step flagged
+#' flagged spectrum keeps its values as they stood when it was flagged, so
+#' with `baseline = TRUE` a spectrum with a value missing anywhere the hull
+#' is fitted is flagged, a water band it then removes included. The rule
+#' holds with every operation off too. A row an earlier step flagged
 #' keeps its flag.
 #'
 #' **Idempotence:** If the object has already been standardized, calling
@@ -1358,16 +1360,18 @@ standardize <- function(x,
 
   }
 
-  ## A spectrum it cannot use is flagged before the hull, which would fail
-  ## the whole batch on it, and keeps its values as they stand here
-
-  before        <- judge(spectra_matrix)
-  now           <- !prior & is.na(reason) & !is.na(before)
-  reason[now]   <- before[now]
-
   hull_range <- NULL
 
   if (baseline) {
+
+    ## A spectrum the hull cannot take is flagged before it, since it would
+    ## fail the whole batch, and keeps its values as they stand here. The
+    ## hull is fitted over every column, water bands included, so they are
+    ## all judged; without a hull only the values returned are (Step 6b).
+
+    before      <- judge(spectra_matrix)
+    now         <- !prior & is.na(reason) & !is.na(before)
+    reason[now] <- before[now]
 
     hull_range <- range(wavelengths)
     hull       <- !prior & is.na(reason)
