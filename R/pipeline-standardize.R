@@ -156,6 +156,111 @@ resample_spectra <- function(spectra_matrix, current_wav, new_wav) {
 
 
 ## =============================================================================
+## Helper: resample_onto_grid()
+## =============================================================================
+
+#' Resample each spectrum onto the grid from its own points
+#'
+#' @description
+#' The axis rule `standardize()` applies to the data, applied to each
+#' spectrum's own finite points: a grid point beyond the points a spectrum
+#' has, or inside a hole in them (a spacing over three times the median and
+#' over 30 cm-1, `grid_summary()`'s rule), is `NA` for it, never extrapolated
+#' or filled, and each contiguous run of its points is interpolated on its
+#' own, so no spline crosses a hole. A single missing point is no hole and is
+#' interpolated over. `prospectr::resample()` would otherwise drop a
+#' spectrum's missing values silently and fit through or past them.
+#'
+#' Spectra that share a pattern of finite values are resampled together, so
+#' a batch with no missing value is one call per run, the same call the
+#' whole batch always had.
+#'
+#' @param M `matrix.` Spectra as rows, on `wavelengths`.
+#' @param wavelengths `numeric.` The data's axis.
+#' @param grid `numeric.` The grid, already inside the data's range and
+#'   clear of the data's gaps.
+#'
+#' @return `matrix.` `nrow(M)` by `length(grid)`, `NA` where a spectrum's own
+#'   points do not reach.
+#'
+#' @noRd
+resample_onto_grid <- function(M, wavelengths, grid) {
+
+  out    <- matrix(NA_real_, nrow = nrow(M), ncol = length(grid))
+  finite <- is.finite(M)
+
+  ## Rows sharing a pattern of finite values ----------------------------------
+
+  complete <- rowSums(!finite) == 0
+  key      <- rep("complete", nrow(M))
+
+  if (!all(complete)) {
+
+    key[!complete] <- apply(finite[!complete, , drop = FALSE], 1, function(r) paste(which(r), collapse = ","))
+
+  }
+
+  for (pattern in unique(key)) {
+
+    rows <- which(key == pattern)
+    cols <- which(finite[rows[1], ])
+
+    ### A spline needs two points
+    if (length(cols) < 2) next
+
+    wn <- wavelengths[cols]
+
+    ## The grid points these spectra's own points reach ------------------------
+
+    gaps  <- grid_summary(wn)$gaps
+    reach <- grid >= min(wn) - GRID_TOL & grid <= max(wn) + GRID_TOL
+
+    for (i in seq_len(if (is.null(gaps)) 0L else nrow(gaps))) {
+
+      reach <- reach & !(grid > gaps[i, "low"] + GRID_TOL & grid < gaps[i, "high"] - GRID_TOL)
+
+    }
+
+    ## One contiguous run at a time; a point's run is the number of gaps below it
+
+    gap_highs <- if (is.null(gaps)) numeric(0) else gaps[, "high"]
+    run_of    <- function(w) vapply(w, function(v) sum(gap_highs <= v + GRID_TOL), integer(1))
+
+    data_run <- run_of(wn)
+    grid_run <- run_of(grid)
+
+    for (run in unique(grid_run[reach])) {
+
+      in_run <- which(data_run == run)
+      at     <- which(reach & grid_run == run)
+
+      if (length(in_run) == 1) {
+
+        ### A lone knot between two gaps: the only grid point it can carry is
+        ### the knot itself.
+        out[rows, at] <- M[rows, cols[in_run]]
+        next
+
+      }
+
+      ### A grid point inside GRID_TOL of the run's end is evaluated at that
+      ### end, so resample_spectra()'s strict no-extrapolation check holds.
+      run_wn <- wn[in_run]
+      piece  <- resample_spectra(M[rows, cols[in_run], drop = FALSE], run_wn,
+                                 new_wav = pmin(pmax(grid[at], min(run_wn)), max(run_wn)))
+
+      out[rows, at] <- piece$matrix
+
+    }
+
+  }
+
+  out
+
+}
+
+
+## =============================================================================
 ## Helper: trim_spectra()
 ## =============================================================================
 
@@ -171,8 +276,9 @@ resample_spectra <- function(spectra_matrix, current_wav, new_wav) {
 #' @param margin `logical.` Also keep the nearest wavenumber beyond each bound,
 #'   where the data has one? `standardize()` sets this when it resamples next:
 #'   a grid point on the bound usually falls between two of the data's points
-#'   (600 between 599.74 and 601.67), and interpolating it needs both.
-#'   Default `FALSE`.
+#'   (600 between 599.74 and 601.67), and interpolating it needs both. It is
+#'   each spectrum's nearest point with a value, so spectra read on different
+#'   grids each keep their own. Default `FALSE`.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Trimmed spectral matrix
@@ -198,11 +304,23 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 
   if (margin) {
 
+    ### Each spectrum's own nearest point, nearest first: a spectrum missing
+    ### the axis's nearest point (one read on another grid) keeps its own, so
+    ### it is resampled from its own points. With no value missing, every
+    ### spectrum's is the axis's nearest point.
+    nearest_finite <- function(idx) {
+      if (length(idx) == 0) return(integer(0))
+      has <- is.finite(spectra_matrix[, idx, drop = FALSE])
+      any <- rowSums(has) > 0
+      unique(idx[max.col(has, ties.method = "first")[any]])
+    }
+
     below <- which(wavelengths < wn_min)
     above <- which(wavelengths > wn_max)
 
-    if (length(below) > 0) keep_idx <- c(keep_idx, below[which.max(wavelengths[below])])
-    if (length(above) > 0) keep_idx <- c(keep_idx, above[which.min(wavelengths[above])])
+    keep_idx <- c(keep_idx,
+                  nearest_finite(below[order(wavelengths[below], decreasing = TRUE)]),
+                  nearest_finite(above[order(wavelengths[above])]))
 
     ### Back into the input's column order.
     keep_idx <- sort(keep_idx)
@@ -605,7 +723,13 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'
 #' The spectra are interpolated onto the grid by cubic spline and never
 #' extrapolated: grid points beyond the data's range are dropped with a
-#' warning that says how many and where. Nor is a hole in the input filled:
+#' warning that says how many and where. Each spectrum is resampled from its
+#' own finite points: one with missing values gets `NA` at a grid point
+#' beyond the points it has, or inside a hole in them, rather than a value
+#' extrapolated or filled in, and is flagged (see Unusable spectra). A single
+#' missing point is no hole, so it is interpolated over; on data already on
+#' the grid, which is not re-interpolated, a missing value stays missing and
+#' flags its spectrum. Nor is a hole in the input filled:
 #' where the data's own axis has a gap (a spacing over three times the median
 #' and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
 #' `remove_water = TRUE`), the grid points inside it are dropped with a
@@ -1069,48 +1193,9 @@ standardize <- function(x,
 
     } else {
 
-      ### One contiguous run of the data at a time, so no spline is fitted
-      ### across a gap. A point's run is the number of gaps below it.
-
-      gap_highs <- if (is.null(gaps)) numeric(0) else gaps[, "high"]
-      run_of    <- function(wn) vapply(wn, function(w) sum(gap_highs <= w + GRID_TOL), integer(1))
-
-      data_run <- run_of(wavelengths)
-      grid_run <- run_of(grid)
-
-      resampled <- matrix(NA_real_, nrow = nrow(spectra_matrix), ncol = length(grid))
-
-      for (run in unique(grid_run)) {
-
-        cols <- which(data_run == run)
-        at   <- which(grid_run == run)
-
-        if (length(cols) == 1) {
-
-          ### A lone knot between two gaps: the only grid point it can carry
-          ### is the knot itself.
-          resampled[, at] <- spectra_matrix[, cols]
-          next
-
-        }
-
-        ### A grid point inside GRID_TOL of the run's end is evaluated at
-        ### that end, so resample_spectra()'s strict no-extrapolation check
-        ### holds.
-        run_wn <- wavelengths[cols]
-
-        ### prospectr fails the whole call on a row with fewer than two
-        ### finite values, so such a row is left NA here and flagged below
-        rows <- rowSums(is.finite(spectra_matrix[, cols, drop = FALSE])) >= 2
-
-        if (!any(rows)) next
-
-        piece  <- resample_spectra(spectra_matrix[rows, cols, drop = FALSE], run_wn,
-                                   new_wav = pmin(pmax(grid[at], min(run_wn)), max(run_wn)))
-
-        resampled[rows, at] <- piece$matrix
-
-      }
+      ### Each spectrum from its own points: one with missing values is never
+      ### extrapolated or filled, the grid points it cannot reach left NA
+      resampled <- resample_onto_grid(spectra_matrix, wavelengths, grid)
 
       operations$resample <- list(
         status            = "resampled",

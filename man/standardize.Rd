@@ -94,7 +94,13 @@ gives clean, stable names (\code{wn_601.5}).
 
 The spectra are interpolated onto the grid by cubic spline and never
 extrapolated: grid points beyond the data's range are dropped with a
-warning that says how many and where. Nor is a hole in the input filled:
+warning that says how many and where. Each spectrum is resampled from its
+own finite points: one with missing values gets \code{NA} at a grid point
+beyond the points it has, or inside a hole in them, rather than a value
+extrapolated or filled in, and is flagged (see Unusable spectra). A single
+missing point is no hole, so it is interpolated over; on data already on
+the grid, which is not re-interpolated, a missing value stays missing and
+flags its spectrum. Nor is a hole in the input filled:
 where the data's own axis has a gap (a spacing over three times the median
 and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
 \code{remove_water = TRUE}), the grid points inside it are dropped with a

@@ -1081,6 +1081,118 @@ test_that("the hull is fitted to the spectra not flagged, and a failure of the h
 
 })
 
+test_that("a spectrum with a hole, or short at one end, is flagged rather than filled or extrapolated", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## Off-grid spectra; row 2 lacks 61 points mid-axis, row 3 its lowest 40
+  hd   <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 4)
+  pred <- predictor_names(hd)
+  wn   <- as.numeric(sub("^wn_", "", pred))
+  hd$data$analysis[2, pred[wn > 2000 & wn < 2000 + 61 * 1.93]] <- NA_real_
+  hd$data$analysis[3, pred[order(wn)[1:40]]] <- NA_real_
+
+  ## Act -------------------------------------------------------------------
+
+  w <- expect_warning(out <- no_output(standardize(hd, resample = 4, trim = c(600, 4000))),
+                      class = "horizons_warning_flagged")
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize", "standardize", NA))
+  expect_match(conditionMessage(w), '2 have a value that is not finite: "s2", "s3"', fixed = TRUE)
+
+  ## The grid points inside the hole, and below row 3's own start, are NA
+  out_wn <- as.numeric(sub("^wn_", "", predictor_names(out)))
+  block  <- predictor_block(out)
+  expect_true(all(is.na(block[2, out_wn > 2004 & out_wn < 2116])))
+  expect_true(all(is.na(block[3, out_wn < min(wn[order(wn)[41]]) - 1e-6])))
+
+  ## Everywhere else they are on the curve, the rows with all their points too
+  expect_lt(max(abs(block[2, ] - 2 * smooth_spectrum(out_wn)), na.rm = TRUE), 1e-5)
+  expect_lt(max(abs(block[3, ] - 3 * smooth_spectrum(out_wn)), na.rm = TRUE), 1e-5)
+  expect_false(anyNA(block[c(1, 4), ]))
+
+})
+
+test_that("a point standing alone between two holes in a spectrum carries the grid point it sits on", {
+
+  ## On a 2 cm-1 axis resampled to 4, row 2 has holes either side of 2000
+  hd   <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 2)
+  pred <- predictor_names(hd)
+  wn   <- as.numeric(sub("^wn_", "", pred))
+  hd$data$analysis[2, pred[(wn > 1900 & wn < 2000) | (wn > 2000 & wn < 2100)]] <- NA_real_
+
+  out <- suppressWarnings(no_output(standardize(hd, resample = 4, trim = c(600, 4000))))
+
+  ## Its own value at 2000, unmoved; the grid points in its holes NA
+  expect_identical(out$data$analysis$wn_2000[2], hd$data$analysis$wn_2000[2])
+  expect_true(all(is.na(unlist(out$data$analysis[2, c("wn_1996", "wn_2004")]))))
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
+
+})
+
+test_that("a single missing point is interpolated over, not flagged", {
+
+  hd   <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 2)
+  pred <- predictor_names(hd)
+  hd$data$analysis[[pred[1000]]][2] <- NA_real_
+
+  expect_no_warning(out <- no_output(standardize(hd, resample = 4, trim = c(600, 4000))))
+
+  out_wn <- as.numeric(sub("^wn_", "", predictor_names(out)))
+  expect_false(".flag" %in% names(out$data$analysis))
+  expect_lt(max(abs(predictor_block(out)[2, ] - 2 * smooth_spectrum(out_wn))), 1e-5)
+
+})
+
+test_that("spectra read from files on different grids are each resampled from their own points", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## Two scans at 1.93 cm-1 and one at 3.86, bound into one table: on the
+  ## union axis each row is NA at the other grid's points
+  fine   <- OFFGRID_WN
+  coarse <- 600.5 + 3.86 * (0:900)
+  union  <- sort(unique(c(fine, coarse)), decreasing = TRUE)
+
+  m <- matrix(NA_real_, nrow = 3, ncol = length(union), dimnames = list(NULL, paste0("wn_", union)))
+  m[1, match(fine, union)]   <- smooth_spectrum(fine)
+  m[2, match(fine, union)]   <- 2 * smooth_spectrum(fine)
+  m[3, match(coarse, union)] <- 3 * smooth_spectrum(coarse)
+
+  hd <- new_horizons_data(
+    analysis = dplyr::bind_cols(tibble::tibble(sample_id = c("f1", "f2", "c1")), tibble::as_tibble(m)),
+    role_map = tibble::tibble(variable = c("sample_id", colnames(m)),
+                              role     = c("id", rep("predictor", ncol(m)))))
+
+  ## Act -------------------------------------------------------------------
+
+  out <- no_output(standardize(hd, resample = 4, trim = c(700, 3800)))
+
+  ## Assert ----------------------------------------------------------------
+
+  ## Nothing flagged, and each row is what its own scan standardizes to alone
+  expect_false(".flag" %in% names(out$data$analysis))
+
+  alone <- function(wn, values, id) {
+    mm <- matrix(values, nrow = 1, dimnames = list(NULL, paste0("wn_", wn)))
+    no_output(standardize(new_horizons_data(
+      analysis = dplyr::bind_cols(tibble::tibble(sample_id = id), tibble::as_tibble(mm)),
+      role_map = tibble::tibble(variable = c("sample_id", colnames(mm)),
+                                role     = c("id", rep("predictor", ncol(mm))))),
+      resample = 4, trim = c(700, 3800)))
+  }
+
+  expect_identical(unname(predictor_block(out)[3, ]),
+                   unname(predictor_block(alone(coarse, 3 * smooth_spectrum(coarse), "c1"))[1, ]))
+  expect_identical(unname(predictor_block(out)[1:2, ]),
+                   unname(predictor_block(no_output(standardize(subset_rows(
+                     make_axis_spectra(fine, f = smooth_spectrum, n = 2), c("s1", "s2")),
+                     resample = 4, trim = c(700, 3800))))))
+
+})
+
 test_that("a row an earlier step flagged keeps its flag and is not counted again", {
 
   hd <- unusable_batch()
