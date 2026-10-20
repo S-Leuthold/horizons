@@ -523,7 +523,11 @@ spectra_from_path <- function(source,
   if (all(failed)) {
 
     abort_horizons(c(
-      "None of the {n_files} {label} {cli::qty(n_files)}file{?s} in {.arg source} could be read.",
+      if (n_files == 1) {
+        "The {label} file in {.arg source} could not be read."
+      } else {
+        "None of the {n_files} {label} files in {.arg source} could be read."
+      },
       bullets,
       "i" = "The failures are on this condition as {.field results}: {.code rlang::last_error()$results}."
     ), kind = "run", class = "horizons_error_read_failed", results = results, call = call)

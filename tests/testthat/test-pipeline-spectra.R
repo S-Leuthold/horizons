@@ -1073,6 +1073,7 @@ test_that("a CSV file whose columns cannot be read fails as a file, each cause k
 
   }
 
+  expect_error(spectra(noid, verbose = FALSE), "The CSV file in `source` could not be read.", fixed = TRUE)
   expect_snapshot(spectra(noid, verbose = FALSE), error = TRUE,
                   transform = function(x) gsub(dir, "<dir>", x, fixed = TRUE))
 

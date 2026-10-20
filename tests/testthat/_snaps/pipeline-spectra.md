@@ -41,7 +41,7 @@
       spectra(noid, verbose = FALSE)
     Condition
       Error in `spectra()`:
-      ! None of the 1 CSV file in `source` could be read.
+      ! The CSV file in `source` could not be read.
       x Column check failed: Could not identify sample ID column. Checked aliases: "sample_id", "Sample_ID", "SampleID", "sampleid", "id", "ID", "Id", "sample", "Sample", "filename", "Filename", "name", and "Name". Available columns: "label" and "4000". Specify it with `id_col`. (<dir>/noid.csv)
       i The failures are on this condition as results: `rlang::last_error()$results`.
 
