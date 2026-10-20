@@ -31,6 +31,9 @@ test_that("spectra() creates horizons_data from tibble", {
   expect_equal(result$data$n_rows, 3)
   expect_equal(result$data$n_predictors, 3)
 
+  ## The table carries a tibble's attributes and nothing else
+  expect_setequal(names(attributes(result$data$analysis)), c("names", "row.names", "class"))
+
 })
 
 test_that("spectra() prints its banner, with the sorting line only when it sorts", {

@@ -206,13 +206,17 @@ spectra <- function(source,
   }
 
   analysis <- bind_spectra_files(tables, collector)
+  wn_cols  <- attr(analysis, "wn_cols")
+
+  ### The bind's working record of the wavelength columns is not the table's
+  attr(analysis, "wn_cols") <- NULL
 
   result <- new_horizons_data(
     analysis       = analysis,
     role_map       = build_role_map(
       id_col     = "sample_id",
-      wn_cols    = attr(analysis, "wn_cols"),
-      meta_cols  = setdiff(names(analysis), c("sample_id", attr(analysis, "wn_cols"))),
+      wn_cols    = wn_cols,
+      meta_cols  = setdiff(names(analysis), c("sample_id", wn_cols)),
       other_cols = character()
     ),
     spectra_source = source_name,
