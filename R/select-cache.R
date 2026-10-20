@@ -227,11 +227,13 @@ prime_library_space <- function(pool, record, verbose = TRUE,
   identity <- space_cache_identity(record)
   if (is.null(identity)) return(invisible(NULL))
 
-  ## The space a draw builds: without the rows an earlier step flagged
-  pm        <- predictor_matrix(pool)
-  pm$matrix <- pm$matrix[!flagged_rows(pool$data$analysis), , drop = FALSE]
-  settings  <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
-  n_cols    <- length(pm$wavenumbers)
+  ## The space a draw builds: without the rows an earlier step flagged, the
+  ## matrix copied only when one leaves it
+  pm       <- predictor_matrix(pool)
+  flagged  <- flagged_rows(pool$data$analysis)
+  if (any(flagged)) pm$matrix <- pm$matrix[!flagged, , drop = FALSE]
+  settings <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
+  n_cols   <- length(pm$wavenumbers)
 
   if (settings$derivative > 0L && !sg_window_fits(settings$window, n_cols)) {
 

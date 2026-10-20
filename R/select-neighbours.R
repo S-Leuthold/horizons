@@ -461,15 +461,18 @@ missing_k <- function(k, properties) {
 #' The set does not depend on `k`.
 #'
 #' **Pass 2, only when needed.** A target short of `k` inside its fetch
-#' gets one more, wide enough for any target: at most every twin among the
-#' property's measured rows lies ahead of a target's `k`-th row. One that
-#' cannot reach `k` even then (the property has too few measured rows left)
-#' is recorded in `short_draws` rather than silently returning a thinner
-#' neighbourhood. So is a target whose distances are all `NA`, which
-#' `metric = "cosine"` produces for a row on the pool's centroid: the
-#' ordering behind such a draw is the pool's own row order, so nothing is
-#' drawn for it at all. `select_training()` reports both in one `coverage`
-#' warning; this function raises nothing.
+#' takes its `k` from the measured rows outside the twin set directly, in a
+#' fetch of width `k`, and the twins nearer than its `k`-th row come from
+#' their own distances (`spare_neighbourhoods()`), one chunk of targets at a
+#' time. Widening its fetch by the twins instead would cost targets times
+#' twins, and when the targets are in the pool every target is short and
+#' the twins are as many as the targets. One that cannot reach `k` (the
+#' property has too few measured rows left) is recorded in `short_draws`
+#' rather than silently returning a thinner neighbourhood. So is a target
+#' whose distances are all `NA`, which `metric = "cosine"` produces for a row
+#' on the pool's centroid: the ordering behind such a draw is the pool's own
+#' row order, so nothing is drawn for it at all. `select_training()` reports
+#' both in one `coverage` warning; this function raises nothing.
 #'
 #' @param St [Matrix.] Target scores, rows named.
 #' @param Sp [Matrix.] Pool scores, rows named.
@@ -541,37 +544,45 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
   exclusions  <- list()
   short_draws <- list()
 
+  chunks <- split(seq_len(nrow(St)), ceiling(seq_len(nrow(St)) / chunk_size))
+
   for (p in properties) {
 
     kp <- k_by[[p]]
     f  <- first[[p]]
-    nn <- f$nn
-    fl <- f$flags
 
     ## Pass 2: spares, only for a target short of k inside its fetch --------
 
-    n_free <- rowSums(matrix(!(nn$ids %in% twins), nrow = nrow(nn$ids)))
+    ### Such a target draws from the measured rows outside the twin set, and
+    ### the twins it passed are read from their own distances, one chunk of
+    ### targets at a time, so no fetch widens with the number of twins.
 
-    if (any(n_free < kp)) {
+    short <- rowSums(matrix(!(f$nn$ids %in% twins), nrow = nrow(f$nn$ids))) < kp
+    held  <- f$measured %in% twins
 
-      ask <- min(kp + sum(f$measured %in% twins), length(f$measured))
+    spares <- vector("list", nrow(St))
 
-      if (ask > ncol(nn$ids)) {
+    for (rows in chunks) {
 
-        nn <- nearest_neighbours(St, Sp[f$measured, , drop = FALSE], k = ask, metric = metric,
-                                 sdev = sdev, chunk_size = chunk_size)
-        fl <- twin_flags(nn$dist, f$ref, ratio = twin_ratio)
+      rows <- rows[short[rows]]
 
+      if (length(rows)) {
+        spares[rows] <- spare_neighbourhoods(St[rows, , drop = FALSE], Sp,
+                                             free = f$measured[!held], held = f$measured[held], k = kp,
+                                             metric = metric, sdev = sdev, chunk_size = chunk_size)
       }
 
     }
 
     for (i in seq_len(nrow(St))) {
 
-      tid  <- rownames(St)[i]
-      ids  <- nn$ids[i, ]
-      dist <- nn$dist[i, ]
-      own  <- fl[i, ]
+      tid <- rownames(St)[i]
+
+      nb   <- if (short[i]) spares[[i]] else list(ids = f$nn$ids[i, ], dist = f$nn$dist[i, ])
+      ids  <- nb$ids
+      dist <- nb$dist
+
+      own  <- twin_flags(dist, f$ref[i], ratio = twin_ratio)
       twin <- ids %in% twins
 
       ## A target with no defined distance to anything is not a thin draw, it
@@ -657,6 +668,80 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
     short_draws      = if (length(short_draws)) dplyr::bind_rows(short_draws) else empty_short_draws(),
     k                = k_by
   )
+
+}
+
+
+#' A short target's measured rows, nearest first, up to its k-th outside the twins
+#'
+#' @description
+#' For targets whose first fetch held fewer than `k` rows outside the twin
+#' set. Each target's `k` nearest rows outside the set come from one fetch of
+#' width `k` over those rows, and the twins no further out than the `k`-th of
+#' them from a fetch over the twins alone. Merged, nearest first with ties in
+#' pool order, they are the start of the target's sorted measured rows up to
+#' and including its `k`-th row outside the set, which is all
+#' `draw_neighbours()` reads of a target. A target that cannot reach `k`
+#' gets every measured row.
+#'
+#' @details
+#' Neither fetch is wider than `k` or the twin set, and `draw_neighbours()`
+#' passes one chunk of targets at a time, so the cost does not grow as targets
+#' times twins: the twin set holds every target's copies when the targets are
+#' in the pool.
+#'
+#' @param St [Matrix.] The short targets' scores, rows named.
+#' @param Sp [Matrix.] Pool scores, rows named.
+#' @param free [Character.] The property's measured rows outside the twin
+#'   set, in pool order.
+#' @param held [Character.] Its measured rows in the twin set, in pool order.
+#' @param k [Integer.] Rows to keep per target.
+#' @param metric,sdev,chunk_size Passed to `nearest_neighbours()`.
+#'
+#' @return [List.] One element per row of `St`: `ids` and `dist`, nearest
+#'   first.
+#'
+#' @seealso [draw_neighbours()], [nearest_neighbours()]
+#' @noRd
+spare_neighbourhoods <- function(St, Sp, free, held, k, metric, sdev, chunk_size) {
+
+  fetch <- function(rows, width) {
+
+    if (!width) {
+      return(list(ids  = matrix(NA_character_, nrow(St), 0L),
+                  dist = matrix(NA_real_,      nrow(St), 0L)))
+    }
+
+    nearest_neighbours(St, Sp[rows, , drop = FALSE], k = width, metric = metric,
+                       sdev = sdev, chunk_size = chunk_size)
+
+  }
+
+  n_keep <- min(k, length(free))
+  kept   <- fetch(free, n_keep)
+  twin   <- fetch(held, length(held))
+
+  ### Pool positions, which break ties in distance as the first fetch's
+  ### stable ordering does
+  kept_at <- matrix(match(kept$ids, rownames(Sp)), nrow = nrow(St))
+  twin_at <- matrix(match(twin$ids, rownames(Sp)), nrow = nrow(St))
+
+  lapply(seq_len(nrow(St)), function(j) {
+
+    ### The k-th row outside the set bounds the twins a target can pass. With
+    ### fewer than k such rows, or no defined distance to the k-th, every
+    ### twin is in reach, as every row is for a target short of k.
+
+    reach <- if (n_keep == k) kept$dist[j, k] else NA_real_
+    near  <- if (is.na(reach)) rep(TRUE, length(held)) else !is.na(twin$dist[j, ]) & twin$dist[j, ] <= reach
+
+    ids  <- c(kept$ids[j, ],  twin$ids[j, near])
+    dist <- c(kept$dist[j, ], twin$dist[j, near])
+    o    <- order(dist, c(kept_at[j, ], twin_at[j, near]), method = "radix")
+
+    list(ids = ids[o], dist = dist[o])
+
+  })
 
 }
 

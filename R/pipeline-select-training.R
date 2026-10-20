@@ -778,9 +778,15 @@ select_training <- function(x, library,
   ## data, left out as evaluate() and fit() leave flagged rows, with a line
   ## in the tree.
 
-  pm$matrix <- pm$matrix[!pool_flagged, , drop = FALSE]
-  tm$matrix <- tm$matrix[!target_flagged, , drop = FALSE]
-  usable    <- pool$data$analysis[!pool_flagged, , drop = FALSE]
+  ## Only the columns the call reads, and the matrices copied only when a
+  ## row leaves them: a library's analysis table and its matrix are each
+  ## about a gigabyte on KSSL.
+
+  if (any(pool_flagged))   pm$matrix <- pm$matrix[!pool_flagged, , drop = FALSE]
+  if (any(target_flagged)) tm$matrix <- tm$matrix[!target_flagged, , drop = FALSE]
+
+  read_cols <- intersect(c("sample_id", properties, "upper_depth_cm"), names(pool$data$analysis))
+  usable    <- pool$data$analysis[!pool_flagged, read_cols, drop = FALSE]
 
   if (any(target_flagged)) {
 

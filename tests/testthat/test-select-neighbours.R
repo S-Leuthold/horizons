@@ -637,6 +637,84 @@ test_that("draw_neighbours() fetches spares for a target that drew another targe
 })
 
 
+test_that("draw_neighbours() takes spares at width k, not k plus the twins, a chunk at a time (#149)", {
+
+  ## Arrange: forty targets that are pool rows, so each one's copy is a twin
+  ## and the twins are as many as the targets, with k above the reference
+  ## width, so every first fetch is k wide and every target one short in it
+  set.seed(149)
+  Sp <- matrix(stats::rnorm(1000), nrow = 200, dimnames = list(sprintf("P%03d", 1:200), NULL))
+  St <- Sp[1:40, ]
+  rownames(St) <- sprintf("T%02d", 1:40)
+  rsp   <- tibble::tibble(sample_id = rownames(Sp), clay = 1)
+  k     <- 60L
+  chunk <- 10L
+
+  expect_gt(k, twin_reference_width(nrow(Sp)))
+
+  real  <- nearest_neighbours
+  asked <- list()
+  local_mocked_bindings(nearest_neighbours = function(St, Sp, k, ...) {
+    asked[[length(asked) + 1L]] <<- c(targets = nrow(St), width = k)
+    real(St, Sp, k, ...)
+  })
+
+  ## Act
+  out <- draw_neighbours(St, Sp, responses = rsp, k = k, properties = "clay",
+                         metric = "euclidean", chunk_size = chunk)
+
+  ## Assert: only a chunk of targets is ever fetched wider than k
+  asked <- do.call(rbind, asked)
+  expect_true(all(asked[, "width"] <= k | asked[, "targets"] <= chunk))
+
+  ## And the draw is the rule's: each target keeps its k nearest rows that
+  ## are no target's copy, and passes the other copies nearer than its k-th
+  D     <- brute_distance(St, Sp)
+  twins <- rownames(Sp)[1:40]
+  free  <- setdiff(rownames(Sp), twins)
+
+  kept <- passed <- character()
+
+  for (i in seq_len(nrow(St))) {
+
+    near   <- free[order(D[i, free])][seq_len(k)]
+    reach  <- D[i, near[k]]
+    kept   <- c(kept,   paste(rownames(St)[i], near))
+    passed <- c(passed, paste(rownames(St)[i], setdiff(twins[D[i, twins] < reach], twins[i])))
+
+  }
+
+  m <- out$membership
+  expect_setequal(paste(m$target_id, m$pool_id)[m$retained],  kept)
+  expect_setequal(paste(m$target_id, m$pool_id)[!m$retained], passed)
+  expect_setequal(paste(out$exclusions$target_id, out$exclusions$pool_id), paste(rownames(St), twins))
+  expect_identical(nrow(out$short_draws), 0L)
+
+})
+
+
+test_that("a short target's spares and the twins it passed tie in pool order (#149)", {
+
+  ## Arrange: two targets that are copies of P01 and P03 on a line. T2 is
+  ## short in its first fetch of four, and its spares tie twice: P01 (T1's
+  ## twin) and P05 at distance 2, P00 and P06 at distance 3
+  Sp <- cbind(0:9, 0)
+  rownames(Sp) <- sprintf("P%02d", 0:9)
+  St <- rbind(T1 = c(1, 0), T2 = c(3, 0))
+  rsp <- tibble::tibble(sample_id = rownames(Sp), clay = 1)
+
+  ## Act
+  out <- draw_neighbours(St, Sp, responses = rsp, k = 4L, properties = "clay", metric = "euclidean")
+
+  ## Assert: ties go in pool order, as in a fetch over every measured row
+  t2 <- out$membership[out$membership$target_id == "T2", ]
+  expect_identical(t2$pool_id, c("P02", "P04", "P01", "P05", "P00"))
+  expect_identical(t2$retained, c(TRUE, TRUE, FALSE, TRUE, TRUE))
+  expect_identical(out$exclusions$pool_id[out$exclusions$target_id == "T2"], "P03")
+
+})
+
+
 test_that("draw_neighbours() labels the space it measured in", {
 
   s   <- fixture_scores()
