@@ -160,7 +160,7 @@ test_that("select_training() refuses every argument problem at once, in one cond
 
   expect_identical(rlang::call_name(err$call), "select_training")
   expect_match(msg, "The inputs failed 6 checks.", fixed = TRUE)
-  expect_match(msg, "1 more not shown; all are in the error's `findings` field.", fixed = TRUE)
+  expect_match(msg, "1 more finding not shown; all are in the error's `findings` field.", fixed = TRUE)
   expect_length(err$findings, 6L)
 
   for (arg in c("scope", "space", "metric", "depth", "k")) {
@@ -1410,6 +1410,7 @@ test_that("a draw the twin subtraction empties fails with the property and the c
   ## The work was attempted, so the kind is run, and the cause travels with it
   expect_s3_class(err, "horizons_error_run")
   expect_match(conditionMessage(err), "lower it")
+  expect_match(conditionMessage(err), "rlang::last_error()$results", fixed = TRUE)
   expect_identical(err$results$property, "clay")
   expect_match(err$results$cause, "lower it (the default is 0.05)", fixed = TRUE)
 
@@ -1662,6 +1663,13 @@ test_that("a target flagged by an earlier step gets no training set, and is name
   expect_identical(out$selection$membership, without$selection$membership)
   expect_identical(out$data$analysis$sample_id, without$data$analysis$sample_id)
 
+  ## Past five, the ids are listed as predict()'s flagged warning lists them
+  w <- collect_warnings(select_training(with_flag(fx$targets, ids[1:6]), fx$pool, k = 5, properties = "clay"),
+                        class = "horizons_warning_flagged")$warnings
+
+  expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])),
+               paste0(shown_ids(ids[1:6]), "."), fixed = TRUE)
+
 })
 
 
@@ -1725,15 +1733,15 @@ test_that("a PLS space with no more measured rows than ncomp is refused before i
 })
 
 
-test_that("a fixed cluster count above the targets the similarity space holds is refused", {
+test_that("a fixed cluster count above the targets is refused before the library resolves", {
 
   fx <- select_fixture(n_pool = 60)
 
-  local_mocked_bindings(cluster_targets = function(...) stop("k-means ran"))
+  local_mocked_bindings(resolve_source = function(...) stop("the library resolved"))
 
   err <- expect_error(quiet_select(fx, k = 5, scope = "cluster", clusters = 9, cluster_min = 1),
                       class = "horizons_error_input")
-  expect_match(conditionMessage(err), "`clusters` = 9 is more clusters than the 8 targets the similarity space holds.",
+  expect_match(conditionMessage(err), "`clusters` = 9 is more clusters than the 8 targets to draw for.",
                fixed = TRUE)
 
   ## A flagged target left out can bring the targets below the count
@@ -1742,25 +1750,8 @@ test_that("a fixed cluster count above the targets the similarity space holds is
   err <- expect_error(suppressWarnings(select_training(targets, fx$pool, k = 5, scope = "cluster",
                                                        clusters = 8, cluster_min = 1)),
                       class = "horizons_error_input")
-  expect_match(conditionMessage(err), "than the 7 targets", fixed = TRUE)
-
-})
-
-
-test_that("report_selection() prints a record with missing tables rather than erroring", {
-
-  ## nrow(NULL) is NULL and if (NULL) is an error naming neither the field
-  ## nor the verb, so a table that may be missing is read through
-  ## n_rows_of(). Its one caller passes the record it has just built.
-
-  sel <- list(settings = list(scope = "batch", k = c(clay = 10L)))
-
-  expect_silent(txt <- utils::capture.output(report_selection(sel, n_targets = 8L)))
-  expect_true(any(grepl("Twins flagged: 0", txt)))
-  expect_true(any(grepl("scope = batch", txt)))
-
-  ## And an entirely empty one
-  expect_silent(utils::capture.output(report_selection(list(), n_targets = 0L)))
+  expect_match(conditionMessage(err), "than the 7 targets to draw for", fixed = TRUE)
+  expect_match(conditionMessage(err), "1 target flagged by an earlier step is not counted", fixed = TRUE)
 
 })
 

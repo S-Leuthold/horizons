@@ -583,7 +583,7 @@ download_sources <- function(entry, dir, verbose = TRUE, call = rlang::caller_en
         "Could not download {.file {src$file[i]}}.",
         "x" = "{why}",
         "i" = "Source: {.url {src$url[i]}}.",
-        "i" = "Check the connection and run the call again; nothing was cached."
+        "i" = "Check the connection, and that {.path {dirname(dir)}} is writable, then run the call again; nothing was cached."
       ), kind = "run", class = "horizons_error_download", parent = parent, call = call)
     }
 

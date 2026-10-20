@@ -621,6 +621,21 @@ select_training <- function(x, library,
 
   }
 
+  ## A fixed cluster count needs as many targets to cluster, and a flagged
+  ## target is not one, so this too is refused before the library resolves
+
+  n_drawn_for <- sum(!target_flagged)
+
+  if (scope == "cluster" && !is.null(clusters) && clusters > n_drawn_for) {
+
+    abort_horizons(c(
+      "{.arg clusters} = {clusters} is more clusters than the {n_drawn_for} target{?s} to draw for.",
+      "i" = if (any(target_flagged)) "{sum(target_flagged)} target{?s} flagged by an earlier step {?is/are} not counted; {.field .flag} names the step.",
+      "i" = "Lower {.arg clusters}, or leave it {.code NULL} to choose the count by silhouette."
+    ), kind = "input")
+
+  }
+
   target_vars   <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
   restandardize <- !is.null(x$provenance$standardization)
 
@@ -798,7 +813,7 @@ select_training <- function(x, library,
     left_targets <- x$data$analysis$sample_id[target_flagged]
 
     log_warning(collector, "flagged", c(
-      "{length(left_targets)} target{?s} flagged by an earlier step {?was/were} left out, so no training set was drawn for {?it/them}: {.val {utils::head(left_targets, 5)}}{if (length(left_targets) > 5) ', ...' else ''}.",
+      "{length(left_targets)} target{?s} flagged by an earlier step {?was/were} left out, so no training set was drawn for {?it/them}: {shown_ids(left_targets)}.",
       "i" = "{.field .flag} names the step that could not use each one."
     ), ids = left_targets)
 
@@ -1096,18 +1111,6 @@ select_training <- function(x, library,
 
   St <- project_similarity(sp, sa$matrix, sa$wavenumbers)
 
-  ## A fixed cluster count needs as many targets in the space, which the
-  ## flagged targets left out can bring below it
-
-  if (scope == "cluster" && !is.null(clusters) && clusters > nrow(St)) {
-
-    abort_horizons(c(
-      "{.arg clusters} = {clusters} is more clusters than the {nrow(St)} target{?s} the similarity space holds.",
-      "i" = "Lower {.arg clusters}, or leave it {.code NULL} to choose the count by silhouette."
-    ), kind = "input")
-
-  }
-
   ## The width the filter actually spans once rounded to whole points.
 
   window_cm <- if (derivative > 0) (window_points - 1L) * search_res else NA_real_
@@ -1335,7 +1338,8 @@ select_training <- function(x, library,
 
       abort_horizons(c(
         "Every row drawn for {.field {emptied}} was flagged as some target's twin, so there is no training set.",
-        bullets
+        bullets,
+        "i" = "The causes, one row per property, are on this condition as {.field results}: {.code rlang::last_error()$results}."
       ), kind = "run", class = "horizons_error_selection_failed",
          results = tibble::tibble(property = unname(emptied), cause = unname(causes)))
 
@@ -1508,7 +1512,7 @@ select_training <- function(x, library,
     log_warning(collector, "coverage", c(
       "{nrow(sd_tbl)} target-property draw{?s} could not reach k.",
       "i" = if (nrow(thin)) "{nrow(thin)} after twin exclusions, with too few measured rows left. Smallest: {min(thin$k_drawn)} of {max(thin$k_requested)} rows, on {.field {unique(thin$property)}}.",
-      "i" = if (length(no_angle)) "{length(no_angle)} target{?s} had no defined distance to any pool row, so nothing was drawn for {?it/them}: {.val {utils::head(no_angle, 5)}}{if (length(no_angle) > 5) ', ...' else ''}. {.code metric = \"cosine\"} has no angle for a row on the pool's centroid, since the scores are mean-centred; use {.val euclidean} or {.val mahalanobis} for these targets.",
+      "i" = if (length(no_angle)) "{length(no_angle)} target{?s} had no defined distance to any pool row, so nothing was drawn for {?it/them}: {shown_ids(no_angle)}. {.code metric = \"cosine\"} has no angle for a row on the pool's centroid, since the scores are mean-centred; use {.val euclidean} or {.val mahalanobis} for these targets.",
       "i" = "See {.code x$selection$short_draws}."
     ), ids = unique(sd_tbl$target_id))
 
@@ -1529,7 +1533,7 @@ select_training <- function(x, library,
 
     log_warning(collector, "applicability", c(
       "{nrow(beyond)} target{?s} sit{?s/} beyond the pool's own nearest-neighbour spread.",
-      "i" = "{.val {utils::head(beyond$target_id, 5)}}{if (nrow(beyond) > 5) ', ...' else ''}.",
+      "i" = "{shown_ids(beyond$target_id)}.",
       "i" = "Selection proceeds; treat their predictions with care. The check is made after SNV, so it cannot see a unit mismatch; that is reported separately."
     ), ids = beyond$target_id)
 
@@ -1610,12 +1614,8 @@ sg_window_fits <- function(points, n_columns) {
 #' @description
 #' `select_training()` checks its arguments, and then the pool's data, all
 #' at once before any work, so a call is refused once with everything wrong
-#' with it rather than once per mistake. Shaped as [abort_validation()]
-#' shapes a validation error: each finding an `x` bullet, the first five
-#' shown and the rest counted, every finding kept on the condition as
-#' `findings`. The findings are text the verb has already rendered, so they
-#' go in as values and their braces are never read as a cli template. Each
-#' finding names its own remedy.
+#' with it rather than once per mistake, in the shape [abort_findings()]
+#' gives a validation error too. Each finding names its own remedy.
 #'
 #' @param findings [Character.] One message per problem.
 #' @param call The frame the error reports: the verb's.
@@ -1624,18 +1624,8 @@ sg_window_fits <- function(points, n_columns) {
 #' @noRd
 abort_select_inputs <- function(findings, call = rlang::caller_env()) {
 
-  shown  <- utils::head(findings, 5L)
-  n_more <- length(findings) - length(shown)
-
-  abort_horizons(
-    c("The inputs failed {length(findings)} check{?s}.",
-      stats::setNames(cli_escape(shown), rep("x", length(shown))),
-      if (n_more > 0) c("i" = paste0(n_more, " more not shown; all are in the error's `findings` field."))),
-    kind     = "input",
-    ## Plain text: a field is data a handler matches or writes out
-    findings = cli::ansi_strip(findings),
-    call     = call
-  )
+  abort_findings(findings, "The inputs failed {length(findings)} check{?s}.",
+                 kind = "input", call = call)
 
 }
 
@@ -2073,10 +2063,8 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
 #' Print the selection report
 #'
 #' @details
-#' Its one caller passes the record it has just built. A table that may be
-#' missing is still read through `n_rows_of()`, since `nrow(NULL)` is `NULL`
-#' and `if (NULL)` is an error with a message that names neither the field
-#' nor the verb.
+#' Its one caller passes the record it has just built, so every table it
+#' reads is there.
 #'
 #' @param sel [List.] `x$selection`.
 #' @param n_targets [Integer.] Targets in the batch.
@@ -2085,27 +2073,23 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
 #' @noRd
 report_selection <- function(sel, n_targets) {
 
-  s  <- sel$settings
-  ps <- sel$pool_sizes
+  s     <- sel$settings
+  ps    <- sel$pool_sizes
+  scope <- s$scope
 
-  n_rows_of <- function(value) if (is.data.frame(value)) nrow(value) else 0L
+  for (i in seq_len(nrow(ps))) {
 
-  scope <- if (is.null(s$scope) || !length(s$scope)) "unknown" else s$scope
-
-  for (i in seq_len(n_rows_of(ps))) {
-
-    k_p <- if (is.null(s$k)) "unknown" else s$k[[ps$property[i]]]
-    msg <- if (identical(scope, "global")) {
+    msg <- if (scope == "global") {
       paste0(ps$property[i], ": ", ps$available[i], " measured rows, no draw (scope = global)")
     } else {
-      paste0(ps$property[i], ": k = ", k_p, " \u00D7 ", n_targets, " targets \u2192 ",
+      paste0(ps$property[i], ": k = ", s$k[[ps$property[i]]], " \u00D7 ", n_targets, " targets \u2192 ",
              ps$drawn[i], " of ", ps$available[i], " measured rows")
     }
     cat(paste0("\u2502  \u251C\u2500 ", msg, "\n"))
 
   }
 
-  if (identical(scope, "cluster") && !is.null(sel$clustering)) {
+  if (scope == "cluster") {
 
     cat(paste0("\u2502  \u251C\u2500 Clusters: ", sel$clustering$k, " (", sel$clustering$reason, ")\n"))
 
@@ -2115,7 +2099,7 @@ report_selection <- function(sel, n_targets) {
   ## neighbourhood slots a twin was removed from, and how many rows that
   ## actually kept out of the training set.
 
-  n_tw <- n_rows_of(sel$exclusions)
+  n_tw <- nrow(sel$exclusions)
   tail <- if (n_tw) {
     paste0(" (", paste(utils::head(unique(sel$exclusions$target_id), 3), collapse = ", "),
            if (length(unique(sel$exclusions$target_id)) > 3) ", ..." else "", ")")
@@ -2127,7 +2111,7 @@ report_selection <- function(sel, n_targets) {
 
   n_un <- sel$n_excluded_union
 
-  union_note <- if (identical(scope, "global")) {
+  union_note <- if (scope == "global") {
     "0 (scope = global keeps the whole pool; the check is reported, not applied)"
   } else {
     paste0(n_un, " removed from the union")
@@ -2135,7 +2119,7 @@ report_selection <- function(sel, n_targets) {
 
   cat(paste0("\u2502  \u251C\u2500 Twin rows: ", union_note, "\n"))
 
-  n_short <- n_rows_of(sel$short_draws)
+  n_short <- nrow(sel$short_draws)
 
   if (n_short) {
 
@@ -2161,7 +2145,7 @@ report_selection <- function(sel, n_targets) {
   }
   cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ", far, "\n"))
 
-  n_groups <- n_rows_of(sel$groups)
+  n_groups <- nrow(sel$groups)
   n_rows   <- length(unique(unlist(sel$groups$pool_ids)))
   cat(paste0("\u2502  \u2514\u2500 ", n_rows, " rows in ", n_groups, " group", if (n_groups != 1) "s",
              " (scope = ", scope, ")\n"))

@@ -202,7 +202,8 @@ test_that("a download that fails stops, classed, with its reason, and caches not
                         "Could not download 'mir.csv.gz'", fixed = TRUE,
                         class = "horizons_error_download")
     expect_identical(err$body[["x"]], f$why)
-    expect_match(conditionMessage(err), "Check the connection and run the call again; nothing was cached.",
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 paste0("Check the connection, and that '", cache, "' is writable, then run the call again; nothing was cached."),
                  fixed = TRUE)
 
   }
