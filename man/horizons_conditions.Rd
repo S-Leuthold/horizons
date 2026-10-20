@@ -45,6 +45,11 @@ not predict, or an ensemble's member or its combination could not.
 One row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
 \code{"combination"} for an ensemble's), \code{config_id} (\code{NA} for the
 combination), \code{step}, \code{class} and \code{error_message}.}
+\item{\code{horizons_error_read_failed}}{(run) \code{\link[=spectra]{spectra()}} could read none
+of the files it was given. One row per file travels as \code{results}: its
+\code{file}, the \code{step} that failed (\code{"file_read"}, or \code{"file_block"} for
+a file with no absorbance block), the \code{class} of the root cause, and
+the \code{cause}.}
 \item{\code{horizons_error_selection_failed}}{(run) \code{\link[=select_training]{select_training()}} had
 nothing to return: the twin subtraction left no training rows for any
 property it drew for. One row per property travels as \code{results}: its

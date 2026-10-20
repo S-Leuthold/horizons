@@ -2814,6 +2814,24 @@ selected_member <- function(x) {
 }
 
 
+#' The source an object was read from, on one line
+#'
+#' @description
+#' `spectra()` records the paths it was given, which can be thousands of
+#' files, so `print()` and `summary()` show the first and count the rest.
+#'
+#' @param source `provenance$spectra_source`: character.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+source_label <- function(source) {
+
+  if (length(source) <= 1) return(as.character(source))
+
+  paste0(source[1], " and ", length(source) - 1, " more")
+
+}
+
 #' Print method for horizons_data objects
 #'
 #' @description
@@ -2943,7 +2961,7 @@ print.horizons_data <- function(x, ...) {
 
       has_type <- !is.null(x$provenance$spectra_type)
       branch   <- if (has_type) "\u251C\u2500" else "\u2514\u2500"
-      cat(paste0("   ", branch, " Source: ", x$provenance$spectra_source, "\n"))
+      cat(paste0("   ", branch, " Source: ", source_label(x$provenance$spectra_source), "\n"))
 
     }
 
@@ -3257,7 +3275,7 @@ summary.horizons_data <- function(object, ...) {
   }
 
   if (!is.null(x$provenance$spectra_source)) {
-    cat(paste0("   ", get_branch(), " Spectra source: ", x$provenance$spectra_source, "\n"))
+    cat(paste0("   ", get_branch(), " Spectra source: ", source_label(x$provenance$spectra_source), "\n"))
   }
 
   if (!is.null(x$provenance$spectra_type)) {

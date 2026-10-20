@@ -507,7 +507,7 @@ test_that("spectra() refuses a directory with no OPUS files", {
 
 })
 
-test_that("spectra() refuses OPUS files that hold no spectral block", {
+test_that("spectra() refuses OPUS files that hold no absorbance block, naming the blocks they hold", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -522,13 +522,14 @@ test_that("spectra() refuses OPUS files that hold no spectral block", {
 
   ## Act and assert --------------------------------------------------------
 
-  ## Each file warns that it has no data block; then the read is refused.
-  ## This abort carries no package class, so the message is the check.
-  expect_error(
-    suppressWarnings(spectra(opus_dir(), type = "opus")),
-    "No valid spectral data could be extracted",
-    fixed = TRUE
-  )
+  ## Every file fails its unit, so nothing usable came out
+  err <- expect_error(spectra(opus_dir(), type = "opus"),
+                      "holds no absorbance block", class = "horizons_error_read_failed")
+  expect_true(inherits(err, "horizons_error_run"))
+
+  expect_identical(nrow(err$results), 3L)
+  expect_identical(err$results$step, rep("file_block", 3))
+  expect_match(err$results$cause, "Its blocks: \"basic_metadata\"", fixed = TRUE)
 
 })
 
@@ -581,6 +582,238 @@ test_that("spectra() reads OPUS files in a fresh session, loading opusreader2 it
 
 
 ## ---------------------------------------------------------------------------
+## spectra() — Several files, each read on its own (#224, #191)
+## ---------------------------------------------------------------------------
+## A file that cannot be read is dropped by name and the rest are returned.
+## Files opusreader2 would fail on, or that hold other blocks, are not cut
+## from real scans: read_opus() is stubbed, keyed by the file's name, over
+## empty files that only have to exist.
+
+#' An OPUS block as opusreader2 returns one: a 1-row matrix and its axis
+#' @noRd
+fake_block <- function(wn, values) {
+  list(data = matrix(values, nrow = 1, dimnames = list(NULL, as.character(wn))),
+       wavenumbers = wn)
+}
+
+#' Empty files named `names` in a temporary directory, which is made the
+#' working directory, so the paths spectra() reports are the bare names
+#' @noRd
+local_opus_files <- function(names, env = parent.frame()) {
+  dir <- withr::local_tempdir(.local_envir = env)
+  file.create(file.path(dir, names))
+  withr::local_dir(dir, .local_envir = env)
+  names
+}
+
+#' Stub read_opus() with one reader per file name: a list of blocks, or a
+#' function run in its place
+#' @noRd
+local_reads <- function(reads, env = parent.frame()) {
+  local_mocked_bindings(
+    read_opus = function(dsn, ...) {
+      read <- reads[[basename(dsn)]]
+      if (is.function(read)) read() else list(file = read)
+    },
+    .package = "opusreader2", .env = env
+  )
+}
+
+FAKE_WN <- c(4000, 3998, 3996)
+
+test_that("spectra() reads a vector of OPUS files as it reads their directory, and a file and a directory together", {
+
+  paths <- file.path(opus_dir(), c("S01-1.0", "S01-1.1", "S02-1.0"))
+
+  by_vector <- spectra(paths)
+  by_dir    <- read_opus_dir()
+
+  expect_identical(by_vector$data$analysis, by_dir$data$analysis)
+  expect_identical(by_vector$provenance$spectra_source, paths)
+
+  ## A file, then a directory: the file's row first
+  both <- spectra(c(file.path(opus_dir(), "S02-1.0"), opus_dir()))
+  expect_identical(both$data$analysis$sample_id, c("S02-1", "S01-1", "S01-1", "S02-1"))
+
+  ## print() and summary() show the first path and count the rest
+  expect_true(any(grepl("S01-1.0 and 2 more", capture.output(print(by_vector)), fixed = TRUE)))
+  expect_true(any(grepl("S01-1.0 and 2 more", capture.output(summary(by_vector)), fixed = TRUE)))
+
+})
+
+test_that("spectra() reads a vector of CSV files, and a directory of them", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  dir <- withr::local_tempdir()
+  readr::write_csv(tibble::tibble(Sample_ID = c("A", "B"), `4000` = c(0.1, 0.2), `3998` = c(0.3, 0.4)),
+                   file.path(dir, "one.csv"))
+  readr::write_csv(tibble::tibble(Sample_ID = "C", `4000` = 0.5, `3998` = 0.6),
+                   file.path(dir, "two.csv"))
+
+  ## Act -------------------------------------------------------------------
+
+  by_vector <- spectra(file.path(dir, c("one.csv", "two.csv")))
+  by_dir    <- spectra(dir)
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(by_vector$data$analysis$sample_id, c("A", "B", "C"))
+  expect_identical(by_vector$data$analysis$wn_3998, c(0.3, 0.4, 0.6))
+  expect_identical(by_vector$provenance$spectra_type, "csv")
+
+  ## A directory read as CSV, told or detected, is its files
+  expect_identical(by_dir$data$analysis, by_vector$data$analysis)
+  expect_identical(spectra(dir, type = "csv")$data$analysis, by_vector$data$analysis)
+
+})
+
+test_that("spectra() refuses a source that mixes OPUS and CSV files, and names a missing path before reading any", {
+
+  csv <- withr::local_tempfile(fileext = ".csv")
+  readr::write_csv(tibble::tibble(Sample_ID = "A", `4000` = 0.1), csv)
+  opus <- file.path(opus_dir(), "S02-1.0")
+
+  expect_error(spectra(c(opus, csv)), "mixes OPUS and CSV files",
+               fixed = TRUE, class = "horizons_error_input")
+
+  ## Every path is checked before the first is read
+  n_reads <- 0
+  local_mocked_bindings(read_opus = function(dsn, ...) { n_reads <<- n_reads + 1; stop("read") },
+                        .package = "opusreader2")
+
+  err <- expect_error(spectra(c(opus, "/nonexistent/a.0", "/nonexistent/b.0")), "2 paths in `source` do not exist",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_match(conditionMessage(err), "/nonexistent/b.0", fixed = TRUE)
+  expect_identical(n_reads, 0)
+
+})
+
+test_that("a file that cannot be read is dropped by name, and the rest returned, with one partial_failure warning", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  files <- local_opus_files(c("a.0", "b.0", "c.0"))
+  local_reads(list(
+    a.0 = list(ab = fake_block(FAKE_WN, c(1, 2, 3))),
+    b.0 = function() stop("corrupt header"),
+    c.0 = list(ab = fake_block(FAKE_WN, c(4, 5, 6)))
+  ))
+
+  ## Act -------------------------------------------------------------------
+
+  w <- expect_warning(out <- spectra(files), "1 of 3 OPUS files could not be read",
+                      class = "horizons_warning_partial_failure")
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(out$data$analysis$sample_id, c("a", "c"))
+  expect_identical(out$data$analysis$wn_3998, c(2, 5))
+  expect_match(conditionMessage(w), "File read failed: corrupt header (b.0)", fixed = TRUE)
+
+  ## Recorded on the object, whether or not the warning is seen
+  out <- suppressWarnings(spectra(files))
+  row <- out$log[out$log$topic %in% "partial_failure", ]
+  expect_identical(nrow(row), 1L)
+  expect_identical(row$verb, "spectra")
+  expect_identical(row$ids[[1]], "b.0")
+
+})
+
+test_that("spectra() aborts with every file's failure when none can be read", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  files <- local_opus_files(c("a.0", "b.0"))
+  local_reads(list(a.0 = function() stop("corrupt header"),
+                   b.0 = list(sc_sample = fake_block(FAKE_WN, 1:3))))
+
+  ## Act -------------------------------------------------------------------
+
+  err <- expect_error(spectra(files), class = "horizons_error_read_failed")
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_true(inherits(err, "horizons_error_run"))
+  expect_identical(err$results$file, files)
+  expect_identical(err$results$step, c("file_read", "file_block"))
+  expect_identical(err$results$class[1], "simpleError")
+  expect_identical(err$results$cause[1], "File read failed: corrupt header")
+
+  ## The causes are in the message, not only on the condition
+  expect_snapshot(spectra(files), error = TRUE)
+
+})
+
+test_that("a warning opusreader2 raises while reading is passed on once, as quality, not muffled", {
+
+  files <- local_opus_files(c("a.0", "b.0"))
+  read  <- function() {
+    warning("odd byte at offset 12")
+    list(file = list(ab = fake_block(FAKE_WN, c(1, 2, 3))))
+  }
+  local_reads(list(a.0 = read, b.0 = read))
+
+  w <- expect_warning(out <- spectra(files), "A warning arose while reading: odd byte at offset 12",
+                      class = "horizons_warning_quality")
+  expect_match(conditionMessage(w), "In 2 files", fixed = TRUE)
+
+  expect_identical(out$data$n_rows, 2L)
+  expect_identical(out$log$ids[out$log$topic %in% "quality"][[1]], files)
+
+})
+
+test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, never the first on the list (#191)", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## A single-channel block first, then a parameter block whose name starts
+  ## with ab, then the absorbance blocks in the other order
+  files <- local_opus_files(c("a.0", "b.0", "c.0"))
+  local_reads(list(
+    a.0 = list(sc_sample = fake_block(FAKE_WN, c(9, 9, 9)),
+               ab_no_atm_comp_data_param = list(data = "parameters"),
+               ab_no_atm_comp = fake_block(FAKE_WN, c(1, 2, 3))),
+    b.0 = list(ab_no_atm_comp = fake_block(FAKE_WN, c(7, 7, 7)),
+               AB = fake_block(FAKE_WN, c(4, 5, 6))),
+    c.0 = list(sc_sample = fake_block(FAKE_WN, c(9, 9, 9)),
+               ab_no_atm_comp_data_param = list(data = "parameters"))
+  ))
+
+  ## Act -------------------------------------------------------------------
+
+  w <- expect_warning(out <- spectra(files), class = "horizons_warning_partial_failure")
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(out$data$analysis$wn_4000, c(1, 4))
+  expect_identical(out$data$analysis$wn_3996, c(3, 6))
+
+  ## The file with neither is dropped, its blocks named
+  expect_match(conditionMessage(w),
+               'The file holds no absorbance block ("ab" or "ab_no_atm_comp"). Its blocks: "sc_sample" and "ab_no_atm_comp_data_param".',
+               fixed = TRUE)
+
+})
+
+test_that("spectra()'s tree counts scans under sample ids when they repeat, and the scans with no id", {
+
+  df <- tibble::tibble(Sample_ID = c("A", "A", "B", "B", NA),
+                       `4000` = 1:5 / 10, `3998` = 1:5 / 10)
+
+  out <- capture.output(spectra(df, verbose = TRUE))
+
+  expect_true(any(grepl("5 scans under 2 sample ids × 2 predictors", out, fixed = TRUE)))
+  expect_true(any(grepl("1 scan with no sample id (`NA`)", out, fixed = TRUE)))
+
+  ## Unique ids: the samples line as before
+  out <- capture.output(spectra(df[c(1, 3), ], verbose = TRUE))
+  expect_true(any(grepl("2 samples × 2 predictors", out, fixed = TRUE)))
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## spectra() — Validation and errors
 ## ---------------------------------------------------------------------------
 
@@ -598,23 +831,6 @@ test_that("spectra() errors on non-existent file", {
   expect_error(
     spectra("/nonexistent/path/to/file.csv"),
     "does not exist", class = "horizons_error_input"
-  )
-
-})
-
-test_that("spectra() refuses a vector of paths, and a directory read as a CSV", {
-
-  ## These aborts carry no package class, so the message is the check.
-  expect_error(
-    spectra(c("a.csv", "b.csv")),
-    "`source` must be a single path, not a vector of length 2",
-    fixed = TRUE
-  )
-
-  expect_error(
-    spectra(withr::local_tempdir(), type = "csv"),
-    "Expected CSV file, got directory",
-    fixed = TRUE
   )
 
 })

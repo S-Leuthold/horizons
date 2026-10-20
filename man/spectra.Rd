@@ -14,7 +14,8 @@ spectra(
 )
 }
 \arguments{
-\item{source}{Path to directory, file(s), or a tibble/data.frame.}
+\item{source}{A data frame, or a character vector of paths, each a file
+or a directory (see Details).}
 
 \item{type}{Character. One of \code{"opus"}, \code{"csv"}, or \code{NULL} for auto-detect.
 Default: \code{NULL}.}
@@ -49,7 +50,9 @@ object ready for downstream processing.
 This function handles three input types:
 \itemize{
 \item \strong{OPUS files} (\code{type = "opus"}): Read via \code{opusreader2::read_opus()}.
-Filenames become \code{sample_id}, wavenumber columns get \code{wn_} prefix.
+Filenames become \code{sample_id}, wavenumber columns get \code{wn_} prefix. The
+absorbance block is taken by name, \code{ab} and then \code{ab_no_atm_comp}
+(ignoring case), never the first block on the file's list.
 \item \strong{CSV files} (\code{type = "csv"}): Read via \code{readr::read_csv()}.
 Auto-detects ID and wavelength columns.
 \item \strong{Tibble/data.frame}: Same detection logic as CSV.
@@ -57,6 +60,17 @@ Auto-detects ID and wavelength columns.
 
 The \code{filename} column (role: meta) preserves original filenames for traceability
 and later ID parsing via \code{parse_ids()}.
+
+\strong{Several files:} \code{source} may be a character vector of files and
+directories, all OPUS or all CSV; a directory is read as the files of
+that type in it, and every file's rows are returned in one object. Each
+file is read on its own. One that cannot be read, or that holds no
+absorbance block, is dropped, and the files dropped are named, with their
+causes, in one \code{horizons_warning_partial_failure}, recorded on the
+object's \code{log}. When no file can be read the call aborts with
+\code{horizons_error_read_failed}, one row per file in its \code{results}. A
+warning \code{opusreader2} or \code{readr} raises while reading is passed on, once
+per distinct message, as a \code{horizons_warning_quality}.
 
 \strong{Wavenumber order:} Predictor columns are sorted into decreasing
 wavenumber order before the object is returned, whatever order the source

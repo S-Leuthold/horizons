@@ -163,6 +163,11 @@ check_arg <- function(check,
 #'     One row per failure travels as `results`: its `unit` (`"configuration"`, or
 #'     `"combination"` for an ensemble's), `config_id` (`NA` for the
 #'     combination), `step`, `class` and `error_message`.}
+#'   \item{`horizons_error_read_failed`}{(run) [spectra()] could read none
+#'     of the files it was given. One row per file travels as `results`: its
+#'     `file`, the `step` that failed (`"file_read"`, or `"file_block"` for
+#'     a file with no absorbance block), the `class` of the root cause, and
+#'     the `cause`.}
 #'   \item{`horizons_error_selection_failed`}{(run) [select_training()] had
 #'     nothing to return: the twin subtraction left no training rows for any
 #'     property it drew for. One row per property travels as `results`: its

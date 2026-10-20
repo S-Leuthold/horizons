@@ -41,7 +41,9 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' This function handles three input types:
 #'
 #' * **OPUS files** (`type = "opus"`): Read via `opusreader2::read_opus()`.
-#'   Filenames become `sample_id`, wavenumber columns get `wn_` prefix.
+#'   Filenames become `sample_id`, wavenumber columns get `wn_` prefix. The
+#'   absorbance block is taken by name, `ab` and then `ab_no_atm_comp`
+#'   (ignoring case), never the first block on the file's list.
 #'
 #' * **CSV files** (`type = "csv"`): Read via `readr::read_csv()`.
 #'   Auto-detects ID and wavelength columns.
@@ -50,6 +52,17 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'
 #' The `filename` column (role: meta) preserves original filenames for traceability
 #' and later ID parsing via `parse_ids()`.
+#'
+#' **Several files:** `source` may be a character vector of files and
+#' directories, all OPUS or all CSV; a directory is read as the files of
+#' that type in it, and every file's rows are returned in one object. Each
+#' file is read on its own. One that cannot be read, or that holds no
+#' absorbance block, is dropped, and the files dropped are named, with their
+#' causes, in one `horizons_warning_partial_failure`, recorded on the
+#' object's `log`. When no file can be read the call aborts with
+#' `horizons_error_read_failed`, one row per file in its `results`. A
+#' warning `opusreader2` or `readr` raises while reading is passed on, once
+#' per distinct message, as a `horizons_warning_quality`.
 #'
 #' **Wavenumber order:** Predictor columns are sorted into decreasing
 #' wavenumber order before the object is returned, whatever order the source
@@ -66,7 +79,8 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' replicates before anything that requires unique ids (`average()` itself,
 #' `add_response()`, `configure()`, and onward, which refuse the object).
 #'
-#' @param source Path to directory, file(s), or a tibble/data.frame.
+#' @param source A data frame, or a character vector of paths, each a file
+#'   or a directory (see Details).
 #' @param type Character. One of `"opus"`, `"csv"`, or `NULL` for auto-detect.
 #'   Default: `NULL`.
 #' @param id_col Character. Column name to use as sample ID. If `NULL`,
@@ -139,18 +153,6 @@ spectra <- function(source,
 
   }
 
-  ## Reject multi-element character vectors -----------------------------------
-  ## spectra() expects a single path (file or directory), not a vector of paths
-
-  if (is_path && length(source) > 1) {
-
-    cli::cli_abort(c(
-      "{.arg source} must be a single path, not a vector of length {length(source)}",
-      "i" = "Provide a directory path, or a single file path"
-    ))
-
-  }
-
   ## Every path must exist, checked once before anything is read --------------
 
   if (is_path) {
@@ -169,32 +171,45 @@ spectra <- function(source,
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 2: Dispatch based on input type
+  ## Step 2: Read the source
   ## -------------------------------------------------------------------------
+  ## A data frame is one table. A path is a vector of files and directories,
+  ## and each file is read as a unit of its own: one that cannot be read is
+  ## dropped and named in one partial_failure warning, and the rest are
+  ## returned.
 
-  call <- rlang::current_env()
+  call      <- rlang::current_env()
+  collector <- log_open("spectra")
 
   if (is_tibble) {
 
-    result <- spectra_from_tibble(
-      data            = source,
-      id_col          = id_col,
-      wavelength_cols = wavelength_cols,
-      call            = call
-    )
+    tables      <- list(spectra_from_tibble(source, id_col, wavelength_cols, call = call))
+    source_type <- "tibble"
+    source_name <- "tibble"
 
-  } else if (is_path) {
+  } else {
 
-    result <- spectra_from_path(
-      source          = source,
-      type            = type,
-      id_col          = id_col,
-      wavelength_cols = wavelength_cols,
-      recursive       = recursive,
-      call            = call
-    )
+    read        <- spectra_from_path(source, type, id_col, wavelength_cols, recursive,
+                                     collector = collector, call = call)
+    tables      <- read$tables
+    source_type <- read$type
+    source_name <- source
 
   }
+
+  analysis <- bind_spectra_files(tables)
+
+  result <- new_horizons_data(
+    analysis       = analysis,
+    role_map       = build_role_map(
+      id_col     = "sample_id",
+      wn_cols    = attr(analysis, "wn_cols"),
+      meta_cols  = setdiff(names(analysis), c("sample_id", attr(analysis, "wn_cols"))),
+      other_cols = character()
+    ),
+    spectra_source = source_name,
+    spectra_type   = source_type
+  )
 
   ## -------------------------------------------------------------------------
   ## Step 2b: Put the axis in decreasing order, then validate
@@ -223,30 +238,43 @@ spectra <- function(source,
 
   sorted_result <- sort_axis_decreasing(result)
   result        <- validate_horizons_data(sorted_result$x, stage = "raw")
+  result$log    <- log_close(collector, result$log)
 
   ## -------------------------------------------------------------------------
   ## Step 3: CLI output
   ## -------------------------------------------------------------------------
+  ## Replicate scans share an id until average() collapses them, so the count
+  ## says how many scans sit under how many ids, and how many have none.
 
   if (verbose) {
+
+    ids    <- result$data$analysis$sample_id
+    n_rows <- result$data$n_rows
+    n_pred <- result$data$n_predictors
+    n_na   <- sum(is.na(ids))
+    n_ids  <- length(unique(ids[!is.na(ids)]))
+
+    lines <- c(
+      if (n_ids < n_rows - n_na) {
+        cli::format_inline("{n_rows} scans under {n_ids} sample id{?s} \u00D7 {n_pred} predictors")
+      } else {
+        paste0(n_rows, " samples \u00D7 ", n_pred, " predictors")
+      },
+      if (n_na > 0) cli::format_inline("{n_na} scan{?s} with no sample id ({.code NA})"),
+      if (sorted_result$sorted) "Sorting: wavenumber columns put in decreasing order"
+    )
 
     cat(paste0("\u2500\u2500 ", cli::style_bold("horizons pipeline"),
                " ", paste(rep("\u2500", 46), collapse = ""), "\n"))
     cat(paste0("\u251C\u2500 ", cli::style_bold("Loading spectra"), "...\n"))
 
-    count_branch <- if (sorted_result$sorted) "\u251C\u2500" else "\u2514\u2500"
-    cat(paste0("\u2502  ", count_branch, " ", result$data$n_rows, " samples \u00D7 ",
-               result$data$n_predictors, " predictors\n"))
-
-    if (sorted_result$sorted) {
-
-      cat("\u2502  \u2514\u2500 Sorting: wavenumber columns put in decreasing order\n")
-
-    }
-
+    branch <- ifelse(seq_along(lines) < length(lines), "\u251C\u2500", "\u2514\u2500")
+    cat(paste0("\u2502  ", branch, " ", lines, "\n"), sep = "")
     cat("\u2502\n")
 
   }
+
+  signal_log(collector, result)
 
   result
 
@@ -254,22 +282,28 @@ spectra <- function(source,
 
 
 ## =============================================================================
-## Section 3: Internal Dispatch Functions
+## Section 3: Reading the source
 ## =============================================================================
 
 
 ## ---------------------------------------------------------------------------
-## spectra_from_tibble() — Process pre-loaded data
+## spectra_from_tibble() — The table of a data frame
 ## ---------------------------------------------------------------------------
 
-#' Process tibble/data.frame into horizons_data
+#' The spectra table of a data frame
+#'
+#' @description
+#' A data frame given to `spectra()`, or one CSV file read: its id column as
+#' `sample_id`, its other columns as meta, and its wavelength columns with the
+#' `wn_` prefix.
 #'
 #' @param data A tibble or data.frame with spectral data.
 #' @param id_col Optional column name for sample ID.
 #' @param wavelength_cols Optional column names for wavelength data.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
-#' @return A horizons_data object.
+#' @return A tibble: `sample_id`, the meta columns, then the wavelength
+#'   columns, whose names are its attribute `"wn_cols"`.
 #'
 #' @noRd
 spectra_from_tibble <- function(data,
@@ -277,34 +311,19 @@ spectra_from_tibble <- function(data,
                                 wavelength_cols = NULL,
                                 call            = rlang::caller_env()) {
 
-  ## -------------------------------------------------------------------------
-  ## Steps 1-3: The id and wavelength columns, checked
-  ## -------------------------------------------------------------------------
+  ## The id and wavelength columns, checked -----------------------------------
 
   cols      <- check_source_columns(data, id_col, wavelength_cols, call = call)
   id_column <- cols$id_column
   wn_cols   <- cols$wn_cols
 
-  ## -------------------------------------------------------------------------
-  ## Step 4: Build analysis tibble
-  ## -------------------------------------------------------------------------
-
-  ## Identify meta columns (everything except ID and wavelengths) ------------
+  ## Meta columns: everything except the id and the wavelengths --------------
 
   meta_cols <- setdiff(names(data), c(id_column, wn_cols))
 
-  ## Rename wavelength columns to wn_* format if needed ----------------------
+  ## The table ----------------------------------------------------------------
 
-  wn_names_new <- ensure_wn_prefix(wn_cols)
-
-  ## Build analysis tibble ---------------------------------------------------
-
-  ## Start with sample_id column
   analysis <- tibble::tibble(sample_id = as.character(data[[id_column]]))
-
-  ## No filename column for tibble input (no actual files) -------------------
-
-  ## Add meta columns --------------------------------------------------------
 
   for (col in meta_cols) {
 
@@ -312,7 +331,7 @@ spectra_from_tibble <- function(data,
 
   }
 
-  ## Add wavelength columns with wn_ prefix ----------------------------------
+  wn_names_new <- ensure_wn_prefix(wn_cols)
 
   for (i in seq_along(wn_cols)) {
 
@@ -320,47 +339,43 @@ spectra_from_tibble <- function(data,
 
   }
 
-  ## -------------------------------------------------------------------------
-  ## Step 5: Build role_map
-  ## -------------------------------------------------------------------------
+  attr(analysis, "wn_cols") <- wn_names_new
 
-  role_map <- build_role_map(
-    id_col     = "sample_id",
-    wn_cols    = wn_names_new,
-    meta_cols  = meta_cols,
-    other_cols = character()
-  )
-
-  ## -------------------------------------------------------------------------
-  ## Step 6: Build horizons_data object
-  ## -------------------------------------------------------------------------
-
-  new_horizons_data(
-    analysis       = analysis,
-    role_map       = role_map,
-    spectra_source = "tibble",
-    spectra_type   = "tibble"
-  )
+  analysis
 
 }
 
 
 ## ---------------------------------------------------------------------------
-## spectra_from_path() — Load from file path
+## spectra_from_path() — Read files, each as a unit
 ## ---------------------------------------------------------------------------
 
-#' Load spectral data from file path
+#' Read the files a path vector names, each as a unit of its own
 #'
-#' @param source Path to file or directory, which `spectra()` has checked
-#'   exists.
-#' @param type File type ("opus", "csv", or NULL for auto-detect), which
-#'   `spectra()` has checked.
-#' @param id_col Optional column name for sample ID.
-#' @param wavelength_cols Optional column names for wavelength data.
-#' @param recursive Search subdirectories.
+#' @description
+#' Every element of `source` is a file or a directory; a directory is read
+#' as the files of the type in it (OPUS by their `.0`, `.1`, ... extension,
+#' CSV by `.csv`, subdirectories with `recursive = TRUE`). The files are all
+#' of one type: `type` when given, else detected element by element, and a
+#' source whose elements detect differently is refused.
+#'
+#' Each file is read in its own [run_unit()]. A file that cannot be read, or
+#' holds no absorbance block, fails its unit and is dropped, and the files
+#' dropped are named in one `partial_failure` warning; when none can be read
+#' the call aborts with `horizons_error_read_failed`, one row per file in
+#' its `results`. A refusal of the user's columns (a CSV's `id_col`) is an
+#' input error, which no unit contains. Another package's warnings raised
+#' while reading are each collected once as a `quality` warning.
+#'
+#' @param source Character. Paths, which `spectra()` has checked exist.
+#' @param type `spectra()`'s `type`, checked, or `NULL`.
+#' @param id_col,wavelength_cols `spectra()`'s arguments, for CSV files.
+#' @param recursive Logical. Search subdirectories.
+#' @param collector `spectra()`'s collector, from [log_open()].
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
-#' @return A horizons_data object.
+#' @return List: `type` (`"opus"` or `"csv"`) and `tables`, one per file
+#'   read, as [spectra_from_tibble()] returns them.
 #'
 #' @noRd
 spectra_from_path <- function(source,
@@ -368,105 +383,60 @@ spectra_from_path <- function(source,
                               id_col          = NULL,
                               wavelength_cols = NULL,
                               recursive       = FALSE,
+                              collector,
                               call            = rlang::caller_env()) {
 
   ## -------------------------------------------------------------------------
-  ## Step 1: Determine file type
+  ## Step 1: One type for every element
   ## -------------------------------------------------------------------------
 
-  type <- if (is.null(type)) detect_file_type(source, call = call) else tolower(type)
-
-  ## -------------------------------------------------------------------------
-  ## Step 2: Dispatch to type-specific loader
-  ## -------------------------------------------------------------------------
-
-  if (type == "opus") {
-
-    load_opus_files(
-      source          = source,
-      id_col          = id_col,
-      wavelength_cols = wavelength_cols,
-      recursive       = recursive,
-      call            = call
-    )
-
+  types <- if (is.null(type)) {
+    vapply(source, detect_file_type, character(1), call = call, USE.NAMES = FALSE)
   } else {
+    rep(tolower(type), length(source))
+  }
 
-    load_csv_files(
-      source          = source,
-      id_col          = id_col,
-      wavelength_cols = wavelength_cols,
-      call            = call
-    )
+  if (length(unique(types)) > 1) {
+
+    abort_horizons(c(
+      "{.arg source} mixes OPUS and CSV files; {.fn spectra} reads one type per call.",
+      "i" = "OPUS: {.path {source[types == 'opus']}}.",
+      "i" = "CSV: {.path {source[types == 'csv']}}."
+    ), kind = "input", call = call)
 
   }
 
-}
-
-
-## =============================================================================
-## Section 4: File Loaders
-## =============================================================================
-
-
-## ---------------------------------------------------------------------------
-## load_opus_files() — Read OPUS binary files
-## ---------------------------------------------------------------------------
-
-#' Load spectral data from OPUS files
-#'
-#' @param source Path to OPUS file or directory, which `spectra()` has
-#'   checked exists.
-#' @param id_col Not used for OPUS (ID comes from filename).
-#' @param wavelength_cols Optional wavelength columns.
-#' @param recursive Search subdirectories.
-#' @param call The frame a refusal reports: `spectra()`'s.
-#'
-#' @return A horizons_data object.
-#'
-#' @noRd
-load_opus_files <- function(source,
-                            id_col          = NULL,
-                            wavelength_cols = NULL,
-                            recursive       = FALSE,
-                            call            = rlang::caller_env()) {
+  type  <- types[1]
+  label <- if (type == "opus") "OPUS" else "CSV"
 
   ## -------------------------------------------------------------------------
-  ## Step 1: Find OPUS files
+  ## Step 2: The files, a directory's included
   ## -------------------------------------------------------------------------
 
-  if (dir.exists(source)) {
+  pattern <- if (type == "opus") "\\.[0-9]+$" else "\\.csv$"
 
-    file_paths <- list.files(
-      path       = source,
-      pattern    = "\\.[0-9]+$",
-      full.names = TRUE,
-      recursive  = recursive
-    )
+  file_paths <- unlist(lapply(source, function(path) {
 
-    if (length(file_paths) == 0) {
+    if (!dir.exists(path)) return(path)
+
+    found <- list.files(path, pattern = pattern, full.names = TRUE,
+                        recursive = recursive, ignore.case = type == "csv")
+
+    if (length(found) == 0) {
 
       abort_horizons(c(
-        "No OPUS files found in directory.",
-        "i" = "Path: {.path {source}}.",
-        "i" = "OPUS files end with .0, .1, etc."
+        "No {label} files found in directory.",
+        "i" = "Path: {.path {path}}.",
+        "i" = if (type == "opus") "OPUS files end with .0, .1, etc." else "CSV files end with .csv."
       ), kind = "input", call = call)
 
     }
 
-  } else {
+    found
 
-    file_paths <- source
+  }))
 
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Step 2: Read OPUS files
-  ## -------------------------------------------------------------------------
-
-  ## Check opusreader2 is available ------------------------------------------
-
-  if (!requireNamespace("opusreader2", quietly = TRUE)) {
+  if (type == "opus" && !requireNamespace("opusreader2", quietly = TRUE)) {
 
     abort_horizons(c(
       "Package {.pkg opusreader2} required for OPUS files.",
@@ -475,28 +445,29 @@ load_opus_files <- function(source,
 
   }
 
-  ## Read all files ----------------------------------------------------------
+  ## -------------------------------------------------------------------------
+  ## Step 3: Each file a unit
+  ## -------------------------------------------------------------------------
 
-  n_files      <- length(file_paths)
-  spectra_list <- vector("list", n_files)
+  n_files <- length(file_paths)
+  units   <- vector("list", n_files)
 
   cli::cli_progress_bar(
-    format = "Reading {n_files} OPUS files {cli::pb_bar} {cli::pb_current}/{n_files} ({cli::pb_percent})",
+    format = "Reading {n_files} {label} files {cli::pb_bar} {cli::pb_current}/{n_files} ({cli::pb_percent})",
     total  = n_files
   )
 
   for (i in seq_along(file_paths)) {
 
-    spectra_list[[i]] <- tryCatch({
-
-      suppressWarnings(opusreader2::read_opus(file_paths[[i]]))
-
-    }, error = function(e) {
-
-      cli::cli_warn("Failed to read {.path {file_paths[[i]]}}: {condition_summary(e)}")
-      return(NULL)
-
-    })
+    units[[i]] <- run_unit(
+      if (type == "opus") {
+        read_opus_file(file_paths[[i]])
+      } else {
+        read_csv_file(file_paths[[i]], id_col, wavelength_cols, call = call)
+      },
+      unit = "file",
+      id   = file_paths[[i]]
+    )
 
     cli::cli_progress_update()
 
@@ -504,88 +475,121 @@ load_opus_files <- function(source,
 
   cli::cli_progress_done()
 
-  ## Filter out failures -----------------------------------------------------
+  ## -------------------------------------------------------------------------
+  ## Step 4: What the units reported
+  ## -------------------------------------------------------------------------
 
-  valid_idx    <- !vapply(spectra_list, is.null, logical(1))
-  spectra_list <- spectra_list[valid_idx]
-  file_paths   <- file_paths[valid_idx]
+  records <- dplyr::bind_rows(new_unit_records(), lapply(units, `[[`, "records"))
+  failed  <- vapply(units, `[[`, logical(1), "failed")
 
-  if (length(spectra_list) == 0) {
+  failures <- records[records$type == "failure", , drop = FALSE]
+  results  <- tibble::tibble(
+    file  = failures$id,
+    step  = failures$step,
+    class = failures$class,
+    cause = vapply(seq_len(nrow(failures)), function(i) {
+      unit_failure_message(failures[i, , drop = FALSE], outside = "Reading")
+    }, character(1))
+  )
+  bullets <- distinct_config_errors(tibble::tibble(config_id = results$file,
+                                                   error_message = results$cause))
 
-    cli::cli_abort("No OPUS files could be read successfully")
+  if (all(failed)) {
+
+    abort_horizons(c(
+      "None of the {n_files} {label} {cli::qty(n_files)}file{?s} in {.arg source} could be read.",
+      bullets,
+      "i" = "The failures are on this condition as {.field results}: {.code rlang::last_error()$results}."
+    ), kind = "run", class = "horizons_error_read_failed", results = results, call = call)
 
   }
 
-  ## -------------------------------------------------------------------------
-  ## Step 3: Extract spectra and build tibble
-  ## -------------------------------------------------------------------------
+  if (any(failed)) {
 
-  ## Extract filenames (without extension) for sample_id ---------------------
+    n_failed <- sum(failed)
 
-  filenames <- tools::file_path_sans_ext(basename(file_paths))
+    log_warning(collector, "partial_failure", c(
+      "{n_failed} of {n_files} {label} {cli::qty(n_files)}file{?s} could not be read, so {cli::qty(n_failed)}{?it was/they were} dropped.",
+      bullets
+    ), ids = results$file)
 
-  ## Extract absorbance data from each file ----------------------------------
+  }
 
-  spectra_data <- lapply(seq_along(spectra_list), function(i) {
+  log_unit_records(collector, records)
+  log_foreign_warnings(collector, records, while_doing = "reading")
 
-    opus_obj <- spectra_list[[i]]
+  list(type = type, tables = lapply(units[!failed], `[[`, "value"))
 
-    ## Unwrap filename-level nesting from opusreader2 -------------------------
-    ## read_opus() returns list keyed by filename, then blocks within each file
+}
 
-    if (length(opus_obj) == 1 && is.list(opus_obj[[1]])) {
 
-      opus_obj <- opus_obj[[1]]
+## =============================================================================
+## Section 4: File Readers
+## =============================================================================
+
+
+## ---------------------------------------------------------------------------
+## read_opus_file() — One OPUS file's absorbance spectrum
+## ---------------------------------------------------------------------------
+
+#' Read one OPUS file's absorbance spectrum
+#'
+#' @description
+#' Runs inside the file's unit. The absorbance block is taken by name, `ab`
+#' and then `ab_no_atm_comp`, ignoring case (#191): instruments write either,
+#' beside single-channel, interferogram and parameter blocks
+#' (`ab_no_atm_comp_data_param` among them), so the first block on the list,
+#' or the first whose name starts with `ab`, can be the wrong one. A file
+#' with neither, or whose block is in a form horizons does not read, fails
+#' its unit naming what it holds.
+#'
+#' @param path Character(1). The file.
+#'
+#' @return A one-row tibble: the wavelength columns (`wn_` names, its
+#'   attribute `"wn_cols"`), any other columns the block carries,
+#'   `sample_id` and `filename` (the file's name without its extension).
+#'
+#' @noRd
+read_opus_file <- function(path) {
+
+  opus_obj <- unit_step("file_read", opusreader2::read_opus(path))
+
+  ## read_opus() returns a list keyed by file, then the blocks within it -----
+
+  if (length(opus_obj) == 1 && is.list(opus_obj[[1]])) {
+
+    opus_obj <- opus_obj[[1]]
+
+  }
+
+  row_data <- unit_step("file_block", {
+
+    blocks <- names(opus_obj)
+    pick   <- match(c("ab", "ab_no_atm_comp"), tolower(blocks))
+    pick   <- pick[!is.na(pick)]
+
+    if (length(pick) == 0) {
+
+      abort_horizons(c(
+        "The file holds no absorbance block ({.val ab} or {.val ab_no_atm_comp}).",
+        "i" = "Its blocks: {.val {blocks}}."
+      ), kind = "run")
 
     }
 
-    ## Get AB block (absorbance) ---------------------------------------------
+    ab_name  <- blocks[pick[1]]
+    ab_block <- opus_obj[[pick[1]]]
 
-    ab_block <- NULL
-
-    if ("ab" %in% names(opus_obj)) {
-
-      ab_block <- opus_obj$ab
-
-    } else if ("AB" %in% names(opus_obj)) {
-
-      ab_block <- opus_obj$AB
-
-    } else {
-
-      ## Try first block that looks like spectral data
-      metadata_names <- c("basic_metadata", "instrument_ref", "optik_ref",
-                          "acquisition_ref")
-      param_pattern  <- "_data_param$"
-
-      data_blocks <- names(opus_obj)[
-        !names(opus_obj) %in% metadata_names &
-        !grepl(param_pattern, names(opus_obj))
-      ]
-
-      if (length(data_blocks) == 0) {
-
-        cli::cli_warn("No data blocks found in {.path {file_paths[i]}}")
-        return(NULL)
-
-      }
-
-      ab_block <- opus_obj[[data_blocks[1]]]
-
-    }
-
-    ## Extract spectral matrix from block ------------------------------------
-    ## opusreader2 blocks are lists with $data (1-row matrix) and $wavenumbers
-
+    ## opusreader2 blocks are lists with $data (a 1-row matrix) and
+    ## $wavenumbers
     if (is.list(ab_block) && "data" %in% names(ab_block)) {
 
       row_data <- tibble::as_tibble(ab_block$data)
 
-      ## Assign wavenumber names if matrix was unnamed or auto-named (V1, V2...)
+      ### Wavenumber names when the matrix was unnamed or auto-named (V1, ...)
       if (!is.null(ab_block$wavenumbers)) {
 
-        unnamed <- is.null(names(row_data)) ||
-          all(grepl("^V\\d+$", names(row_data)))
+        unnamed <- is.null(names(row_data)) || all(grepl("^V\\d+$", names(row_data)))
 
         if (unnamed && length(ab_block$wavenumbers) == ncol(row_data)) {
           names(row_data) <- as.character(ab_block$wavenumbers)
@@ -603,177 +607,93 @@ load_opus_files <- function(source,
 
     } else {
 
-      cli::cli_warn("Unexpected data format in {.path {file_paths[i]}}")
-      return(NULL)
+      abort_horizons(
+        "The absorbance block {.val {ab_name}} is a {.cls {class(ab_block)}}, which horizons does not read.",
+        kind = "run"
+      )
 
     }
-
-    ## Add sample_id and filename --------------------------------------------
-
-    row_data$sample_id <- filenames[i]
-    row_data$filename  <- filenames[i]
 
     row_data
 
   })
 
-  ## Filter NULLs and combine ------------------------------------------------
+  ## Wavenumber columns are the names that read as one ------------------------
 
-  spectra_data <- spectra_data[!vapply(spectra_data, is.null, logical(1))]
+  other_cols <- names(row_data)
+  wn_cols    <- other_cols[!is.na(wn_values(other_cols))]
+  wn_new     <- ensure_wn_prefix(wn_cols)
 
-  if (length(spectra_data) == 0) {
+  names(row_data)[match(wn_cols, names(row_data))] <- wn_new
 
-    cli::cli_abort("No valid spectral data could be extracted")
+  name <- tools::file_path_sans_ext(basename(path))
 
-  }
+  row_data$sample_id <- name
+  row_data$filename  <- name
 
-  combined <- dplyr::bind_rows(spectra_data)
+  attr(row_data, "wn_cols") <- wn_new
 
-  ## -------------------------------------------------------------------------
-  ## Step 4: Organize columns
-  ## -------------------------------------------------------------------------
-
-  ## Identify wavelength columns (numeric names) -----------------------------
-
-  all_cols   <- names(combined)
-  id_cols    <- c("sample_id", "filename")
-  other_cols <- setdiff(all_cols, id_cols)
-
-  ## Wavenumber columns are the names that read as one -----------------------
-
-  wn_cols   <- other_cols[!is.na(wn_values(other_cols))]
-  meta_cols <- setdiff(other_cols, wn_cols)
-
-  ## Add wn_ prefix to wavelength columns, unless they carry it --------------
-
-  wn_cols_new <- ensure_wn_prefix(wn_cols)
-
-  names(combined)[match(wn_cols, names(combined))] <- wn_cols_new
-
-  ## Reorder columns: sample_id, filename, meta, wn_* ------------------------
-
-  col_order <- c("sample_id", "filename", meta_cols, wn_cols_new)
-  combined  <- combined[, col_order, drop = FALSE]
-
-  ## -------------------------------------------------------------------------
-  ## Step 5: Build role_map and create object
-  ## -------------------------------------------------------------------------
-
-  role_map <- build_role_map(
-    id_col     = "sample_id",
-    wn_cols    = wn_cols_new,
-    meta_cols  = c("filename", meta_cols),
-    other_cols = character()
-  )
-
-  new_horizons_data(
-    analysis       = combined,
-    role_map       = role_map,
-    spectra_source = source,
-    spectra_type   = "opus"
-  )
+  row_data
 
 }
 
 
 ## ---------------------------------------------------------------------------
-## load_csv_files() — Read CSV files
+## read_csv_file() — One CSV file's table
 ## ---------------------------------------------------------------------------
 
-#' Load spectral data from CSV file
+#' Read one CSV file's spectra
 #'
-#' @param source Path to CSV file, which `spectra()` has checked exists.
-#' @param id_col Optional column name for sample ID.
-#' @param wavelength_cols Optional wavelength columns.
+#' @description
+#' Runs inside the file's unit: a file `readr` cannot read fails it. Its
+#' columns are checked as a data frame's are ([spectra_from_tibble()]), and
+#' a refusal there is an input error, which no unit contains.
+#'
+#' @param path Character(1). The file.
+#' @param id_col,wavelength_cols `spectra()`'s arguments.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
-#' @return A horizons_data object.
+#' @return The file's table, as [spectra_from_tibble()] returns it.
 #'
 #' @noRd
-load_csv_files <- function(source,
-                           id_col          = NULL,
-                           wavelength_cols = NULL,
-                           call            = rlang::caller_env()) {
+read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL, call = rlang::caller_env()) {
 
-  ## -------------------------------------------------------------------------
-  ## Step 1: Validate path
-  ## -------------------------------------------------------------------------
+  data <- unit_step("file_read", readr::read_csv(path, show_col_types = FALSE))
 
-  if (dir.exists(source)) {
+  spectra_from_tibble(data, id_col, wavelength_cols, call = call)
 
-    cli::cli_abort(c(
-      "Expected CSV file, got directory",
-      "x" = "{.path {source}}",
-      "i" = "Provide path to a single CSV file"
-    ))
+}
 
-  }
 
-  ## -------------------------------------------------------------------------
-  ## Step 2: Read CSV
-  ## -------------------------------------------------------------------------
+## ---------------------------------------------------------------------------
+## bind_spectra_files() — The files' tables as one
+## ---------------------------------------------------------------------------
 
-  data <- readr::read_csv(source, show_col_types = FALSE)
+#' Bind the files' tables into one
+#'
+#' @description
+#' The one place the tables `spectra()` read are bound, whatever their type.
+#' Rows keep the files' order; a wavenumber one file lacks is `NA` in its
+#' rows.
+#'
+#' @param tables List of tables, as [spectra_from_tibble()] and
+#'   [read_opus_file()] return them.
+#'
+#' @return A tibble: `sample_id`, the meta columns, then the wavelength
+#'   columns, whose names are its attribute `"wn_cols"`.
+#'
+#' @noRd
+bind_spectra_files <- function(tables) {
 
-  ## -------------------------------------------------------------------------
-  ## Steps 3-5: The id and wavelength columns, checked
-  ## -------------------------------------------------------------------------
+  wn_cols <- unique(unlist(lapply(tables, attr, "wn_cols")))
 
-  cols      <- check_source_columns(data, id_col, wavelength_cols, call = call)
-  id_column <- cols$id_column
-  wn_cols   <- cols$wn_cols
+  bound <- dplyr::bind_rows(tables)
+  meta  <- setdiff(names(bound), c("sample_id", wn_cols))
+  bound <- bound[, c("sample_id", meta, wn_cols), drop = FALSE]
 
-  ## -------------------------------------------------------------------------
-  ## Step 6: Build analysis tibble
-  ## -------------------------------------------------------------------------
+  attr(bound, "wn_cols") <- wn_cols
 
-  ## Meta columns (everything except ID and wavelengths) ---------------------
-
-  meta_cols <- setdiff(names(data), c(id_column, wn_cols))
-
-  ## Rename wavelength columns to wn_* format --------------------------------
-
-  wn_names_new <- ensure_wn_prefix(wn_cols)
-
-  ## Build analysis tibble ---------------------------------------------------
-
-  analysis <- tibble::tibble(sample_id = as.character(data[[id_column]]))
-
-  ## No filename column for CSV input (no per-sample files) ------------------
-
-  ## Add meta columns --------------------------------------------------------
-
-  for (col in meta_cols) {
-
-    analysis[[col]] <- data[[col]]
-
-  }
-
-  ## Add wavelength columns with wn_ prefix ----------------------------------
-
-  for (i in seq_along(wn_cols)) {
-
-    analysis[[wn_names_new[i]]] <- data[[wn_cols[i]]]
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Step 7: Build role_map and create object
-  ## -------------------------------------------------------------------------
-
-  role_map <- build_role_map(
-    id_col     = "sample_id",
-    wn_cols    = wn_names_new,
-    meta_cols  = meta_cols,
-    other_cols = character()
-  )
-
-  new_horizons_data(
-    analysis       = analysis,
-    role_map       = role_map,
-    spectra_source = source,
-    spectra_type   = "csv"
-  )
+  bound
 
 }
 
