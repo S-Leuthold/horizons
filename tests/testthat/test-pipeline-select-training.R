@@ -1026,6 +1026,26 @@ test_that("scope = 'global' returns every pool row on the targets' grid", {
 })
 
 
+test_that("scope = 'global' counts, per property, the returned rows that carry it (#153)", {
+
+  ## The issue's case: oc is measured on half the 300 rows, and drawn was
+  ## reported as every row, 300 of 150
+  fx  <- select_fixture()
+  out <- suppressWarnings(quiet_select(fx, k = 5, scope = "global"))
+  ps  <- out$selection$pool_sizes
+
+  expect_identical(ps$available, c(300L, 150L))
+  expect_identical(ps$drawn, ps$available)
+
+  ## After rows leave, recounted the same way
+  kept <- subset_rows(out, out$data$analysis$sample_id[-(1:10)])
+  oc   <- kept$data$analysis$oc
+
+  expect_identical(kept$selection$pool_sizes$drawn, c(290L, sum(!is.na(oc))))
+
+})
+
+
 ## =============================================================================
 ## scope = "batch"
 ## =============================================================================

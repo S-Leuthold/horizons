@@ -449,20 +449,25 @@ test_that("subset_rows() leaves a recomputed record that still validates", {
 })
 
 
-test_that("subset_rows() recounts drawn for a global-scope record", {
+test_that("subset_rows() recounts drawn for a global-scope record, per property, over the rows that carry it (#153)", {
 
   ## Arrange — scope = "global" leaves membership empty by construction, so
-  ## the survivors are the draw
+  ## the survivors are the draw; oc is measured on some of them only
   obj <- selected_object(n_rows = 12L)
 
   obj$selection$settings$scope <- "global"
   obj$selection$membership     <- obj$selection$membership[0, , drop = FALSE]
 
+  keep  <- obj$data$analysis$sample_id[1:4]
+  n_oc  <- sum(!is.na(obj$data$analysis$oc[1:4]))
+
   ## Act
-  out <- subset_rows(obj, obj$data$analysis$sample_id[1:4])
+  out <- subset_rows(obj, keep)
 
   ## Assert
-  expect_identical(out$selection$pool_sizes$drawn, c(4L, 4L))
+  expect_lt(n_oc, 4L)
+  expect_identical(out$selection$pool_sizes$property, c("clay", "oc"))
+  expect_identical(out$selection$pool_sizes$drawn, c(4L, n_oc))
   expect_identical(nrow(out$selection$membership), 0L)
 
 })
@@ -548,7 +553,8 @@ test_that("subset_selection() leaves a part the record lacks for the validator t
   for (case in cases) {
 
     ## Act
-    out <- subset_selection(case$rec, keep_ids = ids[1:6], n_removed = 6L)
+    out <- subset_selection(case$rec, keep_ids = ids[1:6], n_removed = 6L,
+                            analysis = obj$data$analysis)
 
     ## Assert — the refilter ran, left the part as it was, and the damage is
     ## still there to be named

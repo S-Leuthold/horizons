@@ -1408,7 +1408,9 @@ select_training <- function(x, library,
   ## Pool sizes per property ------------------------------------------------
 
   ## drawn counts the rows that survived into the return, not the rows the
-  ## neighbourhoods named, so it agrees with n_rows after the twin subtraction.
+  ## neighbourhoods named, so it agrees with n_rows after the twin
+  ## subtraction. Under global, which draws every eligible row, it counts
+  ## those that carry the property, the set available counts (#153).
 
   pool_sizes <- tibble::tibble(
     property  = properties,
@@ -1416,7 +1418,7 @@ select_training <- function(x, library,
     drawn     = vapply(properties, function(p) {
 
       if (scope == "global") {
-        length(union_ids)
+        sum(!is.na(resp_tbl[[p]][pool_ids %in% union_ids]))
       } else {
         length(intersect(unique(membership$pool_id[membership$property == p]), union_ids))
       }
