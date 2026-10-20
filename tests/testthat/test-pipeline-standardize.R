@@ -676,6 +676,33 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
 })
 
 
+test_that("force = TRUE keeps the record of a hull an earlier call fitted, and the range it was fitted over", {
+
+  hulled <- no_output(standardize(make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum),
+                                  resample = 4, trim = c(600, 4000), baseline = TRUE))
+  expect_true(hulled$provenance$standardization$baseline)
+  expect_identical(hulled$provenance$standardization$baseline_range, c(600, 4000))
+
+  ## Every operation off: the values still carry the hull
+  again <- no_output(standardize(hulled, resample = NULL, trim = NULL, force = TRUE))
+  expect_true(again$provenance$standardization$baseline)
+  expect_identical(again$provenance$standardization$baseline_range, c(600, 4000))
+
+  ## A narrower trim without a hull: the hull is the first call's, over its range
+  narrower <- suppressWarnings(no_output(standardize(hulled, resample = 4, trim = c(1000, 3000), force = TRUE)))
+  expect_true(narrower$provenance$standardization$baseline)
+  expect_identical(narrower$provenance$standardization$wavelength_range, c(1000, 3000))
+  expect_identical(narrower$provenance$standardization$baseline_range, c(600, 4000))
+
+  ## Without a hull anywhere there is no range
+  plain <- no_output(standardize(make_axis_spectra(rev(KSSL_WN)), resample = 4))
+  expect_false(plain$provenance$standardization$baseline)
+  expect_true("baseline_range" %in% names(plain$provenance$standardization))
+  expect_null(plain$provenance$standardization$baseline_range)
+
+})
+
+
 test_that("the trim line counts the columns inside the bounds, not the interpolation margin", {
 
   ## Off-grid: 1761 points inside 600-4000, plus 599.74 and one above 4000

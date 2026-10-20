@@ -603,6 +603,31 @@ flag_unusable <- function(analysis, role_map, reason, collector) {
 
 
 ## =============================================================================
+## Helper: prior_hull_range()
+## =============================================================================
+
+#' The range a standardization record's hull was fitted over
+#'
+#' @description
+#' `baseline_range` when the record has it. A record written before it was
+#' kept was written by one call, whose hull was fitted over the axis it
+#' records, so its `wavelength_range` is read in its place; reading it as
+#' missing would let a hull pass a comparison it fails (#107).
+#'
+#' @param record A `provenance$standardization` record, or `NULL`.
+#' @return `numeric(2)`, or `NULL` when the record carries no hull.
+#' @keywords internal
+#' @noRd
+prior_hull_range <- function(record) {
+
+  if (!isTRUE(record$baseline)) return(NULL)
+
+  record$baseline_range %||% record$wavelength_range
+
+}
+
+
+## =============================================================================
 ## Helper: report_standardize_summary()
 ## =============================================================================
 
@@ -800,6 +825,10 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   read that from `grid$step` or from the columns. A training set
 #'   `select_training()` returns carries its library's record, with the axis
 #'   fields describing the columns it returns (see [select_training()]).
+#'   `baseline` says whether the spectra carry a convex-hull correction, from
+#'   this call or, under `force = TRUE`, an earlier one, and `baseline_range`
+#'   is the range that hull was fitted over (`NULL` without one), which
+#'   [select_training()] compares between a library and its targets.
 #'
 #' @examples
 #' \dontrun{
@@ -957,16 +986,18 @@ standardize <- function(x,
     ### The axis as it stands, recorded as the full path records it.
     axis_wn <- wn_values(axis_vars)
 
+    ### A hull an earlier call fitted is still in the values, sorted or not
     x$provenance$standardization <- list(
       resample         = NULL,
       trim             = NULL,
       remove_water     = FALSE,
-      baseline         = FALSE,
+      baseline         = isTRUE(prior$baseline),
       resampled        = keep_prior && isTRUE(prior$resampled),
       grid             = if (keep_prior) prior$grid else NULL,
       applied_at       = Sys.time(),
       n_wavelengths    = length(axis_vars),
-      wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_)
+      wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_),
+      baseline_range   = prior_hull_range(prior)
     )
 
     x$log <- log_close(collector, x$log)
@@ -1236,9 +1267,12 @@ standardize <- function(x,
   now           <- !prior & is.na(reason) & !is.na(before)
   reason[now]   <- before[now]
 
+  hull_range <- NULL
+
   if (baseline) {
 
-    hull <- !prior & is.na(reason)
+    hull_range <- range(wavelengths)
+    hull       <- !prior & is.na(reason)
 
     if (any(hull)) {
 
@@ -1327,16 +1361,21 @@ standardize <- function(x,
 
   ## Update provenance ---------------------------------------------------------
 
+  ### Under force = TRUE the spectra may carry a hull an earlier call fitted,
+  ### which this call's record keeps: the values still hold it
+  earlier <- x$provenance$standardization
+
   x$provenance$standardization <- list(
     resample         = resample,
     trim             = trim,
     remove_water     = remove_water,
-    baseline         = baseline,
+    baseline         = baseline || isTRUE(earlier$baseline),
     resampled        = identical(operations$resample$status, "resampled"),
     grid             = grid_record,
     applied_at       = Sys.time(),
     n_wavelengths    = length(new_predictor_names),
-    wavelength_range = c(min(wavelengths), max(wavelengths))
+    wavelength_range = c(min(wavelengths), max(wavelengths)),
+    baseline_range   = hull_range %||% prior_hull_range(earlier)
   )
 
   ## ---------------------------------------------------------------------------

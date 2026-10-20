@@ -50,6 +50,10 @@ were actually re-interpolated (\code{resampled}), and the grid they sit on
 read that from \code{grid$step} or from the columns. A training set
 \code{select_training()} returns carries its library's record, with the axis
 fields describing the columns it returns (see \code{\link[=select_training]{select_training()}}).
+\code{baseline} says whether the spectra carry a convex-hull correction, from
+this call or, under \code{force = TRUE}, an earlier one, and \code{baseline_range}
+is the range that hull was fitted over (\code{NULL} without one), which
+\code{\link[=select_training]{select_training()}} compares between a library and its targets.
 }
 \description{
 Applies standardization operations to get spectra into a consistent format
