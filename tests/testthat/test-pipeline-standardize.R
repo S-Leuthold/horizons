@@ -114,6 +114,12 @@ test_that("standardize() validates trim parameter", {
     class = "horizons_error_input"
   )
 
+  ## A bound that is not finite is refused at the door, not inside seq()
+  for (bad in list(c(600, Inf), c(NA, 4000))) {
+    expect_error(standardize(hd, trim = bad), "`trim` must be two finite wavenumbers",
+                 fixed = TRUE, class = "horizons_error_input")
+  }
+
 })
 
 
@@ -174,10 +180,13 @@ test_that("standardize() refuses water-band removal that would leave nothing, an
 })
 
 
-test_that("standardize() refuses a resample of zero", {
+test_that("standardize() refuses a resample of zero or below, with one refusal", {
 
   expect_error(standardize(create_test_spectra(), resample = 0),
                "`resample` must be a positive number or `NULL`, not 0", fixed = TRUE,
+               class = "horizons_error_input")
+  expect_error(standardize(create_test_spectra(), resample = -1),
+               "`resample` must be a positive number or `NULL`, not -1", fixed = TRUE,
                class = "horizons_error_input")
 
 })

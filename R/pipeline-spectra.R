@@ -136,6 +136,7 @@ spectra <- function(source,
 
   }
 
+  check_arg(rlang::check_bool, recursive)
   check_arg(rlang::check_bool, verbose)
 
   ## Determine input type ----------------------------------------------------

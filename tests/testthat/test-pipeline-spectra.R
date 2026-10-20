@@ -683,6 +683,9 @@ test_that("spectra(recursive = TRUE) detects the type of a directory whose files
   expect_identical(out$data$analysis$sample_id, "A")
   expect_identical(out$provenance$spectra_type, "csv")
 
+  expect_error(spectra(top, recursive = "yes"), "`recursive` must be `TRUE` or `FALSE`",
+               fixed = TRUE, class = "horizons_error_input")
+
 })
 
 test_that("spectra() refuses a source that mixes OPUS and CSV files, and names a missing path before reading any", {

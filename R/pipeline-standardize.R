@@ -954,22 +954,30 @@ standardize <- function(x,
 
   }
 
-  check_arg(rlang::check_number_decimal, resample, min = 0, allow_infinite = FALSE,
-            allow_null = TRUE)
+  check_arg(rlang::check_number_decimal, resample, allow_infinite = FALSE, allow_null = TRUE)
 
-  if (isTRUE(resample == 0)) {
+  if (!is.null(resample) && resample <= 0) {
 
-    abort_horizons("{.arg resample} must be a positive number or {.code NULL}, not 0.",
+    abort_horizons("{.arg resample} must be a positive number or {.code NULL}, not {resample}.",
                    kind = "input")
 
   }
 
-  if (!is.null(trim) && (!is.numeric(trim) || length(trim) != 2 || anyNA(trim))) {
+  if (!is.null(trim) && (!is.numeric(trim) || length(trim) != 2)) {
 
     abort_horizons(
       "{.arg trim} must be numeric(2) or {.code NULL}, not {.obj_type_friendly {trim}}.",
       kind = "input"
     )
+
+  }
+
+  if (!is.null(trim) && !all(is.finite(trim))) {
+
+    abort_horizons(c(
+      "{.arg trim} must be two finite wavenumbers.",
+      "x" = "Got {trim[1]} and {trim[2]}."
+    ), kind = "input")
 
   }
 
