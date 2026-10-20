@@ -1034,7 +1034,7 @@ test_that("standardize() keeps and flags a flat spectrum and one with a missing 
   ## One warning, counting each reason, written to the log first
   msg <- gsub("\\s+", " ", conditionMessage(w))
   expect_match(msg, "2 spectra could not be used and are flagged (.flag)", fixed = TRUE)
-  expect_match(msg, '1 has a value that is not finite: "s3"', fixed = TRUE)
+  expect_match(msg, '1 has a value missing inside its own range, or not finite: "s3"', fixed = TRUE)
   expect_match(msg, '1 has no spread (every value equal): "s2"', fixed = TRUE)
 
   row <- out$log[out$log$topic %in% "flagged", ]
@@ -1125,15 +1125,17 @@ test_that("the hull is fitted to the spectra not flagged, and a failure of the h
 
 })
 
-test_that("a spectrum with a hole, or short at one end, is flagged rather than filled or extrapolated", {
+test_that("a spectrum with a hole is flagged as missing a value and one short at an end as short, neither filled nor extrapolated", {
 
   ## Arrange ---------------------------------------------------------------
 
-  ## Off-grid spectra; row 2 lacks 61 points mid-axis, row 3 its lowest 40
+  ## Off-grid spectra; row 2 lacks 61 points mid-axis and its highest 40,
+  ## row 3 its lowest 40
   hd   <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 4)
   pred <- predictor_names(hd)
   wn   <- as.numeric(sub("^wn_", "", pred))
   hd$data$analysis[2, pred[wn > 2000 & wn < 2000 + 61 * 1.93]] <- NA_real_
+  hd$data$analysis[2, pred[order(wn, decreasing = TRUE)[1:40]]] <- NA_real_
   hd$data$analysis[3, pred[order(wn)[1:40]]] <- NA_real_
 
   ## Act -------------------------------------------------------------------
@@ -1144,9 +1146,14 @@ test_that("a spectrum with a hole, or short at one end, is flagged rather than f
   ## Assert ----------------------------------------------------------------
 
   expect_identical(out$data$analysis$.flag, c(NA, "standardize", "standardize", NA))
-  expect_match(conditionMessage(w), '2 do not reach every point of the grid from their own points, short at an end or with a hole: "s2", "s3"',
+
+  ## One reason each; the trim hint is the short spectrum's range alone, not
+  ## the overlap with the holed one's, which no trim mends
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+  expect_match(msg, '1 has a value missing inside its own range, or not finite: "s2". Fill or drop such values before `spectra()` reads them.',
                fixed = TRUE)
-  expect_no_match(conditionMessage(w), "not finite", fixed = TRUE)
+  expect_match(msg, '1 is short of the grid at an end, its own points ending before it does: "s3".', fixed = TRUE)
+  expect_match(msg, paste0("The range it covers is ", min(wn[order(wn)[41]]), " to 4000 cm-1"), fixed = TRUE)
 
   ## The grid points inside the hole, and below row 3's own start, are NA
   out_wn <- as.numeric(sub("^wn_", "", predictor_names(out)))
@@ -1179,7 +1186,7 @@ test_that("a spectrum short of the grid is flagged for that, with the range it c
     expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
 
     msg <- gsub("\\s+", " ", conditionMessage(w))
-    expect_match(msg, '1 does not reach every point of the grid from its own points, short at an end or with a hole: "s2".',
+    expect_match(msg, '1 is short of the grid at an end, its own points ending before it does: "s2".',
                  fixed = TRUE)
     expect_match(msg, paste0("The range it covers is ", lo, " to 4000 cm-1; a `trim` inside it keeps it."),
                  fixed = TRUE)
@@ -1197,8 +1204,8 @@ test_that("a spectrum short of the grid is flagged for that, with the range it c
 
   w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
                       class = "horizons_warning_flagged")
-  expect_match(conditionMessage(w), '1 has a value that is not finite: "s2".', fixed = TRUE)
-  expect_no_match(conditionMessage(w), "reach", fixed = TRUE)
+  expect_match(conditionMessage(w), '1 has a value missing inside its own range, or not finite: "s2".', fixed = TRUE)
+  expect_no_match(conditionMessage(w), "short of the grid", fixed = TRUE)
 
 })
 
@@ -1220,13 +1227,14 @@ test_that("a value missing only inside a water band it removes flags nothing, un
 
 })
 
-test_that("a spectrum missing the point beyond a trim bound leaves the others' values unchanged, to the bit", {
+test_that("a spectrum missing the point beyond a trim bound is flagged and leaves the others' values unchanged, to the bit", {
 
   hd   <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 3)
   pred <- predictor_names(hd)
 
-  ## Row 2 lacks 599.74, the point beyond 600, so it reaches for 597.81:
-  ## standardized alone it would; the others must not use it
+  ## Row 2 lacks 599.74, the point beyond 600, so its grid point 600 would
+  ## be interpolated across that missing value from 597.81: it is flagged,
+  ## and the others must not use 597.81
   hd$data$analysis$wn_599.74[2] <- NA_real_
   hd <- set_analysis(hd, dplyr::bind_cols(tibble::tibble(sample_id = hd$data$analysis$sample_id, wn_597.81 = 1:3 / 3),
                                           hd$data$analysis[, pred]),
@@ -1234,12 +1242,13 @@ test_that("a spectrum missing the point beyond a trim bound leaves the others' v
                                     role = c("id", rep("predictor", length(pred) + 1))))
   hd <- sort_axis_decreasing(hd)$x
 
-  batch  <- no_output(standardize(hd, resample = 4, trim = c(600, 4000)))
+  expect_warning(batch <- no_output(standardize(hd, resample = 4, trim = c(600, 4000))),
+                 class = "horizons_warning_flagged")
   others <- no_output(standardize(subset_rows(hd, c("s1", "s3")), resample = 4, trim = c(600, 4000)))
 
   expect_identical(predictor_block(batch)[c(1, 3), ], predictor_block(others))
-  expect_false(".flag" %in% names(batch$data$analysis))
-  expect_false(anyNA(predictor_block(batch)))
+  expect_identical(batch$data$analysis$.flag, c(NA, "standardize", NA))
+  expect_true(is.na(batch$data$analysis$wn_600[2]))
 
 })
 
@@ -1273,17 +1282,129 @@ test_that("a point standing alone between two holes in a spectrum carries the gr
 
 })
 
-test_that("a single missing point is interpolated over, not flagged", {
+test_that("a value missing inside a spectrum's own range flags it on every path, and nothing is interpolated across it", {
 
-  hd   <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 2)
-  pred <- predictor_names(hd)
-  hd$data$analysis[[pred[1000]]][2] <- NA_real_
+  ## Runs of 1, 2, 5 and 14 missing points, and a lone Inf, mid-axis
+  holed <- function(axis, at, run, value = NA_real_) {
+    hd   <- make_axis_spectra(axis, f = smooth_spectrum, n = 2)
+    pred <- predictor_names(hd)
+    hd$data$analysis[2, pred[at + seq_len(run) - 1L]] <- value
+    hd
+  }
 
-  expect_no_warning(out <- no_output(standardize(hd, resample = 4, trim = c(600, 4000))))
+  cases <- list(
+    list(run = 1,  value = NA_real_), list(run = 2,  value = NA_real_),
+    list(run = 5,  value = NA_real_), list(run = 14, value = NA_real_),
+    list(run = 1,  value = Inf)
+  )
 
-  out_wn <- as.numeric(sub("^wn_", "", predictor_names(out)))
+  for (case in cases) {
+
+    what <- paste("run of", case$run, "of", case$value)
+
+    ## Off the grid, resampled at 4 and at 2
+    for (step in c(4, 2)) {
+
+      hd  <- holed(OFFGRID_WN, 1000, case$run, case$value)
+      w   <- expect_warning(out <- no_output(standardize(hd, resample = step, trim = c(600, 4000))),
+                            class = "horizons_warning_flagged")
+      msg <- gsub("\\s+", " ", conditionMessage(w))
+
+      expect_identical(out$data$analysis$.flag, c(NA, "standardize"), info = what)
+      expect_match(msg, '1 has a value missing inside its own range, or not finite: "s2".', fixed = TRUE, info = what)
+      expect_no_match(msg, "trim", fixed = TRUE, info = what)
+
+      ## No grid point between its neighbours is given a value
+      low  <- OFFGRID_WN[999]
+      high <- OFFGRID_WN[1000 + case$run]
+      gwn  <- as.numeric(sub("^wn_", "", predictor_names(out)))
+      expect_true(all(is.na(predictor_block(out)[2, gwn > low + 1e-6 & gwn < high - 1e-6])), info = what)
+
+    }
+
+    ## On the grid, copied and not re-interpolated, and with resample = NULL
+    hd <- holed(KSSL_WN, 1000, case$run, case$value)
+
+    for (resample in list(2, NULL)) {
+
+      w <- expect_warning(out <- no_output(standardize(hd, resample = resample, trim = c(600, 4000))),
+                          class = "horizons_warning_flagged")
+      expect_identical(out$data$analysis$.flag, c(NA, "standardize"), info = what)
+      expect_match(conditionMessage(w), "missing inside its own range, or not finite", fixed = TRUE, info = what)
+
+    }
+
+  }
+
+  ## A batch with no missing value is resampled as it always was
+  clean <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 2)
+  expect_no_warning(out <- no_output(standardize(clean, resample = 4, trim = c(600, 4000))))
   expect_false(".flag" %in% names(out$data$analysis))
-  expect_lt(max(abs(predictor_block(out)[2, ] - 2 * smooth_spectrum(out_wn))), 1e-5)
+
+})
+
+test_that("spectrum_holes() tells a missing value from a coarser grid of a spectrum's own", {
+
+  holes_in <- function(axis, missing = integer(0)) {
+    cols <- setdiff(seq_along(axis), missing)
+    length(spectrum_holes(cols, axis)) > 0
+  }
+
+  on_own_grid <- function(own, axis) {
+    cols <- sort(match(round(own, 6), round(axis, 6)))
+    length(spectrum_holes(cols, axis)) > 0
+  }
+
+  off    <- rev(OFFGRID_WN)
+  kssl   <- rev(KSSL_WN)
+  union2 <- function(...) sort(unique(round(c(...), 6)), decreasing = TRUE)
+
+  ## A missing value, a run of them, near either end, two one point apart
+  expect_false(holes_in(off))
+  for (run in c(1, 2, 5, 14)) expect_true(holes_in(off, 1000 + seq_len(run)), info = run)
+  expect_true(holes_in(off, 2))
+  expect_true(holes_in(off, length(off) - 1))
+  expect_true(holes_in(off, c(1000, 1002)))
+
+  ## Missing at an end is short, not a hole
+  expect_false(holes_in(off, 1:5))
+  expect_false(holes_in(off, length(off)))
+
+  ## Spectra each complete on their own grid, bound on a union axis
+  fine_coarse <- list(
+    list(off, kssl),
+    list(off, 600.5 + 3.86 * (0:900)),
+    list(off, 599.74 + 3.86 * (0:1787)),
+    list(kssl, seq(600, 4000, by = 8)),
+    list(kssl, seq(601, 4000, by = 8))
+  )
+
+  for (pair in fine_coarse) {
+    axis <- union2(pair[[1]], pair[[2]])
+    expect_false(on_own_grid(pair[[1]], axis))
+    expect_false(on_own_grid(pair[[2]], axis))
+  }
+
+  ## A hole in a spectrum on a union axis is still one
+  axis <- union2(kssl, seq(600, 4000, by = 8))
+  expect_true(on_own_grid(setdiff(seq(600, 4000, by = 8), 2000), axis))
+
+  ## Spacing that changes gradually (evenly in nm), or changes resolution
+  nir    <- sort(1e7 / seq(1000, 2500, by = 2), decreasing = TRUE)
+  merged <- sort(c(seq(600, 2000, by = 2), seq(2008, 4000, by = 8)), decreasing = TRUE)
+
+  expect_false(on_own_grid(nir, union2(nir, seq(4000, 10000, by = 4))))
+  expect_true(holes_in(nir, 400))
+  expect_false(on_own_grid(merged, union2(merged, kssl)))
+  expect_true(holes_in(merged, which(merged == 3000)))
+  expect_true(holes_in(merged, which(merged == 1000)))
+
+  ## What it cannot tell from a coarser grid, as documented
+  expect_true(holes_in(off, 1000 + c(0, 2, 4)))
+  expect_false(holes_in(off, 1000 + c(0, 2, 4, 6)))
+  expect_false(holes_in(merged, which(merged == 1998)))
+  expect_false(on_own_grid(kssl[-1000], union2(kssl[-1000])))
+  expect_true(on_own_grid(kssl[-1000], union2(kssl, off)))
 
 })
 
@@ -1331,6 +1452,52 @@ test_that("spectra read from files on different grids are each resampled from th
                    unname(predictor_block(no_output(standardize(subset_rows(
                      make_axis_spectra(fine, f = smooth_spectrum, n = 2), c("s1", "s2")),
                      resample = 4, trim = c(700, 3800))))))
+
+})
+
+test_that("files bound on other grids flag nothing, on the grid or off it, and each row is its own scan standardized alone", {
+
+  ## Every scan complete on its own grid, bound on the union axis
+  bound <- function(axes) {
+    union <- sort(unique(round(unlist(axes), 6)), decreasing = TRUE)
+    m     <- matrix(NA_real_, nrow = length(axes), ncol = length(union),
+                    dimnames = list(NULL, paste0("wn_", union)))
+    for (i in seq_along(axes)) m[i, match(round(axes[[i]], 6), union)] <- i * smooth_spectrum(axes[[i]])
+    new_horizons_data(
+      analysis = dplyr::bind_cols(tibble::tibble(sample_id = paste0("s", seq_along(axes))), tibble::as_tibble(m)),
+      role_map = tibble::tibble(variable = c("sample_id", colnames(m)),
+                                role     = c("id", rep("predictor", ncol(m)))))
+  }
+
+  merged <- c(seq(600, 2000, by = 2), seq(2008, 4000, by = 8))
+
+  cases <- list(
+    "1.93 with 2.0"  = list(axes = list(OFFGRID_WN, KSSL_WN), resample = 4, trim = c(700, 3800)),
+    "1.93 with 3.86" = list(axes = list(OFFGRID_WN, 599.74 + 3.86 * (0:1787)), resample = 4, trim = c(700, 3800)),
+    "2 with 8"       = list(axes = list(KSSL_WN, seq(600, 4000, by = 8)), resample = 2, trim = c(600, 4000)),
+    "a merged 2 | 8" = list(axes = list(KSSL_WN, merged), resample = 2, trim = c(600, 4000)),
+    "even in nm"     = list(axes = list(1e7 / seq(1000, 2500, by = 2), seq(4000, 10000, by = 4)),
+                            resample = 8, trim = c(4100, 9900))
+  )
+
+  for (what in names(cases)) {
+
+    case <- cases[[what]]
+    hd   <- bound(case$axes)
+
+    expect_no_warning(out <- no_output(standardize(hd, resample = case$resample, trim = case$trim)))
+    expect_false(".flag" %in% names(out$data$analysis), info = what)
+    expect_false(anyNA(predictor_block(out)), info = what)
+
+    for (i in seq_along(case$axes)) {
+
+      alone <- no_output(standardize(bound(case$axes[i]), resample = case$resample, trim = case$trim))
+      expect_equal(unname(predictor_block(out)[i, ]), unname(predictor_block(alone)[1, ]) * i,
+                   tolerance = 1e-12, info = paste(what, i))
+
+    }
+
+  }
 
 })
 

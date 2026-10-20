@@ -27,6 +27,15 @@ GRID_DIGITS <- 6L
 #' @noRd
 GRID_TOL <- 1e-6
 
+#' How much wider than the spacings beside it a spectrum's own spacing must
+#' be to be a hole in it ([spectrum_holes()])
+#' @noRd
+HOLE_RATIO <- 1.5
+
+#' How many of a spectrum's own spacings on each side a hole is judged against
+#' @noRd
+HOLE_SIDE <- 3L
+
 
 ## =============================================================================
 ## Helper: canonical_grid()
@@ -156,20 +165,86 @@ resample_spectra <- function(spectra_matrix, current_wav, new_wav) {
 
 
 ## =============================================================================
+## Helper: spectrum_holes()
+## =============================================================================
+
+#' Where a spectrum's own points have a hole
+#'
+#' @description
+#' A spectrum missing a value inside its own range is flagged, never
+#' interpolated across (DECISIONS 2026-10-20), but a spectrum read on a
+#' coarser grid of its own, beside finer ones, lacks the finer grid's columns
+#' and is missing nothing. A spacing between two of its consecutive finite
+#' points is a hole when both hold:
+#'
+#' * an axis column it lacks lies between them, so a spacing every spectrum
+#'   shares (a gap in the axis itself, which `grid_summary()`'s rule
+#'   handles) is never one spectrum's hole; and
+#' * it is wider than `HOLE_RATIO` times the larger of the median spacings
+#'   on each side of it, over `HOLE_SIDE` of the spectrum's own spacings
+#'   each, so a grid that is coarse throughout, or changes resolution, or
+#'   changes spacing gradually (evenly spaced in nm) is read as it is.
+#'
+#' A value that is not finite (`NA`, `NaN`, `Inf`) is a point the spectrum
+#' lacks. A spacing at either end is judged against its one side.
+#'
+#' @details
+#' What the rule cannot tell from a coarser grid: alternating missing points
+#' more than `HOLE_SIDE` in a row (and every other point missing throughout
+#' is a grid at twice the step); and, where one spectrum changes from a fine
+#' to a coarse resolution, missing points on the fine side within about a
+#' point of the change, whose spacing is no wider than the coarse one's. A
+#' file whose own axis skips one point is read as having a hole when it is
+#' bound with a file that has a point there, and not when it is read alone.
+#'
+#' @param cols Integer, increasing. The positions on the axis of the
+#'   spectrum's finite points.
+#' @param wavelengths Numeric. The axis.
+#' @return Integer. Each `p` for which the spacing from `cols[p]` to
+#'   `cols[p + 1]` is a hole; empty when there is none.
+#' @keywords internal
+#' @noRd
+spectrum_holes <- function(cols, wavelengths) {
+
+  skips <- which(diff(cols) > 1L)
+
+  if (length(skips) == 0 || length(cols) < 3) return(integer(0))
+
+  d <- abs(diff(wavelengths[cols]))
+  n <- length(d)
+
+  side <- function(at) if (length(at)) stats::median(d[at]) else -Inf
+
+  wide <- vapply(skips, function(p) {
+
+    left  <- if (p > 1) max(1L, p - HOLE_SIDE):(p - 1L) else integer(0)
+    right <- if (p < n) (p + 1L):min(n, p + HOLE_SIDE) else integer(0)
+    ref   <- max(side(left), side(right))
+
+    d[p] > HOLE_RATIO * ref
+
+  }, logical(1))
+
+  skips[wide]
+
+}
+
+
+## =============================================================================
 ## Helper: resample_onto_grid()
 ## =============================================================================
 
 #' Resample each spectrum onto the grid from its own points
 #'
 #' @description
-#' The axis rule `standardize()` applies to the data, applied to each
-#' spectrum's own finite points: a grid point beyond the points a spectrum
-#' has, or inside a hole in them (a spacing over three times the median and
-#' over 30 cm-1, `grid_summary()`'s rule), is `NA` for it, never extrapolated
-#' or filled, and each contiguous run of its points is interpolated on its
-#' own, so no spline crosses a hole. A single missing point is no hole and is
-#' interpolated over. `prospectr::resample()` would otherwise drop a
-#' spectrum's missing values silently and fit through or past them.
+#' Each spectrum is resampled from its own finite points: a grid point
+#' beyond the points it has, or inside a hole in them, is `NA` for it, never
+#' extrapolated or filled, and each contiguous run of its points is
+#' interpolated on its own, so no spline crosses a hole. Its runs are split
+#' at the axis's gaps (`grid_summary()`'s rule, which every spectrum shares)
+#' and at its own holes ([spectrum_holes()]), a missing value included.
+#' `prospectr::resample()` would otherwise drop a spectrum's missing values
+#' silently and fit through or past them.
 #'
 #' Spectra that share a pattern of finite values are resampled together, so
 #' a batch with no missing value is one call per run, the same call the
@@ -212,7 +287,11 @@ resample_onto_grid <- function(M, wavelengths, grid) {
 
     ## The grid points these spectra's own points reach ------------------------
 
-    gaps  <- grid_summary(wn)$gaps
+    holes <- spectrum_holes(cols, wavelengths)
+    gaps  <- rbind(grid_summary(wn)$gaps,
+                   if (length(holes)) cbind(low  = pmin(wn[holes], wn[holes + 1L]),
+                                            high = pmax(wn[holes], wn[holes + 1L])))
+    if (!is.null(gaps)) gaps <- unique(gaps)
     reach <- grid >= min(wn) - GRID_TOL & grid <= max(wn) + GRID_TOL
 
     for (i in seq_len(if (is.null(gaps)) 0L else nrow(gaps))) {
@@ -363,6 +442,27 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 ## =============================================================================
 ## Helper: remove_water_bands()
 ## =============================================================================
+
+#' Which wavenumbers lie in a water band
+#'
+#' @param wavelengths `numeric.` Wavenumbers.
+#' @return `logical`, one per wavenumber: inside a `WATER_BANDS` range,
+#'   bounds included.
+#' @noRd
+in_water_bands <- function(wavelengths) {
+
+  in_band <- rep(FALSE, length(wavelengths))
+
+  for (band in WATER_BANDS) {
+
+    in_band <- in_band | (wavelengths >= band[1] & wavelengths <= band[2])
+
+  }
+
+  in_band
+
+}
+
 #' Remove water absorption bands from spectra
 #'
 #' @description
@@ -388,14 +488,7 @@ remove_water_bands <- function(spectra_matrix, wavelengths, call = rlang::caller
   ## Step 1: Identify columns in water band regions
   ## ---------------------------------------------------------------------------
 
-  in_water_band <- rep(FALSE, length(wavelengths))
-
-  for (band in WATER_BANDS) {
-
-    in_water_band <- in_water_band |
-                     (wavelengths >= band[1] & wavelengths <= band[2])
-
-  }
+  in_water_band <- in_water_bands(wavelengths)
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Keep only non-water columns
@@ -572,36 +665,73 @@ unusable_spectra <- function(M) {
 
 }
 
-#' The range each spectrum's own points cover
+#' What each spectrum's own points cover, and what they lack
 #'
 #' @description
-#' Read before the resample, so a spectrum the grid outruns can be told from
-#' one with a value that is not finite, and its flag can say what it covers.
-#' Only spectra with a missing value can be short of the grid, so with none
-#' it returns `NULL` without reading the matrix further.
+#' Read before the resample, so a spectrum missing a value inside its own
+#' range can be told from one the grid outruns at an end, and its flag can
+#' say which. With every value finite it returns `NULL` without reading the
+#' matrix further.
 #'
 #' @param M `matrix.` Spectra as rows, on `wavelengths`.
 #' @param wavelengths `numeric.` The axis.
-#' @return `NULL`, or a list: `has` (logical, the spectrum has a finite
-#'   value), `lo` and `hi` (numeric, the range of its finite points).
+#' @return `NULL`, or a list, one element per row in each: `has` (logical,
+#'   the spectrum has a finite value), `lo` and `hi` (numeric, the range of
+#'   its finite points), `lost` (a list of numeric: the wavenumbers of the
+#'   axis columns inside its holes, [spectrum_holes()], and of any value
+#'   that is infinite) and `coarse` (logical: it lacks an axis column inside
+#'   its range that is no hole, as a spectrum on a coarser grid of its own
+#'   does).
 #' @keywords internal
 #' @noRd
 own_points <- function(M, wavelengths) {
 
-  if (!anyNA(M)) return(NULL)
+  finite <- is.finite(M)
 
-  lo <- rep(Inf, nrow(M))
-  hi <- rep(-Inf, nrow(M))
+  if (all(finite)) return(NULL)
 
-  for (j in seq_along(wavelengths)) {
+  n      <- nrow(M)
+  lo     <- rep(Inf, n)
+  hi     <- rep(-Inf, n)
+  lost   <- rep(list(numeric(0)), n)
+  coarse <- rep(FALSE, n)
 
-    at     <- is.finite(M[, j])
-    lo[at] <- pmin(lo[at], wavelengths[j])
-    hi[at] <- pmax(hi[at], wavelengths[j])
+  ## Spectra sharing a pattern of finite values share their holes ------------
+
+  rows_with <- which(rowSums(!finite) > 0)
+  key       <- apply(finite[rows_with, , drop = FALSE], 1, function(r) paste(which(r), collapse = ","))
+
+  for (pattern in unique(key)) {
+
+    rows <- rows_with[key == pattern]
+    cols <- which(finite[rows[1], ])
+
+    if (length(cols) == 0) next
+
+    lo[rows] <- min(wavelengths[cols])
+    hi[rows] <- max(wavelengths[cols])
+
+    holes  <- spectrum_holes(cols, wavelengths)
+    inside <- unlist(lapply(holes, function(p) seq(cols[p] + 1L, cols[p + 1L] - 1L)))
+
+    lost[rows]   <- list(wavelengths[inside])
+    coarse[rows] <- any(diff(cols) > 1L) && length(holes) < sum(diff(cols) > 1L)
 
   }
 
-  list(has = is.finite(lo), lo = lo, hi = hi)
+  ## Every spectrum's infinite values are lost, wherever they are -------------
+
+  for (i in which(rowSums(is.infinite(M)) > 0)) {
+
+    lost[[i]] <- sort(unique(c(lost[[i]], wavelengths[is.infinite(M[i, ])])))
+
+  }
+
+  ### A complete row keeps lo and hi of the whole axis
+  lo[-rows_with] <- min(wavelengths)
+  hi[-rows_with] <- max(wavelengths)
+
+  list(has = is.finite(lo), lo = lo, hi = hi, lost = lost, coarse = coarse)
 
 }
 
@@ -618,17 +748,16 @@ own_points <- function(M, wavelengths) {
 #' @param analysis,role_map The table and its roles.
 #' @param reason Character, one per row, from [unusable_spectra()]: `NA` for
 #'   a row left as it is. `standardize()` adds `"short of the grid"` for a
-#'   spectrum whose own points do not reach every grid point, which only it,
-#'   knowing the grid, can tell from a value that is not finite.
+#'   spectrum whose own points end before the grid does, which only it,
+#'   knowing the grid, can tell from a value that is not finite or missing
+#'   inside a spectrum's own range.
 #' @param collector `standardize()`'s collector, from [log_open()].
 #' @param short_range `numeric(2)` or `NULL`. The range every spectrum short
 #'   of the grid covers, which a `trim` inside keeps them.
-#' @param grid_range `numeric(2)` or `NULL`. The grid's range.
 #' @return List: `analysis` and `role_map`.
 #' @keywords internal
 #' @noRd
-flag_unusable <- function(analysis, role_map, reason, collector,
-                          short_range = NULL, grid_range = NULL) {
+flag_unusable <- function(analysis, role_map, reason, collector, short_range = NULL) {
 
   flag <- !is.na(reason)
 
@@ -669,16 +798,14 @@ flag_unusable <- function(analysis, role_map, reason, collector,
   n_flat     <- sum(flag & reason %in% "no spread")
   n_short    <- sum(flag & reason %in% "short of the grid")
 
-  ### A trim inside the range they all cover keeps them, unless every one
-  ### reaches both ends of the grid and is short only by a hole
-  trim_hint <- n_short > 0 && !is.null(short_range) && short_range[1] < short_range[2] &&
-               (short_range[1] > grid_range[1] + GRID_TOL || short_range[2] < grid_range[2] - GRID_TOL)
+  ### A trim inside the range they all cover keeps them, when they share one
+  trim_hint <- n_short > 0 && short_range[1] < short_range[2]
 
   log_warning(collector, "flagged", c(
     "{n} spectr{?um/a} could not be used and {?is/are} flagged ({.field .flag}); the modelling verbs leave {?it/them} out.",
-    "i" = if (n_nf > 0) "{n_nf} {?has/have} a value that is not finite: {shown_ids(non_finite)}.",
+    "i" = if (n_nf > 0) "{n_nf} {?has/have} a value missing inside {?its/their} own range, or not finite: {shown_ids(non_finite)}. Fill or drop such values before {.fn spectra} reads them.",
     "i" = if (n_flat > 0) "{n_flat} {?has/have} no spread (every value equal): {shown_ids(flat)}.",
-    "i" = if (n_short > 0) "{n_short} {?does/do} not reach every point of the grid from {?its/their} own points, short at an end or with a hole: {shown_ids(short)}.",
+    "i" = if (n_short > 0) "{n_short} {?is/are} short of the grid at an end, {?its/their} own points ending before it does: {shown_ids(short)}.",
     "i" = if (trim_hint) "The range {cli::qty(n_short)}{?it covers/they all cover} is {short_range[1]} to {short_range[2]} cm-1; a {.arg trim} inside it keeps {cli::qty(n_short)}{?it/them}."
   ), ids = ids[flag], n = n)
 
@@ -834,12 +961,22 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' The spectra are interpolated onto the grid by cubic spline and never
 #' extrapolated: grid points beyond the data's range are dropped with a
 #' warning that says how many and where. Each spectrum is resampled from its
-#' own finite points: one with missing values gets `NA` at a grid point
-#' beyond the points it has, or inside a hole in them, rather than a value
-#' extrapolated or filled in, and is flagged (see Unusable spectra). A single
-#' missing point is no hole, so it is interpolated over; on data already on
-#' the grid, which is not re-interpolated, a missing value stays missing and
-#' flags its spectrum. Nor is a hole in the input filled:
+#' own finite points, and nothing is interpolated across a value it is
+#' missing: a spectrum missing a value (`NA`, `NaN` or `Inf`) anywhere
+#' between its first and last points is flagged (see Unusable spectra), on
+#' every path, and one whose points end before the grid's gets `NA` beyond
+#' them, never a value extrapolated. Fill or drop missing values before
+#' `spectra()` if a spectrum should be kept. A spectrum on a coarser grid of
+#' its own, as a file read beside finer ones is, is missing nothing, and is
+#' put on the grid from its own points. Its own spacing tells the two apart:
+#' a spacing wider than 1.5 times the median of the three on each side of it
+#' (the larger side), with an axis column the spectrum lacks inside it, is a
+#' missing value. So a run of more than three alternating missing points
+#' reads as a coarser grid; so do missing points within about a point of
+#' the place where one spectrum's resolution coarsens, on the fine side; and
+#' a file whose own axis skips one point is flagged when it is bound with a
+#' file that has a point there, though not when it is read alone.
+#' Nor is a hole in the input filled:
 #' where the data's own axis has a gap (a spacing over three times the median
 #' and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
 #' `remove_water = TRUE`), the grid points inside it are dropped with a
@@ -865,10 +1002,11 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' (every value equal), is kept and flagged, never dropped: its
 #' `.flag` is `"standardize"` (a `meta` column, created when the first row
 #' is flagged), and one `horizons_warning_flagged` counts and names them,
-#' by reason. With resampling, a spectrum whose own points do not reach
-#' every grid point (short at an end, as the scans of a narrower file bound
-#' with wider ones are, or with a hole) is flagged for that, and the warning
-#' gives the range such spectra cover, inside which a `trim` keeps them.
+#' by reason. With resampling, a spectrum whose own points end before the
+#' grid does (as the scans of a narrower file bound with wider ones do) is
+#' flagged for that, and the warning gives the range such spectra cover,
+#' inside which a `trim` keeps them. A value missing only inside a water
+#' band the call removes flags nothing, unless the hull is fitted across it.
 #' [evaluate()], [fit()], [predict()] and [select_training()] leave flagged
 #' spectra out. The convex hull is fitted to the spectra not flagged, and a
 #' flagged spectrum keeps its values as they stood when it was flagged, so
@@ -1312,9 +1450,17 @@ standardize <- function(x,
 
     if (on_grid) {
 
+      ### A spectrum on a coarser grid of its own, read beside this one, lacks
+      ### grid points it has no hole at: it is put on the grid from its own
+      ### points, the margin beyond the bounds included, as off the grid
+      own   <- own_points(spectra_matrix[, in_bounds, drop = FALSE], grid)
+      redo  <- if (!is.null(own)) which(own$coarse) else integer(0)
+      moved <- if (length(redo)) resample_onto_grid(spectra_matrix[redo, , drop = FALSE], wavelengths, grid)
+
       spectra_matrix <- spectra_matrix[, in_bounds, drop = FALSE]
       wavelengths    <- grid
-      own            <- own_points(spectra_matrix, wavelengths)
+
+      if (length(redo)) spectra_matrix[redo, ] <- moved
 
       operations$resample <- list(
         status            = "skipped",
@@ -1362,17 +1508,34 @@ standardize <- function(x,
   ## trimmed native axis. Before water removal: the hull needs a continuous
   ## range.
 
-  ## Why a spectrum cannot be used. With resampling, a missing value is a
-  ## grid point the spectrum's own points do not reach, which is a reason of
-  ## its own: the remedy is the trim, not the source.
+  ## Why a spectrum cannot be used. With resampling, a value missing inside a
+  ## spectrum's own range is lost data, whose remedy is the source, and a
+  ## grid point beyond its own points at an end is a reason of its own, whose
+  ## remedy is the trim. M's columns are on `at`; `removed`, when given,
+  ## says which lost points lie in columns the call removes before it
+  ## returns, which then judge nothing.
 
-  judge <- function(M) {
+  judge <- function(M, at, removed = NULL) {
 
     r <- unusable_spectra(M)
 
     if (!is.null(own)) {
 
-      short    <- r %in% "non-finite" & own$has & rowSums(is.infinite(M)) == 0
+      lost    <- vapply(own$lost, function(w) {
+        if (!is.null(removed)) w <- w[!removed(w)]
+        length(w) > 0
+      }, logical(1))
+      r[lost] <- "non-finite"
+
+      ### Short only where its own points end: every value it lacks on the
+      ### grid lies beyond them
+      beyond <- function(i) {
+        miss <- at[!is.finite(M[i, ])]
+        all(miss < own$lo[i] - GRID_TOL | miss > own$hi[i] + GRID_TOL)
+      }
+
+      cand     <- which(r %in% "non-finite" & !lost & own$has)
+      short    <- cand[vapply(cand, beyond, logical(1))]
       r[short] <- "short of the grid"
 
     }
@@ -1390,7 +1553,7 @@ standardize <- function(x,
     ## hull is fitted over every column, water bands included, so they are
     ## all judged; without a hull only the values returned are (Step 6b).
 
-    before      <- judge(spectra_matrix)
+    before      <- judge(spectra_matrix, wavelengths)
     now         <- !prior & is.na(reason) & !is.na(before)
     reason[now] <- before[now]
 
@@ -1434,7 +1597,8 @@ standardize <- function(x,
   ## Kept and flagged, never dropped: rows are removed only where modelling
   ## happens.
 
-  after       <- judge(spectra_matrix)
+  after       <- judge(spectra_matrix, wavelengths,
+                       removed = if (remove_water) in_water_bands)
   now         <- !prior & is.na(reason) & !is.na(after)
   reason[now] <- after[now]
 
@@ -1482,8 +1646,7 @@ standardize <- function(x,
   }
 
   flagged      <- flag_unusable(new_analysis, new_role_map, reason, collector,
-                                short_range = short_range,
-                                grid_range  = c(grid_record$min, grid_record$max))
+                                short_range = short_range)
   new_analysis <- flagged$analysis
   new_role_map <- flagged$role_map
 

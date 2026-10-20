@@ -99,12 +99,22 @@ gives clean, stable names (\code{wn_601.5}).
 The spectra are interpolated onto the grid by cubic spline and never
 extrapolated: grid points beyond the data's range are dropped with a
 warning that says how many and where. Each spectrum is resampled from its
-own finite points: one with missing values gets \code{NA} at a grid point
-beyond the points it has, or inside a hole in them, rather than a value
-extrapolated or filled in, and is flagged (see Unusable spectra). A single
-missing point is no hole, so it is interpolated over; on data already on
-the grid, which is not re-interpolated, a missing value stays missing and
-flags its spectrum. Nor is a hole in the input filled:
+own finite points, and nothing is interpolated across a value it is
+missing: a spectrum missing a value (\code{NA}, \code{NaN} or \code{Inf}) anywhere
+between its first and last points is flagged (see Unusable spectra), on
+every path, and one whose points end before the grid's gets \code{NA} beyond
+them, never a value extrapolated. Fill or drop missing values before
+\code{spectra()} if a spectrum should be kept. A spectrum on a coarser grid of
+its own, as a file read beside finer ones is, is missing nothing, and is
+put on the grid from its own points. Its own spacing tells the two apart:
+a spacing wider than 1.5 times the median of the three on each side of it
+(the larger side), with an axis column the spectrum lacks inside it, is a
+missing value. So a run of more than three alternating missing points
+reads as a coarser grid; so do missing points within about a point of
+the place where one spectrum's resolution coarsens, on the fine side; and
+a file whose own axis skips one point is flagged when it is bound with a
+file that has a point there, though not when it is read alone.
+Nor is a hole in the input filled:
 where the data's own axis has a gap (a spacing over three times the median
 and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
 \code{remove_water = TRUE}), the grid points inside it are dropped with a
@@ -130,10 +140,11 @@ value that is not finite among those it returns, or one with no spread
 (every value equal), is kept and flagged, never dropped: its
 \code{.flag} is \code{"standardize"} (a \code{meta} column, created when the first row
 is flagged), and one \code{horizons_warning_flagged} counts and names them,
-by reason. With resampling, a spectrum whose own points do not reach
-every grid point (short at an end, as the scans of a narrower file bound
-with wider ones are, or with a hole) is flagged for that, and the warning
-gives the range such spectra cover, inside which a \code{trim} keeps them.
+by reason. With resampling, a spectrum whose own points end before the
+grid does (as the scans of a narrower file bound with wider ones do) is
+flagged for that, and the warning gives the range such spectra cover,
+inside which a \code{trim} keeps them. A value missing only inside a water
+band the call removes flags nothing, unless the hull is fitted across it.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=predict]{predict()}} and \code{\link[=select_training]{select_training()}} leave flagged
 spectra out. The convex hull is fitted to the spectra not flagged, and a
 flagged spectrum keeps its values as they stood when it was flagged, so
