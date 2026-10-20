@@ -1243,6 +1243,19 @@ test_that("a spectrum missing the point beyond a trim bound leaves the others' v
 
 })
 
+test_that("unusable_spectra() gives one rule over a matrix or a data frame, and judges nothing with no columns", {
+
+  M <- rbind(c(1, 2, 3), c(5, 5, 5), c(1, NA, 3), c(Inf, 2, 3))
+
+  expect_identical(unusable_spectra(M), c(NA, "no spread", "non-finite", "non-finite"))
+  expect_identical(unusable_spectra(as.data.frame(M)), unusable_spectra(M))
+
+  ## One value has no spread to judge; no columns, nothing to judge
+  expect_identical(unusable_spectra(M[, 1, drop = FALSE]), c(NA, NA, NA, "non-finite"))
+  expect_identical(unusable_spectra(M[, 0, drop = FALSE]), rep(NA_character_, 4))
+
+})
+
 test_that("a point standing alone between two holes in a spectrum carries the grid point it sits on", {
 
   ## On a 2 cm-1 axis resampled to 4, row 2 has holes either side of 2000
