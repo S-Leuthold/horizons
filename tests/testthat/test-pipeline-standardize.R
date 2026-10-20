@@ -507,7 +507,7 @@ test_that("an NA outside the trim range passes spectra() |> standardize(trim = )
 
   for (w in wn) {
 
-    df[[as.character(w)]] <- c(0.3, 0.4)
+    df[[as.character(w)]] <- c(0.3, 0.4) + w / 1e5
 
   }
 
@@ -525,6 +525,7 @@ test_that("an NA outside the trim range passes spectra() |> standardize(trim = )
 
   expect_false("wn_4500" %in% predictor_names(out))
   expect_false(anyNA(as.matrix(out$data$analysis[, predictor_names(out)])))
+  expect_false(".flag" %in% names(out$data$analysis))
 
 })
 
@@ -633,21 +634,14 @@ test_that("a call with every operation off still sorts, validates, and changes n
   expect_identical(after[, colnames(before)], before)
   expect_identical(out$data$analysis$sample_id, inc$data$analysis$sample_id)
 
-  ## standardize() validates at "raw" stage (#24 rework): a stray NA in a
-  ## predictor column is legitimate before replicates are collapsed by
-  ## average() (it stays legal until a real trim/resample runs and Step 6b's
-  ## own non-finite check applies), so the no-op path no longer refuses it.
+  ## A stray NA is kept, not refused: with every operation off the row is
+  ## flagged, its value left as it was (the full path is tested below)
   bad <- inc
   bad$data$analysis$wn_1000[1] <- NA_real_
-  bad_out <- no_output(standardize(bad, resample = NULL, trim = NULL))
+  expect_warning(bad_out <- no_output(standardize(bad, resample = NULL, trim = NULL)),
+                 class = "horizons_warning_flagged")
   expect_true(is.na(bad_out$data$analysis$wn_1000[1]))
-
-  ## A value that survives an actual trim/resample as non-finite is still
-  ## caught, by standardize()'s own Step 6b check rather than the validator.
-  expect_error(
-    no_output(standardize(bad, resample = 2, trim = c(600, 4000))),
-    "non-finite"
-  )
+  expect_identical(bad_out$data$analysis$.flag, c("standardize", NA, NA))
 
 })
 
@@ -944,6 +938,153 @@ test_that("a single sample standardizes as its row of a batch, under every optio
                      info = what)
 
   }
+
+})
+
+
+## =============================================================================
+## Spectra standardize() cannot use: kept and flagged
+## =============================================================================
+## Rows are removed only where modelling happens, so a spectrum standardize()
+## cannot use is flagged in .flag, which every verb that computes over
+## predictors reads (flagged_rows()), and one flagged warning names it.
+
+#' A batch of smooth spectra on the KSSL axis, with row 2 flat and row 3
+#' carrying one missing value
+#' @noRd
+unusable_batch <- function() {
+  hd <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 4)
+  pred <- predictor_names(hd)
+  hd$data$analysis[2, pred] <- 0.5
+  hd$data$analysis$wn_2000[3] <- NA_real_
+  hd
+}
+
+test_that("standardize() keeps and flags a flat spectrum and one with a missing value, with one warning", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd <- unusable_batch()
+
+  ## Act -------------------------------------------------------------------
+
+  w <- expect_warning(out <- no_output(standardize(hd, resample = NULL, trim = c(600, 4000))),
+                      class = "horizons_warning_flagged")
+
+  ## Assert ----------------------------------------------------------------
+
+  ## Every row kept, two flagged
+  expect_identical(out$data$analysis$sample_id, paste0("s", 1:4))
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize", "standardize", NA))
+  expect_identical(out$data$role_map$role[out$data$role_map$variable == ".flag"], "meta")
+  expect_identical(flagged_rows(out$data$analysis), c(FALSE, TRUE, TRUE, FALSE))
+
+  ## One warning, counting each reason, written to the log first
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+  expect_match(msg, "2 spectra could not be used and are flagged (.flag)", fixed = TRUE)
+  expect_match(msg, '1 has a value that is not finite: "s3"', fixed = TRUE)
+  expect_match(msg, '1 has no spread (every value equal): "s2"', fixed = TRUE)
+
+  row <- out$log[out$log$topic %in% "flagged", ]
+  expect_identical(row$n, 2L)
+  expect_identical(row$ids[[1]], c("s2", "s3"))
+
+  ## The clean rows are as they standardize alone
+  alone <- no_output(standardize(subset_rows(hd, c("s1", "s4")), resample = NULL, trim = c(600, 4000)))
+  expect_identical(unname(predictor_block(out)[c(1, 4), ]), unname(predictor_block(alone)))
+
+  ## Valid at the full stage once replicates are averaged: the non-finite
+  ## value is in a flagged row
+  avg <- average(out, quality_check = FALSE)
+  expect_no_error(validate_horizons_data(avg))
+
+})
+
+test_that("the flat spectrum is flagged on the resampled path too, where SNV would turn it into zeros", {
+
+  hd <- unusable_batch()
+  hd$data$analysis$wn_2000[3] <- 0.4
+
+  expect_warning(out <- no_output(standardize(hd, resample = 4, trim = c(600, 4000))),
+                 "1 has no spread", class = "horizons_warning_flagged")
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize", NA, NA))
+
+  ## Resampling keeps a flat spectrum exactly flat
+  expect_true(all(predictor_block(out)[2, ] == 0.5))
+
+})
+
+test_that("a spectrum with no finite value is flagged, and the others resampled", {
+
+  ## prospectr fails the whole call on a row with fewer than two finite
+  ## values, so that row is left out of the resample
+  hd <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 3)
+  hd$data$analysis[2, predictor_names(hd)] <- NA_real_
+
+  expect_warning(out <- no_output(standardize(hd, resample = 4, trim = c(600, 4000))),
+                 class = "horizons_warning_flagged")
+
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize", NA))
+  expect_true(all(is.na(predictor_block(out)[2, ])))
+  expect_false(anyNA(predictor_block(out)[c(1, 3), ]))
+
+})
+
+test_that("the hull is fitted to the spectra not flagged, and a failure of the hull stops the call", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd    <- unusable_batch()
+  given <- NULL
+  real  <- prospectr::baseline
+  local_mocked_bindings(
+    baseline = function(X, wav, ...) {
+      given <<- nrow(X)
+      real(X, wav, ...)
+    },
+    .package = "prospectr"
+  )
+
+  ## Act -------------------------------------------------------------------
+
+  out <- suppressWarnings(no_output(standardize(hd, resample = NULL, trim = c(600, 4000),
+                                                baseline = TRUE)))
+
+  ## Assert ----------------------------------------------------------------
+
+  ## prospectr saw the two clean rows only; the flagged ones keep their values
+  expect_identical(given, 2L)
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize", "standardize", NA))
+  expect_true(all(predictor_block(out)[2, ] == 0.5))
+  expect_identical(unname(predictor_block(out)[3, ]), unname(predictor_block(hd)[3, ]))
+
+  alone <- no_output(standardize(subset_rows(hd, c("s1", "s4")), resample = NULL,
+                                 trim = c(600, 4000), baseline = TRUE))
+  expect_identical(unname(predictor_block(out)[c(1, 4), ]), unname(predictor_block(alone)))
+
+  ## A failure on the rest is the run's, with prospectr's as its parent
+  local_mocked_bindings(baseline = function(X, wav, ...) stop("hull exploded"),
+                        .package = "prospectr")
+
+  err <- expect_error(suppressWarnings(no_output(standardize(hd, resample = NULL, baseline = TRUE))),
+                      "Baseline correction failed on the 2 spectra", class = "horizons_error_run")
+  expect_match(conditionMessage(err$parent), "hull exploded", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "standardize")
+
+})
+
+test_that("a row an earlier step flagged keeps its flag and is not counted again", {
+
+  hd <- unusable_batch()
+  hd$data$analysis$.flag <- c(NA, "average", NA, NA)
+  hd$data$role_map <- dplyr::bind_rows(tibble::tibble(variable = ".flag", role = "meta"),
+                                       hd$data$role_map)
+
+  w <- expect_warning(out <- no_output(standardize(hd, resample = NULL, trim = c(600, 4000))),
+                      class = "horizons_warning_flagged")
+
+  expect_identical(out$data$analysis$.flag, c(NA, "average", "standardize", NA))
+  expect_match(conditionMessage(w), "1 spectrum could not be used", fixed = TRUE)
 
 })
 

@@ -115,6 +115,17 @@ the trimmed native axis. Water bands are deleted last so that
 derivative taken later still runs across the hole they leave, which is a
 separate matter (see \code{select_training()}'s \code{mask}).
 
+\strong{Unusable spectra:} a spectrum \code{standardize()} cannot use, one with a
+value that is not finite once it is trimmed and resampled, or one with no
+spread (every value equal), is kept and flagged, never dropped: its
+\code{.flag} is \code{"standardize"} (a \code{meta} column, created when the first row
+is flagged), and one \code{horizons_warning_flagged} counts and names them.
+\code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=predict]{predict()}} and \code{\link[=select_training]{select_training()}} leave flagged
+spectra out. The convex hull is fitted to the spectra not flagged, and a
+flagged spectrum keeps its values as they stood when it was flagged. The
+rule holds with every operation off too. A row an earlier step flagged
+keeps its flag.
+
 \strong{Idempotence:} If the object has already been standardized, calling
 \code{standardize()} again returns the object unchanged, with one
 \code{horizons_warning_skipped}. Use \code{force = TRUE} to override (not

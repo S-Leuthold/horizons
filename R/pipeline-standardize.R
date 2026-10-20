@@ -317,12 +317,19 @@ remove_water_bands <- function(spectra_matrix, wavelengths, call = rlang::caller
 #' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
 #' @param wavelengths `numeric.` Wavenumber positions (column names).
+#' @param call The frame a failure reports: `standardize()`'s.
+#'
+#' @details
+#' `prospectr::baseline()` fits every row in one call and fails the whole
+#' call on a single non-finite value, so `standardize()` passes only the
+#' rows it has not flagged. A failure on those rows hits every one of them
+#' alike, so it stops the call, with prospectr's error as its parent.
 #'
 #' @return `matrix.` Baseline-corrected spectral matrix, the input's shape,
 #'   a single spectrum included.
 #'
 #' @noRd
-apply_baseline_correction <- function(spectra_matrix, wavelengths) {
+apply_baseline_correction <- function(spectra_matrix, wavelengths, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Apply prospectr baseline correction
@@ -333,18 +340,17 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
   wav_sorted     <- sort(wavelengths)
   spectra_sorted <- spectra_matrix[, order(wavelengths), drop = FALSE]
 
-  corrected <- tryCatch(
+  corrected <- rlang::try_fetch(
     prospectr::baseline(
       X   = spectra_sorted,
       wav = wav_sorted
     ),
     error = function(e) {
 
-      cli::cli_abort(c(
-        "Baseline correction failed",
-        "i" = "This can happen with constant or near-constant spectra",
-        "x" = "Original error: {condition_summary(e)}"
-      ))
+      abort_horizons(c(
+        "Baseline correction failed on the {nrow(spectra_sorted)} spectr{?um/a} it was given.",
+        "i" = "The convex hull is fitted to every spectrum in one call, so a failure there stops the call."
+      ), kind = "run", parent = e, call = call)
 
     }
   )
@@ -370,6 +376,112 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
   corrected <- corrected[, order(order(wavelengths)), drop = FALSE]
 
   corrected
+
+}
+
+
+## =============================================================================
+## Helper: unusable_spectra() and flag_unusable()
+## =============================================================================
+
+#' Which spectra cannot be used, and why
+#'
+#' @description
+#' The one rule `standardize()` and `step_transform_spectra()`'s bake share
+#' (decision 5), so a spectrum gets the same answer whichever way it comes.
+#' A spectrum is unusable when any value is not finite, or when it has no
+#' spread: every value equal, as `prospectr`'s own SNV check reads it.
+#' Under prospectr 0.2.10 SNV turns such a spectrum into zeros rather than
+#' `NaN`, so the second test cannot be left to a non-finite value appearing
+#' later.
+#'
+#' @param M Numeric matrix, one spectrum per row.
+#' @return Character, one per row: `NA` for a usable spectrum,
+#'   `"non-finite"` or `"no spread"`.
+#' @keywords internal
+#' @noRd
+unusable_spectra <- function(M) {
+
+  M      <- as.matrix(M)
+  reason <- rep(NA_character_, nrow(M))
+
+  if (nrow(M) == 0 || ncol(M) == 0) return(reason)
+
+  non_finite <- rowSums(!is.finite(M)) > 0
+
+  ### Every value equal to the row's first: M[, 1] recycles down each column
+  flat <- !non_finite & rowSums(M != M[, 1]) == 0
+
+  reason[non_finite] <- "non-finite"
+  reason[flat]       <- "no spread"
+
+  reason
+
+}
+
+#' Flag the spectra standardize() could not use
+#'
+#' @description
+#' Keeps every row: a spectrum that cannot be used is marked in `.flag`
+#' (`"standardize"`), the column the modelling verbs read through
+#' [flagged_rows()], created only when a row is flagged, and placed ahead
+#' of the predictors. A row an earlier step flagged keeps its flag; the
+#' caller leaves it out of `reason`. One `flagged` warning counts the rows
+#' by reason and names the first of them.
+#'
+#' @param analysis,role_map The table and its roles.
+#' @param reason Character, one per row, from [unusable_spectra()]: `NA` for
+#'   a row left as it is.
+#' @param collector `standardize()`'s collector, from [log_open()].
+#' @return List: `analysis` and `role_map`.
+#' @keywords internal
+#' @noRd
+flag_unusable <- function(analysis, role_map, reason, collector) {
+
+  flag <- !is.na(reason)
+
+  if (!any(flag)) return(list(analysis = analysis, role_map = role_map))
+
+  ## The column, ahead of the predictors, when no step has flagged a row yet --
+
+  if (!".flag" %in% names(analysis)) {
+
+    preds <- role_map$variable[role_map$role == "predictor"]
+    at    <- match(TRUE, names(analysis) %in% preds, nomatch = ncol(analysis) + 1L)
+    at_rm <- match(TRUE, role_map$variable %in% preds, nomatch = nrow(role_map) + 1L)
+
+    analysis <- dplyr::bind_cols(
+      analysis[, seq_len(at - 1L), drop = FALSE],
+      tibble::tibble(.flag = rep(NA_character_, nrow(analysis))),
+      analysis[, setdiff(seq_len(ncol(analysis)), seq_len(at - 1L)), drop = FALSE]
+    )
+
+    role_map <- dplyr::bind_rows(
+      role_map[seq_len(at_rm - 1L), , drop = FALSE],
+      tibble::tibble(variable = ".flag", role = "meta"),
+      role_map[setdiff(seq_len(nrow(role_map)), seq_len(at_rm - 1L)), , drop = FALSE]
+    )
+
+  }
+
+  analysis$.flag[flag] <- "standardize"
+
+  ## One warning, counting by reason ------------------------------------------
+
+  ids        <- analysis$sample_id
+  n          <- sum(flag)
+  non_finite <- ids[flag & reason %in% "non-finite"]
+  flat       <- ids[flag & reason %in% "no spread"]
+  n_nf       <- sum(flag & reason %in% "non-finite")
+  n_flat     <- sum(flag & reason %in% "no spread")
+
+  log_warning(collector, "flagged", c(
+    "{n} spectr{?um/a} could not be used and {?is/are} flagged ({.field .flag}); the modelling verbs leave {?it/them} out.",
+    "i" = if (n_nf > 0) "{n_nf} {?has/have} a value that is not finite: {shown_ids(non_finite)}.",
+    "i" = if (n_flat > 0) "{n_flat} {?has/have} no spread (every value equal): {shown_ids(flat)}."
+  ), ids = ids[flag], n = n)
+
+  list(analysis = analysis, role_map = role_map)
 
 }
 
@@ -515,6 +627,17 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' `standardize()`'s own interpolation never spans them; a Savitzky-Golay
 #' derivative taken later still runs across the hole they leave, which is a
 #' separate matter (see `select_training()`'s `mask`).
+#'
+#' **Unusable spectra:** a spectrum `standardize()` cannot use, one with a
+#' value that is not finite once it is trimmed and resampled, or one with no
+#' spread (every value equal), is kept and flagged, never dropped: its
+#' `.flag` is `"standardize"` (a `meta` column, created when the first row
+#' is flagged), and one `horizons_warning_flagged` counts and names them.
+#' [evaluate()], [fit()], [predict()] and [select_training()] leave flagged
+#' spectra out. The convex hull is fitted to the spectra not flagged, and a
+#' flagged spectrum keeps its values as they stood when it was flagged. The
+#' rule holds with every operation off too. A row an earlier step flagged
+#' keeps its flag.
 #'
 #' **Idempotence:** If the object has already been standardized, calling
 #' `standardize()` again returns the object unchanged, with one
@@ -692,6 +815,16 @@ standardize <- function(x,
 
     x <- validate_horizons_data(x, stage = "raw")
 
+    ## A spectrum it cannot use is flagged here too, on the axis as it is ----
+
+    axis_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+    reason    <- unusable_spectra(x$data$analysis[, axis_vars, drop = FALSE])
+    reason[flagged_rows(x$data$analysis)] <- NA_character_
+
+    flagged <- flag_unusable(x$data$analysis, x$data$role_map, reason, collector)
+
+    if (any(!is.na(reason))) x <- set_analysis(x, flagged$analysis, flagged$role_map)
+
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
     ### Under force = TRUE the object may already sit on a grid an earlier
@@ -700,8 +833,7 @@ standardize <- function(x,
     keep_prior <- !is.null(prior) && !sorted$sorted
 
     ### The axis as it stands, recorded as the full path records it.
-    axis_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
-    axis_wn   <- wn_values(axis_vars)
+    axis_wn <- wn_values(axis_vars)
 
     x$provenance$standardization <- list(
       resample         = NULL,
@@ -761,6 +893,11 @@ standardize <- function(x,
 
   predictor_vars <- role_map$variable[role_map$role == "predictor"]
   spectra_matrix <- as.matrix(analysis[, predictor_vars, drop = FALSE])
+
+  ## A row an earlier step flagged stays flagged and is not counted again;
+  ## reason[] holds why this call flags a row
+  prior  <- flagged_rows(analysis)
+  reason <- rep(NA_character_, nrow(analysis))
 
   ## Extract wavenumbers from column names -------------------------------------
 
@@ -963,10 +1100,17 @@ standardize <- function(x,
         ### that end, so resample_spectra()'s strict no-extrapolation check
         ### holds.
         run_wn <- wavelengths[cols]
-        piece  <- resample_spectra(spectra_matrix[, cols, drop = FALSE], run_wn,
+
+        ### prospectr fails the whole call on a row with fewer than two
+        ### finite values, so such a row is left NA here and flagged below
+        rows <- rowSums(is.finite(spectra_matrix[, cols, drop = FALSE])) >= 2
+
+        if (!any(rows)) next
+
+        piece  <- resample_spectra(spectra_matrix[rows, cols, drop = FALSE], run_wn,
                                    new_wav = pmin(pmax(grid[at], min(run_wn)), max(run_wn)))
 
-        resampled[, at] <- piece$matrix
+        resampled[rows, at] <- piece$matrix
 
       }
 
@@ -1002,9 +1146,23 @@ standardize <- function(x,
   ## trimmed native axis. Before water removal: the hull needs a continuous
   ## range.
 
+  ## A spectrum it cannot use is flagged before the hull, which would fail
+  ## the whole batch on it, and keeps its values as they stand here
+
+  before        <- unusable_spectra(spectra_matrix)
+  now           <- !prior & is.na(reason) & !is.na(before)
+  reason[now]   <- before[now]
+
   if (baseline) {
 
-    spectra_matrix <- apply_baseline_correction(spectra_matrix, wavelengths)
+    hull <- !prior & is.na(reason)
+
+    if (any(hull)) {
+
+      spectra_matrix[hull, ] <- apply_baseline_correction(spectra_matrix[hull, , drop = FALSE],
+                                                          wavelengths, call = call)
+
+    }
 
     operations$baseline <- list(applied = TRUE)
 
@@ -1031,15 +1189,14 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 6b: Sanity check for non-finite values
+  ## Step 6b: The spectra it cannot use, once more after the hull
   ## ---------------------------------------------------------------------------
+  ## Kept and flagged, never dropped: rows are removed only where modelling
+  ## happens.
 
-  if (any(!is.finite(spectra_matrix))) {
-
-    n_bad <- sum(!is.finite(spectra_matrix))
-    cli::cli_abort("Standardization produced {n_bad} non-finite values")
-
-  }
+  after       <- unusable_spectra(spectra_matrix)
+  now         <- !prior & is.na(reason) & !is.na(after)
+  reason[now] <- after[now]
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Rebuild analysis tibble
@@ -1079,6 +1236,10 @@ standardize <- function(x,
   ## set_analysis() is the one place that recomputes the stored counts, so
   ## the predictor count is never written by hand here.
 
+  flagged      <- flag_unusable(new_analysis, new_role_map, reason, collector)
+  new_analysis <- flagged$analysis
+  new_role_map <- flagged$role_map
+
   x <- set_analysis(x, new_analysis, new_role_map)
 
   ## Update provenance ---------------------------------------------------------
@@ -1099,10 +1260,8 @@ standardize <- function(x,
   ## Step 10: Re-validate
   ## ---------------------------------------------------------------------------
   ## Raw stage: standardize() runs before average() collapses replicates, so
-  ## a duplicate sample_id is still legitimate here. The Inf/NA-after-trim
-  ## check above (Step 6b) already aborts on anything non-finite, so
-  ## full-mode predictor-NA checking would never fire differently at this
-  ## point.
+  ## a duplicate sample_id is still legitimate here. A non-finite value left
+  ## is in a flagged row (Step 6b), which the full stage admits.
 
   x <- validate_horizons_data(x, stage = "raw")
 
