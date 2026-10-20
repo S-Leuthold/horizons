@@ -1215,6 +1215,39 @@ test_that("scope = 'sample' subtracts the twins from the returned object too", {
 })
 
 
+test_that("every target keeps k rows after the twin subtraction, or is recorded short (#149)", {
+
+  ## The issue's case: on this fixture three targets drew the twin's pool row
+  ## as an ordinary neighbour, and the subtraction left them at 139 rows,
+  ## unrecorded. No target keeps any target's twin now; each takes a spare.
+  fx <- select_fixture(n_pool = 300)
+
+  for (scope in c("batch", "sample")) {
+
+    out  <- suppressWarnings(quiet_select(fx, k = 140, properties = "clay", scope = scope))
+    m    <- out$selection$membership
+    kept <- m[m$retained, ]
+
+    expect_true(all(table(kept$target_id) == 140L), info = scope)
+    expect_identical(nrow(out$selection$short_draws), 0L, info = scope)
+
+    ## The twin's row is in the neighbourhoods of the targets that passed it,
+    ## unretained
+    passed <- m$target_id[m$pool_id == fx$twin_pool_id & !m$retained]
+    expect_gte(length(setdiff(passed, fx$twin_id)), 1L)
+
+    ## Each target's distances are over the rows it kept
+    td <- out$selection$target_distances
+    expect_equal(td$mean_k, as.vector(tapply(kept$distance, kept$target_id, mean)[td$target_id]))
+    expect_equal(td$nearest, as.vector(tapply(kept$distance, kept$target_id, min)[td$target_id]))
+
+    if (scope == "sample") expect_true(all(out$selection$groups$n_rows == 140L))
+
+  }
+
+})
+
+
 test_that("membership keeps the subtracted twins, marked retained = FALSE", {
 
   ## The record is the only place the exclusion survives: membership is the
@@ -1235,9 +1268,11 @@ test_that("membership keeps the subtracted twins, marked retained = FALSE", {
   expect_true(any(m$pool_id %in% self))
   expect_true(all(!m$retained[m$pool_id %in% self]))
 
-  ## retained is exactly membership against the object's own rows
+  ## retained is exactly membership against the object's own rows, and every
+  ## target keeps k of them (#149)
   expect_setequal(unique(m$pool_id[m$retained]),
                   intersect(unique(m$pool_id), out$data$analysis$sample_id))
+  expect_true(all(table(m$target_id[m$retained]) == 10L))
 
 })
 
@@ -1360,51 +1395,52 @@ test_that("at k = 1 batch and global record every twin in the measured pool, wit
 })
 
 
-test_that("a draw the twin subtraction empties fails with the property and the cause", {
-
-  ## At a twin_ratio this close to 1 every row any target drew is some
-  ## other target's twin. The subset used to fail on an empty keep, naming
-  ## neither the property nor the twin rule; it is the only property drawn
-  ## for, so nothing is left to return.
-
-  ## The scenario depends on the fixture's exact geometry, so the filter is
-  ## pinned to the one it was built under: 11 points on the targets' 8 cm-1
-  ## grid, 80 cm-1 now that the window is a width.
-
-  fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
-
-  err <- expect_error(suppressWarnings(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
-                                                    properties = "clay", window = 80)),
-                      regexp = "Every row drawn for clay was flagged", class = "horizons_error_selection_failed")
-
-  ## Ordinary neighbours were flagged, so the ratio is the lever; the work
-  ## was attempted, so the kind is run, and the cause travels with it
-  expect_s3_class(err, "horizons_error_run")
-  expect_match(conditionMessage(err), "lower it")
-  expect_identical(err$results$property, "clay")
-  expect_match(err$results$cause, "lower it (the default is 0.05)", fixed = TRUE)
-
-  ## Global keeps the pool, so there is nothing to empty
-  expect_no_error(suppressWarnings(quiet_select(fx, k = 1, metric = "cosine", twin_ratio = 0.99,
-                                                properties = "clay", scope = "global", window = 80)))
-
-})
-
-
 #' Pool rows as targets, on the pool's own grid, ids prefixed "T"; every row
-#' unless `rows` picks some
+#' unless `rows` picks some, and with Gaussian noise of sd `noise` (a repeat
+#' scan, at 5e-4) when it is above zero
 #' @noRd
-pool_as_targets <- function(fx, rows = NULL) {
+pool_as_targets <- function(fx, rows = NULL, noise = 0) {
 
   pa <- fx$pool$data$analysis
   if (!is.null(rows)) pa <- pa[rows, ]
   tg <- pa[, c("sample_id", grep("^wn_", names(pa), value = TRUE))]
   tg$sample_id <- paste0("T", tg$sample_id)
 
+  if (noise > 0) {
+    wn <- grep("^wn_", names(tg))
+    tg[, wn] <- tg[, wn] + withr::with_seed(1, matrix(stats::rnorm(nrow(tg) * length(wn), sd = noise), nrow(tg)))
+  }
+
   utils::capture.output(targets <- spectra(tg))
   targets
 
 }
+
+
+test_that("a draw the twin subtraction empties fails with the property and the cause", {
+
+  ## Targets that are repeat scans of every pool row: each is its own row's
+  ## twin, so no row is left for any property. The subset used to fail on an
+  ## empty keep, naming neither the property nor the twin rule. They are not
+  ## copies, so twin_ratio is the lever the cause names.
+
+  fx      <- select_fixture(n_pool = 60, seed = 3)
+  targets <- pool_as_targets(fx, noise = 5e-4)
+
+  err <- expect_error(suppressWarnings(select_training(targets, fx$pool, k = 1, properties = "clay")),
+                      regexp = "Every row drawn for clay was flagged", class = "horizons_error_selection_failed")
+
+  ## The work was attempted, so the kind is run, and the cause travels with it
+  expect_s3_class(err, "horizons_error_run")
+  expect_match(conditionMessage(err), "lower it")
+  expect_identical(err$results$property, "clay")
+  expect_match(err$results$cause, "lower it (the default is 0.05)", fixed = TRUE)
+
+  ## Global keeps the rows, so there is nothing to empty
+  expect_no_error(suppressWarnings(select_training(targets, fx$pool, k = 1, properties = "clay",
+                                                   scope = "global")))
+
+})
 
 
 test_that("a draw emptied by the targets' own copies says so, not twin_ratio", {

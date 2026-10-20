@@ -290,21 +290,24 @@ both sets or scanned twice. The reference is the 75th percentile of the
 target's 50 nearest rows with the property measured, or of a quarter of
 the measured rows when fewer than 200 have it: a fixed width rather than
 the \code{k} being drawn, so a cluster of replicate scans cannot set the very
-number it is measured against. Every flagged row is dropped from that
-target's neighbourhood, spares are fetched so the target still reaches
-\code{k}, and the exclusion is recorded with its target, property, distance and
-reason. Except under \code{scope = "global"}, the flagged rows are also
-subtracted from the returned object, since a row excluded from one
-neighbourhood would otherwise walk back in through any other target that
-drew it. Under \code{scope = "global"} the same check runs, per property, in
+number it is measured against. The exclusion is recorded with its
+target, property, distance and reason. Except under \code{scope = "global"},
+no target takes any target's twin, under any property, since a row
+excluded from one neighbourhood would otherwise walk back into the
+returned object through any other target that drew it: every target
+takes its first \code{k} rows outside the twins, spares fetched for any it
+passed, and one that still cannot reach \code{k} is recorded in
+\code{x$selection$short_draws} and warned about. Under \code{scope = "global"} the
+same check runs, per property, in
 the same space and with the same width, and its exclusions and target
 distances are the ones a batch-scope call with the same arguments
 records. The twins are recorded but stay in the returned rows, because
 global returns every row the others draw from, so a comparison that
 scores global against batch has to act on \code{x$selection$exclusions}
-itself. The membership table keeps the subtracted rows with
+itself. The membership table keeps the twins a target passed with
 \code{retained = FALSE} rather than dropping them, so the record still says
-what each neighbourhood was. When the subtraction leaves a property with
+what each neighbourhood was, and a target's \code{target_distances} are over
+the rows it kept. When the subtraction leaves a property with
 no rows at all (every row drawn for it was some target's twin), the
 property is left out with one \code{horizons_warning_partial_failure} saying
 why, and the call fails with \code{horizons_error_selection_failed} only when

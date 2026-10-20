@@ -436,27 +436,38 @@ missing_k <- function(k, properties) {
 #'
 #' @description
 #' For each requested property, restricts the pool to rows where it is
-#' measured, finds every target's nearest rows, drops every twin the
-#' neighbourhood-relative rule flags, and keeps k. Rows are drawn per
-#' property so the sparse-property case is honest rather than silently small.
+#' measured, finds every target's nearest rows, and keeps the first `k` that
+#' are no target's twin under the neighbourhood-relative rule. Rows are
+#' drawn per property so the sparse-property case is honest rather than
+#' silently small.
 #'
 #' @details
-#' The draw costs at most two distance passes per property. The first asks
-#' for `twin_ref` columns rather than `k`, because the twin rule's reference
-#' has to be wider than any replicate cluster it might be measuring; the
-#' reference and the flags that follow from it are therefore the same
-#' whatever `k` the caller asked for. Each target then takes the first `k`
-#' unflagged columns, and the flagged columns it passed on the way are its
-#' exclusions. A flagged row further out than the `k`-th row it kept is not
-#' its exclusion: it was never in the neighbourhood.
+#' **Pass 1, every property.** Each target's fetch asks for `twin_ref`
+#' columns rather than `k`, because the twin rule's reference has to be
+#' wider than any replicate cluster it might be measuring; the reference and
+#' the flags that follow from it are therefore the same whatever `k` the
+#' caller asked for. A flag is a threshold on a sorted row, so a target's
+#' flags are the leading run of its fetch, and with `twin_ratio` below 1 the
+#' fetch holds every twin there is when the reference is positive. A
+#' target's flagged rows are its exclusions.
 #'
-#' The second pass runs only when some target ran out of unflagged columns
-#' inside what the first fetched, and asks for enough to cover the worst-hit
-#' target. One that cannot reach `k` even then — because the property has too
-#' few measured rows left — is recorded in `short_draws` rather than silently
-#' returning a thinner neighbourhood. So is a target whose distances are all
-#' `NA`, which `metric = "cosine"` produces for a row on the pool's centroid:
-#' the ordering behind such a draw is the pool's own row order, so nothing is
+#' **The twins of every target.** `select_training()` takes every flagged row
+#' out of the training set, since a row excluded from one neighbourhood
+#' would otherwise walk back in through any other target that drew it (#149).
+#' So no target takes any target's twin, under any property: each takes its
+#' first `k` rows outside that set, and the rows of it a target passed on the
+#' way (another target's twins) are kept in its membership with
+#' `retained = FALSE`, so the record still says what the neighbourhood was.
+#' The set does not depend on `k`.
+#'
+#' **Pass 2, only when needed.** A target short of `k` inside its fetch
+#' gets one more, wide enough for any target: at most every twin among the
+#' property's measured rows lies ahead of a target's `k`-th row. One that
+#' cannot reach `k` even then (the property has too few measured rows left)
+#' is recorded in `short_draws` rather than silently returning a thinner
+#' neighbourhood. So is a target whose distances are all `NA`, which
+#' `metric = "cosine"` produces for a row on the pool's centroid: the
+#' ordering behind such a draw is the pool's own row order, so nothing is
 #' drawn for it at all. `select_training()` reports both in one `coverage`
 #' warning; this function raises nothing.
 #'
@@ -478,12 +489,13 @@ missing_k <- function(k, properties) {
 #'   always passes `"all"`; the column stays so a record names the space its
 #'   distances were measured in. Default: `"all"`.
 #' @return [List.] `membership` (tibble: `target_id`, `property`, `space`,
-#'   `pool_id`, `distance`, `rank`), `target_distances` (tibble:
-#'   `target_id`, `property`, `space`, `nearest`, `mean_k`, after twin
-#'   exclusion), `exclusions` (tibble: `property` plus `find_twins()`'s
-#'   columns), `short_draws` (tibble: `target_id`, `property`,
-#'   `k_requested`, `k_drawn`, `reason`), and `k` (the resolved per-property
-#'   vector).
+#'   `pool_id`, `distance`, `rank`, `retained`; per target and property the
+#'   `k` rows kept and the other targets' twins passed on the way, in
+#'   distance order), `target_distances` (tibble: `target_id`, `property`,
+#'   `space`, `nearest`, `mean_k`, over the rows kept), `exclusions`
+#'   (tibble: `property` plus `find_twins()`'s columns), `short_draws`
+#'   (tibble: `target_id`, `property`, `k_requested`, `k_drawn`, `reason`),
+#'   and `k` (the resolved per-property vector).
 #'
 #' @seealso [nearest_neighbours()], [find_twins()], [resolve_k()]
 #' @noRd
@@ -497,6 +509,33 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
 
   k_by <- resolve_k(k, properties)
 
+  ## Pass 1, every property: each target's fetch, reference and twin flags -
+
+  ### select_training() draws only for a property with at least k measured
+  ### rows (its Step 2), so nearest_neighbours() is never asked for more.
+  ### The reference is not the neighbourhood: it is a fixed width, so the
+  ### same pool row is or is not a twin of the same target whatever k was
+  ### asked for, and a replicate cluster cannot set its own reference.
+  ### twin_reference_width() holds the rule and its local cap.
+
+  first <- lapply(stats::setNames(properties, properties), function(p) {
+
+    measured <- intersect(rownames(Sp), responses$sample_id[!is.na(responses[[p]])])
+    n_ref    <- twin_reference_width(length(measured), twin_ref)
+    n_fetch  <- min(max(k_by[[p]], n_ref), length(measured))
+
+    nn  <- nearest_neighbours(St, Sp[measured, , drop = FALSE], k = n_fetch, metric = metric,
+                              sdev = sdev, chunk_size = chunk_size)
+    ref <- twin_reference(nn$dist, k_ref = n_ref)
+
+    list(measured = measured, nn = nn, ref = ref, flags = twin_flags(nn$dist, ref, ratio = twin_ratio))
+
+  })
+
+  ## Every target's twins, over every property: none of them is drawn -------
+
+  twins <- unique(unlist(lapply(first, function(f) f$nn$ids[f$flags]), use.names = FALSE))
+
   membership  <- list()
   distances   <- list()
   exclusions  <- list()
@@ -504,42 +543,24 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
 
   for (p in properties) {
 
-    ## select_training() draws only for a property with at least k measured
-    ## rows (Step 2), so nearest_neighbours() is never asked for more
-    kp       <- k_by[[p]]
-    measured <- responses$sample_id[!is.na(responses[[p]])]
-    measured <- intersect(rownames(Sp), measured)
+    kp <- k_by[[p]]
+    f  <- first[[p]]
+    nn <- f$nn
+    fl <- f$flags
 
-    Sp_p <- Sp[measured, , drop = FALSE]
+    ## Pass 2: spares, only for a target short of k inside its fetch --------
 
-    ## Pass 1: the reference set, and the twin flags it fixes -----------------
+    n_free <- rowSums(matrix(!(nn$ids %in% twins), nrow = nrow(nn$ids)))
 
-    ### The reference is not the neighbourhood: it is a fixed width, so the
-    ### same pool row is or is not a twin of the same target whatever k was
-    ### asked for, and a replicate cluster cannot set its own reference.
-    ### twin_reference_width() holds the rule and its local cap.
+    if (any(n_free < kp)) {
 
-    n_ref   <- twin_reference_width(length(measured), twin_ref)
-    n_fetch <- min(max(kp, n_ref), length(measured))
+      ask <- min(kp + sum(f$measured %in% twins), length(f$measured))
 
-    nn  <- nearest_neighbours(St, Sp_p, k = n_fetch, metric = metric,
-                              sdev = sdev, chunk_size = chunk_size)
-    ref <- twin_reference(nn$dist, k_ref = n_ref)
-    fl  <- twin_flags(nn$dist, ref, ratio = twin_ratio)
+      if (ask > ncol(nn$ids)) {
 
-    ## Pass 2: spares, only for a target that ran out inside the reference ----
-
-    n_keep <- rowSums(!fl)
-
-    if (any(n_keep < kp)) {
-
-      ask <- min(n_fetch + max(kp - n_keep), length(measured))
-
-      if (ask > n_fetch) {
-
-        nn <- nearest_neighbours(St, Sp_p, k = ask, metric = metric,
+        nn <- nearest_neighbours(St, Sp[f$measured, , drop = FALSE], k = ask, metric = metric,
                                  sdev = sdev, chunk_size = chunk_size)
-        fl <- twin_flags(nn$dist, ref, ratio = twin_ratio)
+        fl <- twin_flags(nn$dist, f$ref, ratio = twin_ratio)
 
       }
 
@@ -550,7 +571,8 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
       tid  <- rownames(St)[i]
       ids  <- nn$ids[i, ]
       dist <- nn$dist[i, ]
-      flag <- fl[i, ]
+      own  <- fl[i, ]
+      twin <- ids %in% twins
 
       ## A target with no defined distance to anything is not a thin draw, it
       ## is a failed one: order() fell back on the pool's own row order, so
@@ -570,16 +592,16 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
 
       }
 
-      keep_at <- which(!flag)
-      take_at <- utils::head(keep_at, kp)
+      take_at <- utils::head(which(!twin), kp)
 
-      ### The exclusions are the flagged columns this target passed on its way
-      ### to k. A flagged row further out was never in its neighbourhood, so
-      ### recording it would inflate the count and, under batch, subtract a
-      ### row from the union that this target never drew.
+      ### The rows this target passed on its way to k. A row further out than
+      ### its k-th was never in its neighbourhood, so recording it would
+      ### inflate the record. A short target passed everything it fetched.
 
-      limit   <- if (length(take_at)) max(take_at) else length(flag)
-      excl_at <- which(flag[seq_len(limit)])
+      limit     <- if (length(take_at) == kp) max(take_at) else length(ids)
+      excl_at   <- which(own[seq_len(limit)])
+      passed_at <- which(twin[seq_len(limit)] & !own[seq_len(limit)])
+      member_at <- sort(c(take_at, passed_at))
 
       if (length(take_at) < kp) {
 
@@ -601,7 +623,7 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
                       pool_id   = unname(ids[excl_at]),
                       distance  = unname(dist[excl_at]),
                       rank      = as.integer(excl_at),
-                      reference = rep(unname(ref[i]), length(excl_at)))
+                      reference = rep(unname(f$ref[i]), length(excl_at)))
         )
 
       }
@@ -610,9 +632,10 @@ draw_neighbours <- function(St, Sp, responses, k, properties,
         target_id = tid,
         property  = p,
         space     = space_label,
-        pool_id   = unname(ids[take_at]),
-        distance  = unname(dist[take_at]),
-        rank      = seq_along(take_at)
+        pool_id   = unname(ids[member_at]),
+        distance  = unname(dist[member_at]),
+        rank      = seq_along(member_at),
+        retained  = !twin[member_at]
       )
 
       distances[[length(distances) + 1L]] <- tibble::tibble(

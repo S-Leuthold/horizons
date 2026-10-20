@@ -131,21 +131,24 @@
 #' target's 50 nearest rows with the property measured, or of a quarter of
 #' the measured rows when fewer than 200 have it: a fixed width rather than
 #' the `k` being drawn, so a cluster of replicate scans cannot set the very
-#' number it is measured against. Every flagged row is dropped from that
-#' target's neighbourhood, spares are fetched so the target still reaches
-#' `k`, and the exclusion is recorded with its target, property, distance and
-#' reason. Except under `scope = "global"`, the flagged rows are also
-#' subtracted from the returned object, since a row excluded from one
-#' neighbourhood would otherwise walk back in through any other target that
-#' drew it. Under `scope = "global"` the same check runs, per property, in
+#' number it is measured against. The exclusion is recorded with its
+#' target, property, distance and reason. Except under `scope = "global"`,
+#' no target takes any target's twin, under any property, since a row
+#' excluded from one neighbourhood would otherwise walk back into the
+#' returned object through any other target that drew it: every target
+#' takes its first `k` rows outside the twins, spares fetched for any it
+#' passed, and one that still cannot reach `k` is recorded in
+#' `x$selection$short_draws` and warned about. Under `scope = "global"` the
+#' same check runs, per property, in
 #' the same space and with the same width, and its exclusions and target
 #' distances are the ones a batch-scope call with the same arguments
 #' records. The twins are recorded but stay in the returned rows, because
 #' global returns every row the others draw from, so a comparison that
 #' scores global against batch has to act on `x$selection$exclusions`
-#' itself. The membership table keeps the subtracted rows with
+#' itself. The membership table keeps the twins a target passed with
 #' `retained = FALSE` rather than dropping them, so the record still says
-#' what each neighbourhood was. When the subtraction leaves a property with
+#' what each neighbourhood was, and a target's `target_distances` are over
+#' the rows it kept. When the subtraction leaves a property with
 #' no rows at all (every row drawn for it was some target's twin), the
 #' property is left out with one `horizons_warning_partial_failure` saying
 #' why, and the call fails with `horizons_error_selection_failed` only when
@@ -1244,16 +1247,18 @@ select_training <- function(x, library,
   ## Step 5: Assemble the return
   ## ---------------------------------------------------------------------------
 
-  ## A twin excluded from one target's neighbourhood is still drawn by every
-  ## other target whose neighbourhood it falls in, so it walks straight back
-  ## into the union unless it is subtracted here. That holds under sample
-  ## too: the return is one object, nothing downstream consumes
-  ## selection$groups yet, and the ordinary configure |> evaluate |> fit on a
-  ## sample-scope return would otherwise train on every target's own
-  ## replicates. Only global keeps them, because global returns the whole
-  ## pool by definition and says so. membership keeps the pre-subtraction
-  ## draw, which is the record of what each neighbourhood was, and marks the
-  ## subtracted rows retained = FALSE rather than dropping them.
+  ## A twin excluded from one target's neighbourhood would walk straight back
+  ## into the union through any other target whose neighbourhood it falls
+  ## in, so the draw gives no target any target's twin, and fetches spares
+  ## for the targets that pass one (#149). That holds under sample too: the
+  ## return is one object, nothing downstream consumes selection$groups yet,
+  ## and the ordinary configure |> evaluate |> fit on a sample-scope return
+  ## would otherwise train on every target's own replicates. Only global
+  ## keeps them, because global returns every row the others draw from, by
+  ## definition, and says so. membership keeps the twins a target passed,
+  ## marked retained = FALSE, as the record of what each neighbourhood was,
+  ## and the union is its retained rows: the subtraction below counts the
+  ## twins it holds.
 
   excluded_ids <- unique(draw$exclusions$pool_id)
   union_ids    <- if (scope == "global") pool_ids[eligible] else pool_ids[pool_ids %in% membership$pool_id]
@@ -1328,17 +1333,6 @@ select_training <- function(x, library,
       bullets
     ), ids = emptied)
 
-  }
-
-  ## The record of which drawn rows survived the subtraction. Without it the
-  ## first validate(remove_outliers = TRUE) filters membership to the rows
-  ## still in the object and the excluded twins vanish from the record
-  ## entirely, which is the one thing the record exists to hold.
-
-  membership$retained <- if (scope == "global") {
-    rep(TRUE, nrow(membership))
-  } else {
-    !(membership$pool_id %in% excluded_ids)
   }
 
   groups <- build_groups(group_of_target, membership,
