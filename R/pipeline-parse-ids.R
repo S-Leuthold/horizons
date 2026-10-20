@@ -213,7 +213,7 @@ parse_ids <- function(x,
 
     abort_horizons(c(
       "No {.field filename} column found in data.",
-      "i" = "{.fn spectra} creates it when it reads files.",
+      "i" = "{.fn spectra} creates it when it reads OPUS files.",
       "i" = "Check that you're using a horizons_data object from {.fn spectra}."
     ), kind = "input")
 

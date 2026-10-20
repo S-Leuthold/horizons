@@ -1294,7 +1294,7 @@ standardize <- function(x,
       abort_horizons(c(
         "No multiple of {resample} cm-1 between {bounds[1]} and {bounds[2]} cm-1 falls inside the data.",
         "x" = "The data covers {data_range[1]} to {data_range[2]} cm-1.",
-        "i" = "The {.arg trim} window is narrower than one {resample} cm-1 step: widen {.arg trim} or reduce {.arg resample}."
+        "i" = if (diff(bounds) < resample) "The {.arg trim} window is narrower than one {resample} cm-1 step: widen {.arg trim} or reduce {.arg resample}."
       ), kind = "input")
 
     }

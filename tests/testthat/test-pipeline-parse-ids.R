@@ -505,10 +505,11 @@ test_that("parse_ids() errors when filename column missing", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
+  err <- expect_error(
     parse_ids(obj, format = "{a}"),
     "No filename column found in data", fixed = TRUE, class = "horizons_error_input"
   )
+  expect_match(conditionMessage(err), "`spectra()` creates it when it reads OPUS files", fixed = TRUE)
 
 })
 

@@ -423,6 +423,14 @@ test_that("a trim window holding no multiple of the resample step is refused", {
   expect_match(msg, "The data covers 600 to 4000 cm-1", fixed = TRUE)
   expect_match(msg, "narrower than one 4 cm-1 step: widen `trim` or reduce `resample`", fixed = TRUE)
 
+  ## A window wider than a step: the trim is not the cause, so not named
+  ## as it. 1001 to 1003.5 holds no multiple of 4, inside trim = c(600, 4000)
+  narrow <- make_axis_spectra(c(1003.5, 1001))
+  err <- expect_error(no_output(standardize(narrow, resample = 4)),
+                      "No multiple of 4 cm-1 between 600 and 4000 cm-1", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_no_match(conditionMessage(err), "narrower than one", fixed = TRUE)
+
 })
 
 
