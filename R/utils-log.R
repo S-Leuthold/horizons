@@ -507,6 +507,7 @@ UNIT_STEPS <- c(
   bake                = "New-data bake",
   file_read           = "File read",
   file_block          = "Block extraction",
+  file_columns        = "Column check",
   predict             = "Prediction",
   uq_bake             = "Interval recipe bake",
   uq_quantiles        = "Interval quantiles",

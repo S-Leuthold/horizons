@@ -1023,46 +1023,90 @@ test_that("spectra() refuses a source that is neither a path nor a data frame, a
 
 })
 
-test_that("a CSV's columns are checked as a data frame's are, and the refusal names spectra()", {
+test_that("a CSV file whose columns cannot be read fails as a file, each cause keeping its remedy", {
 
   ## Arrange ---------------------------------------------------------------
 
-  csv <- withr::local_tempfile(fileext = ".csv")
-  readr::write_csv(tibble::tibble(Sample_ID = c("A", "B"), `4000` = c("high", "low"),
-                                  `3000` = c(0.2, 0.3)), csv)
+  dir   <- withr::local_tempdir()
+  write <- function(name, d) {
+    path <- file.path(dir, name)
+    readr::write_csv(d, path)
+    path
+  }
 
-  ## Act & Assert ----------------------------------------------------------
+  chr   <- write("chr.csv", tibble::tibble(Sample_ID = c("A", "B"), `4000` = c("high", "low"), `3000` = c(0.2, 0.3)))
+  noid  <- write("noid.csv", tibble::tibble(label = c("A", "B"), `4000` = c(0.1, 0.2)))
+  nowl  <- write("nowl.csv", tibble::tibble(Sample_ID = c("A", "B"), col_a = c(1, 2)))
+  ok    <- write("ok.csv", tibble::tibble(Sample_ID = c("A", "B"), `4000` = c(0.1, 0.2), X4000 = c(0.3, 0.4)))
 
-  err <- expect_error(spectra(csv, id_col = "nonexistent"), "Specified `id_col` not found in data",
-                      fixed = TRUE, class = "horizons_error_input")
-  expect_identical(rlang::call_name(err$call), "spectra")
+  cases <- list(
+    list(args = list(chr, id_col = "nonexistent"), cause = "Specified `id_col` not found in data.",
+         remedy = 'Available columns: "Sample_ID", "4000", and "3000".'),
+    list(args = list(chr, wavelength_cols = "9999"), cause = "Specified wavelength columns not found in data.",
+         remedy = 'Missing: "9999".'),
+    list(args = list(chr), cause = "Wavelength columns must contain numeric data.",
+         remedy = "Check that the spectral columns hold absorbance or reflectance values."),
+    list(args = list(noid), cause = "Could not identify sample ID column.",
+         remedy = "Specify it with `id_col`."),
+    list(args = list(nowl), cause = "Could not identify wavelength columns.",
+         remedy = "Specify them with `wavelength_cols`."),
+    list(args = list(ok, wavelength_cols = c("4000", "X4000")), cause = "Wavelength column names must be wavenumbers.",
+         remedy = 'Not a wavenumber: "X4000".')
+  )
 
-  expect_error(spectra(csv, wavelength_cols = "9999"), "Specified wavelength columns not found in data",
-               fixed = TRUE, class = "horizons_error_input")
+  ## Act and assert --------------------------------------------------------
 
-  err <- expect_error(spectra(csv), "Wavelength columns must contain numeric data",
-                      fixed = TRUE, class = "horizons_error_input")
-  expect_identical(rlang::call_name(err$call), "spectra")
+  ## One file is the common case: its abort is the file's failure, with the
+  ## cause, its remedy and the file in the message
+  for (case in cases) {
+
+    err <- expect_error(do.call("spectra", c(case$args, verbose = FALSE)),
+                        class = "horizons_error_read_failed")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+
+    expect_true(inherits(err, "horizons_error_run"), info = case$cause)
+    expect_identical(rlang::call_name(err$call), "spectra")
+    expect_match(msg, paste("Column check failed:", case$cause), fixed = TRUE, info = case$cause)
+    expect_match(msg, case$remedy, fixed = TRUE, info = case$cause)
+    expect_identical(err$results$file, case$args[[1]], info = case$cause)
+    expect_identical(err$results$step, "file_columns", info = case$cause)
+
+  }
+
+  expect_snapshot(spectra(noid, verbose = FALSE), error = TRUE,
+                  transform = function(x) gsub(dir, "<dir>", x, fixed = TRUE))
+
+  ## A data frame's columns are the caller's, refused at the door
+  expect_error(spectra(readr::read_csv(chr, show_col_types = FALSE)),
+               "Wavelength columns must contain numeric data", fixed = TRUE, class = "horizons_error_input")
 
 })
 
-test_that("a refusal of one CSV file's columns, of several read, names the file", {
+test_that("a CSV file whose columns cannot be read, of several, is dropped by name and the rest returned", {
 
   dir <- withr::local_tempdir()
   readr::write_csv(tibble::tibble(Sample_ID = "A", `4000` = 0.1, `3998` = 0.2), file.path(dir, "one.csv"))
   readr::write_csv(tibble::tibble(label = "B", `4000` = 0.3, `3998` = 0.4), file.path(dir, "two.csv"))
 
   ## Its id column is not one horizons knows
-  err <- expect_error(spectra(dir), "Could not identify sample ID column",
-                      fixed = TRUE, class = "horizons_error_input")
-  expect_match(conditionMessage(err), "File: ", fixed = TRUE)
-  expect_match(conditionMessage(err), "two.csv", fixed = TRUE)
-  expect_no_match(conditionMessage(err), "one.csv", fixed = TRUE)
+  w <- expect_warning(out <- spectra(dir, verbose = FALSE), "1 of 2 CSV files could not be read",
+                      fixed = TRUE, class = "horizons_warning_partial_failure")
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_identical(out$data$analysis$sample_id, "A")
+  expect_match(msg, "Column check failed: Could not identify sample ID column.", fixed = TRUE)
+  expect_match(msg, "Specify it with `id_col`.", fixed = TRUE)
+  expect_match(msg, "two.csv)", fixed = TRUE)
+  expect_no_match(msg, "File: ", fixed = TRUE)
+
+  row <- out$log[out$log$topic %in% "partial_failure", ]
+  expect_identical(row$ids[[1]], file.path(dir, "two.csv"))
 
   ## The id column named lies in one file only
-  err <- expect_error(spectra(dir, id_col = "Sample_ID"), "Specified `id_col` not found in data",
-                      fixed = TRUE, class = "horizons_error_input")
-  expect_match(conditionMessage(err), "two.csv", fixed = TRUE)
+  expect_warning(out <- spectra(dir, id_col = "Sample_ID", verbose = FALSE),
+                 "Specified `id_col` not found in data", fixed = TRUE,
+                 class = "horizons_warning_partial_failure")
+  expect_identical(out$data$analysis$sample_id, "A")
 
 })
 

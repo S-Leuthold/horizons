@@ -64,11 +64,15 @@ and later ID parsing via \code{parse_ids()}.
 \strong{Several files:} \code{source} may be a character vector of files and
 directories, all OPUS or all CSV; a directory is read as the files of
 that type in it, and every file's rows are returned in one object. Each
-file is read on its own. One that cannot be read, or that holds no
-absorbance block, is dropped, and the files dropped are named, with their
-causes, in one \code{horizons_warning_partial_failure}, recorded on the
-object's \code{log}. When no file can be read the call aborts with
-\code{horizons_error_read_failed}, one row per file in its \code{results}. A
+file is read on its own. One that cannot be read, an OPUS file that
+holds no absorbance block, or a CSV file whose columns cannot be read as
+spectra (no id column, no wavelength columns, or one not numeric or not
+named by wavenumber) is dropped, and the files dropped are named, with
+their causes and remedies, in one \code{horizons_warning_partial_failure},
+recorded on the object's \code{log}. When no file can be read, as when the one
+file given fails, the call aborts with \code{horizons_error_read_failed}, one
+row per file in its \code{results}. A data frame's columns are refused at the
+door instead, as an input error, since they are the caller's. A
 warning \code{opusreader2} or \code{readr} raises while reading is passed on, once
 per distinct message, as a \code{horizons_warning_quality}.
 

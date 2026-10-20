@@ -56,11 +56,15 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' **Several files:** `source` may be a character vector of files and
 #' directories, all OPUS or all CSV; a directory is read as the files of
 #' that type in it, and every file's rows are returned in one object. Each
-#' file is read on its own. One that cannot be read, or that holds no
-#' absorbance block, is dropped, and the files dropped are named, with their
-#' causes, in one `horizons_warning_partial_failure`, recorded on the
-#' object's `log`. When no file can be read the call aborts with
-#' `horizons_error_read_failed`, one row per file in its `results`. A
+#' file is read on its own. One that cannot be read, an OPUS file that
+#' holds no absorbance block, or a CSV file whose columns cannot be read as
+#' spectra (no id column, no wavelength columns, or one not numeric or not
+#' named by wavenumber) is dropped, and the files dropped are named, with
+#' their causes and remedies, in one `horizons_warning_partial_failure`,
+#' recorded on the object's `log`. When no file can be read, as when the one
+#' file given fails, the call aborts with `horizons_error_read_failed`, one
+#' row per file in its `results`. A data frame's columns are refused at the
+#' door instead, as an input error, since they are the caller's. A
 #' warning `opusreader2` or `readr` raises while reading is passed on, once
 #' per distinct message, as a `horizons_warning_quality`.
 #'
@@ -375,13 +379,13 @@ spectra_from_tibble <- function(data,
 #' of one type: `type` when given, else detected element by element, and a
 #' source whose elements detect differently is refused.
 #'
-#' Each file is read in its own [run_unit()]. A file that cannot be read, or
-#' holds no absorbance block, fails its unit and is dropped, and the files
-#' dropped are named in one `partial_failure` warning; when none can be read
-#' the call aborts with `horizons_error_read_failed`, one row per file in
-#' its `results`. A refusal of the user's columns (a CSV's `id_col`) is an
-#' input error, which no unit contains. Another package's warnings raised
-#' while reading are each collected once as a `quality` warning.
+#' Each file is read in its own [run_unit()]. A file that cannot be read,
+#' holds no absorbance block (OPUS), or whose columns cannot be read as
+#' spectra (CSV) fails its unit and is dropped, and the files dropped are
+#' named in one `partial_failure` warning; when none can be read the call
+#' aborts with `horizons_error_read_failed`, one row per file in its
+#' `results`. Another package's warnings raised while reading are each
+#' collected once as a `quality` warning.
 #'
 #' @param source Character. Paths, which `spectra()` has checked exist.
 #' @param type `spectra()`'s `type`, checked, or `NULL`.
@@ -668,11 +672,12 @@ read_opus_file <- function(path) {
 #' Read one CSV file's spectra
 #'
 #' @description
-#' Runs inside the file's unit: a file `readr` cannot read fails it. Its
-#' columns are checked as a data frame's are ([spectra_from_tibble()]), and
-#' a refusal there is an input error, which no unit contains.
+#' Runs inside the file's unit: a file `readr` cannot read fails it, and so
+#' do columns that cannot be read as spectra, checked as a data frame's are
+#' ([spectra_from_tibble()]): no id column, no wavelength columns, or one
+#' not numeric or not named by wavenumber.
 #'
-#' @param path Character(1). The file, which a refusal names.
+#' @param path Character(1). The file.
 #' @param id_col,wavelength_cols `spectra()`'s arguments.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
@@ -683,7 +688,7 @@ read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL, call = rl
 
   data <- unit_step("file_read", readr::read_csv(path, show_col_types = FALSE))
 
-  spectra_from_tibble(data, id_col, wavelength_cols, file = path, call = call)
+  unit_step("file_columns", spectra_from_tibble(data, id_col, wavelength_cols, file = path, call = call))
 
 }
 
@@ -861,20 +866,38 @@ bind_spectra_files <- function(tables, collector, call = rlang::caller_env()) {
 ## check_source_columns() — The id and wavelength columns of a table
 ## ---------------------------------------------------------------------------
 
+#' The kind of a problem with a source table's columns
+#'
+#' @description
+#' A data frame's columns are the caller's arguments, so a problem with them
+#' is an input error, refused at the door. A CSV file's are the file's: the
+#' problem fails the file, like an OPUS file with no absorbance block, so it
+#' is a run failure, which the file's unit contains and names, and the file
+#' is dropped or, when every file fails, the call aborts with each file's
+#' cause (DECISIONS 2026-10-20).
+#'
+#' @param file Character(1) or `NULL`. The file the table was read from.
+#' @return `"input"` for a data frame, `"run"` for a file.
+#' @keywords internal
+#' @noRd
+source_kind <- function(file) if (is.null(file)) "input" else "run"
+
 #' The id and wavelength columns of a source table, checked
 #'
 #' @description
-#' The one door both table loaders (a data frame, a CSV file) use for the
+#' The one check both table loaders (a data frame, a CSV file) use for the
 #' user's `id_col` and `wavelength_cols`: the columns named must exist, the
 #' wavelength columns must be named by wavenumber (#121), and they must
 #' hold numbers. Either is detected when not
-#' given ([detect_id_column()], [detect_wavelength_columns()]). Refusals
-#' report as `spectra()`, and name the file the table was read from, so one
-#' file of several can be found.
+#' given ([detect_id_column()], [detect_wavelength_columns()]). Each
+#' problem keeps its remedy in its bullets and reports as `spectra()`. For
+#' a data frame it is a refusal at the door; for a CSV file it is the
+#' file's failure, which its unit contains and names ([source_kind()]).
 #'
 #' @param data The source table.
 #' @param id_col,wavelength_cols `spectra()`'s arguments.
-#' @param file Character(1) or `NULL`. The file `data` was read from.
+#' @param file Character(1) or `NULL`. The file `data` was read from;
+#'   `NULL` for a data frame.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #' @return List: `id_column` (character(1)) and `wn_cols` (character), names
 #'   of `data`.
@@ -891,9 +914,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
       abort_horizons(c(
         "Specified {.arg id_col} not found in data.",
         "x" = "Column {.val {id_col}} does not exist.",
-        "i" = "Available columns: {.val {names(data)}}.",
-        "i" = if (!is.null(file)) "File: {.path {file}}."
-      ), kind = "input", call = call)
+        "i" = "Available columns: {.val {names(data)}}."
+      ), kind = source_kind(file), call = call)
 
     }
 
@@ -915,9 +937,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
 
       abort_horizons(c(
         "Specified wavelength columns not found in data.",
-        "x" = "Missing: {.val {missing_cols}}.",
-        "i" = if (!is.null(file)) "File: {.path {file}}."
-      ), kind = "input", call = call)
+        "x" = "Missing: {.val {missing_cols}}."
+      ), kind = source_kind(file), call = call)
 
     }
 
@@ -940,9 +961,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
     abort_horizons(c(
       "Wavelength column names must be wavenumbers.",
       "x" = "Not a wavenumber: {.val {unnamed}}.",
-      "i" = "Name each by its wavenumber, as {.val 4000} or {.val wn_4000}, or leave it out of {.arg wavelength_cols}.",
-      "i" = if (!is.null(file)) "File: {.path {file}}."
-    ), kind = "input", call = call)
+      "i" = "Name each by its wavenumber, as {.val 4000} or {.val wn_4000}, or leave it out of {.arg wavelength_cols}."
+    ), kind = source_kind(file), call = call)
 
   }
 
@@ -955,9 +975,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
     abort_horizons(c(
       "Wavelength columns must contain numeric data.",
       "x" = "Non-numeric columns: {.val {non_numeric_wn}}.",
-      "i" = "Check that the spectral columns hold absorbance or reflectance values.",
-      "i" = if (!is.null(file)) "File: {.path {file}}."
-    ), kind = "input", call = call)
+      "i" = "Check that the spectral columns hold absorbance or reflectance values."
+    ), kind = source_kind(file), call = call)
 
   }
 
@@ -1035,7 +1054,7 @@ detect_file_type <- function(source, recursive = FALSE, call = rlang::caller_env
 #'
 #' @param col_names Character vector of column names.
 #' @param file Character(1) or `NULL`. The file the columns were read from,
-#'   which the refusal names.
+#'   which decides the failure's kind ([source_kind()]).
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character: detected column name.
@@ -1057,9 +1076,8 @@ detect_id_column <- function(col_names, file = NULL, call = rlang::caller_env())
     "Could not identify sample ID column.",
     "i" = "Checked aliases: {.val {ID_ALIASES}}.",
     "i" = "Available columns: {.val {col_names}}.",
-    "i" = "Specify it with {.arg id_col}.",
-    "i" = if (!is.null(file)) "File: {.path {file}}."
-  ), kind = "input", call = call)
+    "i" = "Specify it with {.arg id_col}."
+  ), kind = source_kind(file), call = call)
 
 }
 
@@ -1072,7 +1090,7 @@ detect_id_column <- function(col_names, file = NULL, call = rlang::caller_env())
 #'
 #' @param col_names Character vector of column names.
 #' @param file Character(1) or `NULL`. The file the columns were read from,
-#'   which the refusal names.
+#'   which decides the failure's kind ([source_kind()]).
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character vector of wavelength column names.
@@ -1106,9 +1124,8 @@ detect_wavelength_columns <- function(col_names, file = NULL, call = rlang::call
     "Could not identify wavelength columns.",
     "i" = "Expected columns starting with {.val wn_} or numeric names (e.g. {.val 4000}, {.val 3998}).",
     "i" = "Found columns: {.val {col_names}}.",
-    "i" = "Specify them with {.arg wavelength_cols}.",
-    "i" = if (!is.null(file)) "File: {.path {file}}."
-  ), kind = "input", call = call)
+    "i" = "Specify them with {.arg wavelength_cols}."
+  ), kind = source_kind(file), call = call)
 
 }
 

@@ -35,3 +35,13 @@
       x Block extraction failed: The file holds no absorbance block ("ab" or "ab_no_atm_comp"). Its blocks: "sc_sample". (b.0)
       i The failures are on this condition as results: `rlang::last_error()$results`.
 
+# a CSV file whose columns cannot be read fails as a file, each cause keeping its remedy
+
+    Code
+      spectra(noid, verbose = FALSE)
+    Condition
+      Error in `spectra()`:
+      ! None of the 1 CSV file in `source` could be read.
+      x Column check failed: Could not identify sample ID column. Checked aliases: "sample_id", "Sample_ID", "SampleID", "sampleid", "id", "ID", "Id", "sample", "Sample", "filename", "Filename", "name", and "Name". Available columns: "label" and "4000". Specify it with `id_col`. (<dir>/noid.csv)
+      i The failures are on this condition as results: `rlang::last_error()$results`.
+
