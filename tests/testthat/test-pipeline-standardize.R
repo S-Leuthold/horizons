@@ -1203,6 +1203,29 @@ test_that("a value missing only inside a water band it removes flags nothing, un
 
 })
 
+test_that("a spectrum missing the point beyond a trim bound leaves the others' values unchanged, to the bit", {
+
+  hd   <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 3)
+  pred <- predictor_names(hd)
+
+  ## Row 2 lacks 599.74, the point beyond 600, so it reaches for 597.81:
+  ## standardized alone it would; the others must not use it
+  hd$data$analysis$wn_599.74[2] <- NA_real_
+  hd <- set_analysis(hd, dplyr::bind_cols(tibble::tibble(sample_id = hd$data$analysis$sample_id, wn_597.81 = 1:3 / 3),
+                                          hd$data$analysis[, pred]),
+                     tibble::tibble(variable = c("sample_id", "wn_597.81", pred),
+                                    role = c("id", rep("predictor", length(pred) + 1))))
+  hd <- sort_axis_decreasing(hd)$x
+
+  batch  <- no_output(standardize(hd, resample = 4, trim = c(600, 4000)))
+  others <- no_output(standardize(subset_rows(hd, c("s1", "s3")), resample = 4, trim = c(600, 4000)))
+
+  expect_identical(predictor_block(batch)[c(1, 3), ], predictor_block(others))
+  expect_false(".flag" %in% names(batch$data$analysis))
+  expect_false(anyNA(predictor_block(batch)))
+
+})
+
 test_that("a point standing alone between two holes in a spectrum carries the grid point it sits on", {
 
   ## On a 2 cm-1 axis resampled to 4, row 2 has holes either side of 2000

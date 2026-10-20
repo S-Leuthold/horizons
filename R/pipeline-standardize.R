@@ -278,7 +278,8 @@ resample_onto_grid <- function(M, wavelengths, grid) {
 #'   a grid point on the bound usually falls between two of the data's points
 #'   (600 between 599.74 and 601.67), and interpolating it needs both. It is
 #'   each spectrum's nearest point with a value, so spectra read on different
-#'   grids each keep their own. Default `FALSE`.
+#'   grids each keep their own, and each spectrum holds only its own: a
+#'   margin point another spectrum keeps is `NA` in it. Default `FALSE`.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Trimmed spectral matrix
@@ -304,26 +305,36 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 
   if (margin) {
 
-    ### Each spectrum's own nearest point, nearest first: a spectrum missing
-    ### the axis's nearest point (one read on another grid) keeps its own, so
-    ### it is resampled from its own points. With no value missing, every
-    ### spectrum's is the axis's nearest point.
-    nearest_finite <- function(idx) {
-      if (length(idx) == 0) return(integer(0))
-      has <- is.finite(spectra_matrix[, idx, drop = FALSE])
-      any <- rowSums(has) > 0
-      unique(idx[max.col(has, ties.method = "first")[any]])
+    ### Each spectrum's own nearest point with a value, nearest first: a
+    ### spectrum missing the axis's nearest point (one read on another grid)
+    ### keeps its own, so it is resampled from its own points. With no value
+    ### missing, every spectrum's is the axis's nearest point.
+    own_nearest <- function(idx) {
+      if (length(idx) == 0) return(rep(NA_integer_, nrow(spectra_matrix)))
+      has     <- is.finite(spectra_matrix[, idx, drop = FALSE])
+      pick    <- idx[max.col(has, ties.method = "first")]
+      pick[rowSums(has) == 0] <- NA_integer_
+      pick
     }
 
     below <- which(wavelengths < wn_min)
     above <- which(wavelengths > wn_max)
 
-    keep_idx <- c(keep_idx,
-                  nearest_finite(below[order(wavelengths[below], decreasing = TRUE)]),
-                  nearest_finite(above[order(wavelengths[above])]))
+    pick_below <- own_nearest(below[order(wavelengths[below], decreasing = TRUE)])
+    pick_above <- own_nearest(above[order(wavelengths[above])])
+    margin_idx <- unique(c(pick_below[!is.na(pick_below)], pick_above[!is.na(pick_above)]))
+
+    ### A margin point is kept only by the spectra whose own nearest it is,
+    ### so no spectrum is resampled through another's: its values never
+    ### depend on which points another spectrum is missing
+    for (j in margin_idx) {
+
+      spectra_matrix[!(pick_below %in% j | pick_above %in% j), j] <- NA_real_
+
+    }
 
     ### Back into the input's column order.
-    keep_idx <- sort(keep_idx)
+    keep_idx <- sort(c(keep_idx, margin_idx))
 
   }
 
