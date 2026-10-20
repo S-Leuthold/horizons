@@ -405,8 +405,6 @@ unusable_spectra <- function(M) {
   M      <- as.matrix(M)
   reason <- rep(NA_character_, nrow(M))
 
-  if (nrow(M) == 0 || ncol(M) == 0) return(reason)
-
   non_finite <- rowSums(!is.finite(M)) > 0
 
   ### Every value equal to the row's first: M[, 1] recycles down each column
