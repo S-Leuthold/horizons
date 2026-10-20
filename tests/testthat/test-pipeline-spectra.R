@@ -1062,6 +1062,31 @@ test_that("a refusal of one CSV file's columns, of several read, names the file"
 
 })
 
+test_that("a meta column of different types in different files is refused before the bind, naming it and the files", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  dir <- withr::local_tempdir()
+  readr::write_csv(tibble::tibble(Sample_ID = "A", depth = "0-10", `4000` = 0.1), file.path(dir, "one.csv"))
+  readr::write_csv(tibble::tibble(Sample_ID = "B", depth = 10, `4000` = 0.2), file.path(dir, "two.csv"))
+  readr::write_csv(tibble::tibble(Sample_ID = "C", depth = 20, `4000` = 0.3), file.path(dir, "three.csv"))
+
+  ## Act and assert --------------------------------------------------------
+
+  err <- expect_error(spectra(dir), "Column depth holds a different type in different files",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "spectra")
+
+  msg <- conditionMessage(err)
+  expect_match(msg, "<character> in .*one\\.csv")
+  expect_match(msg, "<numeric> in .*three\\.csv.*two\\.csv")
+
+  ## Types that bind (a column empty in one file reads as logical) pass
+  readr::write_csv(tibble::tibble(Sample_ID = "A", depth = NA, `4000` = 0.1), file.path(dir, "one.csv"))
+  expect_identical(spectra(dir)$data$analysis$depth, c(NA, 20, 10))
+
+})
+
 test_that("spectra() refuses a directory with neither OPUS nor CSV files, and a file whose type it cannot tell", {
 
   empty <- withr::local_tempdir()

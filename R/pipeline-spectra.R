@@ -205,7 +205,7 @@ spectra <- function(source,
 
   }
 
-  analysis <- bind_spectra_files(tables, collector)
+  analysis <- bind_spectra_files(tables, collector, call = call)
   wn_cols  <- attr(analysis, "wn_cols")
 
   ### The bind's working record of the wavelength columns is not the table's
@@ -707,12 +707,18 @@ read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL, call = rl
 #' @param tables Named list of tables, as [spectra_from_tibble()] and
 #'   [read_opus_file()] return them, named by file.
 #' @param collector `spectra()`'s collector, from [log_open()].
+#' @param call The frame a refusal reports: `spectra()`'s.
+#'
+#' @details
+#' A meta column the files hold in types that cannot be bound into one
+#' (text in one file, numbers in another) is refused before the bind,
+#' naming the column and the files holding each type.
 #'
 #' @return A tibble: `sample_id`, the meta columns, then the wavelength
 #'   columns, whose names are its attribute `"wn_cols"`.
 #'
 #' @noRd
-bind_spectra_files <- function(tables, collector) {
+bind_spectra_files <- function(tables, collector, call = rlang::caller_env()) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Each file's wavenumbers on the grid read before it
@@ -791,7 +797,41 @@ bind_spectra_files <- function(tables, collector) {
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 2: Bind
+  ## Step 2: Each meta column binds into one type
+  ## -------------------------------------------------------------------------
+  ## The bind's own rule, column by column, so the refusal can name the
+  ## column and the files rather than vctrs' positions.
+
+  meta_names <- setdiff(unique(unlist(lapply(tables, names))), c("sample_id", grid_names))
+
+  for (col in meta_names) {
+
+    holding <- names(tables)[vapply(tables, function(t) col %in% names(t), logical(1))]
+
+    if (length(holding) < 2) next
+
+    binds <- rlang::try_fetch(
+      { dplyr::bind_rows(lapply(unname(tables[holding]), `[`, col)); TRUE },
+      vctrs_error_incompatible_type = function(e) FALSE
+    )
+
+    if (binds) next
+
+    type  <- vapply(tables[holding], function(t) class(t[[col]])[1], character(1))
+    sides <- vapply(unique(type), function(ty) {
+      cli_escape(cli::format_inline("{.cls {ty}} in {.path {holding[type == ty]}}"))
+    }, character(1))
+
+    abort_horizons(c(
+      "Column {.field {col}} holds a different type in different files, so the files cannot be bound into one table.",
+      stats::setNames(sides, rep("*", length(sides))),
+      "i" = "Give the column one type in every file, or leave it out of them."
+    ), kind = "input", call = call)
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## Step 3: Bind
   ## -------------------------------------------------------------------------
 
   bound <- dplyr::bind_rows(unname(tables))
