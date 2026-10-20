@@ -54,7 +54,9 @@ Filenames become \code{sample_id}, wavenumber columns get \code{wn_} prefix. The
 absorbance block is taken by name, \code{ab} and then \code{ab_no_atm_comp}
 (ignoring case), never the first block on the file's list.
 \item \strong{CSV files} (\code{type = "csv"}): Read via \code{readr::read_csv()}.
-Auto-detects ID and wavelength columns.
+Auto-detects ID and wavelength columns. A wavelength column with no
+value in any row, which \code{readr} reads as logical, holds missing values,
+which \code{\link[=standardize]{standardize()}} flags; a column of text is refused.
 \item \strong{Tibble/data.frame}: Same detection logic as CSV.
 }
 

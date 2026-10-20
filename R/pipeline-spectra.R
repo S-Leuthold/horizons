@@ -46,7 +46,9 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'   (ignoring case), never the first block on the file's list.
 #'
 #' * **CSV files** (`type = "csv"`): Read via `readr::read_csv()`.
-#'   Auto-detects ID and wavelength columns.
+#'   Auto-detects ID and wavelength columns. A wavelength column with no
+#'   value in any row, which `readr` reads as logical, holds missing values,
+#'   which [standardize()] flags; a column of text is refused.
 #'
 #' * **Tibble/data.frame**: Same detection logic as CSV.
 #'
@@ -353,9 +355,11 @@ spectra_from_tibble <- function(data,
 
   wn_names_new <- ensure_wn_prefix(wn_cols)
 
+  ### An empty column, checked as one, is a numeric NA
   for (i in seq_along(wn_cols)) {
 
-    analysis[[wn_names_new[i]]] <- data[[wn_cols[i]]]
+    v <- data[[wn_cols[i]]]
+    analysis[[wn_names_new[i]]] <- if (is.logical(v)) as.double(v) else v
 
   }
 
@@ -870,6 +874,15 @@ bind_spectra_files <- function(tables, collector, call = rlang::caller_env()) {
 ## check_source_columns() — The id and wavelength columns of a table
 ## ---------------------------------------------------------------------------
 
+#' Whether a column can hold a spectrum's values
+#'
+#' @param v A column.
+#' @return `TRUE` for a numeric column, or one with no value in any row,
+#'   which a reader gives a logical type.
+#' @keywords internal
+#' @noRd
+is_spectral_column <- function(v) is.numeric(v) || (is.logical(v) && all(is.na(v)))
+
 #' The kind of a problem with a source table's columns
 #'
 #' @description
@@ -971,8 +984,11 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
   }
 
   ## Spectra are numbers ------------------------------------------------------
+  ## A column with no value in any row is read as logical (readr, a one-scan
+  ## file missing a value); it holds missing values, which standardize()
+  ## flags, not text
 
-  non_numeric_wn <- wn_cols[!vapply(data[wn_cols], is.numeric, logical(1))]
+  non_numeric_wn <- wn_cols[!vapply(data[wn_cols], is_spectral_column, logical(1))]
 
   if (length(non_numeric_wn) > 0) {
 

@@ -1083,6 +1083,28 @@ test_that("a CSV file whose columns cannot be read fails as a file, each cause k
 
 })
 
+test_that("a wavelength column with no value in any row is read as missing values, which standardize() flags", {
+
+  ## A one-scan CSV missing a value: readr reads the empty column as logical
+  csv <- withr::local_tempfile(fileext = ".csv")
+  writeLines(c("Sample_ID,4000,3998,3996,3994", "A,0.1,,0.3,0.4"), csv)
+
+  out <- spectra(csv, verbose = FALSE)
+  expect_identical(out$data$analysis$wn_3998, NA_real_)
+  expect_type(out$data$analysis$wn_4000, "double")
+
+  w <- expect_warning(standardize(out, resample = NULL, trim = NULL, verbose = FALSE),
+                      class = "horizons_warning_flagged")
+  expect_match(conditionMessage(w), '"A"', fixed = TRUE)
+
+  ## A data frame alike; text is still refused
+  df <- tibble::tibble(Sample_ID = c("A", "B"), `4000` = c(0.1, 0.2), `3998` = NA)
+  expect_identical(spectra(df, verbose = FALSE)$data$analysis$wn_3998, c(NA_real_, NA_real_))
+  expect_error(spectra(tibble::tibble(Sample_ID = "A", `4000` = "x", `3998` = 0.2), verbose = FALSE),
+               "Wavelength columns must contain numeric data", fixed = TRUE, class = "horizons_error_input")
+
+})
+
 test_that("a CSV file whose columns cannot be read, of several, is dropped by name and the rest returned", {
 
   dir <- withr::local_tempdir()
