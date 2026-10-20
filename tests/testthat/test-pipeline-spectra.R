@@ -1042,6 +1042,26 @@ test_that("a CSV's columns are checked as a data frame's are, and the refusal na
 
 })
 
+test_that("a refusal of one CSV file's columns, of several read, names the file", {
+
+  dir <- withr::local_tempdir()
+  readr::write_csv(tibble::tibble(Sample_ID = "A", `4000` = 0.1, `3998` = 0.2), file.path(dir, "one.csv"))
+  readr::write_csv(tibble::tibble(label = "B", `4000` = 0.3, `3998` = 0.4), file.path(dir, "two.csv"))
+
+  ## Its id column is not one horizons knows
+  err <- expect_error(spectra(dir), "Could not identify sample ID column",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_match(conditionMessage(err), "File: ", fixed = TRUE)
+  expect_match(conditionMessage(err), "two.csv", fixed = TRUE)
+  expect_no_match(conditionMessage(err), "one.csv", fixed = TRUE)
+
+  ## The id column named lies in one file only
+  err <- expect_error(spectra(dir, id_col = "Sample_ID"), "Specified `id_col` not found in data",
+                      fixed = TRUE, class = "horizons_error_input")
+  expect_match(conditionMessage(err), "two.csv", fixed = TRUE)
+
+})
+
 test_that("spectra() refuses a directory with neither OPUS nor CSV files, and a file whose type it cannot tell", {
 
   empty <- withr::local_tempdir()

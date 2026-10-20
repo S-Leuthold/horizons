@@ -312,6 +312,8 @@ spectra <- function(source,
 #' @param data A tibble or data.frame with spectral data.
 #' @param id_col Optional column name for sample ID.
 #' @param wavelength_cols Optional column names for wavelength data.
+#' @param file Character(1) or `NULL`. The file the table was read from,
+#'   which a refusal names; `NULL` for a data frame.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return A tibble: `sample_id`, the meta columns, then the wavelength
@@ -321,11 +323,12 @@ spectra <- function(source,
 spectra_from_tibble <- function(data,
                                 id_col          = NULL,
                                 wavelength_cols = NULL,
+                                file            = NULL,
                                 call            = rlang::caller_env()) {
 
   ## The id and wavelength columns, checked -----------------------------------
 
-  cols      <- check_source_columns(data, id_col, wavelength_cols, call = call)
+  cols      <- check_source_columns(data, id_col, wavelength_cols, file = file, call = call)
   id_column <- cols$id_column
   wn_cols   <- cols$wn_cols
 
@@ -662,7 +665,7 @@ read_opus_file <- function(path) {
 #' columns are checked as a data frame's are ([spectra_from_tibble()]), and
 #' a refusal there is an input error, which no unit contains.
 #'
-#' @param path Character(1). The file.
+#' @param path Character(1). The file, which a refusal names.
 #' @param id_col,wavelength_cols `spectra()`'s arguments.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
@@ -673,7 +676,7 @@ read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL, call = rl
 
   data <- unit_step("file_read", readr::read_csv(path, show_col_types = FALSE))
 
-  spectra_from_tibble(data, id_col, wavelength_cols, call = call)
+  spectra_from_tibble(data, id_col, wavelength_cols, file = path, call = call)
 
 }
 
@@ -819,16 +822,18 @@ bind_spectra_files <- function(tables, collector) {
 #' wavelength columns must be named by wavenumber (#121), and they must
 #' hold numbers. Either is detected when not
 #' given ([detect_id_column()], [detect_wavelength_columns()]). Refusals
-#' report as `spectra()`.
+#' report as `spectra()`, and name the file the table was read from, so one
+#' file of several can be found.
 #'
 #' @param data The source table.
 #' @param id_col,wavelength_cols `spectra()`'s arguments.
+#' @param file Character(1) or `NULL`. The file `data` was read from.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #' @return List: `id_column` (character(1)) and `wn_cols` (character), names
 #'   of `data`.
 #' @keywords internal
 #' @noRd
-check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::caller_env()) {
+check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, call = rlang::caller_env()) {
 
   ## The id column ------------------------------------------------------------
 
@@ -839,7 +844,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::ca
       abort_horizons(c(
         "Specified {.arg id_col} not found in data.",
         "x" = "Column {.val {id_col}} does not exist.",
-        "i" = "Available columns: {.val {names(data)}}."
+        "i" = "Available columns: {.val {names(data)}}.",
+        "i" = if (!is.null(file)) "File: {.path {file}}."
       ), kind = "input", call = call)
 
     }
@@ -848,7 +854,7 @@ check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::ca
 
   } else {
 
-    id_column <- detect_id_column(names(data), call = call)
+    id_column <- detect_id_column(names(data), file = file, call = call)
 
   }
 
@@ -862,7 +868,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::ca
 
       abort_horizons(c(
         "Specified wavelength columns not found in data.",
-        "x" = "Missing: {.val {missing_cols}}."
+        "x" = "Missing: {.val {missing_cols}}.",
+        "i" = if (!is.null(file)) "File: {.path {file}}."
       ), kind = "input", call = call)
 
     }
@@ -871,7 +878,7 @@ check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::ca
 
   } else {
 
-    wn_cols <- detect_wavelength_columns(names(data), call = call)
+    wn_cols <- detect_wavelength_columns(names(data), file = file, call = call)
 
   }
 
@@ -886,7 +893,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::ca
     abort_horizons(c(
       "Wavelength column names must be wavenumbers.",
       "x" = "Not a wavenumber: {.val {unnamed}}.",
-      "i" = "Name each by its wavenumber, as {.val 4000} or {.val wn_4000}, or leave it out of {.arg wavelength_cols}."
+      "i" = "Name each by its wavenumber, as {.val 4000} or {.val wn_4000}, or leave it out of {.arg wavelength_cols}.",
+      "i" = if (!is.null(file)) "File: {.path {file}}."
     ), kind = "input", call = call)
 
   }
@@ -900,7 +908,8 @@ check_source_columns <- function(data, id_col, wavelength_cols, call = rlang::ca
     abort_horizons(c(
       "Wavelength columns must contain numeric data.",
       "x" = "Non-numeric columns: {.val {non_numeric_wn}}.",
-      "i" = "Check that the spectral columns hold absorbance or reflectance values."
+      "i" = "Check that the spectral columns hold absorbance or reflectance values.",
+      "i" = if (!is.null(file)) "File: {.path {file}}."
     ), kind = "input", call = call)
 
   }
@@ -976,12 +985,14 @@ detect_file_type <- function(source, call = rlang::caller_env()) {
 #' Detect ID column from common aliases
 #'
 #' @param col_names Character vector of column names.
+#' @param file Character(1) or `NULL`. The file the columns were read from,
+#'   which the refusal names.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character: detected column name.
 #'
 #' @noRd
-detect_id_column <- function(col_names, call = rlang::caller_env()) {
+detect_id_column <- function(col_names, file = NULL, call = rlang::caller_env()) {
 
   for (alias in ID_ALIASES) {
 
@@ -997,7 +1008,8 @@ detect_id_column <- function(col_names, call = rlang::caller_env()) {
     "Could not identify sample ID column.",
     "i" = "Checked aliases: {.val {ID_ALIASES}}.",
     "i" = "Available columns: {.val {col_names}}.",
-    "i" = "Specify it with {.arg id_col}."
+    "i" = "Specify it with {.arg id_col}.",
+    "i" = if (!is.null(file)) "File: {.path {file}}."
   ), kind = "input", call = call)
 
 }
@@ -1010,12 +1022,14 @@ detect_id_column <- function(col_names, call = rlang::caller_env()) {
 #' Detect wavelength columns from column names
 #'
 #' @param col_names Character vector of column names.
+#' @param file Character(1) or `NULL`. The file the columns were read from,
+#'   which the refusal names.
 #' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return Character vector of wavelength column names.
 #'
 #' @noRd
-detect_wavelength_columns <- function(col_names, call = rlang::caller_env()) {
+detect_wavelength_columns <- function(col_names, file = NULL, call = rlang::caller_env()) {
 
   ## Strategy 1: Columns starting with wn_ -----------------------------------
 
@@ -1043,7 +1057,8 @@ detect_wavelength_columns <- function(col_names, call = rlang::caller_env()) {
     "Could not identify wavelength columns.",
     "i" = "Expected columns starting with {.val wn_} or numeric names (e.g. {.val 4000}, {.val 3998}).",
     "i" = "Found columns: {.val {col_names}}.",
-    "i" = "Specify them with {.arg wavelength_cols}."
+    "i" = "Specify them with {.arg wavelength_cols}.",
+    "i" = if (!is.null(file)) "File: {.path {file}}."
   ), kind = "input", call = call)
 
 }
