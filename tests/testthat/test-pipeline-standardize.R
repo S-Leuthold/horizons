@@ -1129,13 +1129,13 @@ test_that("a spectrum with a hole is flagged as missing a value and one short at
 
   ## Arrange ---------------------------------------------------------------
 
-  ## Off-grid spectra; row 2 lacks 61 points mid-axis and its highest 40,
-  ## row 3 its lowest 40
+  ## Off-grid spectra; row 2 lacks 61 points mid-axis and every point above
+  ## 3920, row 3 its lowest 40
   hd   <- make_axis_spectra(OFFGRID_WN, f = smooth_spectrum, n = 4)
   pred <- predictor_names(hd)
   wn   <- as.numeric(sub("^wn_", "", pred))
   hd$data$analysis[2, pred[wn > 2000 & wn < 2000 + 61 * 1.93]] <- NA_real_
-  hd$data$analysis[2, pred[order(wn, decreasing = TRUE)[1:40]]] <- NA_real_
+  hd$data$analysis[2, pred[wn > 3920]] <- NA_real_
   hd$data$analysis[3, pred[order(wn)[1:40]]] <- NA_real_
 
   ## Act -------------------------------------------------------------------
@@ -1361,6 +1361,22 @@ test_that("a value missing inside a spectrum's own range flags it on every path,
       expect_match(conditionMessage(w), "missing inside its own range, or not finite", fixed = TRUE, info = what)
 
     }
+
+  }
+
+  ## A missing value no grid point lies across (700.10, between 698.17 and
+  ## 702.03, with the 8 cm-1 grid at 696 and 704) still flags its spectrum,
+  ## though every value it returns is finite
+  for (value in c(NA_real_, Inf)) {
+
+    hd <- holed(OFFGRID_WN, 53, 1, value)
+    expect_equal(OFFGRID_WN[52:54], c(698.17, 700.10, 702.03))
+
+    w <- expect_warning(out <- no_output(standardize(hd, resample = 8, trim = c(600, 4000))),
+                        class = "horizons_warning_flagged")
+    expect_identical(out$data$analysis$.flag, c(NA, "standardize"), info = value)
+    expect_false(anyNA(predictor_block(out)), info = value)
+    expect_match(conditionMessage(w), "missing inside its own range, or not finite", fixed = TRUE, info = value)
 
   }
 
