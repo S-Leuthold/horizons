@@ -856,7 +856,10 @@ describe("step_transform_spectra() name collisions and window size", {
     rec <- build_recipe(config, td$data, td$role_map)
 
     expect_error(recipes::prep(rec), "spec01")
-    expect_error(recipes::prep(rec), class = "horizons_error_input")
+    err <- expect_error(recipes::prep(rec), class = "horizons_error_input")
+
+    ## Reported as the step's prep(), not the helper that found it
+    expect_identical(rlang::call_name(err$parent$call), "prep")
 
   })
 
