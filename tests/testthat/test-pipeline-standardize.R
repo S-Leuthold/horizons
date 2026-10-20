@@ -695,6 +695,14 @@ test_that("standardize() prints nothing under verbose = FALSE, on either path, a
   expect_silent(standardize(kssl, resample = NULL, trim = NULL, verbose = FALSE))
   expect_output(standardize(kssl, resample = NULL, trim = NULL, verbose = TRUE), "Sorting")
 
+  ## The tree names each operation that ran, and says when none did
+  dec <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum)
+  expect_output(standardize(dec, resample = NULL, trim = NULL, verbose = TRUE), "No operations applied")
+
+  tree <- capture.output(standardize(dec, resample = 4, remove_water = TRUE, baseline = TRUE, verbose = TRUE))
+  expect_true(any(grepl("Water bands: ", tree, fixed = TRUE)))
+  expect_true(any(grepl("Baseline correction (convex hull)", tree, fixed = TRUE)))
+
   expect_error(standardize(kssl, verbose = c(TRUE, FALSE)),
                "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE, class = "horizons_error_input")
 

@@ -772,7 +772,7 @@ test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, neve
 
   ## A single-channel block first, then a parameter block whose name starts
   ## with ab, then the absorbance blocks in the other order
-  files <- local_opus_files(c("a.0", "b.0", "c.0"))
+  files <- local_opus_files(c("a.0", "b.0", "c.0", "d.0"))
   local_reads(list(
     a.0 = list(sc_sample = fake_block(FAKE_WN, c(9, 9, 9)),
                ab_no_atm_comp_data_param = list(data = "parameters"),
@@ -780,7 +780,8 @@ test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, neve
     b.0 = list(ab_no_atm_comp = fake_block(FAKE_WN, c(7, 7, 7)),
                AB = fake_block(FAKE_WN, c(4, 5, 6))),
     c.0 = list(sc_sample = fake_block(FAKE_WN, c(9, 9, 9)),
-               ab_no_atm_comp_data_param = list(data = "parameters"))
+               ab_no_atm_comp_data_param = list(data = "parameters")),
+    d.0 = list(ab = "not a block")
   ))
 
   ## Act -------------------------------------------------------------------
@@ -795,6 +796,10 @@ test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, neve
   ## The file with neither is dropped, its blocks named
   expect_match(conditionMessage(w),
                'The file holds no absorbance block ("ab" or "ab_no_atm_comp"). Its blocks: "sc_sample" and "ab_no_atm_comp_data_param".',
+               fixed = TRUE)
+
+  ## A block in a form horizons does not read is dropped the same way
+  expect_match(conditionMessage(w), 'The absorbance block "ab" is a <character>, which horizons does not read. (d.0)',
                fixed = TRUE)
 
 })
