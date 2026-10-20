@@ -493,7 +493,7 @@ spectra_from_path <- function(source,
       if (type == "opus") {
         read_opus_file(file_paths[[i]])
       } else {
-        read_csv_file(file_paths[[i]], id_col, wavelength_cols, call = call)
+        read_csv_file(file_paths[[i]], id_col, wavelength_cols)
       },
       unit = "file",
       id   = file_paths[[i]]
@@ -687,16 +687,15 @@ read_opus_file <- function(path) {
 #'
 #' @param path Character(1). The file.
 #' @param id_col,wavelength_cols `spectra()`'s arguments.
-#' @param call The frame a refusal reports: `spectra()`'s.
 #'
 #' @return The file's table, as [spectra_from_tibble()] returns it.
 #'
 #' @noRd
-read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL, call = rlang::caller_env()) {
+read_csv_file <- function(path, id_col = NULL, wavelength_cols = NULL) {
 
   data <- unit_step("file_read", readr::read_csv(path, show_col_types = FALSE))
 
-  unit_step("file_columns", spectra_from_tibble(data, id_col, wavelength_cols, file = path, call = call))
+  unit_step("file_columns", spectra_from_tibble(data, id_col, wavelength_cols, file = path))
 
 }
 
