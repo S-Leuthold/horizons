@@ -11,7 +11,7 @@ transform_spectra_matrix(X, preprocessing, window_size = 9)
 spectrum per row.}
 
 \item{preprocessing}{Character. One of the methods documented in
-\code{\link[=step_transform_spectra]{step_transform_spectra()}}.}
+\code{\link[=step_transform_spectra]{step_transform_spectra()}}, which checks it.}
 
 \item{window_size}{Odd integer. Savitzky-Golay window size. Default 9.}
 }

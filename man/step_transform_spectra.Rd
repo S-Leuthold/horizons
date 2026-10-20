@@ -20,7 +20,8 @@ step_transform_spectra(
 
 \item{...}{Column selectors for spectral columns.}
 
-\item{preprocessing}{Character. One of the methods listed above.}
+\item{preprocessing}{Character. One of the methods listed above, checked
+when the step is added.}
 
 \item{window_size}{Odd integer, at least 5. Savitzky-Golay window size, in
 grid points; it also sets the edge trimmed for \code{"raw"} and \code{"snv"}.

@@ -3,8 +3,8 @@
 ## ---------------------------------------------------------------------------
 ##
 ## What the step refuses. Its transforms, window rules, name collisions and
-## unusable-spectrum warning are tested in test-utils-recipes.R. These aborts
-## carry no package class, so each test matches the finding's own text.
+## unusable-spectrum warning are tested in test-utils-recipes.R. Each test
+## asserts the class and matches the finding's own text.
 
 ## Helper: n spectra of p bands named wn_<wavenumber>, and an outcome.
 ## Drawn under the caller's seed.
@@ -32,29 +32,49 @@ describe("step_transform_spectra() refuses input it cannot use", {
     rec <- recipes::recipe(SOC ~ ., data = d) |>
       step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "raw")
 
-    ## Act & Assert
-    expect_error(recipes::prep(rec),
-                 "All spectral columns must be numeric. Non-numeric: wn_3998",
-                 fixed = TRUE)
+    ## Act & Assert: wrapped by recipes, with the class in its chain
+    err <- expect_error(recipes::prep(rec), "All spectral columns must be numeric",
+                        fixed = TRUE, class = "horizons_error_input")
+    expect_match(conditionMessage(err$parent), "Non-numeric: wn_3998", fixed = TRUE)
 
   })
 
-  it("names the method, the matrix and the window when preprocessing fails", {
+  it("refuses an unknown method when the step is added, listing the methods (#199)", {
 
-    ## Arrange: the constructor does not check the method, so an unknown one
-    ## first fails when prep() bakes the training data.
+    withr::local_seed(1)
+    d <- transform_data()
+
+    err <- expect_error(
+      recipes::recipe(SOC ~ ., data = d) |>
+        step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "nope"),
+      "`preprocessing` must be one of", fixed = TRUE, class = "horizons_error_input"
+    )
+    expect_match(conditionMessage(err), '"snv_deriv2"', fixed = TRUE)
+    expect_match(conditionMessage(err), 'Got "nope"', fixed = TRUE)
+
+  })
+
+  it("names the method, the matrix and the window when preprocessing fails (#192)", {
+
+    ## Arrange: the method is checked when the step is added, so the failure
+    ## is the transform's own, made here at its seam
     withr::local_seed(1)
     d <- transform_data()
 
     rec <- recipes::recipe(SOC ~ ., data = d) |>
-      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "nope")
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv1")
 
-    ## Act & Assert: the step's message, with the cause appended
-    expect_error(
-      recipes::prep(rec),
-      "preprocessing 'nope' failed on a 20 x 30 spectral matrix (window_size = 9): Unknown preprocessing type: nope",
-      fixed = TRUE
-    )
+    local_mocked_bindings(transform_spectra_matrix = function(...) stop("convolution failed"))
+
+    ## Act & Assert: a run error, the cause its parent
+    err <- expect_error(recipes::prep(rec), class = "horizons_error_run")
+    run <- err$parent
+    msg <- conditionMessage(run)
+    expect_match(msg, "could not transform its spectra", fixed = TRUE)
+    expect_match(msg, 'Method: "deriv1"', fixed = TRUE)
+    expect_match(msg, "Spectral matrix: 20 x 30", fixed = TRUE)
+    expect_match(msg, "Window size: 9", fixed = TRUE)
+    expect_match(conditionMessage(run$parent), "convolution failed", fixed = TRUE)
 
   })
 

@@ -17,7 +17,8 @@
 #'
 #' @param recipe A `recipes::recipe()` object.
 #' @param ... Column selectors for spectral columns.
-#' @param preprocessing Character. One of the methods listed above.
+#' @param preprocessing Character. One of the methods listed above, checked
+#'   when the step is added.
 #' @param window_size Odd integer, at least 5. Savitzky-Golay window size, in
 #'   grid points; it also sets the edge trimmed for `"raw"` and `"snv"`.
 #'   Default 9. Checked here, so a direct caller cannot build the step with a
@@ -44,13 +45,22 @@ step_transform_spectra <- function(recipe,
   ## An even window has no centre point, and a window under 5 cannot fit the
   ## cubic deriv2 needs. Either would otherwise build, prep, and fail at bake
   ## inside prospectr (or, for raw and snv, trim a fractional edge).
+  if (!rlang::is_string(preprocessing) || !preprocessing %in% VALID_PREPROCESSING) {
+
+    abort_horizons(c(
+      "{.arg preprocessing} must be one of {.val {VALID_PREPROCESSING}}.",
+      "x" = "Got {.val {preprocessing}}."
+    ), kind = "input")
+
+  }
+
   if (!is_valid_sg_window(window_size)) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.arg window_size} must be an odd whole number of at least {SG_WINDOW_MIN}.",
       "x" = "Got {.code {paste(deparse(window_size), collapse = ' ')}}.",
       "i" = "The window is centred on a point, so its width is odd, and the second-derivative methods fit a cubic, which needs at least {SG_WINDOW_MIN} points."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -120,10 +130,10 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 
   if (length(non_numeric) > 0) {
 
-    rlang::abort(paste0(
-      "All spectral columns must be numeric. Non-numeric: ",
-      paste(non_numeric, collapse = ", ")
-    ))
+    abort_horizons(c(
+      "All spectral columns must be numeric.",
+      "x" = "Non-numeric: {.field {non_numeric}}."
+    ), kind = "input")
 
   }
 
@@ -142,11 +152,11 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 
   if (input_len <= x$window_size) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn step_transform_spectra}'s window is at least as wide as the spectrum.",
       "x" = "{input_len} spectral column{?s} with {.code window_size = {x$window_size}}.",
       "i" = "Savitzky-Golay drops {half_window} column{?s} from each end and needs the window narrower than the spectrum, so {.arg window_size} must be smaller than the number of spectral columns."
-    ), class = "horizons_input_error")
+    ), kind = "input")
 
   }
 
@@ -191,31 +201,21 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
   ## one-row-at-a-time loop without the per-row list and rbind copies that
   ## dominated the prep transient at library scale (2026-09-16).
 
-  transformed_matrix <- tryCatch(
+  ### The method was checked when the step was added (#199), so a failure
+  ### here is prospectr's on this matrix, which every row shares.
+  transformed_matrix <- rlang::try_fetch(
     transform_spectra_matrix(spectral_matrix,
                              preprocessing = object$preprocessing,
                              window_size   = object$window_size),
     error = function(e) {
-      rlang::abort(paste0(
-        "step_transform_spectra: preprocessing '", object$preprocessing,
-        "' failed on a ", nrow(spectral_matrix), " x ", ncol(spectral_matrix),
-        " spectral matrix (window_size = ", object$window_size, "): ",
-        conditionMessage(e)
-      ), parent = e)
+      abort_horizons(c(
+        "{.fn step_transform_spectra} could not transform its spectra.",
+        "*" = "Method: {.val {object$preprocessing}}.",
+        "*" = "Spectral matrix: {nrow(spectral_matrix)} x {ncol(spectral_matrix)}.",
+        "*" = "Window size: {object$window_size}."
+      ), kind = "run", parent = e)
     }
   )
-
-  ## Verify the output width matches what prep() promised ---------------------
-
-  if (ncol(transformed_matrix) != length(object$trained_columns)) {
-
-    rlang::abort(paste0(
-      "Inconsistent row lengths in transformed spectra: got ",
-      ncol(transformed_matrix), " columns, expected ",
-      length(object$trained_columns), ". Check preprocessing logic."
-    ))
-
-  }
 
   ## Failures are visible, not silent. A non-finite spectrum raises no error
   ## in prospectr but comes back as an all-NA row of the expected width, which
@@ -269,22 +269,24 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
 #'   (`spec1`, `spec01`, ... from `recipes::names0()`).
 #' @param passthrough Character vector of the column names the step carries
 #'   through untransformed (everything that is not a spectral column).
+#' @param call The frame the refusal reports: the step's `prep()` or
+#'   `bake()`.
 #'
 #' @return Invisibly `TRUE`; aborts naming the colliding columns.
 #' @keywords internal
 #' @noRd
-check_transform_name_collision <- function(generated, passthrough) {
+check_transform_name_collision <- function(generated, passthrough, call = rlang::caller_env()) {
 
   collisions <- intersect(generated, passthrough)
 
   if (length(collisions) > 0) {
 
-    cli::cli_abort(c(
+    abort_horizons(c(
       "{.fn step_transform_spectra} would generate {length(collisions)} column name{?s} that {?is/are} already in the data.",
       "x" = "Colliding: {.val {collisions}}",
       "i" = "The step names its output {.code spec1}, {.code spec2}, ... , so a non-spectral column using that pattern (an id or a meta column) cannot be carried through alongside it.",
       "i" = "{cli::qty(length(collisions))}Rename the offending column{?s} before building the recipe."
-    ), class = "horizons_input_error")
+    ), kind = "input", call = call)
 
   }
 
@@ -353,7 +355,7 @@ print.step_transform_spectra <- function(x, width = max(20, options()$width - 30
 #' @param X Numeric matrix (or something `as.matrix()` turns into one). One
 #'   spectrum per row.
 #' @param preprocessing Character. One of the methods documented in
-#'   [step_transform_spectra()].
+#'   [step_transform_spectra()], which checks it.
 #' @param window_size Odd integer. Savitzky-Golay window size. Default 9.
 #'
 #' @return A numeric matrix with `nrow(X)` rows and
@@ -386,100 +388,13 @@ transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
     "deriv1"     = sg(X, m = 1, p = 1),
     "deriv2"     = sg(X, m = 2, p = 3),
     "snv_deriv1" = sg(snv(X), m = 1, p = 1),
-    "snv_deriv2" = sg(snv(X), m = 2, p = 3),
-
-    rlang::abort(paste0("Unknown preprocessing type: ", preprocessing))
+    "snv_deriv2" = sg(snv(X), m = 2, p = 3)
 
   )
 
   out <- as.matrix(out)
   dimnames(out) <- NULL
   out
-
-}
-
-## ---------------------------------------------------------------------------
-## Row-level spectral processing (reference implementation)
-## ---------------------------------------------------------------------------
-
-#' Process a Single Spectral Row
-#'
-#' @description
-#' Applies one of the supported preprocessing methods to a single spectrum
-#' (numeric vector). Uses prospectr for Savitzky-Golay and SNV operations.
-#'
-#' This was the per-row implementation `bake.step_transform_spectra()` looped
-#' over until 2026-09-16. It is kept as the reference that
-#' `transform_spectra_matrix()` is tested against, and is not called by the
-#' package otherwise.
-#'
-#' @param input_vector Numeric vector. One spectrum.
-#' @param preprocessing Character. Preprocessing method.
-#' @param window_size Integer. SG window size.
-#'
-#' @return Numeric vector (shorter than input due to SG edge trimming).
-#' @keywords internal
-process_spectra_row <- function(input_vector, preprocessing, window_size = 9) {
-
-  half_window <- (window_size - 1) / 2
-  start       <- 1 + half_window
-  end         <- length(input_vector) - half_window
-
-  switch(as.character(preprocessing),
-
-    "raw" = {
-      input_vector[start:end]
-    },
-
-    "sg" = {
-      input_vector |>
-        matrix(nrow = 1) |>
-        prospectr::savitzkyGolay(m = 0, p = 1, w = window_size) |>
-        as.vector()
-    },
-
-    "snv" = {
-      input_vector |>
-        matrix(nrow = 1) |>
-        prospectr::standardNormalVariate() |>
-        as.vector() ->
-      processed
-      processed[start:end]
-    },
-
-    "deriv1" = {
-      input_vector |>
-        matrix(nrow = 1) |>
-        prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) |>
-        as.vector()
-    },
-
-    "deriv2" = {
-      input_vector |>
-        matrix(nrow = 1) |>
-        prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) |>
-        as.vector()
-    },
-
-    "snv_deriv1" = {
-      input_vector |>
-        matrix(nrow = 1) |>
-        prospectr::standardNormalVariate() |>
-        prospectr::savitzkyGolay(m = 1, p = 1, w = window_size) |>
-        as.vector()
-    },
-
-    "snv_deriv2" = {
-      input_vector |>
-        matrix(nrow = 1) |>
-        prospectr::standardNormalVariate() |>
-        prospectr::savitzkyGolay(m = 2, p = 3, w = window_size) |>
-        as.vector()
-    },
-
-    rlang::abort(paste0("Unknown preprocessing type: ", preprocessing))
-
-  )
 
 }
 
