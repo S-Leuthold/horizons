@@ -299,8 +299,11 @@ point_in_grid <- function(point, grid) {
 #'    `tune::tune_grid()`. A result in which every model failed fails the
 #'    member, with tune's cause (`check_tune_result()`), and so does a grid
 #'    with no candidate scored on every fold (#101).
-#' 2. If `bayesian_iter > 0`, refine with `bayes_search()`, which keeps what
-#'    it finished when it fails, and says so (#209).
+#' 2. If `bayesian_iter > 0`, re-pin the random stream to `seed` and refine
+#'    with `bayes_search()`, which keeps what it finished when it fails, and
+#'    says so (#209). The re-pin makes the search independent of where the
+#'    grid stage left the stream, which differs between the sequential and
+#'    parallel paths (#151).
 #' 3. Choose the hyperparameters by RMSE among the candidates scored on every
 #'    fold (`select_complete()`).
 #'
@@ -314,6 +317,8 @@ point_in_grid <- function(point, grid) {
 #' @param recipe The member's untrained recipe, to reproduce a step's failure
 #'   inside tune with its class; `NULL` when it was prepped before tuning.
 #' @param debug Logical. Stop at the first failure rather than fall back.
+#' @param seed Integer. The member's seed, set before the Bayesian search.
+#'   Default 42.
 #'
 #' @return List with `tune_results` (the result the hyperparameters were
 #'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
@@ -330,7 +335,8 @@ tune_warmstart_bayes <- function(workflow,
                                  metric_set,
                                  allow_par = FALSE,
                                  recipe    = NULL,
-                                 debug     = FALSE) {
+                                 debug     = FALSE,
+                                 seed      = 42L) {
 
   n_folds <- nrow(cv_resamples)
 
@@ -371,6 +377,13 @@ tune_warmstart_bayes <- function(workflow,
   n_dropped    <- 0L
 
   if (bayesian_iter > 0) {
+
+    ## Re-pinned before the stochastic stage, as evaluate_single_config()
+    ## re-pins before its search: tune's future path advances the parent
+    ## stream past where the sequential loop leaves it, so a search seeded
+    ## only by what came before could differ between allow_par = TRUE and
+    ## FALSE (#151).
+    set.seed(seed, kind = "Mersenne-Twister")
 
     search <- unit_step("warm_start_bayes", bayes_search(
       workflow      = workflow,

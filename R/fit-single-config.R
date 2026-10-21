@@ -248,7 +248,8 @@ fit_single_config <- function(config_row,
       metric_set    = tune_metrics,
       allow_par     = allow_par,
       recipe        = if (!prepped_now) recipe,
-      debug         = debug
+      debug         = debug,
+      seed          = seed
     ))
 
     best_params <- retune$best_params

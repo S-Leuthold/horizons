@@ -696,6 +696,51 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
   })
 
+  it("does not depend on the caller's random stream (#151)", {
+
+    ## An elastic net with an interior optimum, which glmnet fits
+    ## deterministically, so only the search's own draws can differ. Without
+    ## the re-pin the search reads whatever stream the grid stage left, which
+    ## differs between the sequential and parallel paths; here three caller
+    ## seeds stand in for that, and choose three different points.
+    dat <- withr::with_seed(11, {
+      x <- matrix(stats::rnorm(120 * 30), 120)
+      colnames(x) <- paste0("x", 1:30)
+      d <- tibble::as_tibble(x)
+      d$y <- x[, 1] + 0.5 * x[, 2] + 0.3 * x[, 3] + stats::rnorm(120)
+      d
+    })
+    folds <- withr::with_seed(12, rsample::vfold_cv(dat, v = 5))
+
+    wf <- workflows::workflow(
+      y ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    ps   <- workflows::extract_parameter_set_dials(wf)
+    grid <- build_warmstart_grid(NULL, ps, max_points = 3L)
+    ms   <- tuning_metric_set("none", metrics = c("rmse", "rsq"))
+
+    run <- function(caller_seed) {
+
+      withr::local_seed(caller_seed)
+      r <- tune_warmstart_bayes(wf, folds, grid, ps, bayesian_iter = 3L,
+                                metric_set = ms, seed = 42L)
+      scored <- tune::collect_metrics(r$tune_results)
+
+      list(best     = r$best_params[c("penalty", "mixture")],
+           proposed = scored[scored$.metric == "rmse" & scored$.iter > 0, c("penalty", "mixture")])
+
+    }
+
+    runs <- lapply(1:3, run)
+
+    expect_equal(nrow(runs[[1]]$proposed), 3L)
+    expect_identical(runs[[2]], runs[[1]])
+    expect_identical(runs[[3]], runs[[1]])
+
+  })
+
 })
 
 

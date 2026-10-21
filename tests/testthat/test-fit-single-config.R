@@ -1275,13 +1275,24 @@ describe("fit_single_config() - the RNG pin", {
     skip_unless_slow_tier()
 
     ## A worker started under furrr_options(seed = TRUE) is on L'Ecuyer-CMRG.
-    ## The runner pins kind and seed on entry. The OOF fits and the final fit
-    ## re-pin, so the pin shows only through the re-tune's choice: a cold
-    ## start's Bayesian stage draws its candidates from the stream.
-    setup <- fsc()$setup
+    ## The runner pins kind and seed on entry. The Bayesian search, the OOF
+    ## fits and the final fit re-pin (#151), so the entry pin shows in the
+    ## warm-start grid stage, whose forests draw their seeds from the stream:
+    ## its scores, read from tune's result for that stage (the first
+    ## tune_grid() call), differ between the two callers without the pin.
+    setup     <- fsc()$setup
+    real_grid <- tune::tune_grid
 
     run <- function() {
-      fit_single_config(
+
+      grid_stage <- NULL
+      local_mocked_bindings(tune_grid = function(...) {
+        result <- real_grid(...)
+        if (is.null(grid_stage)) grid_stage <<- result
+        result
+      }, .package = "tune")
+
+      fit <- fit_single_config(
         config_row          = make_fit_config(),
         split_F             = setup$split_F,
         cv_resamples        = setup$folds,
@@ -1294,15 +1305,17 @@ describe("fit_single_config() - the RNG pin", {
         allow_par           = FALSE,
         seed                = 42L
       )
+
+      list(fit = fit, grid = tune::collect_metrics(grid_stage))
+
     }
 
     mersenne <- withr::with_seed(1, run())
     lecuyer  <- withr::with_seed(99, .rng_kind = "L'Ecuyer-CMRG", run())
 
-    ## The test sees the pin only if the Bayesian candidate is the one chosen
-    expect_match(mersenne$best_params$.config, "^iter")
-    expect_identical(lecuyer$best_params, mersenne$best_params)
-    expect_identical(lecuyer$cv_predictions, mersenne$cv_predictions)
+    expect_identical(lecuyer$grid, mersenne$grid)
+    expect_identical(lecuyer$fit$best_params, mersenne$fit$best_params)
+    expect_identical(lecuyer$fit$cv_predictions, mersenne$fit$cv_predictions)
 
   })
 
