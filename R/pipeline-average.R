@@ -124,7 +124,8 @@
 #'     `id` role at the new `sample_id`
 #'   * `log`: The samples whose replicates all failed QC, and the metadata
 #'     columns dropped, then a note recording the call: `by`, the scans in
-#'     and samples out, the quality check, and the scans left out
+#'     and samples out, the quality check and the replicates it removed, and
+#'     any flagged replicates left out
 #'
 #' @examples
 #' \dontrun{
@@ -384,7 +385,7 @@ average <- function(x,
       ## Group was dropped (all outliers + drop mode) ------------------------
 
       dropped_samples <- c(dropped_samples, as.character(group_id))
-      n_dropped       <- n_dropped + n_reps
+      n_dropped       <- n_dropped + group_result$n_dropped
 
     } else {
 
@@ -614,17 +615,20 @@ average <- function(x,
   ## The call's record: how the replicates were averaged ----------------------
   ## A note, never raised, after the events above.
 
+  ### Each count in the tree's words: the replicates QC removed, and the
+  ### flagged ones left out, counted once each
   n_before <- nrow(analysis)
   n_after  <- nrow(averaged)
   qc_text  <- if (quality_check) {
-    "quality check on at a correlation of {correlation_threshold}, with {.code on_all_outliers = {.val {on_all_outliers}}}"
+    "quality check on at a correlation of {correlation_threshold}, with {.code on_all_outliers = {.val {on_all_outliers}}}; {n_dropped} replicate{?s} removed by the quality check"
   } else {
     "quality check off"
   }
+  flag_text <- if (n_flag_out > 0) "; {n_flag_out} flagged (.flag) replicate{?s} left out" else ""
 
   log_note(collector,
            paste0("Averaged {n_before} scan{?s} into {n_after} sample{?s} by {.field {by}}: ",
-                  qc_text, "; {n_dropped} scan{?s} left out."))
+                  qc_text, flag_text, "."))
 
   x$log <- log_close(collector, x$log)
 
@@ -914,7 +918,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #'
 #' @return A list with:
 #'   * `averaged`: Single-row tibble (or NULL if dropped)
-#'   * `n_dropped`: Number of replicates dropped
+#'   * `n_dropped`: Number of replicates QC removed, the flagged ones not
+#'     among them
 #'   * `all_outliers`: Logical, TRUE if all replicates were outliers
 #'   * `qc_info`: QC details
 #'   * `conflicts`: One entry per non-numeric response whose replicates
@@ -1013,10 +1018,12 @@ average_group <- function(group_data,
         if (on_all_outliers == "drop") {
 
           ## Drop entire sample ----------------------------------------------
+          ## Its flagged replicates are counted as left out, in n_flag_out,
+          ## so QC removed the rest
 
           return(list(
             averaged     = NULL,
-            n_dropped    = n_reps,
+            n_dropped    = n_reps - sum(flagged),
             all_outliers = TRUE,
             qc_info      = qc_info,
             flag         = NA_character_,

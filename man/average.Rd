@@ -59,7 +59,8 @@ varies within any sample dropped
 \code{id} role at the new \code{sample_id}
 \item \code{log}: The samples whose replicates all failed QC, and the metadata
 columns dropped, then a note recording the call: \code{by}, the scans in
-and samples out, the quality check, and the scans left out
+and samples out, the quality check and the replicates it removed, and
+any flagged replicates left out
 }
 }
 \description{
