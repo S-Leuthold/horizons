@@ -110,7 +110,8 @@ no training set for because they were flagged on arrival.}
 \item{\code{horizons_warning_partial_failure}}{Some units failed and the rest
 returned.}
 \item{\code{horizons_warning_coverage}}{The data only partly covers what is
-asked of it, such as a wavenumber range.}
+asked of it, such as a wavenumber range, or \code{\link[=add_response]{add_response()}}'s source
+matching fewer than half the samples.}
 \item{\code{horizons_warning_applicability}}{Predictions outside the
 applicability domain.}
 \item{\code{horizons_warning_input}}{A request that is legal but risky enough

@@ -22,9 +22,13 @@
 #' **Join behavior:**
 #'
 #' Left-join semantics matching `dplyr::left_join()` conventions. Strict exact
-#' matching - no case-folding or fuzzy matching. When match quality is poor,
-#' diagnostic messages detect common patterns (case mismatch, whitespace,
-#' prefix/suffix) and suggest fixes.
+#' matching - no case-folding or fuzzy matching. When no sample matches, the
+#' join is refused; when fewer than half match, it runs and warns
+#' (`horizons_warning_coverage`, naming the unmatched samples on the
+#' object's log); when half or more match, the unmatched samples are named
+#' in a note on the log and counted in verbose output. The refusal and the
+#' warning say when a case or whitespace difference would match more samples,
+#' and how to fix it.
 #'
 #' **Missing values:**
 #'
@@ -105,32 +109,6 @@ add_response <- function(x,
                          verbose = getOption("horizons.verbose", TRUE)) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 0: Print header
-  ## ---------------------------------------------------------------------------
-
-  ## (tree output moved to end of function)
-
-  ## ---------------------------------------------------------------------------
-  ## Helper: abort with tree-nested error
-  ## ---------------------------------------------------------------------------
-
-  abort_nested <- function(header, details, error_class = "horizons_input_error") {
-
-    cat(cli::col_red(paste0("\u2502  \u2514\u2500 ", header, "\n")))
-    for (i in seq_along(details)) {
-      branch <- if (i < length(details)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("\u2502        ", branch, " ", details[i], "\n")))
-    }
-    cat("\n")
-    rlang::abort(
-      header,
-      class = error_class,
-      call  = NULL
-    )
-
-  }
-
-  ## ---------------------------------------------------------------------------
   ## Step 1: Input validation
   ## ---------------------------------------------------------------------------
 
@@ -138,15 +116,9 @@ add_response <- function(x,
 
   if (!inherits(x, "horizons_data")) {
 
-    ## Special case: header hasn't printed correctly since x is wrong type
-    ## Reprint with standalone error
-    cat(cli::col_red(paste0(
-      "\u2502  \u2514\u2500 x must be a horizons_data object (got ", class(x)[1], ")\n"
-    )))
-    cat("\n")
-    rlang::abort(
-      paste("x must be a horizons_data object. Got:", class(x)[1]),
-      class = "horizons_input_error"
+    abort_horizons(
+      "{.arg x} must be a horizons_data object, not {.obj_type_friendly {x}}.",
+      kind = "input"
     )
 
   }
@@ -164,9 +136,9 @@ add_response <- function(x,
 
   if (!is_path && !is_tibble) {
 
-    abort_nested(
-      "source must be a data frame or file path",
-      c(paste0("Got class: ", class(source)[1]))
+    abort_horizons(
+      "{.arg source} must be a data frame or the path of a CSV file, not {.obj_type_friendly {source}}.",
+      kind = "input"
     )
 
   }
@@ -177,10 +149,10 @@ add_response <- function(x,
 
     if (!file.exists(source)) {
 
-      abort_nested(
-        "Source file does not exist",
-        c(paste0("Path: ", source))
-      )
+      abort_horizons(c(
+        "The source file does not exist.",
+        "x" = "Path: {.file {source}}."
+      ), kind = "input")
 
     }
 
@@ -194,12 +166,13 @@ add_response <- function(x,
   }
 
   ## 1.4 variable is non-empty and unique ----------------------------------------
+  ### rlang exports no checker for a character vector.
 
   if (!is.character(variable) || length(variable) == 0) {
 
-    abort_nested(
-      "variable must be a non-empty character vector",
-      c("Provide at least one response column name")
+    abort_horizons(
+      "{.arg variable} must be a character vector of column names, not {.obj_type_friendly {variable}}.",
+      kind = "input"
     )
 
   }
@@ -207,10 +180,11 @@ add_response <- function(x,
   if (anyDuplicated(variable)) {
 
     dup_vars <- unique(variable[duplicated(variable)])
-    abort_nested(
-      "variable contains duplicate column names",
-      c(paste0("Duplicates: ", paste(dup_vars, collapse = ", ")))
-    )
+
+    abort_horizons(c(
+      "{.arg variable} names a column more than once.",
+      "x" = "Repeated: {.field {dup_vars}}."
+    ), kind = "input")
 
   }
 
@@ -220,11 +194,11 @@ add_response <- function(x,
 
   if (length(missing_vars) > 0) {
 
-    abort_nested(
-      "Variables not found in source data",
-      c(paste0("Missing: ", paste(missing_vars, collapse = ", ")),
-        paste0("Available: ", paste(names(source), collapse = ", ")))
-    )
+    abort_horizons(c(
+      "{cli::qty(missing_vars)}{?A variable is/Variables are} not in the source data.",
+      "x" = "Missing: {.field {missing_vars}}.",
+      "i" = "Available: {.field {names(source)}}."
+    ), kind = "input")
 
   }
 
@@ -239,10 +213,10 @@ add_response <- function(x,
     )
     type_strs <- paste0(non_numeric, " (", non_numeric_types, ")")
 
-    abort_nested(
-      "Response variables must be numeric",
-      c(paste0("Non-numeric: ", paste(type_strs, collapse = ", ")))
-    )
+    abort_horizons(c(
+      "Response variables must be numeric.",
+      "x" = "Not numeric: {type_strs}."
+    ), kind = "input")
 
   }
 
@@ -254,11 +228,12 @@ add_response <- function(x,
 
     current_responses <- x$data$role_map$variable[x$data$role_map$role == "response"]
 
-    abort_nested(
-      "Response variables already exist in horizons data",
-      c(paste0("Already exists: ", paste(existing, collapse = ", ")),
-        paste0("Current responses: ", paste(current_responses, collapse = ", ")))
-    )
+    abort_horizons(c(
+      "{cli::qty(existing)}{?A variable is/Variables are} already in the data.",
+      "x" = "Already present: {.field {existing}}.",
+      "i" = if (length(current_responses)) "Current responses: {.field {current_responses}}.",
+      "i" = "Rename the source column, or join a different variable."
+    ), kind = "input")
 
   }
 
@@ -267,31 +242,15 @@ add_response <- function(x,
   ## Only single-column joins supported
   if (length(by) > 1) {
 
-    abort_nested(
-      "Multi-column joins not supported",
-      c(paste0("Got ", length(by), " columns: ", paste(by, collapse = ", ")),
-        "Create a composite key first, then join on that single column")
-    )
+    abort_horizons(c(
+      "{.arg by} must name one join column, not {length(by)}.",
+      "x" = "Got: {.field {by}}.",
+      "i" = "Make a composite key column first, then join on it."
+    ), kind = "input")
 
   }
 
-  ## Reject partially-named vectors (all or nothing)
-  if (!is.null(names(by))) {
-
-    has_name <- names(by) != ""
-
-    if (any(has_name) && !all(has_name)) {
-
-      abort_nested(
-        "Join key 'by' is partially named",
-        c("Use a named vector: c(\"horizons_col\" = \"source_col\")",
-          "Or an unnamed string: \"same_col_name\"")
-      )
-
-    }
-
-  }
-
+  ### A `by` of length one is named or not; it cannot be partly named.
   if (!is.null(names(by)) && any(names(by) != "")) {
 
     ## Named vector: c("horizons_col" = "source_col")
@@ -308,21 +267,19 @@ add_response <- function(x,
 
   if (!by_horizons %in% names(x$data$analysis)) {
 
-    abort_nested(
-      "Join column not found in horizons data",
-      c(paste0("Column: ", by_horizons),
-        paste0("Available: ", paste(names(x$data$analysis), collapse = ", ")))
-    )
+    abort_horizons(c(
+      "The join column {.field {by_horizons}} is not in the horizons data.",
+      "i" = "Available: {.field {names(x$data$analysis)}}."
+    ), kind = "input")
 
   }
 
   if (!by_source %in% names(source)) {
 
-    abort_nested(
-      "Join column not found in source data",
-      c(paste0("Column: ", by_source),
-        paste0("Available: ", paste(names(source), collapse = ", ")))
-    )
+    abort_horizons(c(
+      "The join column {.field {by_source}} is not in the source data.",
+      "i" = "Available: {.field {names(source)}}."
+    ), kind = "input")
 
   }
 
@@ -340,11 +297,11 @@ add_response <- function(x,
       if (n_na_source > 0)   paste0(n_na_source, " in source ('", by_source, "')")
     )
 
-    abort_nested(
-      paste0("NA values in join key: ", paste(na_counts, collapse = ", ")),
-      c("An NA key identifies no sample, so it cannot be joined",
-        "Drop the rows without a key, or fill their keys in, then join")
-    )
+    abort_horizons(c(
+      "NA values in join key: {paste(na_counts, collapse = ', ')}.",
+      "i" = "An NA key identifies no sample, so it cannot be joined.",
+      "i" = "Drop the rows without a key, or fill their keys in, then join."
+    ), kind = "input")
 
   }
 
@@ -359,11 +316,11 @@ add_response <- function(x,
     dup_counts <- table(source_keys)[as.character(dup_vals)]
     dup_strs   <- paste0('"', names(dup_counts), '" (', dup_counts, "x)")
 
-    abort_nested(
-      paste0("Duplicate values in source join key '", by_source, "'"),
-      c(paste0("Duplicated: ", paste(dup_strs, collapse = ", ")),
-        "Each sample must appear exactly once in the source data")
-    )
+    abort_horizons(c(
+      "Duplicate values in source join key {.field {by_source}}.",
+      "x" = "Duplicated: {dup_strs}.",
+      "i" = "Each sample must appear exactly once in the source data."
+    ), kind = "input")
 
   }
 
@@ -380,11 +337,11 @@ add_response <- function(x,
     dup_counts <- table(horizons_keys)[as.character(dup_vals)]
     dup_strs   <- paste0('"', names(dup_counts), '" (', dup_counts, "x)")
 
-    abort_nested(
-      paste0("Duplicate values in horizons join key '", by_horizons, "'"),
-      c(paste0("Duplicated: ", paste(dup_strs, collapse = ", ")),
-        "Each sample must have its own key value to join on")
-    )
+    abort_horizons(c(
+      "Duplicate values in horizons join key {.field {by_horizons}}.",
+      "x" = "Duplicated: {dup_strs}.",
+      "i" = "Each sample must have its own key value to join on."
+    ), kind = "input")
 
   }
 
@@ -404,93 +361,59 @@ add_response <- function(x,
   horizons_ids <- x$data$analysis[[by_horizons]]
   source_ids   <- source_slim[[by_source]]
   n_horizons   <- length(horizons_ids)
-  n_matched    <- sum(horizons_ids %in% source_ids)
+  matched      <- horizons_ids %in% source_ids
+  n_matched    <- sum(matched)
   n_unmatched  <- n_horizons - n_matched
   match_rate   <- n_matched / n_horizons
 
-  ## Zero matches - abort with diagnostic ------------------------------------
+  ## The case and whitespace hints, when either would match more samples ------
+
+  match_hints <- c(
+    if (sum(tolower(horizons_ids) %in% tolower(source_ids)) > n_matched) {
+      c("i" = "This looks like a case mismatch: try {.code mutate(source, {by_source} = tolower({by_source}))}.")
+    },
+    if (sum(trimws(horizons_ids) %in% trimws(source_ids)) > n_matched) {
+      c("i" = "This looks like a whitespace issue: try {.code mutate(source, {by_source} = trimws({by_source}))}.")
+    }
+  )
+
+  ## Zero matches: nothing to join ---------------------------------------------
 
   if (n_matched == 0) {
 
-    ## Detect common patterns
-    details <- c(
-      paste0("0/", n_horizons, " samples matched")
-    )
+    h_preview <- paste0('"', utils::head(horizons_ids, 3), '"', collapse = ", ")
+    s_preview <- paste0('"', utils::head(source_ids, 3), '"', collapse = ", ")
 
-    ## Show sample IDs from both sides
-    h_preview <- paste0('"', head(horizons_ids, 3), '"', collapse = ", ")
-    s_preview <- paste0('"', head(source_ids, 3), '"', collapse = ", ")
-    details   <- c(details,
-                   paste0("Horizons IDs: ", h_preview, if (n_horizons > 3) ", ..."),
-                   paste0("Source IDs: ", s_preview, if (length(source_ids) > 3) ", ..."))
-
-    ## Check for case mismatch
-    n_case_match <- sum(tolower(horizons_ids) %in% tolower(source_ids))
-
-    if (n_case_match > 0) {
-
-      details <- c(details,
-                   "This looks like a case mismatch",
-                   paste0("Try: mutate(source, ", by_source, " = tolower(", by_source, "))"))
-
-    }
-
-    ## Check for whitespace differences
-    n_ws_match <- sum(trimws(horizons_ids) %in% trimws(source_ids))
-
-    if (n_ws_match > 0) {
-
-      details <- c(details,
-                   "This looks like a whitespace issue",
-                   paste0("Try: mutate(source, ", by_source, " = trimws(", by_source, "))"))
-
-    }
-
-    abort_nested(
-      "No matching samples between horizons data and source",
-      details
-    )
+    abort_horizons(c(
+      "No sample in the horizons data matches the source.",
+      "x" = "0 of {n_horizons} samples matched on {.field {by_horizons}}.",
+      "i" = "Horizons IDs: {h_preview}{if (n_horizons > 3) ', ...' else ''}.",
+      "i" = "Source IDs: {s_preview}{if (length(source_ids) > 3) ', ...' else ''}.",
+      match_hints
+    ), kind = "input")
 
   }
 
-  ## Low match rate (<50%) - warn with pattern detection ----------------------
-  ## The hints print under the Matched line in Step 6, inside the tree; they
-  ## used to print here, above the tree's header (#91).
+  collector     <- log_open("add_response")
+  unmatched_ids <- as.character(x$data$analysis$sample_id[!matched])
 
-  low_match   <- match_rate < 0.5
-  match_hints <- character()
+  ## Under half matched: the result is weaker than its output shows ------------
+  ## Half or more: the unmatched samples are reported, not warned.
+
+  low_match <- match_rate < 0.5
 
   if (low_match) {
 
-    ## Check for case mismatch
-    n_case_match <- sum(tolower(horizons_ids) %in% tolower(source_ids))
+    log_warning(collector, "coverage", c(
+      "{n_matched} of {n_horizons} samples matched the source, so {n_unmatched} {?has/have} no response values.",
+      match_hints
+    ), ids = unmatched_ids)
 
-    if (n_case_match > n_matched) {
+  } else if (n_unmatched > 0) {
 
-      match_hints <- c(match_hints,
-                       "This looks like a case mismatch",
-                       paste0("Try: mutate(source, ", by_source,
-                              " = tolower(", by_source, "))"))
-
-    }
-
-    ## Check for whitespace
-    n_ws_match <- sum(trimws(horizons_ids) %in% trimws(source_ids))
-
-    if (n_ws_match > n_matched) {
-
-      match_hints <- c(match_hints,
-                       "This looks like a whitespace issue",
-                       paste0("Try: mutate(source, ", by_source,
-                              " = trimws(", by_source, "))"))
-
-    }
-
-    warning(
-      paste0(n_matched, "/", n_horizons, " samples matched \u2014 ",
-             n_unmatched, " have no matching response data"),
-      call. = FALSE
-    )
+    log_note(collector,
+             "{n_unmatched} of {n_horizons} samples matched nothing in the source, so their responses are {.code NA}.",
+             ids = unmatched_ids)
 
   }
 
@@ -562,39 +485,29 @@ add_response <- function(x,
 
   x <- validate_horizons_data(x)
 
+  x$log <- log_close(collector, x$log)
+
   ## ---------------------------------------------------------------------------
   ## Step 6: Progress output
   ## ---------------------------------------------------------------------------
 
-  matched_str <- paste0(n_matched, "/", n_horizons, " samples")
-  if (n_unmatched > 0 && match_rate >= 0.5) {
-
-    matched_str <- paste0(matched_str, " (", n_unmatched, " unmatched \u2192 NA)")
-
-    warning(
-      paste0(n_unmatched, "/", n_horizons,
-             " samples have no matching response data (NA values assigned)"),
-      call. = FALSE
-    )
-
-  }
-
   if (verbose) {
+
+    matched_str <- paste0(n_matched, "/", n_horizons, " samples")
+
+    if (n_unmatched > 0 && !low_match) {
+
+      matched_str <- paste0(matched_str, " (", n_unmatched, " unmatched \u2192 NA)")
+
+    }
+
+    ## Under half matched the line is yellow; its hints are in the warning.
+    matched_line <- paste0("Matched: ", matched_str)
 
     cat(paste0("\u251C\u2500 ", cli::style_bold("Adding response data"), "...\n"))
     cat(paste0("\u2502  \u251C\u2500 Source: ", source_label, "\n"))
-
-    ## Under half matched: the line is yellow, and Step 3's pattern hints sit
-    ## under it.
-    matched_line <- paste0("Matched: ", matched_str)
     cat(paste0("\u2502  \u251C\u2500 ",
                if (low_match) cli::col_yellow(matched_line) else matched_line, "\n"))
-
-    for (i in seq_along(match_hints)) {
-      branch <- if (i < length(match_hints)) "\u251C\u2500" else "\u2514\u2500"
-      cat(paste0("\u2502  \u2502  ", branch, " ", cli::col_yellow(match_hints[i]), "\n"))
-    }
-
     cat("\u2502  \u2514\u2500 Variables:\n")
 
     for (i in seq_along(variable)) {
@@ -605,6 +518,8 @@ add_response <- function(x,
     cat("\u2502\n")
 
   }
+
+  signal_log(collector, x)
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Return

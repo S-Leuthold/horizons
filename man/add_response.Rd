@@ -61,9 +61,13 @@ the tibble.
 \strong{Join behavior:}
 
 Left-join semantics matching \code{dplyr::left_join()} conventions. Strict exact
-matching - no case-folding or fuzzy matching. When match quality is poor,
-diagnostic messages detect common patterns (case mismatch, whitespace,
-prefix/suffix) and suggest fixes.
+matching - no case-folding or fuzzy matching. When no sample matches, the
+join is refused; when fewer than half match, it runs and warns
+(\code{horizons_warning_coverage}, naming the unmatched samples on the
+object's log); when half or more match, the unmatched samples are named
+in a note on the log and counted in verbose output. The refusal and the
+warning say when a case or whitespace difference would match more samples,
+and how to fix it.
 
 \strong{Missing values:}
 

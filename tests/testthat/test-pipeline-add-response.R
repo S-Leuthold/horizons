@@ -215,13 +215,23 @@ test_that("add_response() assigns NA for unmatched horizons samples", {
 
   ## Act -------------------------------------------------------------------
 
-  result <- add_response(hd, lab, variable = "SOC")
+  expect_no_warning(result <- add_response(hd, lab, variable = "SOC"))
 
   ## Assert ----------------------------------------------------------------
 
   expect_equal(result$data$analysis$SOC[1], 1.2)
   expect_true(is.na(result$data$analysis$SOC[2]))
   expect_equal(result$data$analysis$SOC[3], 5.6)
+
+  ## Half or more matched: the unmatched sample is named in a note, not warned
+  row <- result$log[result$log$verb == "add_response", ]
+  expect_identical(row$type, "note")
+  expect_identical(row$ids[[1]], "S002")
+  expect_match(row$message, "1 of 3 samples matched nothing in the source", fixed = TRUE)
+
+  ## and counted in the tree
+  out <- utils::capture.output(add_response(hd, lab, variable = "SOC", verbose = TRUE))
+  expect_true(any(grepl("Matched: 2/3 samples (1 unmatched \u2192 NA)", out, fixed = TRUE)))
 
 })
 
@@ -237,10 +247,17 @@ test_that("add_response() warns about unmatched samples", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_warning(
-    add_response(hd, lab, variable = "SOC"),
-    "no matching response data"
+  w <- expect_warning(
+    result <- add_response(hd, lab, variable = "SOC"),
+    "1 of 3 samples matched the source, so 2 have no response values.", fixed = TRUE,
+    class = "horizons_warning_coverage"
   )
+
+  ## Recorded on the object before it was raised, naming the unmatched samples
+  row <- result$log[result$log$verb == "add_response", ]
+  expect_identical(row$topic, "coverage")
+  expect_identical(row$ids[[1]], c("S002", "S003"))
+  expect_identical(w$log, row)
 
 })
 
@@ -347,7 +364,7 @@ test_that("add_response() refuses NA keys on both sides rather than matching the
 
   ## Act & Assert — refused, with the count on each side
   err <- expect_error(add_response(hd, lab, variable = "SOC", by = "site"),
-                      class = "horizons_input_error")
+                      class = "horizons_error_input")
 
   expect_match(conditionMessage(err), "1 in horizons data")
   expect_match(conditionMessage(err), "1 in source")
@@ -361,7 +378,7 @@ test_that("add_response() refuses NA keys on one side, counting them (#139)", {
   lab <- tibble::tibble(site = c("A", "B", NA, NA), SOC = c(1.2, 3.4, 5.6, 7.8))
 
   err <- expect_error(add_response(hd, lab, variable = "SOC", by = "site"),
-                      class = "horizons_input_error")
+                      class = "horizons_error_input")
 
   expect_match(conditionMessage(err), "2 in source")
   expect_no_match(conditionMessage(err), "horizons data")
@@ -372,7 +389,7 @@ test_that("add_response() refuses NA keys on one side, counting them (#139)", {
   lab <- tibble::tibble(site = c("A", "B", "C"), SOC = c(1.2, 3.4, 5.6))
 
   err <- expect_error(add_response(hd, lab, variable = "SOC", by = "site"),
-                      class = "horizons_input_error")
+                      class = "horizons_error_input")
 
   expect_match(conditionMessage(err), "1 in horizons data")
   expect_no_match(conditionMessage(err), "in source")
@@ -386,9 +403,9 @@ test_that("add_response() refuses a meta join key that repeats in the horizons d
   lab <- tibble::tibble(site = c("A", "C"), SOC = c(1.2, 5.6))
 
   err <- expect_error(utils::capture.output(add_response(hd, lab, variable = "SOC", by = "site")),
-                      class = "horizons_input_error")
+                      class = "horizons_error_input")
 
-  expect_match(conditionMessage(err), "Duplicate values in horizons join key 'site'", fixed = TRUE)
+  expect_match(conditionMessage(err), "Duplicate values in horizons join key site.", fixed = TRUE)
 
 })
 
@@ -441,10 +458,12 @@ test_that("add_response() aborts on zero matches with diagnostic", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
+  err <- expect_error(
     add_response(hd, lab, variable = "SOC"),
-    "0.*matched|No matching"
+    "No sample in the horizons data matches the source.", fixed = TRUE,
+    class = "horizons_error_input"
   )
+  expect_identical(rlang::call_name(err$call), "add_response")
 
 })
 
@@ -460,18 +479,33 @@ test_that("add_response() detects case mismatch pattern", {
 
   ## Act & Assert — should mention case ------------------------------------
 
-  ## The hint is printed in the tree under the error, not raised with it
-  expect_output(
-    expect_error(
-      add_response(hd, lab, variable = "SOC"),
-      "No matching samples"
-    ),
-    "case mismatch"
-  )
+  ## The previews and the hint are bullets of the condition, and nothing is
+  ## printed beside it (#109)
+  expect_silent(err <- tryCatch(add_response(hd, lab, variable = "SOC"), error = identity))
+  expect_s3_class(err, "horizons_error_input")
+  expect_match(conditionMessage(err), "case mismatch: try `mutate(source, sample_id = tolower(sample_id))`",
+               fixed = TRUE)
+
+  expect_snapshot(add_response(hd, lab, variable = "SOC"), error = TRUE, cnd_class = TRUE)
 
 })
 
-test_that("add_response() prints its low-match hints inside the tree, under the Matched line (#91)", {
+test_that("add_response() detects a whitespace pattern", {
+
+  ## Arrange — the source's ids carry stray spaces
+  hd  <- make_test_hd(c("S001", "S002", "S003"))
+  lab <- tibble::tibble(sample_id = c(" S001", "S002 ", " S003"), SOC = c(1, 2, 3))
+
+  ## Act & Assert — the hint is a bullet of the refusal
+  err <- expect_error(add_response(hd, lab, variable = "SOC"), class = "horizons_error_input")
+  expect_match(conditionMessage(err),
+               "This looks like a whitespace issue: try `mutate(source, sample_id = trimws(sample_id))`.",
+               fixed = TRUE)
+  expect_no_match(conditionMessage(err), "case mismatch", fixed = TRUE)
+
+})
+
+test_that("add_response() carries its low-match hints in the warning, and the tree keeps its order (#91)", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -485,22 +519,26 @@ test_that("add_response() prints its low-match hints inside the tree, under the 
 
   ## Act -------------------------------------------------------------------
 
-  expect_warning(
+  w <- expect_warning(
     out <- utils::capture.output(add_response(hd, lab, variable = "SOC", verbose = TRUE)),
-    "1/4 samples matched"
+    class = "horizons_warning_coverage"
   )
 
   ## Assert ----------------------------------------------------------------
 
-  ## The hints used to print above the header, as a block of their own
+  expect_match(conditionMessage(w), "1 of 4 samples matched the source", fixed = TRUE)
+  expect_match(conditionMessage(w),
+               "This looks like a case mismatch: try `mutate(source, sample_id = tolower(sample_id))`.",
+               fixed = TRUE)
+
+  ## The hints used to print above the header, as a block of their own; the
+  ## tree opens with its header and names no hint
   header <- grep("Adding response data", out, fixed = TRUE)
 
   expect_identical(header, 1L)
-  expect_identical(out[header + 1:5], c(
+  expect_identical(out[header + 1:3], c(
     "│  ├─ Source: tibble",
     "│  ├─ Matched: 1/4 samples",
-    "│  │  ├─ This looks like a case mismatch",
-    "│  │  └─ Try: mutate(source, sample_id = tolower(sample_id))",
     "│  └─ Variables:"
   ))
 
@@ -623,10 +661,13 @@ test_that("add_response() errors when variable already exists", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
+  err <- expect_error(
     add_response(result, lab2, variable = "SOC"),
-    "already exist"
+    "A variable is already in the data.", fixed = TRUE,
+    class = "horizons_error_input"
   )
+  expect_match(conditionMessage(err), "Rename the source column, or join a different variable.",
+               fixed = TRUE)
 
 })
 
@@ -641,7 +682,8 @@ test_that("add_response() errors on non-horizons_data input", {
 
   expect_error(
     add_response(data.frame(x = 1), lab, variable = "SOC"),
-    "horizons_data"
+    "`x` must be a horizons_data object, not a data frame.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -654,7 +696,8 @@ test_that("add_response() errors when variable not found in source", {
 
   expect_error(
     add_response(hd, lab, variable = "nonexistent"),
-    "not found"
+    "A variable is not in the source data.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -667,7 +710,8 @@ test_that("add_response() errors when variable is non-numeric", {
 
   expect_error(
     add_response(hd, lab, variable = "texture"),
-    "numeric"
+    "Not numeric: texture (character).", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -682,7 +726,8 @@ test_that("add_response() errors when by column missing from source", {
 
   expect_error(
     add_response(hd, lab, variable = "SOC"),
-    "not found.*source|sample_id"
+    "The join column sample_id is not in the source data.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -695,7 +740,8 @@ test_that("add_response() errors when by column missing from horizons", {
 
   expect_error(
     add_response(hd, lab, variable = "SOC", by = "nonexistent"),
-    "not found.*horizons"
+    "The join column nonexistent is not in the horizons data.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -706,7 +752,8 @@ test_that("add_response() errors on non-existent CSV path", {
 
   expect_error(
     add_response(hd, "/nonexistent/path.csv", variable = "SOC"),
-    "does not exist|not found"
+    "The source file does not exist.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -721,8 +768,28 @@ test_that("add_response() errors on multi-column by", {
   expect_error(
     add_response(hd, lab, variable = "SOC",
                  by = c("sample_id" = "sample_id", "site" = "site")),
-    "Multi-column joins not supported"
+    "`by` must name one join column, not 2.", fixed = TRUE,
+    class = "horizons_error_input"
   )
+
+})
+
+test_that("add_response() refuses a variable that is not column names, or names one twice", {
+
+  hd  <- make_test_hd()
+  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"), SOC = c(1, 2, 3))
+
+  for (bad in list(character(0), 1, NULL)) {
+
+    expect_error(add_response(hd, lab, variable = bad),
+                 "`variable` must be a character vector of column names", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  }
+
+  expect_error(add_response(hd, lab, variable = c("SOC", "SOC")),
+               "Repeated: SOC.", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -732,7 +799,8 @@ test_that("add_response() errors on invalid source type", {
 
   expect_error(
     add_response(hd, 42, variable = "SOC"),
-    "must be"
+    "`source` must be a data frame or the path of a CSV file, not a number.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })

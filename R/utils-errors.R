@@ -226,7 +226,8 @@ check_arg <- function(check,
 #'   \item{`horizons_warning_partial_failure`}{Some units failed and the rest
 #'     returned.}
 #'   \item{`horizons_warning_coverage`}{The data only partly covers what is
-#'     asked of it, such as a wavenumber range.}
+#'     asked of it, such as a wavenumber range, or [add_response()]'s source
+#'     matching fewer than half the samples.}
 #'   \item{`horizons_warning_applicability`}{Predictions outside the
 #'     applicability domain.}
 #'   \item{`horizons_warning_input`}{A request that is legal but risky enough
