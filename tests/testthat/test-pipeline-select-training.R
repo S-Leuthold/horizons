@@ -1799,6 +1799,21 @@ test_that("targets read from a data frame are recorded as one, and targets no sp
 })
 
 
+test_that("the targets' source is read from their last spectra() note", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  ## An earlier read ahead of the targets' own
+  earlier         <- fx$targets$log[1, ]
+  earlier$ids     <- list("earlier.csv")
+  fx$targets$log  <- dplyr::bind_rows(earlier, fx$targets$log)
+  fx$targets$log$ids[[2]] <- "batch_07.csv"
+
+  expect_identical(quiet_select(fx, k = 5)$selection$targets$source, "batch_07.csv")
+
+})
+
+
 test_that("the record carries the targets' source, size and id hash", {
 
   ## The source is the paths the targets' spectra() note names, not the

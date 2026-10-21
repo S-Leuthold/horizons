@@ -1573,8 +1573,8 @@ select_training <- function(x, library,
 #' The source the targets were read from
 #'
 #' @description
-#' The `ids` of the targets' [spectra()] note, which are the paths it was
-#' given. The training set carries the pool's log, not the targets', so the
+#' The `ids` of the targets' last [spectra()] note, which are the paths it
+#' was given. The training set carries the pool's log, not the targets', so the
 #' selection record keeps the targets' source itself, beside their size and
 #' id hash. This is the one place a verb reads a log row's content, so
 #' `spectra()`'s note promises its `ids`.
@@ -1590,7 +1590,9 @@ targets_source <- function(log) {
 
   if (nrow(read) == 0) return(NULL)
 
-  paths <- read$ids[[1]]
+  ### The last: the record is the call's last row, and the latest read
+  ### describes the targets
+  paths <- read$ids[[nrow(read)]]
 
   if (length(paths) == 0) "data frame" else paths
 
