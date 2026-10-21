@@ -194,8 +194,9 @@ reset_slots <- function(x, slots) {
 #' Aborts when `x` carries any state from [evaluate()], [fit()] or
 #' [ensemble()], naming what it found. Silent otherwise.
 #'
-#' The verbs that change an object's rows (`parse_ids()`, `average()`,
-#' `standardize()`, `validate()`) call it at their door, as a refusal of the
+#' The verbs that change an object's data, its rows, ids or spectra
+#' (`parse_ids()`, `average()`, `standardize()`, `validate()`), call it at
+#' their door, as a refusal of the
 #' user's input. [set_analysis()] and [subset_rows()] call it again with
 #' `kind = "internal"`: behind those doors a promoted object reaching them is
 #' a bug.
@@ -222,10 +223,10 @@ check_unpromoted <- function(x, kind = "input", call = rlang::caller_env()) {
   }
 
   abort_horizons(c(
-    "{.arg x} must not be evaluated, fitted or ensembled, as this changes its rows.",
+    "{.arg x} must not be evaluated, fitted or ensembled, as this changes its data.",
     "x" = "It carries {states}.",
-    "i" = "Changing rows now would leave that state keyed to rows the object no longer has.",
-    "i" = "Change the rows before {.fn evaluate}, or start again from the object you evaluated."
+    "i" = "Changing the data now would leave that state keyed to data the object no longer has.",
+    "i" = "Change the data before {.fn evaluate}, or start again from the object you evaluated."
   ), kind = kind, call = call)
 
 }

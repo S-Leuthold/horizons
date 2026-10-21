@@ -135,6 +135,11 @@ note on the object's log. The removal record accumulates
 instead: rows an earlier call removed are gone from the object and stay
 gone, so their ids and detail rows are kept and this call's removals are
 added to them. Re-validation operates on the reduced dataset.
+
+\strong{Removal before modelling only:} removing outliers changes the rows the
+splits and models of \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and \code{\link[=ensemble]{ensemble()}} are keyed to,
+so an evaluated, fitted or ensembled object is refused when there is
+something to remove. Detection alone runs on one.
 }
 \examples{
 \dontrun{

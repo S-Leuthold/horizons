@@ -74,6 +74,11 @@
 #' gone, so their ids and detail rows are kept and this call's removals are
 #' added to them. Re-validation operates on the reduced dataset.
 #'
+#' **Removal before modelling only:** removing outliers changes the rows the
+#' splits and models of [evaluate()], [fit()] and [ensemble()] are keyed to,
+#' so an evaluated, fitted or ensembled object is refused when there is
+#' something to remove. Detection alone runs on one.
+#'
 #' @param x `horizons_data`. Configured object (must have `config$configs`).
 #' @param remove_outliers `logical(1) or character(1)`. `FALSE` to detect
 #'   only (default). `"spectral"` removes the spectral outliers from the

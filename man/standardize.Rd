@@ -159,6 +159,11 @@ keeps its flag.
 recommended); as you asked for it, that is reported in verbose output and
 in a note on the log rather than warned.
 
+\strong{Before modelling only:} past that unchanged return, \code{standardize()}
+rewrites the spectra the splits and models of \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and
+\code{\link[=ensemble]{ensemble()}} are keyed to, so an evaluated, fitted or ensembled object is
+refused.
+
 \strong{Warnings} are collected as the call runs and raised once per topic at
 its end, each written to the object's \code{log} first: grid points dropped
 because the data does not reach them or they fall in a gap are one

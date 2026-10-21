@@ -61,6 +61,11 @@
 #' verbose output counts both; `standardize()` has already warned about the
 #' spectra. The result has a `.flag` column only when a sample is flagged.
 #'
+#' **Before modelling only:** averaging rebuilds the rows the splits and
+#' models of [evaluate()], [fit()] and [ensemble()] are keyed to, so an
+#' evaluated, fitted or ensembled object is refused. Average before
+#' `evaluate()`.
+#'
 #' **Metadata Handling:**
 #' Metadata columns are checked for uniformity within groups:
 #' * Uniform within every sample: preserved in output

@@ -1738,6 +1738,7 @@ test_that("standardize() refuses an evaluated object it would change, and return
                       "It carries evaluation results.", fixed = TRUE,
                       class = "horizons_error_input")
   expect_identical(rlang::call_name(err$call), "standardize")
+  expect_match(conditionMessage(err), "as this changes its data.", fixed = TRUE)
 
   ## The already-standardized return changes nothing, so it is not refused
   expect_warning(again <- standardize(hd_std), class = "horizons_warning_skipped")

@@ -119,6 +119,11 @@ with the replicates' step in \code{.flag}, and modelling leaves it out. The
 verbose output counts both; \code{standardize()} has already warned about the
 spectra. The result has a \code{.flag} column only when a sample is flagged.
 
+\strong{Before modelling only:} averaging rebuilds the rows the splits and
+models of \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and \code{\link[=ensemble]{ensemble()}} are keyed to, so an
+evaluated, fitted or ensembled object is refused. Average before
+\code{evaluate()}.
+
 \strong{Metadata Handling:}
 Metadata columns are checked for uniformity within groups:
 \itemize{

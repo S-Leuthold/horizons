@@ -1021,6 +1021,11 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' recommended); as you asked for it, that is reported in verbose output and
 #' in a note on the log rather than warned.
 #'
+#' **Before modelling only:** past that unchanged return, `standardize()`
+#' rewrites the spectra the splits and models of [evaluate()], [fit()] and
+#' [ensemble()] are keyed to, so an evaluated, fitted or ensembled object is
+#' refused.
+#'
 #' **Warnings** are collected as the call runs and raised once per topic at
 #' its end, each written to the object's `log` first: grid points dropped
 #' because the data does not reach them or they fall in a gap are one
