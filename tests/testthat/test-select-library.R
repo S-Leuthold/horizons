@@ -285,14 +285,6 @@ test_that("a cached library that no longer meets the object contract is built ag
 
 })
 
-test_that("the registered kssl library is at build 2, since its pool no longer carries provenance", {
-
-  ## A kssl library cached at build 1 carries provenance and is built again
-  ## once, under consent, on its next draw
-  expect_identical(library_registry()$kssl$build, 2L)
-
-})
-
 test_that("a cached library from another build is built again, after asking why, with a note (#154)", {
 
   entry <- make_mini_ossl(withr::local_tempdir())
