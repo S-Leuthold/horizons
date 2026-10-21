@@ -826,7 +826,7 @@ flag_unusable <- function(analysis, role_map, reason, collector, short_range = N
 #' records, so its `wavelength_range` is read in its place; reading it as
 #' missing would let a hull pass a comparison it fails (#107).
 #'
-#' @param record A `provenance$standardization` record, or `NULL`.
+#' @param record A `data$standardization` record, or `NULL`.
 #' @return `numeric(2)`, or `NULL` when the record carries no hull.
 #' @keywords internal
 #' @noRd
@@ -838,6 +838,54 @@ prior_hull_range <- function(record) {
 
 }
 
+
+#' Record a standardize() call as a note on its log
+#'
+#' @description
+#' The call's settings, as given, and what they did to the axis: whether it
+#' was re-interpolated, already on the grid or left as it was, and how many
+#' wavenumbers it kept. Under `force = TRUE`, a hull an earlier call fitted
+#' that this call keeps is named. A note, never raised; the early return,
+#' which changes nothing, writes none.
+#'
+#' @param collector From [log_open()].
+#' @param resample,trim,remove_water,baseline The arguments, as given.
+#' @param axis Character(1). `"resampled"`, `"on_grid"`, `"as_is"` (no
+#'   resampling asked) or `"off"` (every operation off).
+#' @param n_wavelengths Integer(1). The wavenumbers the call returns.
+#' @param kept_hull Logical(1). Whether a hull an earlier call fitted is kept.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+standardize_note <- function(collector, resample, trim, remove_water, baseline,
+                             axis, n_wavelengths, kept_hull) {
+
+  ### As the user would type them: a whole number given as an integer reads
+  ### as the same number, without deparse()'s L suffix
+  arg_text <- function(v) {
+    if (is.null(v)) return("NULL")
+    if (length(v) == 1) return(as.character(v))
+    paste0("c(", paste(v, collapse = ", "), ")")
+  }
+
+  settings <- paste0("resample = ", arg_text(resample), ", trim = ", arg_text(trim),
+                     ", remove_water = ", arg_text(remove_water),
+                     ", baseline = ", arg_text(baseline))
+
+  outcome <- switch(axis,
+    resampled = "re-interpolated onto the {resample} cm-1 grid",
+    on_grid   = "already on the {resample} cm-1 grid",
+    as_is     = "not resampled",
+    off       = "nothing applied"
+  )
+
+  hull <- if (kept_hull) ", and the convex hull an earlier call fitted is kept" else ""
+
+  log_note(collector,
+           paste0("Standardized with {.code {settings}}: ", outcome,
+                  ", {n_wavelengths} wavenumber{?s} kept", hull, "."))
+
+}
 
 ## =============================================================================
 ## Helper: report_standardize_summary()
@@ -1052,17 +1100,22 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return `horizons_data.` The input object with standardized spectra.
-#'   `provenance$standardization` records the arguments, whether the spectra
-#'   were actually re-interpolated (`resampled`), and the grid they sit on
-#'   (`grid`: `min`, `max`, `step`, `n`; `NULL` without resampling).
-#'   `resample` records the argument as given, never the axis's spacing;
-#'   read that from `grid$step` or from the columns. A training set
-#'   `select_training()` returns carries its library's record, with the axis
-#'   fields describing the columns it returns (see [select_training()]).
-#'   `baseline` says whether the spectra carry a convex-hull correction, from
-#'   this call or, under `force = TRUE`, an earlier one, and `baseline_range`
-#'   is the range that hull was fitted over (`NULL` without one), which
-#'   [select_training()] compares between a library and its targets.
+#'   `data$standardization` records what the verbs read of how the spectra
+#'   were standardized. `baseline` says whether they carry a convex-hull
+#'   correction, from this call or, under `force = TRUE`, an earlier one,
+#'   and `baseline_range` is the range that hull was fitted over (`NULL`
+#'   without one), which [select_training()] compares between a library and
+#'   its targets. `wavelength_range` is the range of the axis returned, and
+#'   `grid` the grid it sits on (`min`, `max`, `step`, `n`; `NULL` without
+#'   resampling). A training set `select_training()` returns carries its
+#'   library's record, with the axis fields describing the columns it
+#'   returns (see [select_training()]).
+#'   The call is recorded as a note on the object's `log`, after any
+#'   warnings: the arguments as given, whether the axis was re-interpolated,
+#'   already on the grid or left as it was, the wavenumbers kept, and under
+#'   `force = TRUE` a hull an earlier call fitted that is kept. A call that
+#'   returns early because the spectra are already standardized records only
+#'   its warning.
 #'
 #' @examples
 #' \dontrun{
@@ -1147,7 +1200,7 @@ standardize <- function(x,
   ## Step 1: Check idempotence
   ## ---------------------------------------------------------------------------
 
-  if (!is.null(x$provenance$standardization) && !force) {
+  if (!is.null(x$data$standardization) && !force) {
 
     ## Returned as it arrived, so validated as it arrived (#234). A
     ## standardized object is already on a decreasing axis.
@@ -1176,7 +1229,7 @@ standardize <- function(x,
 
   operations <- list()
 
-  if (!is.null(x$provenance$standardization) && force) {
+  if (!is.null(x$data$standardization) && force) {
 
     ### force = TRUE is the user's explicit choice: reported, not warned
     log_note(collector, "Re-standardizing previously standardized data ({.code force = TRUE}).")
@@ -1228,26 +1281,26 @@ standardize <- function(x,
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
     ### Under force = TRUE the object may already sit on a grid an earlier
-    ### call built. The axis is untouched here, so that record still holds.
-    prior      <- x$provenance$standardization
+    ### call built. The axis is untouched here, so that grid still holds.
+    prior      <- x$data$standardization
     keep_prior <- !is.null(prior) && !sorted$sorted
 
     ### The axis as it stands, recorded as the full path records it.
     axis_wn <- wn_values(axis_vars)
 
-    ### A hull an earlier call fitted is still in the values, sorted or not
-    x$provenance$standardization <- list(
-      resample         = NULL,
-      trim             = NULL,
-      remove_water     = FALSE,
+    ### A hull an earlier call fitted is still in the values, sorted or not.
+    ### The settings are in the call's note.
+    x$data$standardization <- list(
       baseline         = isTRUE(prior$baseline),
-      resampled        = keep_prior && isTRUE(prior$resampled),
-      grid             = if (keep_prior) prior$grid else NULL,
-      applied_at       = Sys.time(),
-      n_wavelengths    = length(axis_vars),
+      baseline_range   = prior_hull_range(prior),
       wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_),
-      baseline_range   = prior_hull_range(prior)
+      grid             = if (keep_prior) prior$grid else NULL
     )
+
+    standardize_note(collector, resample, trim, remove_water, baseline,
+                     axis          = "off",
+                     n_wavelengths = length(axis_vars),
+                     kept_hull     = isTRUE(prior$baseline))
 
     x$log <- log_close(collector, x$log)
 
@@ -1664,23 +1717,18 @@ standardize <- function(x,
 
   x <- set_analysis(x, new_analysis, new_role_map)
 
-  ## Update provenance ---------------------------------------------------------
+  ## Record the standardization ----------------------------------------------
 
   ### Under force = TRUE the spectra may carry a hull an earlier call fitted,
-  ### which this call's record keeps: the values still hold it
-  earlier <- x$provenance$standardization
+  ### which this call's record keeps: the values still hold it. The record
+  ### keeps what the verbs read; the settings are in the call's note.
+  earlier <- x$data$standardization
 
-  x$provenance$standardization <- list(
-    resample         = resample,
-    trim             = trim,
-    remove_water     = remove_water,
+  x$data$standardization <- list(
     baseline         = baseline || isTRUE(earlier$baseline),
-    resampled        = identical(operations$resample$status, "resampled"),
-    grid             = grid_record,
-    applied_at       = Sys.time(),
-    n_wavelengths    = length(new_predictor_names),
+    baseline_range   = hull_range %||% prior_hull_range(earlier),
     wavelength_range = c(min(wavelengths), max(wavelengths)),
-    baseline_range   = hull_range %||% prior_hull_range(earlier)
+    grid             = grid_record
   )
 
   ## ---------------------------------------------------------------------------
@@ -1691,6 +1739,19 @@ standardize <- function(x,
   ## is in a flagged row (Step 6b), which the full stage admits.
 
   x <- validate_horizons_data(x, stage = "raw")
+
+  axis_outcome <- if (is.null(resample)) {
+    "as_is"
+  } else if (identical(operations$resample$status, "resampled")) {
+    "resampled"
+  } else {
+    "on_grid"
+  }
+
+  standardize_note(collector, resample, trim, remove_water, baseline,
+                   axis          = axis_outcome,
+                   n_wavelengths = length(new_predictor_names),
+                   kept_hull     = !baseline && isTRUE(earlier$baseline))
 
   x$log <- log_close(collector, x$log)
 

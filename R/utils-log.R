@@ -4,9 +4,10 @@
 ## Every object carries one log of what its verbs reported (see
 ## ?horizons_conditions): each warning a verb raised, one row per topic per
 ## call, and each note, an event a verb reports without warning (samples
-## dropped as the user asked, a cache rebuilt), one row each. A verb collects
-## both in a per-call collector as it runs; at its end log_close() writes the
-## rows, and only then does signal_log() raise each warning row, once. No site
+## dropped as the user asked, a cache rebuilt) or a data verb's record of its
+## call, one row each. A verb collects both in a per-call collector as it
+## runs; at its end log_close() writes the rows, and only then does
+## signal_log() raise each warning row, once. No site
 ## raises a warning itself, and signal_log() raises only what log_close()
 ## wrote, so "recorded before raised" and "once per topic per call" hold by
 ## construction.
@@ -33,7 +34,8 @@ LOG_TOPICS <- c("substitution", "quality", "skipped", "flagged",
 #'   shown in verbose output but not raised), `topic` (one of `LOG_TOPICS`
 #'   for a warning, `NA` for a note), `message` (the text on one line), `ids`
 #'   (a list of the configurations, members, samples, files or properties it
-#'   is about) and `n` (how many times it arose).
+#'   is about), `n` (how many times it arose) and `time` (when the call that
+#'   wrote it ended, the same for every row of a call).
 #' @keywords internal
 #' @noRd
 new_log <- function() {
@@ -44,7 +46,8 @@ new_log <- function() {
     topic   = character(0),
     message = character(0),
     ids     = list(),
-    n       = integer(0)
+    n       = integer(0),
+    time    = as.POSIXct(character(0))
   )
 
 }
@@ -132,7 +135,9 @@ check_log_topic <- function(topic) {
 #' asked for that changed the data (samples dropped under
 #' `on_all_outliers = "drop"`), or a recovery that cost only time (a stale
 #' cache rebuilt). The verb shows it in its verbose output; the log keeps it
-#' with the warnings, so a pipeline's history is in one place. A note is
+#' with the warnings, so a pipeline's history is in one place. The data
+#' verbs also record each call as a note, its source and settings, as the
+#' call's last row, every call but `standardize()`'s early return. A note is
 #' never raised.
 #'
 #' @inheritParams log_warning
@@ -243,7 +248,8 @@ log_rows <- function(collector) {
     topic   = vapply(group, function(g) g[[1]]$topic, character(1)),
     message = vapply(messages, flatten_message, character(1)),
     ids     = lapply(group, function(g) unique(unlist(lapply(g, `[[`, "ids")))),
-    n       = vapply(group, function(g) sum(vapply(g, `[[`, integer(1), "n")), integer(1))
+    n       = vapply(group, function(g) sum(vapply(g, `[[`, integer(1), "n")), integer(1)),
+    time    = as.POSIXct(rep(NA_real_, length(group)))
   )
 
   attr(rows, "messages") <- messages
@@ -254,8 +260,10 @@ log_rows <- function(collector) {
 #' Close a verb call's collector onto a log
 #'
 #' @description
-#' Writes this call's rows, one per topic, and closes the collector: nothing
-#' more can be added, and [signal_log()] raises exactly these rows.
+#' Writes this call's rows, one per topic, each stamped with the time the
+#' call closed, and closes the collector: nothing more can be added, and
+#' [signal_log()] raises exactly these rows. Rows already on the log keep
+#' their own times.
 #'
 #' @param collector From [log_open()].
 #' @param log The object's log so far, shaped like [new_log()]'s.
@@ -271,7 +279,14 @@ log_close <- function(collector, log = new_log()) {
 
   }
 
-  collector$rows   <- log_rows(collector)
+  ### One time for every row of the call; the messages signal_log() raises
+  ### ride on the rows as an attribute, kept through the assignment
+  rows      <- log_rows(collector)
+  messages  <- attr(rows, "messages")
+  rows$time <- rep(Sys.time(), nrow(rows))
+  attr(rows, "messages") <- messages
+
+  collector$rows   <- rows
   collector$closed <- TRUE
 
   rows <- collector$rows

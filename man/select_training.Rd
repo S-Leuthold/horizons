@@ -148,14 +148,14 @@ response column the pool carried, three provenance columns with role
 \code{settings$properties} are the properties drawn for (a skipped or
 emptied property is not among them, so \code{\link[=configure]{configure()}} warns when one is
 chosen as the outcome).
-\code{provenance$standardization} is the library's, describing the returned
+\code{data$standardization} is the library's, describing the returned
 axis: when only some of the library's columns are returned (targets on a
-coarser or narrower grid), \code{n_wavelengths}, \code{wavelength_range} and \code{grid}
-describe the columns returned (\code{grid} is \code{NULL} when they are not evenly
-spaced, or the library was on no grid), while the \code{standardize()}
-arguments (\code{resample}, \code{trim}, \code{remove_water}, \code{baseline}), \code{resampled}
-and \code{applied_at} stay the library's, since they produced the values; so
-\code{resample} can differ from \code{grid$step}. A library never standardized has
+coarser or narrower grid), \code{wavelength_range} and \code{grid} describe the
+columns returned (\code{grid} is \code{NULL} when they are not evenly spaced, or
+the library was on no grid), while \code{baseline} and \code{baseline_range} stay
+the library's, since its hull is in the values. The library's
+\code{standardize()} settings are in its note on the log, so the \code{resample}
+it gives can differ from \code{grid$step}. A library never standardized has
 no record, and the training set gets none. \code{x$selection$reconciliation}
 records the columns returned: \code{operation} (\code{"none"} when every library
 column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range}, and
@@ -361,7 +361,9 @@ library was drawn from, and its \code{build}.
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 columns returned, the pool's identity, the targets' identity (their source,
-row count and a hash of their ids), the membership table (target by
+row count and a hash of their ids; the source is the paths their
+\code{\link[=spectra]{spectra()}} note names, \code{"data frame"} when they were read from one, and
+\code{NULL} when they were not made by \code{spectra()}), the membership table (target by
 property by pool row, with the space it was measured in, distance, rank,
 and whether the row was \code{retained} in the object after the twin
 subtraction), the groups, pool sizes per property against those available, every

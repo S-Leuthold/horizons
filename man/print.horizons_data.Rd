@@ -16,15 +16,18 @@
 }
 \description{
 Displays a concise, tree-style summary of a horizons_data object. Shows
-key dimensions, provenance info, and current pipeline stage at a glance.
+key dimensions, the current pipeline stage and how many warnings and notes
+the log holds at a glance.
 }
 \details{
 The print output adapts based on what's populated in the object:
 \itemize{
-\item \strong{Empty objects}: Shows "(empty)" with a hint to use \code{spectra()}
+\item \strong{Empty objects} (no data and an empty log): Shows "(empty)" with a
+hint to use \code{spectra()}
 \item \strong{Objects with data}: Shows sample count, predictor count, wavenumber
 range, and the outcome and responses if present
-\item \strong{Objects with provenance}: Shows source path and spectra type
+\item \strong{The log}: How many warnings and notes it holds; \code{\link[=summary]{summary()}} lists
+them
 }
 
 The output uses the tree-style formatting of the verbs' progress output.

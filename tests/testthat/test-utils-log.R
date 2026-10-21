@@ -38,6 +38,37 @@ describe("the collector", {
 
   })
 
+  it("stamps every row of a call with the one time it closed, and leaves earlier rows' times alone", {
+
+    first <- log_open("spectra")
+    log_note(first, "Read a data frame.")
+    log <- log_close(first)
+
+    Sys.sleep(0.05)
+
+    second <- log_open("average")
+    log_warning(second, "quality", "1 sample averaged though every replicate failed QC.", ids = "s3")
+    log_note(second, "Averaged 6 scans into 2 samples.")
+
+    before <- Sys.time()
+    log2   <- log_close(second, log)
+    after  <- Sys.time()
+
+    expect_s3_class(log2$time, "POSIXct")
+    expect_false(anyNA(log2$time))
+
+    ### The earlier call's row keeps its time; this call's rows share one
+    expect_identical(log2$time[1], log$time[1])
+    expect_identical(log2$time[2], log2$time[3])
+    expect_true(log2$time[2] >= before && log2$time[2] <= after)
+    expect_true(log2$time[2] > log2$time[1])
+
+    ### The warning carries its row as the log holds it, time included
+    w <- expect_warning(signal_log(second), class = "horizons_warning_quality")
+    expect_identical(w$log$time, log2$time[2])
+
+  })
+
   it("renders the message where it is added, and keeps upstream text as text", {
 
     n_failed <- 2L

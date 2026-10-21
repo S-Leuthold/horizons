@@ -38,7 +38,10 @@ A \code{horizons_data} S3 object with:
 \item \code{data$analysis}: tibble with \code{sample_id}, \code{filename}, \verb{wn_*} columns, and
 any additional columns
 \item \code{data$role_map}: tibble mapping columns to roles
-\item \code{provenance}: source and creation metadata
+\item \code{log}: after any warnings, a note recording the call: the source type,
+the files read from the paths given, the scans and predictors, and the
+horizons version, with the paths as given as its \code{ids} (none for a
+data frame)
 }
 }
 \description{

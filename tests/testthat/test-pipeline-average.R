@@ -159,8 +159,7 @@ make_test_hd_average <- function(n_samples      = 3,
 
   ## Build horizons_data -----------------------------------------------------
 
-  new_horizons_data(analysis = analysis, role_map = role_map,
-                    spectra_source = "test", spectra_type = "opus")
+  new_horizons_data(analysis = analysis, role_map = role_map)
 
 }
 
@@ -231,8 +230,8 @@ test_that("average() removes outlier replicate when QC enabled", {
   ## Should still have 2 samples
   expect_equal(nrow(result$data$analysis), 2)
 
-  ## Provenance should show 1 dropped replicate (the outlier from sample 1)
-  expect_equal(result$provenance$average$n_replicates_dropped, 1)
+  ## The note counts 1 dropped replicate (the outlier from sample 1)
+  expect_match(log_rows_added(hd, result)$message, "; 1 replicate removed by the quality check.", fixed = TRUE)
 
 })
 
@@ -248,8 +247,8 @@ test_that("average() with quality_check=FALSE keeps all replicates", {
 
   ## Assert ----------------------------------------------------------------
 
-  ## Provenance should show no dropped replicates
-  expect_equal(result$provenance$average$n_replicates_dropped, 0)
+  ## The note says the check was off, and counts nothing it did not do
+  expect_match(log_rows_added(hd, result)$message, ": quality check off.", fixed = TRUE)
 
 })
 
@@ -266,7 +265,7 @@ test_that("average() single replicate groups skip QC", {
   ## Assert ----------------------------------------------------------------
 
   expect_equal(nrow(result$data$analysis), 3)
-  expect_equal(result$provenance$average$n_replicates_dropped, 0)
+  expect_match(log_rows_added(hd, result)$message, "; 0 replicates removed by the quality check.", fixed = TRUE)
 
 })
 
@@ -290,7 +289,7 @@ test_that("average() on_all_outliers='warn' keeps all and warns", {
   )
 
   ## Recorded on the object before it was raised, naming the sample
-  row <- result$log[result$log$verb == "average", ]
+  row <- log_events_added(hd, result)
   expect_identical(row$topic, "quality")
   expect_identical(row$ids[[1]], "S1")
   expect_identical(w$log, row)
@@ -299,9 +298,6 @@ test_that("average() on_all_outliers='warn' keeps all and warns", {
 
   ## Sample 1 should still be in results
   expect_true("S1" %in% result$data$analysis$sample_id)
-
-  ## The sample is on the log, not in provenance (#231)
-  expect_null(result$provenance$average$samples_all_outliers)
 
 })
 
@@ -317,7 +313,7 @@ test_that("average() names every sample whose replicates all failed, on the log,
   for (mode in c("warn", "keep_best", "drop")) {
 
     result <- suppressWarnings(average(hd, on_all_outliers = mode, verbose = FALSE))
-    row    <- result$log[result$log$verb == "average", ]
+    row    <- log_events_added(hd, result)
 
     expect_identical(nrow(row), 1L, info = mode)
     expect_setequal(row$ids[[1]], c("S1", "S2"))
@@ -343,14 +339,12 @@ test_that("average() on_all_outliers='drop' removes sample", {
   expect_false("S1" %in% result$data$analysis$sample_id)
   expect_equal(nrow(result$data$analysis), 1)
 
-  ## Dropped as asked: a note naming it, not a warning, and not in
-  ## provenance (#231)
+  ## Dropped as asked: a note naming it, not a warning (#231)
   expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE))
-  row <- result$log[result$log$verb == "average", ]
+  row <- log_events_added(hd, result)
   expect_identical(row$type, "note")
   expect_identical(row$ids[[1]], "S1")
   expect_match(row$message, 'on_all_outliers = "drop"` dropped', fixed = TRUE)
-  expect_null(result$provenance$average$samples_dropped)
 
 })
 
@@ -370,11 +364,11 @@ test_that("average() on_all_outliers='keep_best' keeps the replicate with the hi
   expect_true("S1" %in% result$data$analysis$sample_id)
 
   ## Should have dropped 2 replicates from S1
-  expect_equal(result$provenance$average$n_replicates_dropped, 2)
+  expect_match(log_rows_added(hd, result)$message[2], "; 2 replicates removed by the quality check.", fixed = TRUE)
 
   ## Kept as asked: a note naming the sample, not a warning (#231)
   expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "keep_best", verbose = FALSE))
-  row <- result$log[result$log$verb == "average", ]
+  row <- log_events_added(hd, result)
   expect_identical(row$type, "note")
   expect_identical(row$ids[[1]], "S1")
 
@@ -717,11 +711,10 @@ test_that("average() drops non-uniform metadata", {
   ## project should be dropped (different per row)
   expect_false("project" %in% names(result$data$analysis))
 
-  ## Named in a note on the log, not in provenance
-  row <- result$log[result$log$verb == "average", ]
+  ## Named in a note on the log
+  row <- log_events_added(hd, result)
   expect_identical(row$type, "note")
   expect_setequal(row$ids[[1]], c("project", "rep_num"))
-  expect_null(result$provenance$average$meta_columns_dropped)
 
 })
 
@@ -785,10 +778,40 @@ test_that("average() leaves a flagged replicate out of QC and the mean, and flag
   expect_identical(out$.flag[out$sample_id == "S3"], "standardize")
   expect_no_error(validate_horizons_data(result))
 
-  ## Nothing on the log, and the tree counts both
-  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
+  ## Nothing on the log but the call's record, and the tree counts both
+  expect_identical(nrow(log_events_added(hd, result)), 0L)
   expect_output(average(hd, verbose = TRUE),
                 "Flagged (.flag): 1 replicate left out, 1 sample kept flagged", fixed = TRUE)
+
+  ## The record counts the flagged replicate apart from QC's, with QC on
+  ## and off
+  expect_identical(log_rows_added(hd, result)$message,
+                   'Averaged 9 scans into 3 samples by sample_id: quality check on at a correlation of 0.996, with `on_all_outliers = "warn"`; 0 replicates removed by the quality check; 1 flagged (.flag) replicate left out.')
+  off <- average(hd, quality_check = FALSE, verbose = FALSE)
+  expect_identical(log_rows_added(hd, off)$message,
+                   "Averaged 9 scans into 3 samples by sample_id: quality check off; 1 flagged (.flag) replicate left out.")
+
+})
+
+test_that("average() counts a dropped sample's flagged replicate once, as left out, in its record and its tree", {
+
+  ## Arrange — S1's three replicates are uncorrelated, and its first is
+  ## flagged: QC fails the other two, and "drop" drops the sample
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
+  hd$data$analysis$.flag <- c("standardize", rep(NA, 5))
+  hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+  ## Act
+  result <- average(hd, on_all_outliers = "drop", verbose = FALSE)
+
+  ## Assert — S1 is gone, and its flagged scan is not also counted as QC's
+  expect_identical(result$data$analysis$sample_id, "S2")
+  expect_match(log_rows_added(hd, result)$message[2],
+               "; 2 replicates removed by the quality check; 1 flagged (.flag) replicate left out.",
+               fixed = TRUE)
+  out <- capture.output(average(hd, on_all_outliers = "drop", verbose = TRUE))
+  expect_true(any(grepl("dropped, 2 replicates removed", out, fixed = TRUE)))
+  expect_true(any(grepl("Flagged (.flag): 1 replicate left out", out, fixed = TRUE)))
 
 })
 
@@ -809,7 +832,7 @@ test_that("average() writes no .flag column when no sample is flagged", {
                    unname(vapply(hd$data$analysis[2:3, wn], mean, numeric(1))))
   expect_false(".flag" %in% names(result$data$analysis))
   expect_false(".flag" %in% result$data$role_map$variable)
-  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
+  expect_identical(nrow(log_events_added(hd, result)), 0L)
 
   ## and none when the input had none
   expect_false(".flag" %in% names(average(make_test_hd_average(), verbose = FALSE)$data$analysis))
@@ -830,17 +853,18 @@ test_that("average() always drops filename column", {
 
   expect_false("filename" %in% names(result$data$analysis))
 
-  ## Dropped by design on every call, so nothing is logged
-  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
+  ## Dropped by design on every call, so nothing is logged but the call's
+  ## record
+  expect_identical(nrow(log_events_added(hd, result)), 0L)
 
 })
 
 
 ## ---------------------------------------------------------------------------
-## average() — Provenance
+## average() — The record of the call
 ## ---------------------------------------------------------------------------
 
-test_that("average() records provenance correctly", {
+test_that("average() records its settings and counts in its note", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -852,16 +876,52 @@ test_that("average() records provenance correctly", {
 
   ## Assert ----------------------------------------------------------------
 
-  prov <- result$provenance$average
+  note <- log_rows_added(hd, result)$message
 
-  expect_equal(prov$by, "sample_id")
-  expect_true(prov$quality_check)
-  expect_equal(prov$correlation_threshold, 0.99)
-  expect_equal(prov$on_all_outliers, "warn")
-  expect_equal(prov$n_groups, 3)
-  expect_equal(prov$n_replicates_before, 12)
-  expect_equal(prov$n_replicates_after, 3)
-  expect_s3_class(prov$applied_at, "POSIXct")
+  expect_match(note, "by sample_id:", fixed = TRUE)
+  expect_match(note, "quality check on at a correlation of 0.99", fixed = TRUE)
+  expect_match(note, '`on_all_outliers = "warn"`', fixed = TRUE)
+  expect_match(note, "Averaged 12 scans into 3 samples", fixed = TRUE)
+
+})
+
+
+test_that("average() records the call as its last row, a note with by, the counts and the quality check", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 4)
+
+  ## Act -------------------------------------------------------------------
+
+  expect_no_warning(
+    result <- average(hd, quality_check = TRUE, correlation_threshold = 0.99, verbose = FALSE)
+  )
+
+  ## Assert ----------------------------------------------------------------
+
+  note <- log_rows_added(hd, result)
+  expect_identical(note$verb, "average")
+  expect_identical(note$type, "note")
+  expect_true(is.na(note$topic))
+  expect_identical(note$ids[[1]], character(0))
+  expect_identical(note$message,
+                   'Averaged 12 scans into 3 samples by sample_id: quality check on at a correlation of 0.99, with `on_all_outliers = "warn"`; 0 replicates removed by the quality check.')
+
+  ### Without the check, by another column
+  hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE, uniform_meta = TRUE)
+  result <- average(hd, by = "project", quality_check = FALSE, verbose = FALSE)
+  expect_identical(log_rows_added(hd, result)$message,
+                   "Averaged 6 scans into 2 samples by project: quality check off.")
+
+  ### After the events: a sample dropped as asked, then the record
+  hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
+  result <- average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE)
+  rows   <- log_rows_added(hd, result)
+  expect_identical(rows$type, c("note", "note"))
+  expect_identical(rows$ids[[1]], "S1")
+  expect_match(rows$message[2], "Averaged 6 scans into 1 sample by sample_id", fixed = TRUE)
+  expect_match(rows$message[2], "; 3 replicates removed by the quality check.", fixed = TRUE)
 
 })
 
@@ -886,7 +946,7 @@ test_that("average() works with custom by column", {
   ## Assert ----------------------------------------------------------------
 
   expect_equal(nrow(result$data$analysis), 2)
-  expect_equal(result$provenance$average$by, "project")
+  expect_match(log_rows_added(hd, result)$message, "by project:", fixed = TRUE)
 
   ## The grouping values are the new sample ids; the object is whole
   expect_true("sample_id" %in% names(result$data$analysis))
@@ -895,7 +955,6 @@ test_that("average() works with custom by column", {
   expect_identical(result$data$role_map$role[result$data$role_map$variable == "sample_id"], "id")
   expect_identical(sum(result$data$role_map$role == "id"), 1L)
   expect_no_error(validate_horizons_data(result))
-  expect_equal(result$provenance$aggregation_by, "project")
 
   ## An object without a selection record does not gain one
   expect_null(result$selection)
@@ -1296,58 +1355,6 @@ test_that("average() refuses to promote `by` over an existing sample_id column",
   expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
                regexp = "must be on sample_id",
                class  = "horizons_error_validation")
-
-})
-
-
-## ---------------------------------------------------------------------------
-## average() — Source id provenance
-## ---------------------------------------------------------------------------
-
-test_that("average() records which scans each averaged row came from", {
-
-  ## Arrange
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
-
-  ## Act
-  result <- average(hd, quality_check = FALSE, verbose = FALSE)
-
-  ## Assert
-  src <- result$provenance$average$source_ids
-
-  expect_s3_class(src, "tbl_df")
-  expect_identical(names(src), c("sample_id", "source_sample_id"))
-  expect_identical(nrow(src), 6L)
-  expect_setequal(src$sample_id[src$source_sample_id == "S1"], "S1")
-
-})
-
-
-test_that("average() maps a custom by value back to its source scans", {
-
-  ## Arrange
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
-
-  ## Act
-  result <- average(hd, by = "project", quality_check = FALSE, verbose = FALSE)
-
-  ## Assert — the original ids are gone from the table but not from the record
-  src <- result$provenance$average$source_ids
-
-  expect_false("S1" %in% result$data$analysis$sample_id)
-  expect_setequal(src$source_sample_id[src$sample_id == "PROJ1"], "S1")
-  expect_setequal(unique(src$sample_id), c("PROJ1", "PROJ2"))
-
-})
-
-
-test_that("average() writes aggregation_by on every call", {
-
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
-
-  result <- average(hd, quality_check = FALSE, verbose = FALSE)
-
-  expect_identical(result$provenance$aggregation_by, "sample_id")
 
 })
 

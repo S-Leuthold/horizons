@@ -197,7 +197,9 @@
 #'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
 #' columns returned, the pool's identity, the targets' identity (their source,
-#' row count and a hash of their ids), the membership table (target by
+#' row count and a hash of their ids; the source is the paths their
+#' [spectra()] note names, `"data frame"` when they were read from one, and
+#' `NULL` when they were not made by `spectra()`), the membership table (target by
 #' property by pool row, with the space it was measured in, distance, rank,
 #' and whether the row was `retained` in the object after the twin
 #' subtraction), the groups, pool sizes per property against those available, every
@@ -306,14 +308,14 @@
 #'   `settings$properties` are the properties drawn for (a skipped or
 #'   emptied property is not among them, so [configure()] warns when one is
 #'   chosen as the outcome).
-#'   `provenance$standardization` is the library's, describing the returned
+#'   `data$standardization` is the library's, describing the returned
 #'   axis: when only some of the library's columns are returned (targets on a
-#'   coarser or narrower grid), `n_wavelengths`, `wavelength_range` and `grid`
-#'   describe the columns returned (`grid` is `NULL` when they are not evenly
-#'   spaced, or the library was on no grid), while the `standardize()`
-#'   arguments (`resample`, `trim`, `remove_water`, `baseline`), `resampled`
-#'   and `applied_at` stay the library's, since they produced the values; so
-#'   `resample` can differ from `grid$step`. A library never standardized has
+#'   coarser or narrower grid), `wavelength_range` and `grid` describe the
+#'   columns returned (`grid` is `NULL` when they are not evenly spaced, or
+#'   the library was on no grid), while `baseline` and `baseline_range` stay
+#'   the library's, since its hull is in the values. The library's
+#'   `standardize()` settings are in its note on the log, so the `resample`
+#'   it gives can differ from `grid$step`. A library never standardized has
 #'   no record, and the training set gets none. `x$selection$reconciliation`
 #'   records the columns returned: `operation` (`"none"` when every library
 #'   column is returned, else `"subset"`), `n_shared`, `shared_range`, and
@@ -637,7 +639,7 @@ select_training <- function(x, library,
   }
 
   target_vars   <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
-  restandardize <- !is.null(x$provenance$standardization)
+  restandardize <- !is.null(x$data$standardization)
 
   ## A registered library's columns and baseline are known from the
   ## registry, which build_ossl_library() standardizes it with, so targets
@@ -655,7 +657,7 @@ select_training <- function(x, library,
 
     check_same_standardization(list(baseline         = isTRUE(reg_grid$baseline),
                                     wavelength_range = c(reg_grid$wn_min, reg_grid$wn_max)),
-                               x$provenance$standardization,
+                               x$data$standardization,
                                pool_step     = reg_grid$wn_step,
                                target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
                                library_form  = "registered",
@@ -743,13 +745,13 @@ select_training <- function(x, library,
   pool_vars <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
   cols      <- check_shared_columns(target_vars, pool_vars, restandardize = restandardize,
                                     library_form         = resolved$record$form,
-                                    library_standardized = !is.null(pool$provenance$standardization),
-                                    library_baseline     = isTRUE(pool$provenance$standardization$baseline))
+                                    library_standardized = !is.null(pool$data$standardization),
+                                    library_baseline     = isTRUE(pool$data$standardization$baseline))
 
   ## Standardized alike (#107): a hull on one side only, or hulls fitted over
   ## different ranges, would train on one preprocessing and predict another.
 
-  check_same_standardization(pool$provenance$standardization, x$provenance$standardization,
+  check_same_standardization(pool$data$standardization, x$data$standardization,
                              pool_step     = grid_summary(predictor_wavenumbers(pool))$resolution,
                              target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
                              library_form  = resolved$record$form,
@@ -1417,10 +1419,12 @@ select_training <- function(x, library,
   out <- set_analysis(drawn, analysis, role_map)
 
   ## The library's standardization record, its axis fields describing the
-  ## columns returned when they are only some of the library's (#90)
-  out$provenance$standardization <- returned_standardization(
-    pool$provenance$standardization, as.numeric(sub("^wn_", "", cols$shared)), length(pool_vars)
-  )
+  ## columns returned when they are only some of the library's (#90).
+  ## Assigned through single brackets, so a library never standardized
+  ## keeps the key as NULL rather than deleting it.
+  out$data["standardization"] <- list(returned_standardization(
+    pool$data$standardization, as.numeric(sub("^wn_", "", cols$shared)), length(pool_vars)
+  ))
 
   ## Pool sizes per property ------------------------------------------------
 
@@ -1471,7 +1475,7 @@ select_training <- function(x, library,
     search           = c(sa$record, list(cache = cache)),
     pool             = list(n_rows = nrow(pool$data$analysis),
                             id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix"))),
-    targets          = list(source  = x$provenance$spectra_source,
+    targets          = list(source  = targets_source(x$log),
                             n_rows  = nrow(x$data$analysis),
                             id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),
     library          = resolved$record,
@@ -1560,6 +1564,39 @@ select_training <- function(x, library,
 ## =============================================================================
 ## Internal helpers
 ## =============================================================================
+
+
+## ---------------------------------------------------------------------------
+## targets_source() — where the targets were read from, from their log
+## ---------------------------------------------------------------------------
+
+#' The source the targets were read from
+#'
+#' @description
+#' The `ids` of the targets' last [spectra()] note, which are the paths it
+#' was given. The training set carries the pool's log, not the targets', so the
+#' selection record keeps the targets' source itself, beside their size and
+#' id hash. This is the one place a verb reads a log row's content, so
+#' `spectra()`'s note promises its `ids`.
+#'
+#' @param log [Tibble.] The targets' log.
+#'
+#' @return [Character or NULL.] The paths, `"data frame"` when the note names
+#'   none, or `NULL` when the log holds no `spectra()` note.
+#' @noRd
+targets_source <- function(log) {
+
+  read <- log[log$verb %in% "spectra" & log$type %in% "note", , drop = FALSE]
+
+  if (nrow(read) == 0) return(NULL)
+
+  ### The last: the record is the call's last row, and the latest read
+  ### describes the targets
+  paths <- read$ids[[nrow(read)]]
+
+  if (length(paths) == 0) "data frame" else paths
+
+}
 
 
 ## ---------------------------------------------------------------------------
@@ -1760,7 +1797,7 @@ check_pool_unpromoted <- function(pool) {
 #' refused as a gap.
 #'
 #' @param pool_record,target_record [List or NULL.] Each side's
-#'   `provenance$standardization`.
+#'   `data$standardization`.
 #' @param pool_step,target_step [Numeric.] Each axis's median spacing.
 #' @param library_form [Character.] The library's `form` (`"object"`,
 #'   `"path"`, `"registered"`): a pool in memory or a library file is the

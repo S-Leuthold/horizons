@@ -130,8 +130,15 @@ configuring an outcome a \code{\link[=select_training]{select_training()}} draw 
 Each verb raises a topic at most once per call, at its end, and only after
 writing it to the object's log, so a warning that is silenced or never
 seen is still on the object. The log also keeps the notes a verb reports
-without warning, such as samples dropped as the user asked, so a
-pipeline's history is in one place. \code{predict()}, which changes no object,
+without warning, such as samples dropped as the user asked, and the note
+each of \code{\link[=spectra]{spectra()}}, \code{\link[=parse_ids]{parse_ids()}}, \code{\link[=standardize]{standardize()}}, \code{\link[=average]{average()}} and
+\code{\link[=add_response]{add_response()}} writes as the last row of every call, recording its
+source and settings, so a pipeline's history is in one place. The one
+call that writes none is \code{standardize()}'s early return on spectra
+already standardized, whose \code{skipped} warning is its row. Notes are never
+raised. Every row carries the \code{time} its call ended, so the first row's
+is when the spectra were read (on a training set, the library's).
+\code{predict()}, which changes no object,
 carries each warning's record as the field \code{log}.
 
 Under \code{options(warn = 2)}, a warning that no handler takes ends the call

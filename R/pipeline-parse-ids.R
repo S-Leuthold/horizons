@@ -88,7 +88,9 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   * `sample_id` updated from the `sampleid` token (if present)
 #'   * New metadata columns added to `data$analysis`
 #'   * `data$role_map` updated with new columns (role: meta)
-#'   * Provenance recorded in `provenance$parse_ids`
+#'   * A note on the object's `log` recording the call, after any warning:
+#'     the format or the patterns, the filenames matched, and the columns
+#'     added, which are its `ids`
 #'
 #' @examples
 #' \dontrun{
@@ -406,30 +408,44 @@ parse_ids <- function(x,
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 8: Update provenance
-  ## -------------------------------------------------------------------------
-
-  x$provenance$parse_ids <- list(
-    format        = format,
-    patterns      = if (has_patterns && !has_format) patterns else NULL,
-    matched       = n_matched,
-    unmatched     = n_unmatched,
-    columns_added = cols_to_add,
-    applied_at    = Sys.time()
-  )
-
-  ### list() keeps the key when format is NULL (patterns = was used);
-  ### `$<-` with NULL would delete it.
-  x$provenance["id_pattern"] <- list(format)
-
-  ## -------------------------------------------------------------------------
-  ## Step 8b: Re-validate
+  ## Step 8: Re-validate
   ## -------------------------------------------------------------------------
   ## Raw stage: parse_ids() runs before average() collapses replicates, so a
   ## duplicate parsed sample_id (several filenames parsing to the same id) or
   ## an NA one (too_few = "na") passes here.
 
   x <- validate_horizons_data(x, stage = "raw")
+
+  ## The call's record: how the ids were parsed --------------------------------
+  ## A note, never raised; its ids are the columns added.
+
+  n_files <- n_matched + n_unmatched
+  added   <- if (length(cols_to_add) > 0) {
+    "{cli::qty(length(cols_to_add))}the column{?s} {.field {cols_to_add}} added"
+  } else {
+    "no column added"
+  }
+
+  if (has_format) {
+
+    log_note(collector,
+             paste0("Parsed sample ids with the format {.val {format}}: {n_matched} of {n_files} filename{?s} matched, ", added, "."),
+             ids = cols_to_add)
+
+  } else {
+
+    ### As the user typed them, names included, so the note says which
+    ### pattern became which column
+    pattern_names <- names(patterns) %||% rep("", length(patterns))
+    typed         <- encodeString(patterns, quote = "\"")
+    typed         <- ifelse(nzchar(pattern_names), paste0(pattern_names, " = ", typed), typed)
+    pattern_text  <- paste0("c(", paste(typed, collapse = ", "), ")")
+
+    log_note(collector,
+             paste0("Parsed sample ids with the patterns {.code {pattern_text}}: {n_matched} of {n_files} filename{?s} matched, ", added, "."),
+             ids = cols_to_add)
+
+  }
 
   x$log <- log_close(collector, x$log)
 

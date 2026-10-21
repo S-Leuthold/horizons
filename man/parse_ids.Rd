@@ -40,7 +40,9 @@ The input \code{horizons_data} object with:
 \item \code{sample_id} updated from the \code{sampleid} token (if present)
 \item New metadata columns added to \code{data$analysis}
 \item \code{data$role_map} updated with new columns (role: meta)
-\item Provenance recorded in \code{provenance$parse_ids}
+\item A note on the object's \code{log} recording the call, after any warning:
+the format or the patterns, the filenames matched, and the columns
+added, which are its \code{ids}
 }
 }
 \description{

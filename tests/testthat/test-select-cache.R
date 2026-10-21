@@ -65,7 +65,7 @@ test_that("a cached space draws exactly what a fresh one does", {
   fresh  <- suppressWarnings(select_training(x, m$pool, k = 5L))
 
   expect_true(cached$selection$search$cache$hit)
-  expect_identical(cached$selection$library$build, 1L)
+  expect_identical(cached$selection$library$build, 2L)
   expect_false(fresh$selection$search$cache$used)
   expect_identical(cached$data$analysis$sample_id, fresh$data$analysis$sample_id)
   expect_equal(cached$selection$membership$distance, fresh$selection$membership$distance, tolerance = 1e-10)
@@ -194,7 +194,7 @@ test_that("baseline-corrected targets are refused against the registered library
   msg <- gsub("\\s+", " ", conditionMessage(err))
 
   expect_match(msg, "The targets were baseline-corrected", fixed = TRUE)
-  expect_identical(m$pool$provenance$standardization$baseline, FALSE)
+  expect_identical(m$pool$data$standardization$baseline, FALSE)
 
   ## A registered library is not the user's to standardize again
   expect_false(grepl("Or correct the library", msg, fixed = TRUE))
@@ -211,7 +211,7 @@ test_that("the registry's grid and baseline are the built library's", {
 
   expect_identical(paste0("wn_", canonical_grid(f$wn_min, f$wn_max, f$wn_step)),
                    m$pool$data$role_map$variable[m$pool$data$role_map$role == "predictor"])
-  expect_identical(m$pool$provenance$standardization$baseline, f$baseline)
+  expect_identical(m$pool$data$standardization$baseline, f$baseline)
   expect_false(f$baseline)
 
 })

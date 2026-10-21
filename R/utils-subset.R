@@ -497,8 +497,8 @@ recount_data <- function(x) {
 #' in `average()`, each maintaining the same small invariant by hand. Any
 #' internal operation that needs a subset of samples (a per-group fit, a
 #' holdout, a training set drawn from a pool) should use this rather than
-#' subsetting the source tibble before `spectra()`, which discards
-#' provenance.
+#' subsetting the source tibble before `spectra()`, which discards the log
+#' and its record of how the object was made.
 #'
 #' The object must be unpromoted. An object carrying evaluation results,
 #' fitted models or an ensemble is refused by name: the split, the row index
@@ -519,7 +519,7 @@ recount_data <- function(x) {
 #'
 #' The calling verb records the subset in its own terms (`validate()` in its
 #' removal record, `select_training()` in the selection record); this
-#' function writes no provenance of its own.
+#' function writes nothing to the log, and keeps it as it was.
 #'
 #' @param x [horizons_data.] The object to subset.
 #' @param keep [Character or logical.] `sample_id`s to keep, or a logical

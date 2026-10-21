@@ -297,10 +297,8 @@ make_axis_spectra <- function(wn, f = NULL, n = 3) {
   )
 
   new_horizons_data(
-    analysis       = analysis,
-    role_map       = role_map,
-    spectra_source = "test",
-    spectra_type   = "tibble"
+    analysis = analysis,
+    role_map = role_map
   )
 
 }
@@ -321,6 +319,11 @@ smooth_spectrum <- function(wn) {
 }
 
 predictor_names <- function(hd) hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+
+#' The message of the last row of an object's log: a standardize() call's
+#' note, when that call ran last
+#' @noRd
+record_message <- function(hd) hd$log$message[nrow(hd$log)]
 
 KSSL_WN <- seq(600, 4000, by = 2)
 OFFGRID_WN <- 599.74 + 1.93 * (0:3574)
@@ -350,8 +353,8 @@ test_that("an off-grid axis lands on the same columns as a KSSL-shaped one", {
   expect_identical(predictor_names(offgrid), predictor_names(kssl))
   expect_identical(predictor_names(offgrid)[c(1, 851)], c("wn_4000", "wn_600"))
 
-  expect_true(offgrid$provenance$standardization$resampled)
-  expect_identical(offgrid$provenance$standardization$grid,
+  expect_match(record_message(offgrid), "re-interpolated onto the 4 cm-1 grid", fixed = TRUE)
+  expect_identical(offgrid$data$standardization$grid,
                    list(min = 600, max = 4000, step = 4, n = 851L))
 
 })
@@ -381,7 +384,7 @@ test_that("grid points the data does not reach are dropped with a warning, never
 
   ## The covered multiples survive, and nothing beyond the data does
   expect_identical(predictor_names(out), paste0("wn_", seq(3500, 652, by = -4)))
-  expect_identical(out$provenance$standardization$grid$n, 713L)
+  expect_identical(out$data$standardization$grid$n, 713L)
 
 })
 
@@ -400,7 +403,7 @@ test_that("an uncovered grid and a gap are one coverage warning with two bullets
   expect_match(msg, "does not cover the 4 cm-1 grid", fixed = TRUE)
   expect_match(msg, "gap in it", fixed = TRUE)
 
-  rows <- out$log[out$log$verb == "standardize", ]
+  rows <- out$log[out$log$verb == "standardize" & out$log$type == "warning", ]
   expect_identical(rows$topic, "coverage")
   expect_identical(rows$n, 2L)
 
@@ -447,8 +450,8 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
   ## agree to about 1e-12
   after <- as.matrix(out$data$analysis[, predictor_names(out)])
   expect_identical(after, before)
-  expect_false(out$provenance$standardization$resampled)
-  expect_identical(out$provenance$standardization$grid$n, 1701L)
+  expect_match(record_message(out), "already on the 2 cm-1 grid", fixed = TRUE)
+  expect_identical(out$data$standardization$grid$n, 1701L)
 
   ## Stored increasing (make_axis_spectra() bypasses spectra()'s own sort,
   ## #24, so this is genuinely unsorted input): standardize() sorts it, and
@@ -620,8 +623,8 @@ test_that("resample = NULL keeps trim-as-subset but still sorts", {
   out  <- no_output(standardize(kssl, resample = NULL, trim = c(1000, 2000)))
 
   expect_identical(predictor_names(out), paste0("wn_", seq(2000, 1000, by = -2)))
-  expect_false(out$provenance$standardization$resampled)
-  expect_null(out$provenance$standardization$grid)
+  expect_match(record_message(out), "not resampled", fixed = TRUE)
+  expect_null(out$data$standardization$grid)
 
   ## A subset, with no margin: 599.74 is outside c(600, 4000) and stays out
   offgrid <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = NULL, trim = c(600, 4000)))
@@ -643,7 +646,7 @@ test_that("a call with every operation off still sorts, validates, and changes n
   ## Decreasing columns, a valid object, marked standardized
   expect_identical(predictor_names(out), paste0("wn_", rev(KSSL_WN)))
   expect_no_error(validate_horizons_data(out))
-  expect_false(is.null(out$provenance$standardization))
+  expect_false(is.null(out$data$standardization))
 
   ## The same value at every wavenumber: only the column order moved
   after <- as.matrix(out$data$analysis[, predictor_names(out)])
@@ -662,6 +665,49 @@ test_that("a call with every operation off still sorts, validates, and changes n
 })
 
 
+test_that("standardize() records the call as its last row, a note with its settings and what they did to the axis", {
+
+  hd     <- make_axis_spectra(seq(4000, 600, by = -4), f = smooth_spectrum)
+  record <- function(before, after) {
+    rows <- log_rows_added(before, after)
+    expect_identical(rows$type[nrow(rows)], "note")
+    expect_identical(rows$ids[[nrow(rows)]], character(0))
+    rows$message[nrow(rows)]
+  }
+
+  ## Re-interpolated, already on the grid, or not resampled; never raised
+  expect_no_warning(fine <- standardize(hd, resample = 2, verbose = FALSE))
+  expect_identical(record(hd, fine),
+                   "Standardized with `resample = 2, trim = c(600, 4000), remove_water = FALSE, baseline = FALSE`: re-interpolated onto the 2 cm-1 grid, 1701 wavenumbers kept.")
+
+  hulled <- standardize(hd, resample = 4, baseline = TRUE, verbose = FALSE)
+  expect_identical(record(hd, hulled),
+                   "Standardized with `resample = 4, trim = c(600, 4000), remove_water = FALSE, baseline = TRUE`: already on the 4 cm-1 grid, 851 wavenumbers kept.")
+
+  ### Whole numbers given as integers read the same
+  ints <- standardize(hd, resample = 4L, trim = c(600L, 4000L), baseline = TRUE, verbose = FALSE)
+  expect_identical(record(hd, ints), record(hd, hulled))
+
+  as_is <- standardize(hd, resample = NULL, verbose = FALSE)
+  expect_identical(record(hd, as_is),
+                   "Standardized with `resample = NULL, trim = c(600, 4000), remove_water = FALSE, baseline = FALSE`: not resampled, 851 wavenumbers kept.")
+
+  ## Every operation off, and a hull an earlier call fitted kept under force
+  off <- standardize(hulled, resample = NULL, trim = NULL, force = TRUE, verbose = FALSE)
+  expect_identical(record(hulled, off),
+                   "Standardized with `resample = NULL, trim = NULL, remove_water = FALSE, baseline = FALSE`: nothing applied, 851 wavenumbers kept, and the convex hull an earlier call fitted is kept.")
+
+  kept <- standardize(hulled, resample = 4, force = TRUE, verbose = FALSE)
+  expect_match(record(hulled, kept),
+               "already on the 4 cm-1 grid, 851 wavenumbers kept, and the convex hull an earlier call fitted is kept.",
+               fixed = TRUE)
+
+  ## A hull this call fits is its own
+  refit <- standardize(hulled, resample = 4, baseline = TRUE, force = TRUE, verbose = FALSE)
+  expect_false(grepl("earlier call", record(hulled, refit), fixed = TRUE))
+
+})
+
 test_that("force = TRUE with every operation off keeps the grid an earlier call recorded", {
 
   on_4 <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = 4))
@@ -672,20 +718,24 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
     again <- no_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE))
   )
 
-  note <- again$log[again$log$verb == "standardize", ]
-  expect_identical(note$type, "note")
+  ### The event, then the call's record
+  rows <- log_rows_added(on_4, again)
+  expect_identical(rows$type, c("note", "note"))
+  note <- rows[1, ]
   expect_match(note$message, "Re-standardizing previously standardized data", fixed = TRUE)
 
-  expect_true(again$provenance$standardization$resampled)
-  expect_identical(again$provenance$standardization$grid,
-                   on_4$provenance$standardization$grid)
+  ### The earlier call's note, which says it re-interpolated, is still on the
+  ### log
+  expect_match(again$log$message[nrow(on_4$log)], "re-interpolated onto the 4 cm-1 grid", fixed = TRUE)
+  expect_identical(again$data$standardization$grid,
+                   on_4$data$standardization$grid)
   expect_identical(predictor_names(again), predictor_names(on_4))
 
   ## The no-op record describes the axis the way the full path does
-  expect_identical(again$provenance$standardization$n_wavelengths,
-                   on_4$provenance$standardization$n_wavelengths)
-  expect_equal(again$provenance$standardization$wavelength_range,
-               on_4$provenance$standardization$wavelength_range)
+  expect_identical(names(again$data$standardization), names(on_4$data$standardization))
+  expect_match(record_message(again), paste0(length(predictor_names(on_4)), " wavenumbers kept"), fixed = TRUE)
+  expect_equal(again$data$standardization$wavelength_range,
+               on_4$data$standardization$wavelength_range)
 
 })
 
@@ -694,25 +744,25 @@ test_that("force = TRUE keeps the record of a hull an earlier call fitted, and t
 
   hulled <- no_output(standardize(make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum),
                                   resample = 4, trim = c(600, 4000), baseline = TRUE))
-  expect_true(hulled$provenance$standardization$baseline)
-  expect_identical(hulled$provenance$standardization$baseline_range, c(600, 4000))
+  expect_true(hulled$data$standardization$baseline)
+  expect_identical(hulled$data$standardization$baseline_range, c(600, 4000))
 
   ## Every operation off: the values still carry the hull
   again <- no_output(standardize(hulled, resample = NULL, trim = NULL, force = TRUE))
-  expect_true(again$provenance$standardization$baseline)
-  expect_identical(again$provenance$standardization$baseline_range, c(600, 4000))
+  expect_true(again$data$standardization$baseline)
+  expect_identical(again$data$standardization$baseline_range, c(600, 4000))
 
   ## A narrower trim without a hull: the hull is the first call's, over its range
   narrower <- no_output(standardize(hulled, resample = 4, trim = c(1000, 3000), force = TRUE))
-  expect_true(narrower$provenance$standardization$baseline)
-  expect_identical(narrower$provenance$standardization$wavelength_range, c(1000, 3000))
-  expect_identical(narrower$provenance$standardization$baseline_range, c(600, 4000))
+  expect_true(narrower$data$standardization$baseline)
+  expect_identical(narrower$data$standardization$wavelength_range, c(1000, 3000))
+  expect_identical(narrower$data$standardization$baseline_range, c(600, 4000))
 
   ## Without a hull anywhere there is no range
   plain <- no_output(standardize(make_axis_spectra(rev(KSSL_WN)), resample = 4))
-  expect_false(plain$provenance$standardization$baseline)
-  expect_true("baseline_range" %in% names(plain$provenance$standardization))
-  expect_null(plain$provenance$standardization$baseline_range)
+  expect_false(plain$data$standardization$baseline)
+  expect_true("baseline_range" %in% names(plain$data$standardization))
+  expect_null(plain$data$standardization$baseline_range)
 
 })
 
@@ -834,7 +884,7 @@ test_that("an axis with the water bands cut upstream is not spline-filled, and s
   ## The same 1329 columns and the same values: on the grid apart from the gaps
   expect_identical(predictor_names(out), predictor_names(cut))
   expect_identical(as.matrix(out$data$analysis[, predictor_names(out)]), cut_values)
-  expect_false(out$provenance$standardization$resampled)
+  expect_match(record_message(out), "already on the", fixed = TRUE)
   expect_false(any(in_water_band(as.numeric(sub("^wn_", "", predictor_names(out))))))
 
 })
@@ -1701,15 +1751,16 @@ test_that("standardize() warns on already-standardized object, once, after writi
     "already standardized", class = "horizons_warning_skipped"
   )
 
-  ## The object is unchanged but for its log
-  row <- again$log[again$log$verb == "standardize", ]
+  ## The object is unchanged but for its log, which gains the warning and
+  ## no record of a call that did nothing
+  row <- log_rows_added(hd_std, again)
   expect_identical(row$topic, "skipped")
   again$log <- hd_std$log
   expect_identical(again, hd_std)
 
   ## Recorded whether or not the warning is seen
   quiet <- suppressWarnings(standardize(hd_std))
-  expect_identical(quiet$log$topic[quiet$log$verb == "standardize"], "skipped")
+  expect_identical(log_rows_added(hd_std, quiet)$topic, "skipped")
 
 })
 
@@ -1757,7 +1808,7 @@ test_that("standardize() with every operation on trims, drops the water bands, r
 
   hd <- create_test_spectra(n_wavelengths = 200, wn_min = 400, wn_max = 4500)
 
-  expect_null(hd$provenance$standardization)
+  expect_null(hd$data$standardization)
 
   ## Apply all operations ------------------------------------------------------
 
@@ -1767,15 +1818,14 @@ test_that("standardize() with every operation on trims, drops the water bands, r
                          remove_water = TRUE,
                          baseline     = TRUE)
 
-  ## Check the provenance records each argument --------------------------------
+  ## The record keeps what the verbs read; the note records each argument -----
 
-  std <- hd_full$provenance$standardization
-  expect_false(is.null(std))
-  expect_equal(std$resample, 2)
-  expect_equal(std$trim, c(600, 4000))
-  expect_true(std$remove_water)
+  std <- hd_full$data$standardization
+  expect_named(std, c("baseline", "baseline_range", "wavelength_range", "grid"))
   expect_true(std$baseline)
-  expect_s3_class(std$applied_at, "POSIXct")
+  expect_match(record_message(hd_full),
+               "`resample = 2, trim = c(600, 4000), remove_water = TRUE, baseline = TRUE`",
+               fixed = TRUE)
 
   ## Check final wavelengths are in expected range -----------------------------
 

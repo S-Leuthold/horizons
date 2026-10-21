@@ -14,12 +14,6 @@
          ├─ Outcome: SOC
          └─ Memory: <size>
       
-      Provenance
-         ├─ Spectra source: test
-         ├─ Spectra type: mir
-         ├─ Created: <time>
-         └─ Horizons version: <version>
-      
       Configuration
          ├─ Configs defined: 1
          ├─ Outcome: SOC
@@ -35,6 +29,9 @@
       
       Validation
          └─ Status: passed
+      
+      Log
+         └─ (empty)
       
       Pipeline Status
          └─ Next step: evaluate()
@@ -54,12 +51,6 @@
          ├─ Outcome: SOC
          └─ Memory: <size>
       
-      Provenance
-         ├─ Spectra source: test
-         ├─ Spectra type: mir
-         ├─ Created: <time>
-         └─ Horizons version: <version>
-      
       Configuration
          ├─ Configs defined: 1
          ├─ Outcome: SOC
@@ -74,6 +65,9 @@
       
       Validation
          └─ Status: passed
+      
+      Log
+         └─ (empty)
       
       Pipeline Status
          └─ Next step: evaluate()

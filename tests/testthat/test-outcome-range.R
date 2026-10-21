@@ -54,13 +54,10 @@ to_d13c <- function(soc) -22 + 3 * (soc - 2)
 flat_message <- function(e) gsub("\\s+", " ", conditionMessage(e))
 
 ## summary() prints the table's size in memory, which changes between R
-## versions, and when and by which version the object was made. The snapshot
-## keeps those lines and replaces their values.
+## versions. The snapshot keeps the line and replaces its value.
 scrub_memory <- function(lines) {
 
-  lines <- sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
-  lines <- sub("(Created:) .*$", "\\1 <time>", lines)
-  sub("(Horizons version:) .*$", "\\1 <version>", lines)
+  sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
 
 }
 

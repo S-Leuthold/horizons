@@ -373,7 +373,7 @@ test_that("select_training() writes its coverage warning to the log before raisi
 
   ## The record does not depend on the signal
   quiet <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay"))
-  expect_identical(quiet$log, out$log)
+  expect_identical(without_time(quiet$log), without_time(out$log))
 
 })
 
@@ -1781,10 +1781,46 @@ test_that("the record carries settings, reconciliation, pool identity and distan
 })
 
 
-test_that("the record carries the targets' source, size and id hash", {
+test_that("targets read from a data frame are recorded as one, and targets no spectra() call made have no source", {
 
   fx <- select_fixture(n_pool = 60)
-  fx$targets$provenance$spectra_source <- "batch_07.csv"
+
+  ## The fixture reads both from data frames: the note names no path
+  expect_identical(fx$targets$log$ids[[1]], character(0))
+  expect_identical(quiet_select(fx, k = 5)$selection$targets$source, "data frame")
+
+  ## A log without a spectra() note gives none, which summary() reads as
+  ## unknown
+  fx$targets$log <- new_log()
+  out <- quiet_select(fx, k = 5)
+  expect_null(out$selection$targets$source)
+  expect_identical(describe_selection(out$selection)$target_source, "unknown")
+
+})
+
+
+test_that("the targets' source is read from their last spectra() note", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  ## An earlier read ahead of the targets' own
+  earlier         <- fx$targets$log[1, ]
+  earlier$ids     <- list("earlier.csv")
+  fx$targets$log  <- dplyr::bind_rows(earlier, fx$targets$log)
+  fx$targets$log$ids[[2]] <- "batch_07.csv"
+
+  expect_identical(quiet_select(fx, k = 5)$selection$targets$source, "batch_07.csv")
+
+})
+
+
+test_that("the record carries the targets' source, size and id hash", {
+
+  ## The source is the paths the targets' spectra() note names, not the
+  ## library's, whose log the training set carries
+  fx <- select_fixture(n_pool = 60)
+  fx$targets$log$ids[[1]] <- "batch_07.csv"
+  fx$pool$log$ids[[1]]    <- "library.csv"
 
   out <- quiet_select(fx, k = 5)
 
@@ -1795,6 +1831,7 @@ test_that("the record carries the targets' source, size and id hash", {
 
   expect_named(rec, c("source", "n_rows", "id_hash"))
   expect_identical(rec$source,  "batch_07.csv")
+  expect_identical(out$log$ids[[1]], "library.csv")
   expect_identical(rec$n_rows,  8L)
   expect_identical(rec$id_hash, digest::digest(sort(ids, method = "radix")))
 
@@ -1803,11 +1840,11 @@ test_that("the record carries the targets' source, size and id hash", {
   expect_identical(reordered$selection$targets$id_hash, rec$id_hash)
 
   ## It describes the draw, so rows leaving afterwards leave it alone; the
-  ## object's provenance stays the library's.
+  ## object's log stays the library's.
   kept <- subset_rows(out, out$data$analysis$sample_id[-1])
 
   expect_identical(kept$selection$targets, rec)
-  expect_identical(out$provenance$spectra_source, "tibble")
+  expect_identical(kept$log, out$log)
 
 })
 
@@ -1852,7 +1889,7 @@ test_that("targets on a coarser grid get the library's own values there, and the
   })
 
   out <- select_training(targets, pool, k = 10)
-  rec <- out$provenance$standardization
+  rec <- out$data$standardization
   wn  <- predictor_matrix(out)$wavenumbers
 
   ## Every target column is shared, so nothing is warned and none is missing
@@ -1869,8 +1906,8 @@ test_that("targets on a coarser grid get the library's own values there, and the
   ## The recorded step is the axis's spacing, the targets' 8, not the pool's 4
   expect_equal(rec$grid$step, stats::median(abs(diff(wn))))
   expect_equal(rec$grid$step, 8)
-  expect_identical(rec$grid, targets$provenance$standardization$grid)
-  expect_identical(rec$n_wavelengths, length(wn))
+  expect_identical(rec$grid, targets$data$standardization$grid)
+  expect_identical(rec$grid$n, length(wn))
   expect_equal(rec$wavelength_range, range(wn))
 
   ## So axis_spacing_cm()'s fallback agrees with the axis it reads first
@@ -1879,14 +1916,14 @@ test_that("targets on a coarser grid get the library's own values there, and the
   ## Nothing was moved, so there is no record of a move
   expect_false("reconciliation" %in% names(rec))
 
-  ## The standardize() arguments that produced the values stay the pool's,
-  ## and so do whether it resampled and when
-  expect_identical(rec$resample, 4)
-  expect_identical(rec$trim, c(600, 4000))
-  expect_identical(rec$remove_water, FALSE)
+  ## The record keeps the pool's hull, and the standardize() arguments that
+  ## produced the values are the pool's note, at the head of the training
+  ## set's log
   expect_identical(rec$baseline, FALSE)
-  expect_identical(rec$resampled, pool$provenance$standardization$resampled)
-  expect_identical(rec$applied_at, pool$provenance$standardization$applied_at)
+  expect_identical(out$log[seq_len(nrow(pool$log)), ], pool$log)
+  expect_match(pool$log$message[nrow(pool$log)],
+               "`resample = 4, trim = c(600, 4000), remove_water = FALSE, baseline = FALSE`",
+               fixed = TRUE)
 
 })
 
@@ -1903,7 +1940,7 @@ test_that("a pool already on the targets' grid keeps its standardization record 
   out <- select_training(targets, pool, k = 10)
 
   expect_identical(out$selection$reconciliation$operation, "none")
-  expect_identical(out$provenance$standardization, pool$provenance$standardization)
+  expect_identical(out$data$standardization, pool$data$standardization)
 
 })
 
@@ -1921,14 +1958,17 @@ test_that("the record describes the columns returned whatever the targets' recor
     targets <- standardize(fx$targets, resample = NULL, trim = c(600, 4000))
   })
 
-  rec <- select_training(targets, pool, k = 10)$provenance$standardization
+  rec <- select_training(targets, pool, k = 10)$data$standardization
 
-  expect_null(targets$provenance$standardization$grid)
+  expect_null(targets$data$standardization$grid)
   expect_identical(rec$grid, list(min = 600, max = 4000, step = 8, n = 426L))
-  expect_identical(rec$n_wavelengths, fx$targets$data$n_predictors)
+  expect_identical(rec$grid$n, fx$targets$data$n_predictors)
 
-  ## A pool standardize() never saw is not marked standardized
-  expect_null(quiet_select(fx, k = 10)$provenance$standardization)
+  ## A pool standardize() never saw is not marked standardized, and the
+  ## training set keeps the key the constructor declares
+  plain <- quiet_select(fx, k = 10)
+  expect_null(plain$data$standardization)
+  expect_true("standardization" %in% names(plain$data))
 
 })
 
@@ -2110,9 +2150,9 @@ test_that("targets on an offset step get the columns both grids share, at their 
   wn <- predictor_matrix(out)$wavenumbers
   expect_identical(wn, seq(3996, 600, by = -12))
 
-  rec <- out$provenance$standardization
+  rec <- out$data$standardization
   expect_identical(rec$grid, list(min = 600, max = 3996, step = 12, n = length(wn)))
-  expect_identical(rec$resample, 4)
+  expect_match(out$log$message[nrow(pool$log)], "`resample = 4", fixed = TRUE)
   expect_match(gsub("\\s+", " ", conditionMessage(w)),
                "standardize the targets at a multiple of 4 cm-1 to share every column", fixed = TRUE)
 
@@ -2171,8 +2211,8 @@ test_that("a side never standardized counts as not baseline-corrected (#107)", {
     target_hull <- standardize(fx$targets, resample = 8, baseline = TRUE)
   })
 
-  expect_null(fx$pool$provenance$standardization)
-  expect_null(fx$targets$provenance$standardization)
+  expect_null(fx$pool$data$standardization)
+  expect_null(fx$targets$data$standardization)
 
   expect_error(select_training(target_hull, fx$pool, k = 5),
                "The targets were baseline-corrected", class = "horizons_error_input")
@@ -2222,7 +2262,7 @@ test_that("hulls over ranges an end apart by less than the coarser step pass (#1
     targets <- standardize(fx$targets, resample = 6, baseline = TRUE)
   })
 
-  expect_identical(targets$provenance$standardization$wavelength_range, c(600, 3996))
+  expect_identical(targets$data$standardization$wavelength_range, c(600, 3996))
 
   expect_warning(out <- select_training(targets, pool, k = 5), class = "horizons_warning_coverage")
   expect_s3_class(out, "horizons_data")
@@ -2252,7 +2292,7 @@ test_that("hulls over different ranges name the range both reach, which a librar
     pool    <- standardize(fx$pool, resample = 4, trim = c(600, 4000), baseline = TRUE)
   })
 
-  expect_identical(targets$provenance$standardization$wavelength_range, c(604, 3996))
+  expect_identical(targets$data$standardization$wavelength_range, c(604, 3996))
 
   err <- expect_error(select_training(targets, pool, k = 10, properties = "clay"), class = "horizons_error_input")
   msg <- gsub("\\s+", " ", conditionMessage(err))
@@ -2295,7 +2335,7 @@ test_that("a hull carried through standardize(force = TRUE) is compared over the
   expect_match(gsub("\\s+", " ", conditionMessage(err)),
                "the library's hull over 600 to 4000 cm-1 and the targets' over 1000 to 3000 cm-1", fixed = TRUE)
 
-  expect_identical(same$provenance$standardization$wavelength_range, c(1000, 3000))
+  expect_identical(same$data$standardization$wavelength_range, c(1000, 3000))
   expect_s3_class(suppressWarnings(select_training(same, pool, k = 5)), "horizons_data")
 
 })
@@ -2311,8 +2351,8 @@ test_that("a hull-corrected record written without its range is read by its axis
   })
 
   ## As standardize() wrote a record before it kept the hull's range
-  pool$provenance$standardization$baseline_range    <- NULL
-  targets$provenance$standardization$baseline_range <- NULL
+  pool$data$standardization$baseline_range    <- NULL
+  targets$data$standardization$baseline_range <- NULL
 
   expect_error(select_training(targets, pool, k = 5), "hulls are pinned at different ends",
                class = "horizons_error_input")

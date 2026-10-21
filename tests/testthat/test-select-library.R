@@ -273,6 +273,16 @@ test_that("a cached library that no longer meets the object contract is built ag
   expect_false(is.null(qs2::qs_read(path)$pool$log))
   expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
 
+  ## As a library cached while a pool carried provenance
+  lib <- qs2::qs_read(path)
+  lib$pool$provenance <- list(spectra_source = "ossl", standardization = list(baseline = FALSE))
+  qs2::qs_save(lib, path)
+
+  rebuilt <- suppressMessages(resolve_source("mini", verbose = FALSE))
+
+  expect_false("provenance" %in% names(rebuilt$pool))
+  expect_false("provenance" %in% names(qs2::qs_read(path)$pool))
+
 })
 
 test_that("a cached library from another build is built again, after asking why, with a note (#154)", {
@@ -284,13 +294,13 @@ test_that("a cached library from another build is built again, after asking why,
   first <- suppressMessages(resolve_source("mini", verbose = FALSE))
   path  <- library_cache_path(entry)
 
-  expect_identical(first$record$build, 1L)
+  expect_identical(first$record$build, 2L)
   expect_identical(nrow(first$pool$data$analysis), 8L)
 
   ## The issue's case: a release whose recipe keeps two rows, under the same
   ## name and version, and a raised build
   newer        <- entry
-  newer$build  <- 2L
+  newer$build  <- 3L
   newer$recipe <- function(raw, entry, verbose = TRUE) {
     pool <- build_ossl_library(raw, entry, verbose = verbose)
     subset_rows(pool, pool$data$analysis$sample_id[1:2])
@@ -305,8 +315,8 @@ test_that("a cached library from another build is built again, after asking why,
   )
 
   expect_identical(nrow(rebuilt$pool$data$analysis), 2L)
-  expect_identical(rebuilt$record$build, 2L)
-  expect_identical(qs2::qs_read(path)$record$build, 2L)
+  expect_identical(rebuilt$record$build, 3L)
+  expect_identical(qs2::qs_read(path)$record$build, 3L)
   expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
 
   ## A library cached before builds were recorded has none, and is built
@@ -321,7 +331,7 @@ test_that("a cached library from another build is built again, after asking why,
 
   withr::local_options(horizons.library_download = TRUE)
   again <- suppressMessages(resolve_source("mini", verbose = FALSE))
-  expect_identical(again$record$build, 2L)
+  expect_identical(again$record$build, 3L)
 
   ## And the next draw reads the current build, without building
   local_mocked_bindings(download_sources = function(...) stop("downloaded again"))

@@ -24,15 +24,17 @@
 #' horizons_eval → horizons_fit → horizons_ensemble). This constructor
 #' initializes all 8 sections with either provided values or NULL defaults:
 #'
-#' 1. **data**: The analysis tibble and role_map
-#' 2. **provenance**: Source files, transforms applied, version info
-#' 3. **config**: Model configurations and tuning parameters
-#' 4. **validation**: Pre-flight check results and outlier tracking
-#' 5. **evaluation**: Model comparison results (populated by evaluate())
-#' 6. **models**: Fitted workflows and UQ models (populated by fit())
-#' 7. **ensemble**: Optional stacked ensemble (populated by ensemble())
-#' 8. **selection**: The record of a draw from a reference pool, `NULL`
+#' 1. **data**: The analysis tibble, role_map, the stored counts and the
+#'    standardization record
+#' 2. **config**: Model configurations and tuning parameters
+#' 3. **validation**: Pre-flight check results and outlier tracking
+#' 4. **evaluation**: Model comparison results (populated by evaluate())
+#' 5. **models**: Fitted workflows and UQ models (populated by fit())
+#' 6. **ensemble**: Optional stacked ensemble (populated by ensemble())
+#' 7. **selection**: The record of a draw from a reference pool, `NULL`
 #'    unless the object came from `select_training()`
+#' 8. **log**: What the verbs reported, and the data verbs' record of each
+#'    call: the sources and settings the object was made with
 #'
 #' The selection record is a list with `settings` (every lever the draw used),
 #' `reconciliation` (which of the targets' wavenumbers the training set has:
@@ -62,10 +64,6 @@
 #' @param role_map `tibble or NULL.` Maps variable names to roles (id,
 #'   predictor, outcome, response, meta). Must have columns `variable` and
 #'   `role`. Default: `NULL`.
-#' @param spectra_source `character or NULL.` Path to source spectra files.
-#'   Default: `NULL`.
-#' @param spectra_type `character or NULL.` Type of spectra source: "opus",
-#'   "csv" or "tibble". Default: `NULL`.
 #'
 #' @return `horizons_data`. An unvalidated horizons_data object with class
 #'   `c("horizons_data", "list")`.
@@ -74,10 +72,8 @@
 #'   `spectra()` for user-facing construction.
 #'
 #' @noRd
-new_horizons_data <- function(analysis       = NULL,
-                              role_map       = NULL,
-                              spectra_source = NULL,
-                              spectra_type   = NULL) {
+new_horizons_data <- function(analysis = NULL,
+                              role_map = NULL) {
 
  ## ----------------------------------------------------------------------------
  ## Compute derived counts from role_map
@@ -108,30 +104,19 @@ new_horizons_data <- function(analysis       = NULL,
     ## Section 1: DATA — The canonical modeling table
     ## -------------------------------------------------------------------------
 
-    data = list(analysis     = analysis,
-                role_map     = role_map,
-                n_rows       = n_rows,
-                n_predictors = n_predictors,
-                n_responses  = n_responses),
+    data = list(analysis        = analysis,
+                role_map        = role_map,
+                n_rows          = n_rows,
+                n_predictors    = n_predictors,
+                n_responses     = n_responses,
+
+                ## Written by standardize(): what the verbs read of how the
+                ## spectra were standardized (see ?standardize). NULL until
+                ## then.
+                standardization = NULL),
 
     ## -------------------------------------------------------------------------
-    ## Section 2: PROVENANCE — Source and transform history
-    ## -------------------------------------------------------------------------
-
-    ## Source provenance (immutable once set)  ---------------------------------
-
-    provenance = list(spectra_source   = spectra_source,
-                      spectra_type     = spectra_type,
-                      created          = Sys.time(),
-                      horizons_version = utils::packageVersion("horizons"),
-
-    ## Transform provenance (updated by pipeline verbs) ------------------------
-
-                      id_pattern     = NULL,
-                      aggregation_by = NULL),
-
-    ## -------------------------------------------------------------------------
-    ## Section 3: CONFIG — Model configurations
+    ## Section 2: CONFIG — Model configurations
     ## -------------------------------------------------------------------------
 
     config = list(configs   = NULL,
@@ -162,7 +147,7 @@ new_horizons_data <- function(analysis       = NULL,
                   expansion = NULL),
 
     ## -------------------------------------------------------------------------
-    ## Section 4: VALIDATION — Pre-flight check results
+    ## Section 3: VALIDATION — Pre-flight check results
     ## -------------------------------------------------------------------------
 
     validation = list(passed    = NULL,
@@ -180,7 +165,7 @@ new_horizons_data <- function(analysis       = NULL,
                                       removed        = FALSE)),
 
     ## -------------------------------------------------------------------------
-    ## Section 5: EVALUATION — Model comparison results (horizons_eval+)
+    ## Section 4: EVALUATION — Model comparison results (horizons_eval+)
     ## -------------------------------------------------------------------------
 
     ## Populated by evaluate(); keys mirror what it writes. fit()'s cold start
@@ -201,7 +186,7 @@ new_horizons_data <- function(analysis       = NULL,
                       timestamp        = NULL), ## POSIXct
 
     ## -------------------------------------------------------------------------
-    ## Section 6: MODELS — Finalized models + UQ (horizons_fit+)
+    ## Section 5: MODELS — Finalized models + UQ (horizons_fit+)
     ## -------------------------------------------------------------------------
 
     ## Populated by fit(); keys mirror what it writes.
@@ -222,7 +207,7 @@ new_horizons_data <- function(analysis       = NULL,
                   runtime_secs      = NULL), ## numeric
 
     ## -------------------------------------------------------------------------
-    ## Section 7: ENSEMBLE — Optional ensemble (horizons_ensemble)
+    ## Section 6: ENSEMBLE — Optional ensemble (horizons_ensemble)
     ## -------------------------------------------------------------------------
 
     ## Populated by ensemble(); shape mirrors build_ensemble_contract().
@@ -243,7 +228,7 @@ new_horizons_data <- function(analysis       = NULL,
                     runtime_secs    = NULL),
 
     ## -------------------------------------------------------------------------
-    ## Section 8: SELECTION — The record of a draw from a reference pool
+    ## Section 7: SELECTION — The record of a draw from a reference pool
     ## -------------------------------------------------------------------------
 
     ## Populated by select_training(); NULL on every object that never went
@@ -251,11 +236,12 @@ new_horizons_data <- function(analysis       = NULL,
     selection = NULL,
 
     ## -------------------------------------------------------------------------
-    ## Section 9: LOG — What the verbs reported
+    ## Section 8: LOG — What the verbs reported
     ## -------------------------------------------------------------------------
 
-    ## Every verb appends the warnings it raised and the notes it reported;
-    ## nothing resets it (see ?horizons_conditions).
+    ## Every verb appends the warnings it raised and the notes it reported,
+    ## and the data verbs a note recording each call; nothing resets it (see
+    ## ?horizons_conditions).
     log = new_log()
   )
 
@@ -384,6 +370,12 @@ new_horizons_data <- function(analysis       = NULL,
 #'     request for that outcome with a usable threshold. Every class
 #'     validator reaches these through the chain.
 #'
+#' 15. **No provenance**: an object carrying a `provenance` slot was made
+#'     before it was retired, and is refused with the remedy of re-running
+#'     the pipeline: the verbs read the standardization record from
+#'     `data$standardization` and the history from the log, so its record
+#'     would go unread.
+#'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction. The selection record is
 #' checked even on an otherwise empty object.
@@ -471,6 +463,20 @@ validate_horizons_data <- function(x,
 
     errors <- c(errors, cli::format_inline(
       "The object has no {.field log}, or its log is not the table the verbs write ({.field {names(new_log())}})"
+    ))
+
+  }
+
+  ## Provenance ----
+  ## Retired: how an object was made is its data verbs' notes on the log, and
+  ## the standardization record is data$standardization. An object still
+  ## carrying the slot was made by an earlier version, whose record the verbs
+  ## no longer read, so it would pass as never standardized.
+
+  if ("provenance" %in% names(x)) {
+
+    errors <- c(errors, cli::format_inline(
+      "The object carries a {.field provenance} slot, which horizons no longer writes: it was made by an earlier version. Re-run the pipeline from {.fn spectra}."
     ))
 
   }
@@ -2848,9 +2854,10 @@ selected_member <- function(x) {
 #'
 #' @description
 #' `spectra()` records the paths it was given, which can be thousands of
-#' files, so `print()` and `summary()` show the first and count the rest.
+#' files, so `summary()` shows the first of a training set's targets and
+#' counts the rest.
 #'
-#' @param source `provenance$spectra_source`: character.
+#' @param source `selection$targets$source`: character.
 #' @return Character(1).
 #' @keywords internal
 #' @noRd
@@ -2862,19 +2869,92 @@ source_label <- function(source) {
 
 }
 
+#' print()'s line for the log: its warnings and notes, counted
+#'
+#' @description
+#' Reads the log as a table, as every reader of it does: no verb's row is
+#' singled out.
+#'
+#' @param log The object's log, shaped like [new_log()]'s.
+#' @return `NULL`, invisibly; prints the section.
+#' @keywords internal
+#' @noRd
+print_log_count <- function(log) {
+
+  if (!is.data.frame(log)) return(invisible(NULL))
+
+  n_warn <- sum(log$type == "warning", na.rm = TRUE)
+  n_note <- sum(log$type == "note", na.rm = TRUE)
+
+  cat(cli::style_bold("Log\n"))
+  cat(paste0("   \u2514\u2500 ", n_warn, " warning", if (n_warn != 1) "s", ", ",
+             n_note, " note", if (n_note != 1) "s", "\n"))
+  cat("\n")
+
+  invisible(NULL)
+
+}
+
+#' summary()'s section for the log: every row, in order
+#'
+#' @description
+#' One line per row: when its call ran, the verb, for a warning its topic,
+#' and the message, in the order the verbs wrote them. The data verbs' notes
+#' record how the object was made, so the section reads as its history, and
+#' its first time is when the object was made. Like [print_log_count()], it
+#' reads the log as a table. A row without a time (a log built by hand)
+#' shows none.
+#'
+#' @inheritParams print_log_count
+#' @return `NULL`, invisibly; prints the section.
+#' @keywords internal
+#' @noRd
+summary_log <- function(log) {
+
+  if (!is.data.frame(log)) return(invisible(NULL))
+
+  cat(cli::style_bold("Log\n"))
+
+  n <- nrow(log)
+
+  if (n == 0) {
+
+    cat(cli::col_silver("   \u2514\u2500 (empty)\n\n"))
+    return(invisible(NULL))
+
+  }
+
+  time  <- if ("time" %in% names(log)) format(log$time, "%Y-%m-%d %H:%M:%S") else rep(NA, n)
+  when  <- ifelse(is.na(time), "", paste0(time, " "))
+  lines <- paste0(when, log$verb, "()",
+                  ifelse(log$type == "warning", paste0(" warning (", log$topic, ")"), ""),
+                  ": ", log$message)
+
+  branch <- c(rep("\u251C\u2500", n - 1), "\u2514\u2500")
+
+  cat(paste0("   ", branch, " ", lines, "\n"), sep = "")
+  cat("\n")
+
+  invisible(NULL)
+
+}
+
 #' Print method for horizons_data objects
 #'
 #' @description
 #' Displays a concise, tree-style summary of a horizons_data object. Shows
-#' key dimensions, provenance info, and current pipeline stage at a glance.
+#' key dimensions, the current pipeline stage and how many warnings and notes
+#' the log holds at a glance.
 #'
 #' @details
 #' The print output adapts based on what's populated in the object:
 #'
-#' - **Empty objects**: Shows "(empty)" with a hint to use `spectra()`
+#' - **Empty objects** (no data and an empty log): Shows "(empty)" with a
+#'   hint to use `spectra()`
 #' - **Objects with data**: Shows sample count, predictor count, wavenumber
 #'   range, and the outcome and responses if present
-#' - **Objects with provenance**: Shows source path and spectra type
+#' - **The log**: How many warnings and notes it holds; [summary()] lists
+#'   them
 #'
 #' The output uses the tree-style formatting of the verbs' progress output.
 #'
@@ -2905,14 +2985,13 @@ print.horizons_data <- function(x, ...) {
   cat(cli::style_bold(paste0("\u2500\u2500 ", class_label, " \u2500\u2500\n\n")))
 
   ## ---------------------------------------------------------------------------
-  ## Check if truly empty (no data AND no provenance)
+  ## Check if truly empty (no data and nothing on the log)
   ## ---------------------------------------------------------------------------
 
-  has_data       <- !is.null(x$data$analysis)
-  has_provenance <- !is.null(x$provenance$spectra_source) ||
-                    !is.null(x$provenance$spectra_type)
+  has_data <- !is.null(x$data$analysis)
+  has_log  <- is.data.frame(x$log) && nrow(x$log) > 0
 
-  if (!has_data && !has_provenance) {
+  if (!has_data && !has_log) {
 
     cat(cli::col_silver("(empty)\n\n"))
     cat(cli::col_silver("Use spectra() to load data.\n"))
@@ -2972,32 +3051,6 @@ print.horizons_data <- function(x, ...) {
 
       response_vars <- x$data$role_map$variable[x$data$role_map$role == "response"]
       cat(paste0("   \u2514\u2500 Responses: ", paste(response_vars, collapse = ", "), "\n"))
-
-    }
-
-    cat("\n")
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Provenance section
-  ## ---------------------------------------------------------------------------
-
-  if (has_provenance) {
-
-    cat(cli::style_bold("Provenance\n"))
-
-    if (!is.null(x$provenance$spectra_source)) {
-
-      has_type <- !is.null(x$provenance$spectra_type)
-      branch   <- if (has_type) "\u251C\u2500" else "\u2514\u2500"
-      cat(paste0("   ", branch, " Source: ", source_label(x$provenance$spectra_source), "\n"))
-
-    }
-
-    if (!is.null(x$provenance$spectra_type)) {
-
-      cat(paste0("   \u2514\u2500 Type: ", x$provenance$spectra_type, "\n"))
 
     }
 
@@ -3128,6 +3181,12 @@ print.horizons_data <- function(x, ...) {
   }
 
   ## ---------------------------------------------------------------------------
+  ## Log section: what the verbs reported, counted
+  ## ---------------------------------------------------------------------------
+
+  print_log_count(x$log)
+
+  ## ---------------------------------------------------------------------------
   ## Status hint
   ## ---------------------------------------------------------------------------
 
@@ -3142,16 +3201,15 @@ print.horizons_data <- function(x, ...) {
 #'
 #' @description
 #' Displays a comprehensive, detailed summary of a horizons_data object. Shows
-#' full provenance, data characteristics, configuration status, and pipeline
-#' state. Designed for scientists who want to see the complete picture.
+#' data characteristics, configuration status, every row of the log, and
+#' pipeline state. Designed for scientists who want to see the complete
+#' picture.
 #'
 #' @details
 #' The summary output provides significantly more detail than `print()`:
 #'
 #' - **Data section**: Sample ID preview, wavenumber range and step size,
 #'   response names, outcome variable, memory footprint
-#' - **Provenance section**: Full source paths, timestamps, version info,
-#'   preprocessing history, aggregation settings
 #' - **Selection section**: Scope and groups, properties, k, pool size, rows
 #'   drawn per property, similarity space and metric, twins excluded, and any
 #'   rows removed since the draw (present only for objects from
@@ -3159,6 +3217,9 @@ print.horizons_data <- function(x, ...) {
 #' - **Configuration section**: Tuning parameter defaults, config count, and
 #'   the outcome range when it is not the default `c(0, Inf)`
 #' - **Validation section**: Whether validation has run, pass/fail status
+#' - **Log section**: Every row of the log, in order: when its call ran, the
+#'   verb, for a warning its topic, and the message. The data verbs' notes
+#'   record how the object was made, from the source onward
 #' - **Pipeline status**: Current stage and next step guidance, noting when
 #'   the rows were drawn from a pool
 #'
@@ -3281,49 +3342,6 @@ summary.horizons_data <- function(object, ...) {
     cat(cli::col_silver("   \u2514\u2500 (no data loaded)\n\n"))
 
   }
-
-  ## ---------------------------------------------------------------------------
-  ## Provenance section
-  ## ---------------------------------------------------------------------------
-
-  cat(cli::style_bold("Provenance\n"))
-
-  # Count how many provenance items we have to display
-  prov_items <- c(
-    !is.null(x$provenance$spectra_source),
-    !is.null(x$provenance$spectra_type),
-    TRUE,  # created (always present)
-    TRUE,  # horizons_version (always present)
-    !is.null(x$provenance$aggregation_by)
-  )
-  n_prov <- sum(prov_items)
-  prov_idx <- 0
-
-  get_branch <- function() {
-    prov_idx <<- prov_idx + 1
-    if (prov_idx < n_prov) "\u251C\u2500" else "\u2514\u2500"
-  }
-
-  if (!is.null(x$provenance$spectra_source)) {
-    cat(paste0("   ", get_branch(), " Spectra source: ", source_label(x$provenance$spectra_source), "\n"))
-  }
-
-  if (!is.null(x$provenance$spectra_type)) {
-    cat(paste0("   ", get_branch(), " Spectra type: ", x$provenance$spectra_type, "\n"))
-  }
-
-  # Created timestamp
-  created_str <- format(x$provenance$created, "%Y-%m-%d %H:%M:%S")
-  cat(paste0("   ", get_branch(), " Created: ", created_str, "\n"))
-
-  # Horizons version
-  cat(paste0("   ", get_branch(), " Horizons version: ", x$provenance$horizons_version, "\n"))
-
-  if (!is.null(x$provenance$aggregation_by)) {
-    cat(paste0("   ", get_branch(), " Aggregation: ", x$provenance$aggregation_by, "\n"))
-  }
-
-  cat("\n")
 
   ## ---------------------------------------------------------------------------
   ## Selection section (rows drawn from a pool by select_training())
@@ -3631,6 +3649,12 @@ summary.horizons_data <- function(object, ...) {
     cat("\n")
 
   }
+
+  ## ---------------------------------------------------------------------------
+  ## Log section: every row, in order
+  ## ---------------------------------------------------------------------------
+
+  summary_log(x$log)
 
   ## ---------------------------------------------------------------------------
   ## Pipeline status

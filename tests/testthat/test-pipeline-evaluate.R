@@ -2067,7 +2067,7 @@ describe("evaluate() - checkpoint data provenance", {
 
     ## Nothing unusable in the store: no note on the log
     expect_named(caught$value$log, names(new_log()))
-    expect_false(any(caught$value$log$type == "note"))
+    expect_false(any(caught$value$log$verb == "evaluate" & caught$value$log$type == "note"))
     expect_equal(caught$value$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
 

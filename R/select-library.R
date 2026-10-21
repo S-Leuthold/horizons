@@ -52,7 +52,7 @@ library_registry <- function() {
       ## on every built library. Raise it whenever build_ossl_library(), the
       ## filters or the property map change what is built: a library cached
       ## from another build is then rebuilt rather than read (#154).
-      build = 1L,
+      build = 2L,
 
       ## Sizes and MD5s as published, verified by HTTP HEAD on 2026-09-11.
       ## OSSL's KSSL MIR data is the laboratory's July 2022 snapshot.

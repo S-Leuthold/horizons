@@ -107,8 +107,7 @@ make_configured_hd <- function(n_samples      = 100L,
 
   ## Built from the constructor, so every key the contract declares arrives
   ## on its own; only what the tests set is written here.
-  obj <- new_horizons_data(analysis = analysis, role_map = role_map,
-                           spectra_source = "test", spectra_type = "mir")
+  obj <- new_horizons_data(analysis = analysis, role_map = role_map)
 
   obj$config$configs          <- configs
   obj$config$n_configs        <- if (!is.null(configs)) nrow(configs)

@@ -16,16 +16,15 @@
 }
 \description{
 Displays a comprehensive, detailed summary of a horizons_data object. Shows
-full provenance, data characteristics, configuration status, and pipeline
-state. Designed for scientists who want to see the complete picture.
+data characteristics, configuration status, every row of the log, and
+pipeline state. Designed for scientists who want to see the complete
+picture.
 }
 \details{
 The summary output provides significantly more detail than \code{print()}:
 \itemize{
 \item \strong{Data section}: Sample ID preview, wavenumber range and step size,
 response names, outcome variable, memory footprint
-\item \strong{Provenance section}: Full source paths, timestamps, version info,
-preprocessing history, aggregation settings
 \item \strong{Selection section}: Scope and groups, properties, k, pool size, rows
 drawn per property, similarity space and metric, twins excluded, and any
 rows removed since the draw (present only for objects from
@@ -33,6 +32,9 @@ rows removed since the draw (present only for objects from
 \item \strong{Configuration section}: Tuning parameter defaults, config count, and
 the outcome range when it is not the default \code{c(0, Inf)}
 \item \strong{Validation section}: Whether validation has run, pass/fail status
+\item \strong{Log section}: Every row of the log, in order: when its call ran, the
+verb, for a warning its topic, and the message. The data verbs' notes
+record how the object was made, from the source onward
 \item \strong{Pipeline status}: Current stage and next step guidance, noting when
 the rows were drawn from a pool
 }

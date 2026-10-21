@@ -1,4 +1,4 @@
-# print.horizons_data shows the empty state and the spectra() hint, and an object with only provenance as not empty
+# print.horizons_data shows the empty state and the spectra() hint, and an object with only a log as not empty
 
     Code
       print(obj)
@@ -9,17 +9,16 @@
       
       Use spectra() to load data.
     Code
-      print(new_horizons_data(spectra_source = "/path/to/spectra", spectra_type = "opus"))
+      print(logged)
     Output
       ── horizons_data ──
       
-      Provenance
-         ├─ Source: /path/to/spectra
-         └─ Type: opus
+      Log
+         └─ 1 warning, 1 note
       
       Use summary() for details.
 
-# print.horizons_data shows the counts, the outcome and the provenance
+# print.horizons_data shows the counts, the outcome and the log's warnings and notes
 
     Code
       print(obj)
@@ -31,13 +30,12 @@
          ├─ Predictors: 3 (4000–3996 cm⁻¹)
          └─ Outcome: SOC
       
-      Provenance
-         ├─ Source: /path/to/spectra
-         └─ Type: opus
+      Log
+         └─ 1 warning, 1 note
       
       Use summary() for details.
 
-# summary.horizons_data of an empty object shows the tuning defaults, the version and spectra() as the next step
+# summary.horizons_data of an empty object shows the tuning defaults, an empty log and spectra() as the next step
 
     Code
       summary(obj)
@@ -46,10 +44,6 @@
       
       Data
          └─ (no data loaded)
-      
-      Provenance
-         ├─ Created: <time>
-         └─ Horizons version: <version>
       
       Configuration
          ├─ Configs defined: 0
@@ -61,12 +55,15 @@
       Validation
          └─ Status: not run
       
+      Log
+         └─ (empty)
+      
       Pipeline Status
          └─ Next step: spectra()
       
       ──────────────────────────────────────────────────────────────────────────────── 
 
-# summary.horizons_data shows the data, provenance, configuration and validation blocks, and configure() as the next step
+# summary.horizons_data shows the data, configuration, validation and log blocks, and configure() as the next step
 
     Code
       summary(obj)
@@ -82,12 +79,6 @@
          ├─ Outcome: SOC
          └─ Memory: <size>
       
-      Provenance
-         ├─ Spectra source: /path/to/spectra
-         ├─ Spectra type: opus
-         ├─ Created: <time>
-         └─ Horizons version: <version>
-      
       Configuration
          ├─ Configs defined: 0
          └─ Tuning defaults:
@@ -97,6 +88,10 @@
       
       Validation
          └─ Status: not run
+      
+      Log
+         ├─ <time> spectra(): Read 1 OPUS file from 1 path: 4 scans and 3 predictors, with horizons <version>.
+         └─ <time> add_response() warning (coverage): 2 of 4 samples matched the source, so 2 have no response values.
       
       Pipeline Status
          └─ Next step: configure()
@@ -163,16 +158,15 @@
          ├─ Predictors: 851 (4000–600 cm⁻¹)
          └─ Responses: clay, oc
       
-      Provenance
-         ├─ Source: scans/T01.0 and 2 more
-         └─ Type: opus
-      
       Selection
          ├─ Scope: batch (2 groups)
          ├─ k: 3
          ├─ Targets: 4 rows
          ├─ Pool: 12 rows; drawn per property: clay 12/12, oc 12/12
          └─ Space: PCA 12 components, mahalanobis; twins excluded: 0 flagged, 0 removed
+      
+      Log
+         └─ 0 warnings, 2 notes
       
       Use summary() for details.
 
@@ -191,12 +185,6 @@
          │     └─ Step: 4 cm⁻¹
          ├─ Responses: clay, oc
          └─ Memory: <size>
-      
-      Provenance
-         ├─ Spectra source: scans/T01.0 and 2 more
-         ├─ Spectra type: opus
-         ├─ Created: <time>
-         └─ Horizons version: <version>
       
       Selection
          ├─ Scope: batch (2 groups)
@@ -219,6 +207,10 @@
       
       Validation
          └─ Status: not run
+      
+      Log
+         ├─ <time> spectra(): Read a data frame: 40 rows and 851 predictors, with horizons <version>.
+         └─ <time> add_response(): Joined clay and oc from a data frame on sample_id: 40 of 40 samples matched, with measured values per variable: clay 40, oc 20.
       
       Pipeline Status
          ├─ Rows: drawn from a pool by select_training() (scope: batch)
