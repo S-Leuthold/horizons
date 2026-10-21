@@ -123,7 +123,9 @@ record (other than \code{scope = "global"}) was drawn for properties that do not
 include it (\code{horizons_warning_input}). Re-configuring an evaluated or
 fitted object warns too (\code{horizons_warning_input}), naming what it
 discards; re-configuring one that was only configured is reported in
-verbose output and a note on the object's log.
+verbose output and a note on the object's log. Either message says when
+it cleared a validation, and with it a response-trim request, so that
+\code{validate()} can be run again.
 This enables the \code{purrr::map()} multi-outcome pattern:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{c("SOC", "POM_C", "pH") |>

@@ -36,7 +36,9 @@
 #' include it (`horizons_warning_input`). Re-configuring an evaluated or
 #' fitted object warns too (`horizons_warning_input`), naming what it
 #' discards; re-configuring one that was only configured is reported in
-#' verbose output and a note on the object's log.
+#' verbose output and a note on the object's log. Either message says when
+#' it cleared a validation, and with it a response-trim request, so that
+#' `validate()` can be run again.
 #' This enables the `purrr::map()` multi-outcome pattern:
 #'
 #' ```
@@ -418,16 +420,25 @@ configure <- function(x,
     discarded <- intersect(promoted_state(x),
                            c("evaluation results", "fitted models", "an ensemble"))
 
+    ### The validation goes with the configuration, so the message names it
+    ### when there was one to clear.
+    cleared <- if (!is.null(x$validation$timestamp)) {
+      c("i" = paste0("Cleared the validation",
+                     if (!is.null(x$validation$outliers$response_trim)) ", with its response-trim request",
+                     "; run {.fn validate} again."))
+    }
+
     if (length(discarded) > 0) {
 
       log_warning(collector, "input", c(
         "Re-configuring discarded {discarded}, keyed to the previous configuration.",
-        "i" = "Run {.fn evaluate} again on this object, or keep the earlier one to use them."
+        "i" = "Run {.fn evaluate} again on this object, or keep the earlier one to use them.",
+        cleared
       ))
 
     } else {
 
-      log_note(collector, "Replaced the previous configuration.")
+      log_note(collector, c("Replaced the previous configuration.", cleared))
 
     }
 

@@ -719,6 +719,18 @@ describe("configure() reconfiguration", {
     expect_identical(row$message, "Replaced the previous configuration.")
     expect_output(configure(r1, verbose = TRUE), "Replaced the previous configuration", fixed = TRUE)
 
+    ## A validation is cleared with the configuration, and the note says so,
+    ## with the response-trim request when there was one
+    vd <- r1
+    vd$validation$timestamp <- Sys.time()
+    row <- configure(vd)$log
+    expect_identical(row$message[row$verb == "configure"],
+                     "Replaced the previous configuration. Cleared the validation; run `validate()` again.")
+    vd$validation$outliers$response_trim <- list(outcome = "SOC", method = "iqr", threshold = 1.5)
+    row <- configure(vd)$log
+    expect_match(row$message[row$verb == "configure"],
+                 "Cleared the validation, with its response-trim request; run `validate()` again.", fixed = TRUE)
+
     ## An evaluation and a fit are runs the user loses, so they are warned,
     ## by name, after being written to the log
     ev <- r1
