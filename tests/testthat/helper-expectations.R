@@ -39,7 +39,9 @@ log_rows_added <- function(before, after) {
 #' The events one verb call added to an object's log, less its record
 #'
 #' A data verb's last row is the note recording the call; the rows before it
-#' are what happened to particular samples, columns or files.
+#' are what happened to particular samples, columns or files. The row
+#' dropped is checked to be that note, by the opening each data verb's
+#' record has, so an event in its place is never dropped silently.
 #'
 #' @inheritParams log_rows_added
 #'
@@ -47,6 +49,19 @@ log_rows_added <- function(before, after) {
 log_events_added <- function(before, after) {
 
   rows <- log_rows_added(before, after)
+
+  openings <- c(spectra      = "Read ",
+                parse_ids    = "Parsed sample ids with ",
+                standardize  = "Standardized with ",
+                average      = "Averaged ",
+                add_response = "Joined ")
+
+  last <- rows[nrow(rows), , drop = FALSE]
+
+  if (nrow(rows) == 0 || !identical(last$type, "note") || !last$verb %in% names(openings) ||
+      !startsWith(last$message, openings[[last$verb]])) {
+    stop("The call's last row is not a data verb's record note.", call. = FALSE)
+  }
 
   rows[setdiff(seq_len(nrow(rows)), nrow(rows)), , drop = FALSE]
 
