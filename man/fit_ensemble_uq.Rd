@@ -27,7 +27,8 @@ recorded on the ensemble contract.}
 \value{
 \code{x} with \verb{$ensemble$uq} populated. The bundle carries: \code{method}
 (\code{"cv_plus"}), \code{ensemble_method}, \code{members}, \code{fold_models}, \code{calib}
-(\code{.row}, \code{fold}, \code{.pred_oof}, \code{truth}, \code{residual}), \code{n_calib},
+(\code{.row}, \code{sample_id}, \code{fold}, \code{.pred_oof}, \code{truth}, \code{residual}; \code{.row}
+is \code{NA} for a trimmed row), \code{n_calib},
 \code{level_default}, \code{seed}, \code{oof_coverage}, \code{mean_width}, \code{timestamp}.
 }
 \description{
@@ -35,7 +36,9 @@ Populates \verb{$ensemble$uq} with a CV+ conformal bundle calibrated on the
 meta-learner's honest out-of-fold residuals: a fresh 5-fold partition of
 the meta frame (drawn at \verb{ensemble seed + 1000}, disjoint from the tuning
 folds), per-fold refits of the finalized combiner with the fold models
-retained, and the signed residuals CQR-style. Consumed by
+retained, and the signed residuals CQR-style. After a response trim, the
+training rows it set aside calibrate as well (see
+\code{compute_ensemble_uq()}, #103). Consumed by
 \code{\link[=predict.horizons_ensemble]{predict.horizons_ensemble()}} unless \code{interval = FALSE}.
 
 Runs inside \code{\link[=ensemble]{ensemble()}} when \code{compute_uq = TRUE}, at \code{level}

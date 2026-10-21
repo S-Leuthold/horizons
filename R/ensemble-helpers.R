@@ -92,6 +92,7 @@ gather_members <- function(object) {
 #'     \item{truth}{Numeric vector of observed values, aligned to
 #'       `predictors` row order.}
 #'     \item{row}{Integer vector of `.row` ids, aligned to `predictors`.}
+#'     \item{sample_id}{The rows' `sample_id`s, aligned to `predictors`.}
 #'     \item{members}{The member `config_id`s, in column order.}
 #'   }
 #'
@@ -100,7 +101,7 @@ build_oof_matrix <- function(object, members) {
 
   cv <- object$models$cv_predictions
 
-  cv <- cv[cv$config_id %in% members, c(".row", "config_id", ".pred", "truth")]
+  cv <- cv[cv$config_id %in% members, c(".row", "sample_id", "config_id", ".pred", "truth")]
 
   ## Every member covers the same .row set, with no row twice: fit() fails a
   ## member that missed a fold (#101), and the door validator refuses a fit
@@ -112,11 +113,12 @@ build_oof_matrix <- function(object, members) {
   ## pivot_wider() from building list-columns here; inside ensemble() this
   ## runs as the meta-learner unit's first step (oof_matrix).
 
-  ## Carry truth through the pivot — it is constant per .row, so it rides as an
-  ## id column and comes out aligned, avoiding a separate dedup-and-reorder.
+  ## Carry truth and sample_id through the pivot — each is constant per .row,
+  ## so it rides as an id column and comes out aligned, avoiding a separate
+  ## dedup-and-reorder.
 
   wide <- tidyr::pivot_wider(
-    cv[, c(".row", "truth", "config_id", ".pred")],
+    cv[, c(".row", "sample_id", "truth", "config_id", ".pred")],
     names_from   = "config_id",
     values_from  = ".pred",
     names_prefix = "member_"
@@ -131,6 +133,7 @@ build_oof_matrix <- function(object, members) {
     predictors = wide[, member_cols, drop = FALSE],
     truth      = wide$truth,
     row        = wide$.row,
+    sample_id  = wide$sample_id,
     members    = members
   )
 
@@ -745,13 +748,11 @@ build_ensemble_contract <- function(method,
 #'   does not. `TRUE`: intervals asked for; without a bundle the bounds are
 #'   `NA`, with one warning of class `horizons_warning_skipped`. `FALSE`:
 #'   none. The intervals are at the level they were calibrated at in
-#'   [ensemble()], 0.90 by default (see Details). When the
-#'   members were fit on a response-trimmed training partition
-#'   (`validate(remove_outliers =
-#'   "response")`, #77), the intervals come from out-of-fold predictions on
-#'   the rows inside the training fences, so this warns once, with class
-#'   `horizons_warning_quality`, that they were calibrated within those
-#'   fences and can undercover samples outside them.
+#'   [ensemble()], 0.90 by default (see Details). When the members were fit
+#'   on a response-trimmed training partition (`validate(remove_outliers =
+#'   "response")`, #77), the training rows the trim set aside calibrate the
+#'   intervals too, so they cover samples outside the training fences as
+#'   well as inside (#103).
 #' @param ... Not used; present for S3 method consistency. A `level` passed
 #'   here is ignored with a warning (see Details), and any other argument is
 #'   an error.
@@ -999,9 +1000,8 @@ predict.horizons_ensemble <- function(object,
 
   log_prediction_reports(collector, records, flagged, list(winsorized))
 
-  ## Conformal coverage on a selected training set, and CV+ intervals
-  ## calibrated within the training fences, said only when intervals came
-  ## back (#145)
+  ## Conformal coverage on a selected training set, said only when intervals
+  ## came back (#145)
   log_interval_quality(collector, object, intervals_returned(out))
 
   finish_predict(collector, out)

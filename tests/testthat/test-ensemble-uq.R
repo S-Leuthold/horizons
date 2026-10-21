@@ -140,7 +140,7 @@ describe("fit_ensemble_uq() - bundle contract", {
     uq <- ens_built("weighted")$ensemble$uq
 
     expect_setequal(names(uq$calib),
-                    c(".row", "fold", ".pred_oof", "truth", "residual"))
+                    c(".row", "sample_id", "fold", ".pred_oof", "truth", "residual"))
     expect_equal(uq$n_calib, nrow(uq$calib))
     expect_true(any(uq$calib$residual < 0) && any(uq$calib$residual > 0))
     expect_equal(uq$calib$residual, uq$calib$truth - uq$calib$.pred_oof)
@@ -252,6 +252,145 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
     }
 
     expect_false(identical(fold_of(307L), fold_of(uq$seed)))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## The rows a response trim set aside (#103)
+## ---------------------------------------------------------------------------
+## The trim keeps the training rows outside the fences out of every member's
+## fit and out-of-fold predictions, so the meta frame holds none of them. They
+## calibrate the CV+ intervals as well, as they calibrate a single fit's
+## (#99): the final members predict them, and a fold model that never trained
+## on them scores each.
+
+#' A weighted ensemble with CV+ intervals over a fit whose evaluation trimmed
+#' eight training rows far above the rest. plsr and elastic net keep it fast.
+#' @noRd
+build_trimmed_ens <- function() {
+
+  obj <- make_eval_object(n = 80, n_configs = 2)
+  obj$config$configs$model <- c("plsr", "elastic_net")
+  obj$config$tuning$final_bayesian_iter <- 0L
+  obj$data$analysis$SOC[1:8] <- seq(20, 55, by = 5)
+
+  utils::capture.output(
+    v <- suppressWarnings(validate(obj, remove_outliers = "response"))
+  )
+
+  ev  <- suppressWarnings(evaluate(v, prune = FALSE, seed = 307L))
+  fx  <- suppressWarnings(fit(ev, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 307L))
+
+  suppressWarnings(ensemble(fx, method = "weighted", compute_uq = TRUE))
+
+}
+
+trimmed_ens <- function() memo_fixture("trimmed_ens", build_trimmed_ens)
+
+describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
+
+  it("calibrates on every trimmed row, each in one fold, beside every meta row", {
+
+    ens <- trimmed_ens()
+    uq  <- ens$ensemble$uq
+    ids <- ens$evaluation$response_trim$trimmed_ids
+    oof <- build_oof_matrix(ens, uq$members)
+
+    expect_length(ids, 8L)
+
+    at <- match(ids, uq$calib$sample_id)
+
+    expect_false(anyNA(at))
+    expect_identical(which(is.na(uq$calib$.row)), sort(at))
+    expect_true(all(uq$calib$fold[at] %in% seq_along(uq$fold_models)))
+
+    ## Balanced across the five folds: eight rows give 2, 2, 2, 1, 1
+    expect_identical(sort(as.integer(table(factor(uq$calib$fold[at], levels = 1:5)))),
+                     c(1L, 1L, 2L, 2L, 2L))
+
+    ## The meta rows are all there, each once, with their sample_ids
+    expect_setequal(uq$calib$.row[-at], oof$row)
+    expect_identical(anyDuplicated(uq$calib$sample_id), 0L)
+    expect_identical(uq$calib$sample_id[-at], oof$sample_id[match(uq$calib$.row[-at], oof$row)])
+    expect_identical(uq$n_calib, length(oof$row) + length(ids))
+
+  })
+
+  it("scores each trimmed row with its fold model's prediction of the members' predictions", {
+
+    ens  <- trimmed_ens()
+    uq   <- ens$ensemble$uq
+    ids  <- ens$evaluation$response_trim$trimmed_ids
+    rows <- ens$data$analysis[ens$data$analysis$sample_id %in% ids, , drop = FALSE]
+
+    ## The final members, which never trained on these rows (#77)
+    member_pred <- predict_members(ens, uq$members, rows)
+    wide <- tidyr::pivot_wider(member_pred[, c("sample_id", "config_id", ".pred")],
+                               names_from = "config_id", values_from = ".pred",
+                               names_prefix = "member_")
+
+    calib <- uq$calib[match(wide$sample_id, uq$calib$sample_id), ]
+    truth <- rows$SOC[match(wide$sample_id, rows$sample_id)]
+
+    scored <- vapply(seq_len(nrow(wide)), function(i) {
+      predict_fold_model(uq$fold_models[[calib$fold[i]]], "weighted",
+                         wide[i, paste0("member_", uq$members), drop = FALSE])
+    }, numeric(1))
+
+    expect_equal(calib$.pred_oof, scored)
+    expect_equal(calib$truth, truth)
+    expect_equal(calib$residual, truth - scored)
+    expect_true(all(truth > ens$evaluation$response_trim$upper))
+
+  })
+
+  it("trains no fold model on a trimmed row", {
+
+    ## A weighted fold model is the member weights re-derived on its fold's
+    ## training rows. Re-derived from the meta rows outside the fold alone,
+    ## they are the same, so no trimmed row entered any fold model.
+    ens  <- trimmed_ens()
+    uq   <- ens$ensemble$uq
+    oof  <- build_oof_matrix(ens, uq$members)
+    meta <- uq$calib[!is.na(uq$calib$.row), ]
+
+    for (k in seq_along(uq$fold_models)) {
+
+      pos <- match(meta$.row[meta$fold != k], oof$row)
+
+      expect_equal(
+        derive_member_weights(oof$predictors[pos, , drop = FALSE], oof$truth[pos],
+                              members = uq$members, optimize = ens$ensemble$optimize),
+        uq$fold_models[[k]],
+        info = k
+      )
+
+    }
+
+  })
+
+  it("calibrates an ensemble without a trim on its meta rows alone, as the fold pass at the stored seed does", {
+
+    ## The trimmed rows' folds are drawn only when there are some, after the
+    ## fold models, so an ensemble without a trim calibrates as it always has
+    ens_ref <- ens_built("weighted")
+    uq      <- ens_ref$ensemble$uq
+    oof     <- build_oof_matrix(ens_ref, uq$members)
+
+    meta_frame        <- oof$predictors
+    meta_frame$.truth <- oof$truth
+
+    set.seed(uq$seed)
+    folds <- suppressWarnings(rsample::vfold_cv(meta_frame, v = 5, strata = ".truth"))
+    plain <- fit_uq_fold_models(meta_frame, oof$row, oof$sample_id, folds,
+                                ens_ref$ensemble, ens_ref$ensemble$optimize)
+
+    expect_false(anyNA(uq$calib$.row))
+    expect_identical(uq$calib, plain$calib)
+    expect_identical(uq$fold_models, plain$fold_models)
 
   })
 

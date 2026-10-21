@@ -530,6 +530,7 @@ UNIT_STEPS <- c(
   combine             = "Ensemble combination",
   cv_plus_folds       = "CV+ fold predictions",
   cv_plus_fold_models = "CV+ fold models",
+  cv_plus_trimmed     = "CV+ trimmed-row calibration",
   cv_plus_diagnostics = "CV+ leave-self-out diagnostics",
   cv_plus_bounds      = "CV+ bounds"
 )

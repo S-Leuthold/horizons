@@ -20,6 +20,7 @@ A list with:
 \item{truth}{Numeric vector of observed values, aligned to
 \code{predictors} row order.}
 \item{row}{Integer vector of \code{.row} ids, aligned to \code{predictors}.}
+\item{sample_id}{The rows' \code{sample_id}s, aligned to \code{predictors}.}
 \item{members}{The member \code{config_id}s, in column order.}
 }
 }
