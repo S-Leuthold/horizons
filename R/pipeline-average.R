@@ -1120,7 +1120,7 @@ average_group <- function(group_data,
 
     if (check_uniformity(col_values)) {
 
-      result[[col]] <- col_values[1]
+      result[[col]] <- first_present(col_values)
 
     } else {
 
@@ -1195,13 +1195,37 @@ collapse_response <- function(values) {
 
   if (check_uniformity(values)) {
 
-    non_na <- values[!is.na(values)]
-
-    return(if (length(non_na) == 0) values[1] else non_na[1])
+    return(first_present(values))
 
   }
 
   structure(as.character(unique(values[!is.na(values)])), class = "conflict")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## first_present() — The value a uniform column collapses to
+## ---------------------------------------------------------------------------
+
+#' The first non-missing value of a vector
+#'
+#' @description
+#' What a column uniform within a group collapses to, metadata and
+#' non-numeric responses alike: the value its replicates share, which a
+#' missing first replicate does not hide.
+#'
+#' @param values Vector of the column's values for the group's replicates.
+#'
+#' @return Length-one vector of the same type: the first non-`NA` value, or
+#'   `values[1]` when every value is `NA`.
+#'
+#' @noRd
+first_present <- function(values) {
+
+  non_na <- values[!is.na(values)]
+
+  if (length(non_na) == 0) values[1] else non_na[1]
 
 }
 

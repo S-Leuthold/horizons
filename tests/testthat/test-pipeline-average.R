@@ -652,6 +652,19 @@ test_that("average() preserves uniform metadata", {
 
 })
 
+test_that("average() keeps a uniform metadata column's value when the first replicate lacks it", {
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
+  hd$data$analysis$site[1] <- NA
+  hd$data$analysis$site[4:6] <- NA
+
+  out <- average(hd, verbose = FALSE)$data$analysis
+
+  ## and stays NA where no replicate has it
+  expect_identical(out$site, c("SiteA", NA))
+
+})
+
 test_that("average() drops non-uniform metadata", {
 
   ## Arrange ---------------------------------------------------------------
