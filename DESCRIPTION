@@ -89,6 +89,7 @@ Collate:
     'metrics.R'
     'utils-errors.R'
     'utils-log.R'
+    'utils-tune.R'
     'control.R'
     'utils-backtransform.R'
     'utils-clustering.R'

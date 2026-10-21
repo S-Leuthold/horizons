@@ -268,7 +268,7 @@ fit_single_config <- function(config_row,
     ## The candidates left out of the choice for a missing fold, the Bayesian
     ## search's dropped ones among them, as evaluate()'s row says (#101)
     left_out <- unit_step("select_best", incomplete_note(retune$tune_results, n_folds,
-                                                         retune$n_dropped))
+                                                         nrow(retune$grid), retune$n_dropped))
 
     if (!is.null(left_out)) pin(left_out)
 

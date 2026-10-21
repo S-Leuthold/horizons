@@ -239,7 +239,7 @@ across the \code{n_best} members is gated on the fitted-object memory contract
 Every prediction \code{fit()} scores (out-of-fold, test and calibration) is
 clamped to \code{configure()}'s \code{outcome_range}, as \code{predict()} clamps what it
 serves. Before anything is drawn or fitted, on either path, \code{fit()} aborts
-with class \code{horizons_input_error} when an observed outcome lies outside
+with class \code{horizons_error_input} when an observed outcome lies outside
 the range or is infinite, naming \code{outcome_range} and how to set it (#76);
 when the ranking metric is \code{"rrmse"} and the range's lower bound is
 negative, since the mean outcome it divides by can then be zero or
@@ -252,7 +252,7 @@ the members were chosen on predictions clamped to that range.
 \section{Zero outcome variance}{
 
 On either path, before anything is drawn, \code{fit()} aborts with class
-\code{horizons_input_error} when every observed outcome has the same value, as
+\code{horizons_error_input} when every observed outcome has the same value, as
 \code{evaluate()} does. It also aborts, before any model is fitted, when the
 modelled rows vary but the rows its models are fitted on do not, because
 the rows with another value all fell in the test set or the calibration

@@ -430,10 +430,10 @@ describe("fit_single_config() - log transformation", {
 ## Failure paths
 ## =========================================================================
 
-## Every stage runs inside safely_execute() and, when it errors, returns the
-## failed result naming the stage. With a stage's exit removed the config
-## still fails, but at a later stage and under that stage's name, so each
-## case asserts the stage and the cause. Stages are made to fail by mocking a
+## Every stage runs as a step of the member's unit and, when it errors,
+## returns the failed result naming the stage. With a stage's exit removed
+## the config still fails, but at a later stage and under that stage's name,
+## so each case asserts the stage and the cause. Stages are made to fail by mocking a
 ## horizons step or tune::fit_resamples(), or, for the final fit, by missing
 ## predictor values that only train_data holds (the folds carry their own
 ## copy of the rows).

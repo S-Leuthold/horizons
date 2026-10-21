@@ -79,7 +79,10 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #' **Before modelling only:** `parse_ids()` rewrites `sample_id`, and the
 #' splits and models that [evaluate()], [fit()] and [ensemble()] store are
 #' keyed to it, so an evaluated, fitted or ensembled object is refused. Parse
-#' the ids before `evaluate()`.
+#' the ids before `evaluate()`. For the same reason a parse that would
+#' rewrite the ids of a [select_training()] result is refused: parse them
+#' before selecting. A token named like a column already in the data is
+#' refused rather than overwriting it.
 #'
 #' @return The input `horizons_data` object with:
 #'   * `sample_id` updated from the `sampleid` token (if present)
@@ -136,7 +139,7 @@ parse_ids <- function(x,
   ## Rewriting sample_id is a row change: evaluation and model splits are
   ## keyed to the ids this would rewrite.
 
-  check_unpromoted(x, "parse_ids")
+  check_unpromoted(x)
 
   ## Validate exactly one of format/patterns provided ------------------------
 
@@ -235,6 +238,24 @@ parse_ids <- function(x,
   if (has_format) {
 
     patterns <- format_to_patterns(format)
+
+  }
+
+  ## Refuse a token named like a column already present ----------------------
+  ## Its values would overwrite the column. The sampleid token writes
+  ## sample_id, as it is meant to.
+
+  tokens   <- names(patterns)[nzchar(names(patterns) %||% character(0))]
+  tokens   <- tokens[!tolower(tokens) %in% tolower(SAMPLEID_VARIANTS)]
+  clashing <- intersect(tokens, names(x$data$analysis))
+
+  if (length(clashing) > 0) {
+
+    abort_horizons(c(
+      "{cli::qty(clashing)}Token{?s} {.field {clashing}} {?names a column/name columns} already in the data.",
+      "i" = "A token becomes a column, so it would overwrite {cli::qty(clashing)}{?it/them}.",
+      "i" = "{cli::qty(clashing)}Rename the token{?s}, or drop the column{?s} before parsing again."
+    ), kind = "input")
 
   }
 
@@ -343,6 +364,17 @@ parse_ids <- function(x,
   ## A sample_id rewrite is a row change, so it goes through set_analysis() --
 
   if (!identical(new_sample_id, old_sample_id)) {
+
+    ### A select_training() record is keyed to the ids it drew, and renamed
+    ### rows cannot be matched back to it.
+    if (!is.null(x$selection)) {
+
+      abort_horizons(c(
+        "{.arg x} carries a {.fn select_training} record, keyed to the {.field sample_id}s this parse would rewrite.",
+        "i" = "Parse the ids before {.fn select_training}."
+      ), kind = "input")
+
+    }
 
     analysis           <- x$data$analysis
     analysis$sample_id <- new_sample_id

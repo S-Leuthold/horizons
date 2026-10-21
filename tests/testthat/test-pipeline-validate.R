@@ -142,8 +142,9 @@ describe("validate() input validation", {
   test_that("rejects non-horizons_data input", {
 
     expect_error(
-      capture.output(validate(data.frame(x = 1))),
-      class = "horizons_validate_error"
+      validate(data.frame(x = 1)),
+      "`x` must be a horizons_data object, not a data frame.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -153,9 +154,9 @@ describe("validate() input validation", {
     hd <- make_configured_hd(has_config = FALSE)
 
     expect_error(
-      capture.output(validate(hd)),
-      "not configured",
-      class = "horizons_validate_error"
+      validate(hd),
+      "Run `configure()` first.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -165,15 +166,15 @@ describe("validate() input validation", {
     hd <- make_configured_hd()
 
     expect_error(
-      capture.output(validate(hd, remove_outliers = "both")),
-      "remove_outliers",
-      class = "horizons_validate_error"
+      validate(hd, remove_outliers = "both"),
+      "Got `\"both\"`.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
     expect_error(
-      capture.output(validate(hd, remove_outliers = 42)),
-      "remove_outliers",
-      class = "horizons_validate_error"
+      validate(hd, remove_outliers = 42),
+      "`remove_outliers` must be `FALSE`, `TRUE`, \"spectral\" or \"response\".", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -183,9 +184,9 @@ describe("validate() input validation", {
     hd <- make_configured_hd()
 
     expect_error(
-      capture.output(validate(hd, spectral_method = "robust")),
-      "spectral_method",
-      class = "horizons_validate_error"
+      validate(hd, spectral_method = "robust"),
+      "`spectral_method` must be one of \"mahalanobis\".", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -195,9 +196,9 @@ describe("validate() input validation", {
     hd <- make_configured_hd()
 
     expect_error(
-      capture.output(validate(hd, response_method = "zscore")),
-      "response_method",
-      class = "horizons_validate_error"
+      validate(hd, response_method = "zscore"),
+      "`response_method` must be one of \"iqr\".", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -207,21 +208,21 @@ describe("validate() input validation", {
     hd <- make_configured_hd()
 
     expect_error(
-      capture.output(validate(hd, spectral_threshold = -0.1)),
-      "between 0 and 1",
-      class = "horizons_validate_error"
+      validate(hd, spectral_threshold = -0.1),
+      "`spectral_threshold` must be a single number between 0 and 1, exclusive.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
     expect_error(
-      capture.output(validate(hd, spectral_threshold = 1.0)),
-      "between 0 and 1",
-      class = "horizons_validate_error"
+      validate(hd, spectral_threshold = 1.0),
+      "`spectral_threshold` must be a single number between 0 and 1, exclusive.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
     expect_error(
-      capture.output(validate(hd, spectral_threshold = NA)),
-      "between 0 and 1",
-      class = "horizons_validate_error"
+      validate(hd, spectral_threshold = NA),
+      "`spectral_threshold` must be a single number between 0 and 1, exclusive.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -231,28 +232,30 @@ describe("validate() input validation", {
     hd <- make_configured_hd()
 
     expect_error(
-      capture.output(validate(hd, response_threshold = 0)),
-      "must be positive",
-      class = "horizons_validate_error"
+      validate(hd, response_threshold = 0),
+      "`response_threshold` must be a single positive number.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
     expect_error(
-      capture.output(validate(hd, response_threshold = -1)),
-      "must be positive",
-      class = "horizons_validate_error"
+      validate(hd, response_threshold = -1),
+      "`response_threshold` must be a single positive number.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
 
-  test_that("warns on re-validation, and replaces the checks rather than appending", {
+  test_that("notes a re-validation, and replaces the checks rather than appending", {
 
     hd <- make_configured_hd()
     r1 <- quiet_validate(hd)
 
-    expect_warning(
-      capture.output(r2 <- validate(r1)),
-      "Overwriting previous validation"
-    )
+    ## What the user asked for: a note and a tree line, not a warning
+    expect_no_warning(r2 <- validate(r1))
+    row <- r2$log[r2$log$verb == "validate", ]
+    expect_identical(row$type, "note")
+    expect_identical(row$message, "Replaced the previous validation.")
+    expect_output(validate(r1, verbose = TRUE), "Replaced the previous validation", fixed = TRUE)
 
     expect_equal(nrow(r2$validation$checks), nrow(r1$validation$checks))
 
@@ -517,11 +520,10 @@ describe("validate() cubist feasibility check (P010)", {
     ## trips it without building a library-scale matrix.
     local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")
 
-    ## Don't use quiet_validate — need to capture the warning
-    expect_warning(
-      capture.output(result <- validate(hd)),
-      "Cubist may not finish"
-    )
+    ## Reported in the check and the tree, not warned
+    expect_no_warning(result <- validate(hd))
+    expect_output(validate(hd, verbose = TRUE), "Cubist feasibility: 100 x 50 cells, 1 config(s) flagged",
+                  fixed = TRUE)
 
     p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
     expect_equal(p010$status, "fail")
@@ -574,7 +576,7 @@ describe("validate() cubist feasibility check (P010)", {
 
   })
 
-  test_that("P010 names only the affected configs in the warning", {
+  test_that("P010 counts only the affected configs, and warns nothing", {
 
     hd <- make_configured_hd()
     hd$config$configs <- tibble::tibble(
@@ -587,11 +589,8 @@ describe("validate() cubist feasibility check (P010)", {
 
     local_mocked_bindings(CUBIST_MAX_CELLS = 100, .package = "horizons")
 
-    warned <- testthat::capture_warnings(capture.output(result <- validate(hd)))
-    combined <- paste(warned, collapse = "\n")
-
-    expect_true(grepl("cubist_raw_none_none_ab12cd", combined, fixed = TRUE))
-    expect_false(grepl("rf_raw_none_none_ef34gh", combined, fixed = TRUE))
+    ## The report is the advice; nothing is raised (the Cubist warning went)
+    expect_no_warning(result <- validate(hd))
 
     p010 <- result$validation$checks[result$validation$checks$check_id == "P010", ]
     expect_equal(p010$value, "1 config(s); 100 x 50 = 5,000 cells")
@@ -607,11 +606,26 @@ describe("validate() cubist feasibility check (P010)", {
 
 describe("validate() spectral outlier detection", {
 
-  test_that("P005 detects no outliers in clean data", {
+  test_that("P005 compares each distance with its exact in-sample reference, which can flag where chi-squared cannot (#227)", {
 
-    result <- quiet_validate(make_configured_hd())
+    ## Clean noise, 100 x 50: 47 components are kept, and chi-squared's
+    ## 97.5% point lies above every distance, so it could never flag
+    hd     <- make_configured_hd()
+    result <- quiet_validate(hd)
 
-    expect_equal(length(result$validation$outliers$spectral_ids), 0)
+    pred   <- as.matrix(hd$data$analysis[, -c(1, ncol(hd$data$analysis))])
+    pca    <- stats::prcomp(pred, scale. = TRUE)
+    n      <- nrow(pred)
+    k      <- min(which(cumsum(pca$sdev^2) / sum(pca$sdev^2) >= 0.99)[1], n - 2, 50)
+    scores <- pca$x[, 1:k, drop = FALSE]
+    d      <- stats::mahalanobis(scores, colMeans(scores), stats::cov(scores))
+
+    exact  <- (n - 1)^2 / n * stats::qbeta(0.975, k / 2, (n - k - 1) / 2)
+
+    expect_identical(result$validation$outliers$spectral_ids,
+                     hd$data$analysis$sample_id[d > exact])
+    expect_length(result$validation$outliers$spectral_ids, 2L)
+    expect_false(any(d > stats::qchisq(0.975, df = k)))
 
   })
 
@@ -667,28 +681,62 @@ describe("validate() spectral outlier detection", {
 
   })
 
-  test_that("P005 skips with fewer than 5 samples", {
+  test_that("P005 skips when the cap leaves no component, below three samples (#227)", {
 
-    hd <- make_configured_hd(n_samples = 4, cv_folds = 2L)
+    hd <- make_configured_hd(n_samples = 2, cv_folds = 2L)
 
-    ## Don't use quiet_validate — we need to capture the warning
-    expect_warning(
-      capture.output(result <- validate(hd)),
-      "Too few samples"
-    )
+    ## The response check skips too, so the spectral skip is one bullet
+    w <- expect_warning(result <- validate(hd), class = "horizons_warning_skipped")
+    expect_match(conditionMessage(w), "Spectral outlier detection did not run: too few samples (2).",
+                 fixed = TRUE)
 
     expect_equal(length(result$validation$outliers$spectral_ids), 0)
 
+    ## The report says the check did not run, rather than that it found nothing
+    p005 <- result$validation$checks[result$validation$checks$check_id == "P005", ]
+    expect_identical(p005$value, "not run: too few samples (2)")
+    expect_identical(w$log, result$log[result$log$verb == "validate", ])
+
   })
 
-  test_that("P005 runs with exactly 5 samples (boundary)", {
+  test_that("P005 runs from three samples, with no fixed minimum (#227)", {
 
-    hd <- make_configured_hd(n_samples = 5, cv_folds = 2L)
+    for (n in 3:4) {
 
-    ## No skip warning at n = 5: the guard is n < 5
-    expect_no_warning(capture.output(result <- validate(hd)))
+      hd <- make_configured_hd(n_samples = n, cv_folds = 2L)
 
-    expect_true("P005" %in% result$validation$checks$check_id)
+      warnings <- testthat::capture_warnings(result <- validate(hd))
+      expect_false(any(grepl("Spectral outlier detection did not run", warnings, fixed = TRUE)),
+                   info = paste("n =", n))
+
+      p005 <- result$validation$checks[result$validation$checks$check_id == "P005", ]
+      expect_match(p005$value, "flagged$", info = paste("n =", n))
+
+    }
+
+  })
+
+  test_that("P005 and P007 leave flagged rows out, and never flag or remove one", {
+
+    ## A flagged row holding NA, and a column constant among the other rows:
+    ## left in, the NA would stop the PCA and the column would vary
+    hd <- make_configured_hd(n_predictors = 20)
+    pred <- hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+
+    hd$data$analysis[[pred[1]]] <- c(9, rep(0.5, 99))
+    hd$data$analysis[[pred[5]]][1] <- NA
+    hd$data$analysis[[pred[6]]][1] <- 1000
+    hd$data$analysis$.flag <- c("standardize", rep(NA_character_, 99))
+    hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+
+    p007 <- result$validation$checks[result$validation$checks$check_id == "P007", ]
+    expect_identical(p007$value, "1")
+    expect_match(result$validation$checks$value[result$validation$checks$check_id == "P005"], "flagged$")
+
+    expect_false("S001" %in% result$validation$outliers$spectral_ids)
+    expect_true("S001" %in% result$data$analysis$sample_id)
 
   })
 
@@ -698,11 +746,9 @@ describe("validate() spectral outlier detection", {
     ## would leave each spectrum with no spread, refused before validate().)
     hd <- make_configured_hd(n_predictors = 3, constant_cols = c(1L, 2L))
 
-    ## Don't use quiet_validate — we need to capture the warning
-    expect_warning(
-      capture.output(result <- validate(hd)),
-      "Fewer than 2 predictor columns"
-    )
+    expect_warning(result <- validate(hd),
+                   "Spectral outlier detection did not run: fewer than 2 predictor columns vary.",
+                   fixed = TRUE, class = "horizons_warning_skipped")
 
     p007 <- result$validation$checks[result$validation$checks$check_id == "P007", ]
     expect_equal(p007$value, "2")
@@ -810,6 +856,22 @@ describe("validate() response outlier detection", {
 
   })
 
+  test_that("P006 leaves flagged rows out of its fences and its flags", {
+
+    ## An extreme label on a flagged row: modelling never reads it
+    outcome_vals <- c(1000, seq(10, 20, length.out = 99))
+    hd <- make_configured_hd(outcome_values = outcome_vals)
+    hd$data$analysis$.flag <- c("standardize", rep(NA_character_, 99))
+    hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+    result <- quiet_validate(hd)
+
+    expect_identical(result$validation$outliers$response_ids, character(0))
+    expect_identical(result$validation$checks$value[result$validation$checks$check_id == "P006"],
+                     "0 flagged")
+
+  })
+
   test_that("P006 is INFO severity and does not affect passed", {
 
     outcome_vals <- c(stats::rnorm(97, 15, 2), 100, 200, 300)
@@ -824,13 +886,35 @@ describe("validate() response outlier detection", {
 
     outcome_vals <- c(1.0, 2.0, 3.0, rep(NA, 97))
 
-    ## Don't use quiet_validate — need to capture the warning
-    expect_warning(
-      capture.output(result <- validate(make_configured_hd(outcome_values = outcome_vals))),
-      "Too few non-NA outcome values"
-    )
+    expect_warning(result <- validate(make_configured_hd(outcome_values = outcome_vals)),
+                   "Response outlier detection did not run: too few outcome values (3).",
+                   fixed = TRUE, class = "horizons_warning_skipped")
 
     expect_equal(length(result$validation$outliers$response_ids), 0)
+    p006 <- result$validation$checks[result$validation$checks$check_id == "P006", ]
+    expect_identical(p006$value, "not run: too few outcome values (3)")
+
+  })
+
+  test_that("raises one skipped warning per call, naming every check that could not run", {
+
+    ## Two of three predictors constant, and a constant outcome: both checks
+    ## skip, each a bullet of one warning
+    hd <- make_configured_hd(n_predictors = 3, constant_cols = c(1L, 2L),
+                             outcome_values = rep(5.0, 100))
+
+    warnings <- testthat::capture_warnings(result <- validate(hd))
+    expect_length(warnings, 1L)
+
+    w <- tryCatch(validate(hd), horizons_warning_skipped = identity)
+    expect_match(conditionMessage(w), "2 skipped warnings in `validate()`", fixed = TRUE)
+    expect_match(conditionMessage(w), "Spectral outlier detection did not run: fewer than 2 predictor columns vary.",
+                 fixed = TRUE)
+    expect_match(conditionMessage(w), "Response outlier detection did not run: the outcome's IQR is zero.",
+                 fixed = TRUE)
+
+    p006 <- result$validation$checks[result$validation$checks$check_id == "P006", ]
+    expect_identical(p006$value, "not run: the outcome's IQR is zero")
 
   })
 
@@ -959,9 +1043,10 @@ describe("validate() outlier removal", {
   test_that("no outliers detected: remove_outliers=TRUE does nothing", {
 
     ## Use controlled outcome to ensure no IQR outliers
+    ## A threshold at which the clean fixture flags nothing
     outcome_vals <- seq(10, 20, length.out = 100)
     hd     <- make_configured_hd(outcome_values = outcome_vals)
-    result <- quiet_validate(hd, remove_outliers = TRUE)
+    result <- quiet_validate(hd, remove_outliers = TRUE, spectral_threshold = 0.9999)
 
     expect_false(result$validation$outliers$removed)
     expect_equal(result$validation$outliers$removed_ids, character(0))
@@ -995,6 +1080,47 @@ describe("validate() outlier removal", {
     ## The response threshold travels with the request instead
     expect_identical(result$validation$outliers$response_trim$threshold, 2)
     expect_false("S006" %in% detail$sample_id)
+
+  })
+
+  test_that("validate() refuses a spectral_threshold that would remove every sample", {
+
+    ## Three samples, two alike: at 0.3 every distance exceeds the cutoff
+    hd   <- make_configured_hd(n_samples = 3, cv_folds = 2L)
+    pred <- hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+    base <- sin(seq(0, 6, length.out = length(pred))) + 2
+    hd$data$analysis[, pred] <- as.data.frame(rbind(base, base, base * 1.5 + 0.3))
+
+    ## Ten noise spectra: at 0.05 every one is flagged
+    ten <- make_configured_hd(n_samples = 10, cv_folds = 2L)
+
+    for (case in list(list(hd, 0.3), list(ten, 0.05))) {
+
+      x <- case[[1]]; thr <- case[[2]]
+
+      ## Detection alone flags every sample, and keeps them
+      kept <- quiet_validate(x, spectral_threshold = thr)
+      expect_length(kept$validation$outliers$spectral_ids, nrow(x$data$analysis))
+
+      ## Removal is refused as the argument's, not as a bug
+      expect_error(
+        suppressWarnings(capture.output(validate(x, remove_outliers = TRUE, spectral_threshold = thr))),
+        "flags every sample the check reads as a spectral outlier", fixed = TRUE,
+        class = "horizons_error_input"
+      )
+
+    }
+
+    ## A flagged row is never removed nor modelled, so it leaves nothing either
+    ten$data$analysis$.flag <- c("standardize", rep(NA_character_, 9))
+    ten$data$role_map <- tibble::add_row(ten$data$role_map, variable = ".flag", role = "meta")
+    expect_length(quiet_validate(ten, spectral_threshold = 0.05)$validation$outliers$spectral_ids, 9L)
+
+    err <- expect_error(
+      suppressWarnings(capture.output(validate(ten, remove_outliers = "spectral", spectral_threshold = 0.05))),
+      class = "horizons_error_input"
+    )
+    expect_identical(rlang::call_name(err$call), "validate")
 
   })
 
@@ -1114,6 +1240,23 @@ describe("validate() keeps the removal record", {
 
 describe("validate() passed logic and CLI output", {
 
+  test_that("is quiet under horizons.verbose = FALSE, prints when asked, and checks verbose", {
+
+    hd <- make_configured_hd(n_predictors = 20)
+
+    withr::local_options(horizons.verbose = FALSE)
+    expect_silent(validate(hd))
+    expect_output(validate(hd, verbose = TRUE), "Validating")
+
+    withr::local_options(horizons.verbose = TRUE)
+    expect_output(validate(hd), "Validating")
+
+    expect_error(validate(hd, verbose = "yes"),
+                 "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
   test_that("passed=TRUE when all checks pass", {
 
     result <- quiet_validate(make_configured_hd())
@@ -1148,7 +1291,7 @@ describe("validate() passed logic and CLI output", {
 
     hd <- make_configured_hd()
 
-    expect_snapshot(validate(hd))
+    expect_snapshot(validate(hd, verbose = TRUE))
 
   })
 
@@ -1156,7 +1299,7 @@ describe("validate() passed logic and CLI output", {
 
     hd <- make_configured_hd(outcome_values = rep(5.0, 100))
 
-    expect_snapshot(validate(hd))
+    expect_snapshot(validate(hd, verbose = TRUE))
 
   })
 
@@ -1169,7 +1312,7 @@ describe("validate() passed logic and CLI output", {
 
     }
 
-    expect_snapshot(validate(hd, remove_outliers = TRUE))
+    expect_snapshot(validate(hd, remove_outliers = TRUE, verbose = TRUE))
 
   })
 
@@ -1178,8 +1321,9 @@ describe("validate() passed logic and CLI output", {
     outcome_vals <- c(stats::rnorm(97, 15, 2), 100, 200, 300)
     hd           <- make_configured_hd(outcome_values = outcome_vals)
 
-    requested <- capture.output(suppressWarnings(validate(hd, remove_outliers = "response")))
-    plain     <- capture.output(suppressWarnings(validate(hd)))
+    requested <- capture.output(suppressWarnings(validate(hd, remove_outliers = "response",
+                                                          verbose = TRUE)))
+    plain     <- capture.output(suppressWarnings(validate(hd, verbose = TRUE)))
 
     expect_true(any(grepl("Response outliers: [0-9]+ on the whole table, not removed", requested)))
     expect_true(any(grepl("Trim requested: evaluate() fences its training partition",
@@ -1300,11 +1444,16 @@ describe("validate() and the selection record", {
     hd <- make_selected_hd()
     hd$models$workflows <- list(cfg_a = "a fitted workflow")
 
-    ## Act & Assert
-    expect_error(
+    ## Act & Assert — refused at validate()'s door, not by the row helper
+    err <- expect_error(
       suppressWarnings(capture.output(validate(hd, remove_outliers = "spectral"))),
-      class = "horizons_input_error"
+      "It carries fitted models.", fixed = TRUE,
+      class = "horizons_error_input"
     )
+    expect_identical(rlang::call_name(err$call), "validate")
+
+    ## With nothing to remove the object is still validated
+    expect_no_error(suppressWarnings(capture.output(validate(hd, remove_outliers = FALSE))))
 
   })
 

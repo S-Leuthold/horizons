@@ -283,16 +283,47 @@ test_that("average() on_all_outliers='warn' keeps all and warns", {
 
   ## Act -------------------------------------------------------------------
 
-  expect_warning(
+  w <- expect_warning(
     result <- average(hd, quality_check = TRUE, on_all_outliers = "warn", verbose = FALSE),
-    "All replicates failed"
+    "All replicates failed QC for 1 sample, averaged anyway.", fixed = TRUE,
+    class = "horizons_warning_quality"
   )
+
+  ## Recorded on the object before it was raised, naming the sample
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$topic, "quality")
+  expect_identical(row$ids[[1]], "S1")
+  expect_identical(w$log, row)
 
   ## Assert ----------------------------------------------------------------
 
   ## Sample 1 should still be in results
   expect_true("S1" %in% result$data$analysis$sample_id)
-  expect_equal(length(result$provenance$average$samples_all_outliers), 1)
+
+  ## The sample is on the log, not in provenance (#231)
+  expect_null(result$provenance$average$samples_all_outliers)
+
+})
+
+test_that("average() names every sample whose replicates all failed, on the log, in every mode (#231)", {
+
+  ## Two of three samples fail on every replicate
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 3, all_outliers = TRUE)
+  set.seed(7)
+  for (col in grep("^wn_", names(hd$data$analysis), value = TRUE)) {
+    hd$data$analysis[[col]][4:6] <- stats::runif(3, 0, 2)
+  }
+
+  for (mode in c("warn", "keep_best", "drop")) {
+
+    result <- suppressWarnings(average(hd, on_all_outliers = mode, verbose = FALSE))
+    row    <- result$log[result$log$verb == "average", ]
+
+    expect_identical(nrow(row), 1L, info = mode)
+    expect_setequal(row$ids[[1]], c("S1", "S2"))
+    expect_identical(row$type, if (mode == "warn") "warning" else "note", info = mode)
+
+  }
 
 })
 
@@ -311,11 +342,19 @@ test_that("average() on_all_outliers='drop' removes sample", {
   ## Sample 1 should be dropped
   expect_false("S1" %in% result$data$analysis$sample_id)
   expect_equal(nrow(result$data$analysis), 1)
-  expect_equal(result$provenance$average$samples_dropped, "S1")
+
+  ## Dropped as asked: a note naming it, not a warning, and not in
+  ## provenance (#231)
+  expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE))
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$type, "note")
+  expect_identical(row$ids[[1]], "S1")
+  expect_match(row$message, 'on_all_outliers = "drop"` dropped', fixed = TRUE)
+  expect_null(result$provenance$average$samples_dropped)
 
 })
 
-test_that("average() on_all_outliers='keep_best' keeps highest correlation replicate", {
+test_that("average() on_all_outliers='keep_best' keeps the replicate with the highest mean correlation", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -333,10 +372,50 @@ test_that("average() on_all_outliers='keep_best' keeps highest correlation repli
   ## Should have dropped 2 replicates from S1
   expect_equal(result$provenance$average$n_replicates_dropped, 2)
 
-  ## Verify keep_best retained the QC survivor (not an all-NA artifact)
+  ## Kept as asked: a note naming the sample, not a warning (#231)
+  expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "keep_best", verbose = FALSE))
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$type, "note")
+  expect_identical(row$ids[[1]], "S1")
+
+  ## S1 is exactly the scan whose mean correlation with the other two is
+  ## highest, measured before QC removes any
   s1_result <- result$data$analysis[result$data$analysis$sample_id == "S1", ]
   wn_cols   <- grep("^wn_", names(s1_result), value = TRUE)
-  expect_true(all(!is.na(s1_result[, wn_cols])))
+  scans     <- as.matrix(hd$data$analysis[1:3, wn_cols])
+  cm        <- stats::cor(t(scans))
+  diag(cm)  <- NA
+  best      <- which.max(rowMeans(cm, na.rm = TRUE))
+  expect_equal(unlist(s1_result[, wn_cols]), scans[best, ])
+
+})
+
+test_that("average() under keep_best keeps the best replicate, not the one QC's removal leaves last", {
+
+  ## Arrange — A and B correlate well, C correlates with A alone: their mean
+  ## correlations are 0.713, 0.661 and 0.387. The removal takes C, then one
+  ## of A and B, whose last correlation ties, and used to leave B
+  p  <- 50
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, n_wavelengths = p)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+
+  set.seed(1)
+  z1 <- rnorm(p); z2 <- rnorm(p); z3 <- rnorm(p)
+  A  <- z1 + 0.10 * z2
+  B  <- z1 + 0.10 * z3
+  C  <- z1 * 0.4 + 0.9 * (0.9 * z2 + 0.1 * rnorm(p))
+  for (k in seq_len(p)) hd$data$analysis[[wn[k]]][1:3] <- c(A[k], B[k], C[k])
+
+  cm <- stats::cor(t(rbind(A, B, C)))
+  diag(cm) <- NA
+  expect_equal(unname(round(rowMeans(cm, na.rm = TRUE), 3)), c(0.713, 0.661, 0.387))
+
+  ## Act
+  result <- average(hd, on_all_outliers = "keep_best", verbose = FALSE)
+
+  ## Assert — S1 is A
+  s1 <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_equal(unname(unlist(s1)), A)
 
 })
 
@@ -349,10 +428,19 @@ test_that("average() errors when all samples dropped", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
+  err <- expect_error(
     average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE),
-    "All samples dropped"
+    "Every sample failed quality control on every replicate", fixed = TRUE,
+    class = "horizons_error_qc"
   )
+  expect_s3_class(err, "horizons_error_run")
+
+  ## Nothing printed beside it, and the samples travel on it
+  expect_silent(tryCatch(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE),
+                         error = function(e) NULL))
+  expect_identical(err$results, tibble::tibble(sample_id = "S1", n_replicates = 3L))
+  expect_snapshot(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE),
+                  error = TRUE, cnd_class = TRUE)
 
 })
 
@@ -538,7 +626,7 @@ test_that("average() reports single-replicate groups as not QC'd, not clean (#89
   expect_identical(qc_report(out), c(
     "│  ├─ QC (r > 0.996)",
     "│  │  ├─ 2/3 groups clean",
-    "│  │  ├─ 1 single-replicate group (not QC'd)",
+    "│  │  ├─ 1 group with fewer than two usable replicates (not QC'd)",
     "│  │  └─ 3 samples retained"
   ))
 
@@ -598,6 +686,19 @@ test_that("average() preserves uniform metadata", {
 
 })
 
+test_that("average() keeps a uniform metadata column's value when the first replicate lacks it", {
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE)
+  hd$data$analysis$site[1] <- NA
+  hd$data$analysis$site[4:6] <- NA
+
+  out <- average(hd, verbose = FALSE)$data$analysis
+
+  ## and stays NA where no replicate has it
+  expect_identical(out$site, c("SiteA", NA))
+
+})
+
 test_that("average() drops non-uniform metadata", {
 
   ## Arrange ---------------------------------------------------------------
@@ -616,8 +717,102 @@ test_that("average() drops non-uniform metadata", {
   ## project should be dropped (different per row)
   expect_false("project" %in% names(result$data$analysis))
 
-  ## Should be tracked in provenance
-  expect_true("rep_num" %in% result$provenance$average$meta_columns_dropped)
+  ## Named in a note on the log, not in provenance
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$type, "note")
+  expect_setequal(row$ids[[1]], c("project", "rep_num"))
+  expect_null(result$provenance$average$meta_columns_dropped)
+
+})
+
+test_that("average() drops a metadata column that varies within any sample from every row (#226)", {
+
+  ## Arrange — site is uniform within S1 and S2, but varies within S3
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 3, add_meta = TRUE)
+  hd$data$analysis$site[9] <- "SiteZ"
+
+  ## Act
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert — gone from every row, not kept for S1 and S2 and NA for S3
+  expect_false("site" %in% names(result$data$analysis))
+  expect_false("site" %in% result$data$role_map$variable)
+  expect_true("project" %in% names(result$data$analysis))
+
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$ids[[1]], "site")
+  expect_no_error(validate_horizons_data(result))
+
+})
+
+test_that("average() under keep_best keeps the first of two replicates QC cannot tell apart (#109)", {
+
+  ## Arrange — two uncorrelated replicates: both mean correlations are their
+  ## one correlation
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2, all_outliers = TRUE)
+
+  ## Act
+  result <- average(hd, on_all_outliers = "keep_best", verbose = FALSE)
+
+  ## Assert — S1 is its first scan, exactly
+  wn  <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  s1  <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_equal(unlist(s1), unlist(hd$data$analysis[1, wn]))
+
+})
+
+test_that("average() leaves a flagged replicate out of QC and the mean, and flags a sample only when every replicate is (#226)", {
+
+  ## Arrange — S2's first scan is flagged, though QC would pass it: it is
+  ## its second scan shifted, so averaged in it would move the mean; every
+  ## scan of S3 is flagged
+  hd  <- make_test_hd_average(n_samples = 3, n_reps = 3)
+  wn  <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[4, wn] <- hd$data$analysis[5, wn] + 0.3
+  hd$data$analysis$.flag  <- c(NA, NA, NA, "standardize", NA, NA, rep("standardize", 3))
+  hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+  ## Act — no warning: standardize() warned about those spectra
+  expect_no_warning(result <- average(hd, verbose = FALSE))
+  out <- result$data$analysis
+
+  ## Assert — S2 is exactly the mean of its two clean scans, unflagged
+  expect_identical(unname(unlist(out[out$sample_id == "S2", wn])),
+                   unname(vapply(hd$data$analysis[5:6, wn], mean, numeric(1))))
+  expect_true(is.na(out$.flag[out$sample_id == "S2"]))
+
+  ## S3 is one row, flagged with the step, and validates
+  expect_identical(out$.flag[out$sample_id == "S3"], "standardize")
+  expect_no_error(validate_horizons_data(result))
+
+  ## Nothing on the log, and the tree counts both
+  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
+  expect_output(average(hd, verbose = TRUE),
+                "Flagged (.flag): 1 replicate left out, 1 sample kept flagged", fixed = TRUE)
+
+})
+
+test_that("average() writes no .flag column when no sample is flagged", {
+
+  ## A flagged replicate among clean ones leaves its sample unflagged; it is
+  ## one QC would pass, so only the flag keeps it out of S1's mean
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[1, wn] <- hd$data$analysis[2, wn] + 0.3
+  hd$data$analysis$.flag <- c("standardize", rep(NA, 5))
+  hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+  result <- average(hd, verbose = FALSE)
+
+  s1 <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_identical(unname(unlist(s1)),
+                   unname(vapply(hd$data$analysis[2:3, wn], mean, numeric(1))))
+  expect_false(".flag" %in% names(result$data$analysis))
+  expect_false(".flag" %in% result$data$role_map$variable)
+  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
+
+  ## and none when the input had none
+  expect_false(".flag" %in% names(average(make_test_hd_average(), verbose = FALSE)$data$analysis))
 
 })
 
@@ -634,7 +829,9 @@ test_that("average() always drops filename column", {
   ## Assert ----------------------------------------------------------------
 
   expect_false("filename" %in% names(result$data$analysis))
-  expect_true("filename" %in% result$provenance$average$meta_columns_dropped)
+
+  ## Dropped by design on every call, so nothing is logged
+  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
 
 })
 
@@ -714,7 +911,8 @@ test_that("average() errors on non-horizons_data input", {
 
   expect_error(
     average(data.frame(x = 1)),
-    "must be a horizons_data"
+    "`x` must be a horizons_data object, not a data frame.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -725,8 +923,12 @@ test_that("average() errors when by column doesn't exist", {
 
   expect_error(
     average(hd, by = "nonexistent"),
-    "not found"
+    "`by` must name a column of the data, and \"nonexistent\" is not one.", fixed = TRUE,
+    class = "horizons_error_input"
   )
+  expect_error(average(hd, by = c("sample_id", "filename")),
+               "`by` must be a single string", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -736,8 +938,12 @@ test_that("average() errors on invalid quality_check", {
 
   expect_error(
     average(hd, quality_check = "yes"),
-    "must be TRUE or FALSE"
+    "`quality_check` must be `TRUE` or `FALSE`", fixed = TRUE,
+    class = "horizons_error_input"
   )
+  expect_error(average(hd, verbose = NA),
+               "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -747,13 +953,44 @@ test_that("average() errors on invalid correlation_threshold", {
 
   expect_error(
     average(hd, correlation_threshold = 1.5),
-    "between 0 and 1"
+    "`correlation_threshold` must be a number between 0 and 1", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
   expect_error(
     average(hd, correlation_threshold = -0.1),
-    "between 0 and 1"
+    "`correlation_threshold` must be a number between 0 and 1", fixed = TRUE,
+    class = "horizons_error_input"
   )
+
+})
+
+test_that("average() refuses an on_all_outliers it does not know, and takes the first by default", {
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
+
+  expect_error(average(hd, on_all_outliers = "keep_all"),
+               "`on_all_outliers` must be one of \"warn\", \"drop\", and \"keep_best\".", fixed = TRUE,
+               class = "horizons_error_input")
+
+  ## The default is "warn"
+  expect_warning(average(hd, verbose = FALSE), class = "horizons_warning_quality")
+
+})
+
+test_that("average() refuses an object with no spectra", {
+
+  ## Arrange — the predictor columns and their roles gone
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  wn <- hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+  hd$data$analysis <- hd$data$analysis[, setdiff(names(hd$data$analysis), wn)]
+  hd$data$role_map <- hd$data$role_map[!hd$data$role_map$variable %in% wn, ]
+  hd$data$n_predictors <- 0L
+
+  ## Act & Assert
+  expect_error(average(hd, verbose = FALSE),
+               "Average an object with spectra, from `spectra()`.", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -766,9 +1003,24 @@ test_that("average() refuses a grouping column with NA values", {
   ## Act & Assert
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
-    "Grouping column 'sample_id' contains NA values", fixed = TRUE,
-    class = "horizons_data_error"
+    "The grouping column sample_id has 1 `NA` value", fixed = TRUE,
+    class = "horizons_error_input"
   )
+
+})
+
+
+test_that("average() refuses an evaluated or fitted object at its door", {
+
+  ## Arrange — averaging rebuilds the rows a promotion's splits are keyed to
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  hd$evaluation$results <- tibble::tibble(config_id = "cfg_a")
+
+  ## Act & Assert — the verb's input error, not the row helper's bug report
+  err <- expect_error(average(hd, verbose = FALSE),
+                      "It carries evaluation results.", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "average")
 
 })
 
@@ -815,11 +1067,6 @@ test_that("compute_replicate_quality() identifies outliers via iterative removal
   expect_equal(qc$outliers, 4L)
   expect_false(qc$all_fail)
 
-  ## Good spectra (1-3) should have high mean correlations after outlier removal
-  expect_true(all(qc$mean_cors[1:3] > 0.99, na.rm = TRUE))
-
-  ## Outlier's mean_cors is NA (it was removed)
-  expect_true(is.na(qc$mean_cors[4]))
 
 })
 
@@ -925,8 +1172,39 @@ test_that("average() aborts on a non-numeric response that disagrees within a gr
 
   ## Act & Assert
   expect_error(average(hd, quality_check = FALSE, verbose = FALSE),
-               regexp = "texture",
-               class  = "horizons_data_error")
+               "texture in S1: sand, silt", fixed = TRUE,
+               class = "horizons_error_input")
+
+})
+
+
+test_that("average() names every sample whose non-numeric response disagrees, in one refusal", {
+
+  ## Arrange — S1 and S2 each have a replicate called something else
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3,
+                             add_responses = TRUE, conflict_texture = TRUE)
+  hd$data$analysis$texture[4] <- "clay"
+
+  ## Act & Assert — both, rather than the first alone
+  err <- expect_error(average(hd, quality_check = FALSE, verbose = FALSE),
+                      "2 samples have response values that disagree between replicates.", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "texture in S1: sand, silt", fixed = TRUE)
+  expect_match(conditionMessage(err), "texture in S2: clay, loam", fixed = TRUE)
+
+  ## One sample disagreeing on two columns is one sample, with a bullet each
+  one <- make_test_hd_average(n_samples = 2, n_reps = 3,
+                              add_responses = TRUE, conflict_texture = TRUE)
+  one$data$analysis$horizon    <- rep(c("A", "B"), each = 3)
+  one$data$analysis$horizon[2] <- "Bt"
+  one$data$role_map <- tibble::add_row(one$data$role_map, variable = "horizon", role = "response")
+  one$data$n_responses <- one$data$n_responses + 1L
+
+  err <- expect_error(average(one, quality_check = FALSE, verbose = FALSE),
+                      "1 sample has response values that disagree between replicates.", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "texture in S1: sand, silt", fixed = TRUE)
+  expect_match(conditionMessage(err), "horizon in S1: A, Bt", fixed = TRUE)
 
 })
 
@@ -986,10 +1264,14 @@ test_that("average() aborts when promoting `by` would produce duplicate ids", {
     tibble::tibble(variable = "plot_number", role = "meta")
   )
 
-  ## Act & Assert
+  ## Act & Assert — refused before any group is averaged, with the remedy
+  local_mocked_bindings(average_group = function(...) stop("averaged a group"))
   expect_error(average(hd, by = "plot_number", quality_check = FALSE, verbose = FALSE),
-               regexp = "duplicate",
-               class  = "horizons_data_error")
+               "Repeated as text: \"0.3\".", fixed = TRUE,
+               class  = "horizons_error_input")
+  expect_error(average(hd, by = "plot_number", quality_check = FALSE, verbose = FALSE),
+               "Make plot_number character, or round it, before averaging.", fixed = TRUE,
+               class  = "horizons_error_input")
 
 })
 
@@ -1108,8 +1390,8 @@ test_that("average() refuses a custom by on an object carrying a record", {
 
   ## Act & Assert
   expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
-               regexp = "selection record",
-               class  = "horizons_validation_error")
+               "Average first, then run `select_training()`.", fixed = TRUE,
+               class  = "horizons_error_input")
 
 })
 
@@ -1144,20 +1426,200 @@ test_that("average() catches a corrupt input the verb itself never checks (#24)"
 
 test_that("average() validates the averaged object on return (#24)", {
 
-  ## Arrange — one replicate per sample, so the NA reaches the output as it
-  ## was. The entry check runs at the raw stage, where an NA predictor is
-  ## allowed before replicates are collapsed; only the full check on return
-  ## refuses it.
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 1)
-  hd$data$analysis$wn_500[1] <- NA
+  ## Arrange — a group's average that breaks the full stage the entry check
+  ## (raw) allows: every averaged row given one id
+  hd   <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  real <- average_group
+  local_mocked_bindings(average_group = function(...) {
+    out <- real(...)
+    out$averaged$sample_id <- "S1"
+    out
+  })
 
   ## Act & Assert --------------------------------------------------------------
 
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
-    "NA values in predictor columns", fixed = TRUE,
+    "Duplicate sample_id values: S1", fixed = TRUE,
     class = "horizons_error_validation"
   )
+
+})
+
+test_that("average() leaves an unusable spectrum to standardize(), which flags it, in the documented order", {
+
+  ## Arrange — a lone scan holding an NA, and a lone flat scan: before
+  ## standardize() runs, nothing has flagged either
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 1)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis$wn_500[1] <- NA
+  hd$data$analysis[2, wn]    <- 0.7
+
+  ## Act — average() returns them, and standardize() flags them
+  averaged <- average(hd, verbose = FALSE)
+  expect_identical(averaged$data$analysis$sample_id, c("S1", "S2", "S3"))
+
+  flagged <- suppressWarnings(standardize(averaged, resample = NULL, trim = NULL,
+                                          remove_water = FALSE, baseline = FALSE,
+                                          verbose = FALSE))
+  expect_identical(flagged$data$analysis$.flag, c("standardize", "standardize", NA))
+  expect_no_error(validate_horizons_data(flagged))
+
+})
+
+test_that("average()'s quality check fails a replicate it cannot correlate, rather than averaging it in", {
+
+  ## Arrange — S1's first scan is flat
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[1, wn] <- 0.5
+
+  ## Act — no base R warning about a zero standard deviation
+  expect_no_warning(result <- average(hd, verbose = FALSE))
+
+  ## Assert — S1 is the mean of its two other scans
+  s1 <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_equal(unlist(s1), colMeans(as.matrix(hd$data$analysis[2:3, wn])))
+
+  ## With two scans, one flat, the flat one is set aside before QC's own
+  ## rule, so the group has not failed: S1 is its other scan, in every mode
+  two <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  two$data$analysis[1, wn] <- 0.5
+
+  for (mode in c("warn", "keep_best", "drop")) {
+
+    expect_no_warning(kept <- average(two, on_all_outliers = mode, verbose = FALSE))
+    kept <- kept$data$analysis
+    expect_equal(unlist(kept[kept$sample_id == "S1", wn]), unlist(two$data$analysis[2, wn]),
+                 info = mode)
+
+  }
+
+})
+
+test_that("average() gives the same sample whether standardize() runs before or after it, when a replicate is flat", {
+
+  ## Arrange — scans QC cannot correlate, here flat
+  wn  <- grep("^wn_", names(make_test_hd_average()$data$analysis), value = TRUE)
+  std <- function(h) suppressWarnings(standardize(h, resample = NULL, trim = NULL,
+                                                  remove_water = FALSE, baseline = FALSE,
+                                                  verbose = FALSE))
+  s1_of <- function(h) unlist(h$data$analysis[h$data$analysis$sample_id == "S1", wn])
+
+  cases <- list(
+    "two scans, one flat"   = list(n_reps = 2, dead = 1,   good = 2),
+    "three scans, two flat" = list(n_reps = 3, dead = 1:2, good = 3)
+  )
+
+  for (name in names(cases)) {
+
+    cs <- cases[[name]]
+    hd <- make_test_hd_average(n_samples = 2, n_reps = cs$n_reps)
+    hd$data$analysis[cs$dead, wn] <- 0
+    good <- unlist(hd$data$analysis[cs$good, wn])
+
+    ## Act — the documented order, and standardize() first
+    expect_no_warning(averaged <- average(hd, verbose = FALSE))
+    readme_order <- std(averaged)
+    expect_no_warning(std_first <- average(std(hd), verbose = FALSE))
+
+    ## Assert — both are the good scan, unflagged
+    expect_equal(s1_of(readme_order), good, info = name)
+    expect_equal(s1_of(std_first), good, info = name)
+    expect_false(any(flagged_rows(readme_order$data$analysis)), info = name)
+    expect_false(any(flagged_rows(std_first$data$analysis)), info = name)
+
+  }
+
+})
+
+test_that("average() averages a sample whose every replicate is unusable, for standardize() to flag", {
+
+  ## Arrange — both of S1's scans are flat
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[1, wn] <- 0.2
+  hd$data$analysis[2, wn] <- 0.4
+
+  ## Act — no warning: QC could not look at the group, so it has not failed
+  expect_no_warning(averaged <- average(hd, verbose = FALSE))
+  s1 <- unlist(averaged$data$analysis[averaged$data$analysis$sample_id == "S1", wn])
+
+  ## Assert — the mean of both, which standardize() flags
+  expect_equal(unname(s1), rep(0.3, length(wn)))
+  flagged <- suppressWarnings(standardize(averaged, resample = NULL, trim = NULL,
+                                          remove_water = FALSE, baseline = FALSE,
+                                          verbose = FALSE))
+  expect_identical(flagged$data$analysis$.flag, c("standardize", NA))
+
+  ## The tree counts it among the groups QC could not look at, not clean
+  expect_identical(qc_report(utils::capture.output(average(hd, verbose = TRUE))), c(
+    "│  ├─ QC (r > 0.996)",
+    "│  │  ├─ 1/2 groups clean",
+    "│  │  ├─ 1 group with fewer than two usable replicates (not QC'd)",
+    "│  │  └─ 2 samples retained"
+  ))
+
+})
+
+test_that("average() treats a non-finite value as missing, so the sample is kept in either order", {
+
+  ## Arrange — S1's first scan holds an Inf, or an NA, at one band
+  std <- function(h) suppressWarnings(standardize(h, resample = NULL, trim = NULL,
+                                                  remove_water = FALSE, baseline = FALSE,
+                                                  verbose = FALSE))
+
+  for (bad in list(Inf, NA_real_)) {
+
+    hd   <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 50)
+    wn   <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+    band <- wn[10]
+    hd$data$analysis[[band]][1] <- bad
+    other <- hd$data$analysis[[band]][2]
+
+    ## Act — the documented order, and standardize() first
+    expect_no_warning(averaged <- average(hd, verbose = FALSE))
+    readme_order <- std(averaged)
+    expect_no_warning(std_first <- average(std(hd), verbose = FALSE))
+
+    ## Assert — kept and unflagged both ways; in the documented order the
+    ## band is the other scan's value, and the rest the mean of both
+    for (r in list(readme_order, std_first)) {
+      expect_identical(r$data$analysis$sample_id, c("S1", "S2"), info = format(bad))
+      expect_false(any(flagged_rows(r$data$analysis)), info = format(bad))
+    }
+
+    s1 <- readme_order$data$analysis[readme_order$data$analysis$sample_id == "S1", ]
+    expect_identical(s1[[band]], other, info = format(bad))
+    rest <- setdiff(wn, band)
+    expect_equal(unlist(s1[rest]), colMeans(as.matrix(hd$data$analysis[1:2, rest])),
+                 info = format(bad))
+
+  }
+
+})
+
+test_that("average() leaves a band missing when every replicate lacks it, for standardize() to flag", {
+
+  ## Arrange — both of S1's scans are non-finite at one band
+  hd   <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 50)
+  wn   <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  band <- wn[10]
+  hd$data$analysis[[band]][1:2] <- c(Inf, NaN)
+
+  ## Act
+  expect_no_warning(averaged <- average(hd, verbose = FALSE))
+
+  ## Assert — NA at that band, the mean of both elsewhere, then flagged
+  s1 <- averaged$data$analysis[averaged$data$analysis$sample_id == "S1", ]
+  expect_identical(s1[[band]], NA_real_)
+  rest <- setdiff(wn, band)
+  expect_equal(unlist(s1[rest]), colMeans(as.matrix(hd$data$analysis[1:2, rest])))
+
+  flagged <- suppressWarnings(standardize(averaged, resample = NULL, trim = NULL,
+                                          remove_water = FALSE, baseline = FALSE,
+                                          verbose = FALSE))
+  expect_identical(flagged$data$analysis$.flag, c("standardize", NA))
 
 })
 

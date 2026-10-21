@@ -318,12 +318,15 @@ new_horizons_data <- function(analysis       = NULL,
 #'    wavelength/predictor columns (role = "predictor") must not contain
 #'    `NA` or `Inf` values, and the spectrum must have spread: one whose
 #'    every value is equal is refused, by the rule `standardize()` flags by
-#'    ([unusable_spectra()]). Checked only at `stage = "full"`: a non-finite
-#'    value outside `standardize()`'s eventual trim range is legitimately
-#'    still there before the trim runs, and `standardize()` itself flags a
-#'    spectrum with a non-finite value left after trimming and resampling,
-#'    or with no spread, so this is only enforced from `average()` on. The
-#'    first 3 problematic columns, or the first 5 flat spectra, are named.
+#'    ([unusable_spectra()]). Checked at `stage = "full"`, and not when
+#'    `spectra = FALSE`: a non-finite value outside `standardize()`'s
+#'    eventual trim range is legitimately still there before the trim runs,
+#'    and `standardize()` flags a spectrum with a non-finite value left after
+#'    trimming and resampling, or with no spread. `average()`, which runs
+#'    before `standardize()` in the documented order, passes
+#'    `spectra = FALSE`; every other full-stage caller checks the spectra.
+#'    The first 3 problematic columns, or the first 5 flat spectra, are
+#'    named.
 #'
 #' 6. **Wavelength naming and order**: Every predictor name must be a
 #'    wavenumber (`wn_<number>` or a bare number, #121) and parse to a
@@ -390,6 +393,11 @@ new_horizons_data <- function(analysis       = NULL,
 #' @param config `logical(1)`. Check the configuration of a configured
 #'   object (see [config_findings()]). `configure()` passes `FALSE`, since
 #'   rewriting the configuration is the remedy for a bad one.
+#' @param spectra `logical(1)`. At `stage = "full"`, check the spectra of
+#'   the rows not flagged (check 5). `average()` passes `FALSE`: it runs
+#'   before `standardize()` in the documented order, and `standardize()` is
+#'   where an unusable spectrum is decided and flagged, the remedy the
+#'   finding names.
 #' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_data`. The input object, unchanged, if validation
@@ -399,9 +407,10 @@ new_horizons_data <- function(analysis       = NULL,
 #'
 #' @noRd
 validate_horizons_data <- function(x,
-                                   stage  = c("full", "raw"),
-                                   config = TRUE,
-                                   call   = rlang::caller_env()) {
+                                   stage   = c("full", "raw"),
+                                   config  = TRUE,
+                                   spectra = TRUE,
+                                   call    = rlang::caller_env()) {
 
   stage <- match.arg(stage)
 
@@ -561,9 +570,10 @@ validate_horizons_data <- function(x,
   # A non-finite value outside standardize()'s trim range is legitimately
   # there before the trim runs (Inf no less than NA); standardize() flags a
   # row with a non-finite value that survives trimming and resampling, or
-  # with no spread, so this is only enforced from average() on.
+  # with no spread. average() runs before it in the documented order and
+  # passes spectra = FALSE; every other full-stage caller enforces this.
 
-  if (stage != "raw") {
+  if (stage != "raw" && isTRUE(spectra)) {
 
     na_check <- sapply(predictor_cols, function(col) any(is.na(col)))
 

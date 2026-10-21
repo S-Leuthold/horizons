@@ -222,10 +222,10 @@
 #'   are scored, as are the tuning predictions of a transformed response,
 #'   which are back-transformed first. Aborts, before any config runs, when
 #'   `configure()`'s `sg_window` is not narrower than the spectrum, and, with class
-#'   `horizons_input_error`, when an observed outcome lies outside
+#'   `horizons_error_input`, when an observed outcome lies outside
 #'   `outcome_range` or is infinite, or when `metric = "rrmse"` under a range
 #'   whose lower bound is negative (the mean outcome it divides by can then be
-#'   zero or negative) (#76). Also with class `horizons_input_error`, it
+#'   zero or negative) (#76). Also with class `horizons_error_input`, it
 #'   aborts when the outcome has zero variance: before the split, when every
 #'   observed value is the same, and after it, when every training row left
 #'   by the split and the response trim has the same value, since every

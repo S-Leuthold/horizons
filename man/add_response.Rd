@@ -4,7 +4,13 @@
 \alias{add_response}
 \title{Pipeline: Join Response Data}
 \usage{
-add_response(x, source, variable, by = "sample_id")
+add_response(
+  x,
+  source,
+  variable,
+  by = "sample_id",
+  verbose = getOption("horizons.verbose", TRUE)
+)
 }
 \arguments{
 \item{x}{\code{horizons_data}. Object from pipeline (post-\code{average()}, unique
@@ -19,6 +25,9 @@ response variables. Required - no default. Must be numeric columns.}
 \item{by}{\code{character}. Join key. Default \code{"sample_id"}. Use a named vector
 for mismatched column names: \code{c("sample_id" = "Lab_ID")} where the name
 is the horizons-side column and the value is the source-side column.}
+
+\item{verbose}{\code{logical(1)}. Print the join's report. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 A modified \code{horizons_data} object with:
@@ -52,9 +61,13 @@ the tibble.
 \strong{Join behavior:}
 
 Left-join semantics matching \code{dplyr::left_join()} conventions. Strict exact
-matching - no case-folding or fuzzy matching. When match quality is poor,
-diagnostic messages detect common patterns (case mismatch, whitespace,
-prefix/suffix) and suggest fixes.
+matching - no case-folding or fuzzy matching. When no sample matches, the
+join is refused; when fewer than half match, it runs and warns
+(\code{horizons_warning_coverage}, naming the unmatched samples on the
+object's log); when half or more match, the unmatched samples are named
+in a note on the log and counted in verbose output. The refusal and the
+warning say when a case or whitespace difference would match more samples,
+and how to fix it.
 
 \strong{Missing values:}
 

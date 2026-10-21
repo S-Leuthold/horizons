@@ -594,14 +594,34 @@ test_that("parse_ids() refuses an evaluated, fitted or ensembled object (#135)",
   ft <- hd
   class(ft) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
-  ## Act & Assert
-  expect_error(parse_ids(ev, format = "{project}_{sampleid}_{fraction}"),
-               regexp = "evaluation results",
-               class  = "horizons_input_error")
+  ## Act & Assert — refused at parse_ids()'s door, as the user's input
+  err <- expect_error(parse_ids(ev, format = "{project}_{sampleid}_{fraction}"),
+                      regexp = "evaluation results",
+                      class  = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "parse_ids")
 
   expect_error(parse_ids(ft, format = "{project}_{sampleid}_{fraction}"),
                regexp = "horizons_fit",
-               class  = "horizons_input_error")
+               class  = "horizons_error_input")
+
+})
+
+test_that("parse_ids() refuses to rewrite the ids of a select_training() result", {
+
+  ## Arrange — the record is keyed to the ids it drew
+  hd <- make_test_hd(c("PROJ_S001_bulk", "PROJ_S002_bulk"))
+  hd$selection <- make_selection_record(pool_ids = hd$data$analysis$sample_id)
+
+  ## Act & Assert
+  err <- expect_error(parse_ids(hd, format = "{project}_{sampleid}_{fraction}"),
+                      "Parse the ids before `select_training()`", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "parse_ids")
+
+  ## A parse that leaves the ids alone adds its columns
+  out <- parse_ids(hd, format = "{project}_{id}_{fraction}")
+  expect_identical(out$data$analysis$sample_id, hd$data$analysis$sample_id)
+  expect_true("project" %in% names(out$data$analysis))
 
 })
 
@@ -633,10 +653,10 @@ test_that("parse_ids() refuses a token that names an existing column (#135)", {
   hd     <- make_test_hd(c("PROJ_S001_bulk", "PROJ_S002_bulk"))
   parsed <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}")
 
-  ## Act & Assert
+  ## Act & Assert — refused at the door, naming the token
   expect_error(parse_ids(parsed, format = "{project}_{sampleid}_{fraction}"),
-               regexp = "already in the analysis table",
-               class  = "horizons_input_error")
+               "Tokens project and fraction name columns already in the data.", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 

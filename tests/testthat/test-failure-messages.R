@@ -435,7 +435,7 @@ describe("condition_summary()", {
 ## Capture sites
 ## ---------------------------------------------------------------------------
 
-describe("create_failed_result() and handle_results()", {
+describe("create_failed_result()", {
 
   step_error <- tryCatch(
     recipes::prep(recipes::recipe(mpg ~ ., mtcars) |>
@@ -448,15 +448,6 @@ describe("create_failed_result() and handle_results()", {
     row <- create_failed_result("cfg_x", step_error)
 
     expect_match(row$error_message, "boom from step", fixed = TRUE)
-
-  })
-
-  it("puts the cause in handle_results()'s abort", {
-
-    safe <- list(result = NULL, error = step_error)
-
-    expect_error(handle_results(safe, error_title = "Prep failed"),
-                 "boom from step", fixed = TRUE)
 
   })
 
@@ -710,6 +701,56 @@ describe("evaluate_single_config() chooses only among candidates scored on every
 
   })
 
+  it("counts a Bayesian result's grid candidate that failed on every fold, reading the grid as iteration 0 (#249)", {
+
+    ## A grid of three, one failing on every fold, then two Bayesian
+    ## iterations: the result holds two grid candidates and two proposals
+    real_glmnet <- glmnet::glmnet
+    local_mocked_bindings(glmnet = function(...) {
+      if (isTRUE(all.equal(list(...)$alpha, 0.05))) stop("the engine broke on every fold")
+      real_glmnet(...)
+    }, .package = "glmnet")
+
+    train <- rsample::training(setup$split)
+    wf    <- workflows::workflow() |>
+      workflows::add_recipe(recipes::recipe(SOC ~ ., data = train) |>
+                              recipes::update_role(sample_id, new_role = "id")) |>
+      workflows::add_model(parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+                             parsnip::set_engine("glmnet"))
+    grid  <- tibble::tibble(penalty = c(0.01, 0.01, 0.1), mixture = c(0.05, 1, 0.5))
+
+    set.seed(1)
+    initial <- suppressWarnings(suppressMessages(tune::tune_grid(wf, setup$folds, grid = grid)))
+    bayes   <- suppressWarnings(suppressMessages(tune::tune_bayes(
+      wf, setup$folds, initial = initial, iter = 2, control = tune::control_bayes(no_improve = Inf)
+    )))
+
+    expect_match(incomplete_note(bayes, 3L, n_grid = nrow(grid)),
+                 "^1 of 5 candidates was left out of the choice of hyperparameters")
+
+  })
+
+  it("counts a grid candidate that failed on every fold among those left out (#249)", {
+
+    ## tune keeps no metrics for a candidate that fails on every fold, so
+    ## only the grid's size can count it
+    real_glmnet <- glmnet::glmnet
+    local_mocked_bindings(glmnet = function(...) {
+      if (isTRUE(all.equal(list(...)$alpha, 0.05))) stop("the engine broke on every fold")
+      real_glmnet(...)
+    }, .package = "glmnet")
+
+    result <- suppressWarnings(run_evaluate("elastic_net", setup))
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params[[1]]$mixture, 1)
+    expect_true(any(grepl(
+      "1 of 2 candidates was left out of the choice of hyperparameters, not being scored on every fold: the engine broke on every fold (3 of 3 folds).",
+      result$warnings[[1]], fixed = TRUE
+    )))
+
+  })
+
 })
 
 describe("fit_single_config() records the cause of a recipe step error", {
@@ -867,6 +908,25 @@ describe("fit_single_config() chooses only among candidates scored on every fold
     expect_identical(result$best_params$mixture, 1)
     expect_true(any(grepl(
       "1 of 2 candidates was left out of the choice of hyperparameters, not being scored on every fold: the engine broke (1 of 3 folds).",
+      result$warnings, fixed = TRUE
+    )))
+
+  })
+
+  it("counts a warm-start grid candidate that failed on every fold among those left out (#249)", {
+
+    real_glmnet <- glmnet::glmnet
+    local_mocked_bindings(glmnet = function(...) {
+      if (isTRUE(all.equal(list(...)$alpha, 0.05))) stop("the engine broke on every fold")
+      real_glmnet(...)
+    }, .package = "glmnet")
+
+    result <- suppressWarnings(run_fit("elastic_net", setup))
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params$mixture, 1)
+    expect_true(any(grepl(
+      "1 of 2 candidates was left out of the choice of hyperparameters, not being scored on every fold: the engine broke on every fold (3 of 3 folds).",
       result$warnings, fixed = TRUE
     )))
 

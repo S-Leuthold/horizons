@@ -10,7 +10,8 @@ validate(
   spectral_method = "mahalanobis",
   spectral_threshold = 0.975,
   response_method = "iqr",
-  response_threshold = 1.5
+  response_threshold = 1.5,
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -26,8 +27,11 @@ with \code{response_threshold} as the multiplier. \code{TRUE} does both.}
 \item{spectral_method}{\code{character(1)}. Spectral outlier detection method.
 Currently only \code{"mahalanobis"}. Default: \code{"mahalanobis"}.}
 
-\item{spectral_threshold}{\code{numeric(1)}. Chi-squared quantile for
-Mahalanobis distance cutoff. Default: \code{0.975}.}
+\item{spectral_threshold}{\code{numeric(1)}. The quantile of the squared
+Mahalanobis distance's exact in-sample reference distribution above
+which a sample is flagged. Default: \code{0.975}. A threshold low enough to
+flag every sample is refused when the spectral outliers are to be
+removed, since nothing would be left to model.}
 
 \item{response_method}{\code{character(1)}. Response outlier detection method.
 Currently only \code{"iqr"}. Default: \code{"iqr"}.}
@@ -35,6 +39,9 @@ Currently only \code{"iqr"}. Default: \code{"iqr"}.}
 \item{response_threshold}{\code{numeric(1)}. IQR multiplier for Tukey fences,
 both the whole-table flags and the training-partition fences
 \code{evaluate()} trims by. Default: \code{1.5}.}
+
+\item{verbose}{\code{logical(1)}. Print the report. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 \code{horizons_data}. Same object with \code{validation} section populated:
@@ -81,8 +88,15 @@ set to \code{FALSE}.
 
 Spectral outliers are detected via Mahalanobis distance on PCA scores
 of the raw (unpreprocessed) spectral matrix, scaled to unit variance per
-wavenumber. Response outliers use IQR-based Tukey fences on the outcome
-variable.
+wavenumber. Each sample's squared distance is compared with its exact
+in-sample reference distribution, a scaled Beta (Tracy, Young and Mason
+1992), rather than chi-squared, which ignores that the centre and
+covariance are estimated from the same samples and cannot flag any sample
+when many components are kept for the sample count. The check runs from
+three samples. Rows a step flagged (\code{.flag}) are left out of it, and of
+the near-zero-variance check, as modelling leaves them out; a flagged row
+is never removed as an outlier. Response outliers use IQR-based Tukey
+fences on the outcome variable, over the unflagged rows too.
 
 \strong{Response outliers are trimmed from the training partition, not here:}
 
@@ -105,13 +119,27 @@ that differs from the trim \code{evaluate()} applied makes \code{fit()} refuse u
 with the rest of the verdict, since it was made for the outcome being
 replaced.
 
+\strong{Checks that cannot run:}
+
+When the spectral check cannot run (fewer than two predictor columns vary,
+or too few samples) or the response check cannot (too few outcome values,
+or an IQR of zero), its row in \code{validation$checks} reads "not run" and
+says why, and the call raises one \code{horizons_warning_skipped} naming each,
+after writing it to the object's log.
+
 \strong{Idempotency:}
 
 Running \code{validate()} again replaces the verdict, the checks, the flagged
-ids and the response-trim request. The removal record accumulates
+ids and the response-trim request, and says so in verbose output and a
+note on the object's log. The removal record accumulates
 instead: rows an earlier call removed are gone from the object and stay
 gone, so their ids and detail rows are kept and this call's removals are
 added to them. Re-validation operates on the reduced dataset.
+
+\strong{Removal before modelling only:} removing outliers changes the rows the
+splits and models of \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and \code{\link[=ensemble]{ensemble()}} are keyed to,
+so an evaluated, fitted or ensembled object is refused when there is
+something to remove. Detection alone runs on one.
 }
 \examples{
 \dontrun{

@@ -17,7 +17,8 @@ configure(
   final_bayesian_iter = 25L,
   sg_window = 9L,
   pca_threshold = 0.995,
-  outcome_range = c(0, Inf)
+  outcome_range = c(0, Inf),
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -69,6 +70,9 @@ Set it from the property's physical bounds, not the data's. Every
 observed value of the outcome must lie inside it. A negative lower bound
 rules out the \code{"log"}, \code{"log10"} and \code{"sqrt"} transformations. See
 Outcome range.}
+
+\item{verbose}{\code{logical(1)}. Print the configuration's summary. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 A modified \code{horizons_data} object with:
@@ -113,11 +117,15 @@ empty state, and the \code{horizons_eval}, \code{horizons_fit} or
 outcome that is being replaced. The validation verdict is cleared too,
 but the record of outliers \code{validate()} already removed is kept, since
 those rows stay removed, and so is a \code{select_training()} record, which
-describes the rows rather than the outcome. Because neither was chosen for
-the new outcome, \code{configure()} warns when rows were removed as response
-outliers of a different outcome, and when a \code{select_training()} record
-(other than \code{scope = "global"}) was drawn for properties that do not
-include it.
+describes the rows rather than the outcome. Because the record was not
+drawn for the new outcome, \code{configure()} warns when a \code{select_training()}
+record (other than \code{scope = "global"}) was drawn for properties that do not
+include it (\code{horizons_warning_input}). Re-configuring an evaluated or
+fitted object warns too (\code{horizons_warning_input}), naming what it
+discards; re-configuring one that was only configured is reported in
+verbose output and a note on the object's log. Either message says when
+it cleared a validation, and with it a response-trim request, so that
+\code{validate()} can be run again.
 This enables the \code{purrr::map()} multi-outcome pattern:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{c("SOC", "POM_C", "pH") |>
@@ -149,7 +157,7 @@ at 4 cm-1 (14,228 rows x 851 predictors, ~12.1M cells), not one of 25
 tune tasks finished in 29.5 minutes, while the same config with
 \code{feature_selection = "pca"} finished in 368 s (test RPD 3.82) — OSSL's
 published pipeline is SNV -> PCA(120) -> Cubist (Safanelli et al. 2025,
-PLOS ONE 20(1):e0296545). \code{validate()}'s P010 check warns when a
+PLOS ONE 20(1):e0296545). \code{validate()}'s P010 check reports when a
 \code{cubist} config with \code{feature_selection = "none"} sits on a table whose
 \code{n_rows * n_predictors} exceeds \code{CUBIST_MAX_CELLS} (a conservative floor
 well under the measured failure point, not a benchmark); the fix is
@@ -157,7 +165,7 @@ well under the measured failure point, not a benchmark); the fix is
 scale with \code{p} on well-established grounds — an RBF kernel matrix costs
 \verb{O(n^2 p)} to build, and MARS's forward pass searches every predictor at
 every candidate knot — but neither has been measured at library scale,
-and \code{validate()} does not warn for them. A slow run with either on a
+and \code{validate()} does not report them. A slow run with either on a
 full-resolution table is a signal to add \code{feature_selection} there too.
 See GitHub issue #40.
 
@@ -210,7 +218,7 @@ and 20 the bound is 530 under \code{c(-1000, Inf)} and 25 under \code{c(-Inf, In
 
 The range is checked against the data: when an observed value of the
 outcome lies outside it or is infinite, \code{configure()} aborts with class
-\code{horizons_input_error}, and \code{evaluate()}, \code{fit()} and \code{ensemble()} repeat
+\code{horizons_error_input}, and \code{evaluate()}, \code{fit()} and \code{ensemble()} repeat
 the check before they fit anything. A range whose lower bound is negative
 cannot be combined with the \code{"log"}, \code{"log10"} or \code{"sqrt"} transformations,
 which are undefined for negative values and whose back-transforms floor

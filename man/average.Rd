@@ -36,7 +36,9 @@ a replicate to pass QC. Default: \code{0.996}. Changing this is rarely needed.}
 \itemize{
 \item \code{"warn"} (default): Keep all replicates and average
 \item \code{"drop"}: Remove the sample entirely
-\item \code{"keep_best"}: Keep only the replicate with highest mean correlation
+\item \code{"keep_best"}: Keep only the replicate with the highest mean
+correlation, measured before QC removes any. A tie goes to the earlier
+scan, so of two replicates the first is kept
 }}
 
 \item{verbose}{Logical. Print progress messages. Default:
@@ -51,14 +53,17 @@ values are the ids of the averaged rows and the \code{by} column itself is
 not in the output.
 \item Predictor columns: Mean of replicate values
 \item Response and outcome columns: Mean of replicate values when numeric,
-the shared value when not; a group whose non-numeric response values
-disagree is an error, not a silent pick
-\item Metadata columns: Uniform values preserved, non-uniform dropped
+the shared value when not; samples whose non-numeric response values
+disagree are refused together, not a silent pick
+\item Metadata columns: Those uniform within every sample preserved; one that
+varies within any sample dropped
 \item \code{data$role_map}: Updated to remove dropped columns and to point the
 \code{id} role at the new \code{sample_id}
-\item \code{provenance$average}: Processing metadata including QC results and
+\item \code{provenance$average}: The call's settings and counts, and
 \code{source_ids}, the mapping from each averaged \code{sample_id} to the source
 scans it was built from
+\item \code{log}: The samples whose replicates all failed QC, and the metadata
+columns dropped
 \item \code{provenance$aggregation_by}: The \code{by} column name, written on every
 call
 }
@@ -85,21 +90,63 @@ method when group sizes are small (n=2-3).
 to ensure baseline shifts don't confound quality control. Spectra with baseline
 offsets can correlate ~1.0 but shouldn't be averaged without correction.
 
+\strong{Missing and non-finite values:} an \code{Inf}, \code{-Inf} or \code{NaN} in a
+replicate is treated as a missing value, as \code{NA} is. Quality control
+correlates replicates over the bands they share, and the mean at each band
+uses the replicates with a value there, so a replicate missing a few
+bands is still averaged in at the rest. A band no replicate has is \code{NA} in
+the result, and \code{\link[=standardize]{standardize()}} decides on it.
+
+\strong{Unusable spectra:} \code{average()} leaves the decision on a spectrum that
+is not finite or has no spread to \code{\link[=standardize]{standardize()}}, which flags it. In the
+order \code{spectra() |> parse_ids() |> average() |> standardize()} such a
+sample is averaged and then flagged, not refused. Quality control fails a
+replicate it cannot correlate, such as a flat scan, so it is removed
+rather than averaged in: it is set aside before the iterative removal, as
+a flagged replicate is. A sample left with one replicate is that
+replicate; one left with none is averaged, and \code{standardize()} flags it.
+Under \code{quality_check = FALSE} such a replicate is averaged in, as asked.
+
 \strong{Handling All-Outlier Groups:}
 If QC flags all replicates as outliers:
 \itemize{
-\item \code{"warn"} (default): Keep all replicates and average, emit warning
+\item \code{"warn"} (default): Keep all replicates and average, with one
+\code{horizons_warning_quality} naming the samples
 \item \code{"drop"}: Remove the entire sample from results
-\item \code{"keep_best"}: Keep only the replicate with highest mean correlation
+\item \code{"keep_best"}: Keep only the replicate with the highest mean
+correlation against the sample's other replicates, measured before QC
+removes any. A tie goes to the earlier scan, so of two replicates,
+whose one correlation cannot tell them apart, the first is kept
 }
+
+\strong{Flagged replicates:}
+A replicate a step flagged (\code{.flag}, from \code{\link[=standardize]{standardize()}}) is one it
+could not use, so it is left out of quality control and the mean, as
+every verb that computes over predictors leaves a flagged row out. A
+sample is flagged only when every replicate is: it is kept as one row,
+with the replicates' step in \code{.flag}, and modelling leaves it out. The
+verbose output counts both; \code{standardize()} has already warned about the
+spectra. The result has a \code{.flag} column only when a sample is flagged.
+
+\strong{Before modelling only:} averaging rebuilds the rows the splits and
+models of \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and \code{\link[=ensemble]{ensemble()}} are keyed to, so an
+evaluated, fitted or ensembled object is refused. Average before
+\code{evaluate()}.
 
 \strong{Metadata Handling:}
 Metadata columns are checked for uniformity within groups:
 \itemize{
-\item Uniform values: preserved in output
-\item Non-uniform values: column dropped (tracked in provenance)
+\item Uniform within every sample: preserved in output
+\item Non-uniform within any sample: column dropped from every row, and named
+in a note on the object's log
 \item \code{filename} column: always dropped (not meaningful after averaging)
 }
+
+\strong{The log:}
+Every sample whose replicates all failed QC is named on the object's
+log, whatever \code{on_all_outliers} is: under \code{"warn"} as the
+\code{horizons_warning_quality} it raises, under \code{"keep_best"} and \code{"drop"}
+as a note, since either is your explicit choice.
 }
 \examples{
 \dontrun{

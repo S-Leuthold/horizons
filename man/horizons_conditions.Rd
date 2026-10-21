@@ -77,8 +77,10 @@ result as \code{object} and its warnings as \code{log}.}
 downloaded.}
 \item{\code{horizons_error_boruta}}{(run) \code{\link[=step_select_boruta]{step_select_boruta()}}'s Boruta run
 failed; Boruta's error is in its message.}
-\item{\code{horizons_error_qc}}{(run) A quality check failed once it had been
-computed.}
+\item{\code{horizons_error_qc}}{(run) \code{\link[=average]{average()}} had nothing to return:
+every sample failed quality control on every replicate and
+\code{on_all_outliers = "drop"} dropped it. One row per sample travels as
+\code{results}: its \code{sample_id} and \code{n_replicates}.}
 \item{\code{horizons_error_consent}}{(input) A library download was declined.}
 \item{\code{horizons_error_missing_predict_package}}{(dependency) \code{predict()}
 needs a model package that is not installed.}
@@ -95,10 +97,13 @@ is weaker than its output shows (small folds, every member below the
 prune threshold). \code{predict()} raises each distinct warning another
 package raised while predicting under this topic, naming the
 configurations (or an ensemble's units) that raised it, and
-\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.}
+\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.
+\code{\link[=average]{average()}} names the samples it averaged though every replicate
+failed quality control.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such
-as a member's prediction intervals, or a response \code{\link[=select_training]{select_training()}}
-could not draw for under \code{properties = NULL}.}
+as a member's prediction intervals, a response \code{\link[=select_training]{select_training()}}
+could not draw for under \code{properties = NULL}, or a \code{\link[=validate]{validate()}} check
+that could not run.}
 \item{\code{horizons_warning_flagged}}{A step kept samples it could not use;
 modelling leaves them out. From \code{\link[=standardize]{standardize()}}, the spectra it
 flagged (\code{.flag}); from \code{step_transform_spectra()}, the spectra its
@@ -110,11 +115,13 @@ no training set for because they were flagged on arrival.}
 \item{\code{horizons_warning_partial_failure}}{Some units failed and the rest
 returned.}
 \item{\code{horizons_warning_coverage}}{The data only partly covers what is
-asked of it, such as a wavenumber range.}
+asked of it, such as a wavenumber range, or \code{\link[=add_response]{add_response()}}'s source
+matching fewer than half the samples.}
 \item{\code{horizons_warning_applicability}}{Predictions outside the
 applicability domain.}
 \item{\code{horizons_warning_input}}{A request that is legal but risky enough
-to say so.}
+to say so, such as \code{\link[=configure]{configure()}} discarding an evaluation or a fit, or
+configuring an outcome a \code{\link[=select_training]{select_training()}} draw was not made for.}
 }
 }
 

@@ -30,11 +30,15 @@
 #' outcome that is being replaced. The validation verdict is cleared too,
 #' but the record of outliers `validate()` already removed is kept, since
 #' those rows stay removed, and so is a `select_training()` record, which
-#' describes the rows rather than the outcome. Because neither was chosen for
-#' the new outcome, `configure()` warns when rows were removed as response
-#' outliers of a different outcome, and when a `select_training()` record
-#' (other than `scope = "global"`) was drawn for properties that do not
-#' include it.
+#' describes the rows rather than the outcome. Because the record was not
+#' drawn for the new outcome, `configure()` warns when a `select_training()`
+#' record (other than `scope = "global"`) was drawn for properties that do not
+#' include it (`horizons_warning_input`). Re-configuring an evaluated or
+#' fitted object warns too (`horizons_warning_input`), naming what it
+#' discards; re-configuring one that was only configured is reported in
+#' verbose output and a note on the object's log. Either message says when
+#' it cleared a validation, and with it a response-trim request, so that
+#' `validate()` can be run again.
 #' This enables the `purrr::map()` multi-outcome pattern:
 #'
 #' ```
@@ -67,7 +71,7 @@
 #' tune tasks finished in 29.5 minutes, while the same config with
 #' `feature_selection = "pca"` finished in 368 s (test RPD 3.82) — OSSL's
 #' published pipeline is SNV -> PCA(120) -> Cubist (Safanelli et al. 2025,
-#' PLOS ONE 20(1):e0296545). `validate()`'s P010 check warns when a
+#' PLOS ONE 20(1):e0296545). `validate()`'s P010 check reports when a
 #' `cubist` config with `feature_selection = "none"` sits on a table whose
 #' `n_rows * n_predictors` exceeds `CUBIST_MAX_CELLS` (a conservative floor
 #' well under the measured failure point, not a benchmark); the fix is
@@ -75,7 +79,7 @@
 #' scale with `p` on well-established grounds — an RBF kernel matrix costs
 #' `O(n^2 p)` to build, and MARS's forward pass searches every predictor at
 #' every candidate knot — but neither has been measured at library scale,
-#' and `validate()` does not warn for them. A slow run with either on a
+#' and `validate()` does not report them. A slow run with either on a
 #' full-resolution table is a signal to add `feature_selection` there too.
 #' See GitHub issue #40.
 #'
@@ -128,7 +132,7 @@
 #'
 #' The range is checked against the data: when an observed value of the
 #' outcome lies outside it or is infinite, `configure()` aborts with class
-#' `horizons_input_error`, and `evaluate()`, `fit()` and `ensemble()` repeat
+#' `horizons_error_input`, and `evaluate()`, `fit()` and `ensemble()` repeat
 #' the check before they fit anything. A range whose lower bound is negative
 #' cannot be combined with the `"log"`, `"log10"` or `"sqrt"` transformations,
 #' which are undefined for negative values and whose back-transforms floor
@@ -175,6 +179,8 @@
 #'   observed value of the outcome must lie inside it. A negative lower bound
 #'   rules out the `"log"`, `"log10"` and `"sqrt"` transformations. See
 #'   Outcome range.
+#' @param verbose `logical(1)`. Print the configuration's summary. Default:
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`
@@ -234,33 +240,8 @@ configure <- function(x,
                       final_bayesian_iter   = 25L,
                       sg_window             = 9L,
                       pca_threshold         = 0.995,
-                      outcome_range         = c(0, Inf)) {
-
-  ## ---------------------------------------------------------------------------
-  ## Step 0: Print header
-  ## ---------------------------------------------------------------------------
-
-  ## (tree output moved to end of function)
-
-  ## ---------------------------------------------------------------------------
-  ## Helper: abort with tree-nested error
-  ## ---------------------------------------------------------------------------
-
-  abort_nested <- function(header, details, error_class = "horizons_configure_error") {
-
-    cat(cli::col_red(paste0("\u2502  \u2514\u2500 ", header, "\n")))
-    for (i in seq_along(details)) {
-      branch <- if (i < length(details)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("\u2502        ", branch, " ", details[i], "\n")))
-    }
-    cat("\n")
-    rlang::abort(
-      header,
-      class = error_class,
-      call  = NULL
-    )
-
-  }
+                      outcome_range         = c(0, Inf),
+                      verbose               = getOption("horizons.verbose", TRUE)) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Input validation
@@ -270,13 +251,9 @@ configure <- function(x,
 
   if (!inherits(x, "horizons_data")) {
 
-    cat(cli::col_red(paste0(
-      "\u2502  \u2514\u2500 x must be a horizons_data object (got ", class(x)[1], ")\n"
-    )))
-    cat("\n")
-    rlang::abort(
-      paste("Expected a `horizons_data` object. Got:", class(x)[1]),
-      class = "horizons_configure_error"
+    abort_horizons(
+      "{.arg x} must be a horizons_data object, not {.obj_type_friendly {x}}.",
+      kind = "input"
     )
 
   }
@@ -286,6 +263,8 @@ configure <- function(x,
 
   x <- validate_horizons_data(x, config = FALSE)
 
+  check_arg(rlang::check_bool, verbose)
+
   ## 1.2 Response data must exist -----------------------------------------------
 
   responses <- x$data$role_map$variable[x$data$role_map$role == "response"]
@@ -294,103 +273,46 @@ configure <- function(x,
 
   if (length(all_response_vars) == 0) {
 
-    abort_nested(
-      "No response data found",
-      c("Use `add_response()` to join response variables before configuring")
-    )
+    abort_horizons(c(
+      "{.arg x} has no response data to configure.",
+      "i" = "Use {.fn add_response} to join response variables before configuring."
+    ), kind = "input")
 
   }
 
   ## 1.3 Validate config axis values -------------------------------------------
 
-  bad_models <- setdiff(models, VALID_MODELS)
-  if (length(bad_models) > 0) {
+  axes <- list(
+    models            = list(given = models,            valid = VALID_MODELS),
+    transformations   = list(given = transformations,   valid = VALID_TRANSFORMATIONS),
+    preprocessing     = list(given = preprocessing,     valid = VALID_PREPROCESSING),
+    feature_selection = list(given = feature_selection, valid = VALID_FEATURE_SELECTION)
+  )
 
-    abort_nested(
-      "Invalid model(s)",
-      c(paste0("Invalid: ", paste(bad_models, collapse = ", ")),
-        paste0("Valid options: ", paste(VALID_MODELS, collapse = ", ")))
-    )
+  for (axis in names(axes)) {
 
-  }
+    bad <- setdiff(axes[[axis]]$given, axes[[axis]]$valid)
 
-  bad_transforms <- setdiff(transformations, VALID_TRANSFORMATIONS)
-  if (length(bad_transforms) > 0) {
+    if (length(bad) > 0) {
 
-    abort_nested(
-      "Invalid transformation(s)",
-      c(paste0("Invalid: ", paste(bad_transforms, collapse = ", ")),
-        paste0("Valid options: ", paste(VALID_TRANSFORMATIONS, collapse = ", ")))
-    )
+      valid <- axes[[axis]]$valid
 
-  }
+      abort_horizons(c(
+        "{.arg {axis}} must be among the values horizons knows.",
+        "x" = "Not known: {.val {bad}}.",
+        "i" = "Valid values: {.val {valid}}."
+      ), kind = "input")
 
-  bad_preproc <- setdiff(preprocessing, VALID_PREPROCESSING)
-  if (length(bad_preproc) > 0) {
-
-    abort_nested(
-      "Invalid preprocessing(s)",
-      c(paste0("Invalid: ", paste(bad_preproc, collapse = ", ")),
-        paste0("Valid options: ", paste(VALID_PREPROCESSING, collapse = ", ")))
-    )
-
-  }
-
-  bad_fs <- setdiff(feature_selection, VALID_FEATURE_SELECTION)
-  if (length(bad_fs) > 0) {
-
-    abort_nested(
-      "Invalid feature selection(s)",
-      c(paste0("Invalid: ", paste(bad_fs, collapse = ", ")),
-        paste0("Valid options: ", paste(VALID_FEATURE_SELECTION, collapse = ", ")))
-    )
+    }
 
   }
 
   ## 1.4 Validate tuning parameters --------------------------------------------
 
-  if (!is.numeric(cv_folds) || length(cv_folds) != 1 || is.na(cv_folds) ||
-      cv_folds != as.integer(cv_folds) || cv_folds < 2) {
-
-    abort_nested(
-      "`cv_folds` must be an integer >= 2",
-      c(paste0("Got: ", deparse(cv_folds)))
-    )
-
-  }
-
-  if (!is.numeric(grid_size) || length(grid_size) != 1 || is.na(grid_size) ||
-      grid_size != as.integer(grid_size) || grid_size < 1) {
-
-    abort_nested(
-      "`grid_size` must be an integer >= 1",
-      c(paste0("Got: ", deparse(grid_size)))
-    )
-
-  }
-
-  if (!is.numeric(bayesian_iter) || length(bayesian_iter) != 1 || is.na(bayesian_iter) ||
-      bayesian_iter != as.integer(bayesian_iter) || bayesian_iter < 0) {
-
-    abort_nested(
-      "`bayesian_iter` must be a non-negative integer",
-      c(paste0("Got: ", deparse(bayesian_iter)))
-    )
-
-  }
-
-
-  if (!is.numeric(final_bayesian_iter) || length(final_bayesian_iter) != 1 ||
-      is.na(final_bayesian_iter) ||
-      final_bayesian_iter != as.integer(final_bayesian_iter) ||
-      final_bayesian_iter < 0) {
-
-    abort_nested(
-      "`final_bayesian_iter` must be a non-negative integer",
-      c(paste0("Got: ", deparse(final_bayesian_iter)))
-    )
-
-  }
+  check_arg(rlang::check_number_whole, cv_folds, min = 2)
+  check_arg(rlang::check_number_whole, grid_size, min = 1)
+  check_arg(rlang::check_number_whole, bayesian_iter, min = 0)
+  check_arg(rlang::check_number_whole, final_bayesian_iter, min = 0)
 
   ## Both Bayesian searches start from a grid of grid_size points: evaluate()'s
   ## from its grid, fit()'s warm start capped at it. tune_bayes() needs at
@@ -403,11 +325,11 @@ configure <- function(x,
       if (final_bayesian_iter > 0) paste0("final_bayesian_iter = ", final_bayesian_iter)
     )
 
-    abort_nested(
-      "`grid_size` must be at least 2 when a Bayesian search runs",
-      c(paste0("Got: grid_size = ", grid_size, ", with ", paste(searches, collapse = " and ")),
-        "The Bayesian searches start from the grid and need at least two of its points; raise grid_size, or set bayesian_iter and final_bayesian_iter to 0")
-    )
+    abort_horizons(c(
+      "{.arg grid_size} must be at least 2 when a Bayesian search runs.",
+      "x" = "Got {.code grid_size = {grid_size}}, with {.code {searches}}.",
+      "i" = "The Bayesian searches start from the grid and need at least two of its points; raise {.arg grid_size}, or set {.arg bayesian_iter} and {.arg final_bayesian_iter} to 0."
+    ), kind = "input")
 
   }
 
@@ -423,23 +345,24 @@ configure <- function(x,
 
   if (!is_valid_sg_window(sg_window)) {
 
-    abort_nested(
-      "`sg_window` must be an odd integer >= 5",
-      c(paste0("Got: ", paste(deparse(sg_window), collapse = " ")),
-        "The window is centred on a point, so its width is odd",
-        "The second-derivative methods fit a cubic, which needs at least 5 points")
-    )
+    abort_horizons(c(
+      "{.arg sg_window} must be an odd whole number of at least 5.",
+      "x" = "Got {.code {paste(deparse(sg_window), collapse = ' ')}}.",
+      "i" = "The window is centred on a point, so its width is odd.",
+      "i" = "The second-derivative methods fit a cubic, which needs at least 5 points."
+    ), kind = "input")
 
   }
 
+  ### The interval is open at 0, which rlang's checker cannot state.
   if (!is.numeric(pca_threshold) || length(pca_threshold) != 1 ||
       is.na(pca_threshold) || pca_threshold <= 0 || pca_threshold > 1) {
 
-    abort_nested(
-      "`pca_threshold` must be a single number in (0, 1]",
-      c(paste0("Got: ", paste(deparse(pca_threshold), collapse = " ")),
-        "It is the share of variance feature_selection = 'pca' keeps")
-    )
+    abort_horizons(c(
+      "{.arg pca_threshold} must be a single number in (0, 1].",
+      "x" = "Got {.code {paste(deparse(pca_threshold), collapse = ' ')}}.",
+      "i" = "It is the share of variance {.code feature_selection = \"pca\"} keeps."
+    ), kind = "input")
 
   }
 
@@ -451,11 +374,11 @@ configure <- function(x,
 
   if (!is_valid_outcome_range(outcome_range)) {
 
-    abort_nested(
-      "`outcome_range` must be a numeric vector of length 2 with lower < upper",
-      c(paste0("Got: ", paste(deparse(outcome_range), collapse = " ")),
-        "Either end may be infinite: c(0, Inf) is non-negative, c(-Inf, Inf) is unbounded")
-    )
+    abort_horizons(c(
+      "{.arg outcome_range} must be a numeric vector of length 2 with lower < upper.",
+      "x" = "Got {.code {paste(deparse(outcome_range), collapse = ' ')}}.",
+      "i" = "Either end may be infinite: {.code c(0, Inf)} is non-negative, {.code c(-Inf, Inf)} is unbounded."
+    ), kind = "input")
 
   }
 
@@ -470,15 +393,17 @@ configure <- function(x,
 
   if (outcome_range[1] < 0 && length(signed_transforms) > 0) {
 
-    abort_nested(
-      paste0("`transformations` ", paste(signed_transforms, collapse = ", "),
-             " cannot be used with `outcome_range` = ", format_outcome_range(outcome_range),
-             ", which admits negative values"),
-      c("log(x + 1) is undefined below -1 and sqrt(x) below 0, and their back-transforms floor the predictions",
-        "Use transformations = 'none' for an outcome that can be negative")
-    )
+    range_text <- format_outcome_range(outcome_range)
+
+    abort_horizons(c(
+      "{.arg transformations} {.val {signed_transforms}} cannot be used with {.code outcome_range = {range_text}}, which admits negative values.",
+      "i" = "log(x + 1) is undefined below -1 and sqrt(x) below 0, and their back-transforms floor the predictions.",
+      "i" = "Use {.code transformations = \"none\"} for an outcome that can be negative."
+    ), kind = "input")
 
   }
+
+  collector <- log_open("configure")
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Resolve and promote outcome
@@ -486,9 +411,36 @@ configure <- function(x,
 
   ## 2.1 Reset any existing outcome to "response" -------------------------------
 
-  if (!is.null(x$config$configs)) {
+  reconfigured <- !is.null(x$config$configs)
 
-    warning("Overwriting previous configuration", call. = FALSE)
+  if (reconfigured) {
+
+    ## Discarding an evaluation or a fit costs the user its run, so that is
+    ## warned; replacing a configuration alone is what they asked for.
+    discarded <- intersect(promoted_state(x),
+                           c("evaluation results", "fitted models", "an ensemble"))
+
+    ### The validation goes with the configuration, so the message names it
+    ### when there was one to clear.
+    cleared <- if (!is.null(x$validation$timestamp)) {
+      c("i" = paste0("Cleared the validation",
+                     if (!is.null(x$validation$outliers$response_trim)) ", with its response-trim request",
+                     "; run {.fn validate} again."))
+    }
+
+    if (length(discarded) > 0) {
+
+      log_warning(collector, "input", c(
+        "Re-configuring discarded {discarded}, keyed to the previous configuration.",
+        "i" = "Run {.fn evaluate} again on this object, or keep the earlier one to use them.",
+        cleared
+      ))
+
+    } else {
+
+      log_note(collector, c("Replaced the previous configuration.", cleared))
+
+    }
 
     ## Promotion is earned, and reconfiguring un-earns it. The split, the row
     ## index and the cached predictions are all keyed to an outcome that is
@@ -515,22 +467,23 @@ configure <- function(x,
 
     } else {
 
-      abort_nested(
-        "Multiple response variables found",
-        c(paste0("Available: ", paste(responses, collapse = ", ")),
-          "Specify `outcome` to select one")
-      )
+      abort_horizons(c(
+        "{.arg x} has several responses, so {.arg outcome} must name one.",
+        "i" = "Available: {.field {responses}}."
+      ), kind = "input")
 
     }
 
   } else {
 
+    check_arg(rlang::check_string, outcome)
+
     if (!outcome %in% responses) {
 
-      abort_nested(
-        paste0("Response variable '", outcome, "' not found"),
-        c(paste0("Available: ", paste(responses, collapse = ", ")))
-      )
+      abort_horizons(c(
+        "{.arg outcome} must name a response, and {.val {outcome}} is not one.",
+        "i" = "Available: {.field {responses}}."
+      ), kind = "input")
 
     }
 
@@ -543,22 +496,23 @@ configure <- function(x,
   ## Every prediction is clamped to the range, so an outcome outside it would
   ## be scored against predictions that cannot reach it. Refused here, where
   ## the values are first known, rather than after evaluate() has tuned every
-  ## configuration (#76). evaluate() and fit() repeat the check. abort_nested()
-  ## raises its header alone, so the header carries the remedy too.
+  ## configuration (#76). evaluate() and fit() repeat the check.
 
   breach <- outcome_range_breach(x$data$analysis[[outcome_var]], outcome_range)
 
   if (!is.null(breach)) {
 
-    abort_nested(
-      paste0("Outcome '", outcome_var, "' lies outside `outcome_range` = ",
-             format_outcome_range(outcome_range), ". Set `outcome_range` ",
-             "to the property's physical bounds: c(-Inf, Inf) for a signed property"),
-      c(breach$lines,
-        "`outcome_range` is the outcome's physical range, and every prediction is clamped to it",
-        "The default, c(0, Inf), is for non-negative properties"),
-      error_class = c("horizons_configure_error", "horizons_input_error")
-    )
+    range_text <- format_outcome_range(outcome_range)
+
+    ### The breach lines hold numbers and the package's words, but the
+    ### column name is the user's, so they go in as values, not templates.
+    abort_horizons(c(
+      "Outcome {.field {outcome_var}} lies outside {.code outcome_range = {range_text}}.",
+      stats::setNames(sprintf("{breach$lines[%d]}.", seq_along(breach$lines)),
+                      rep("x", length(breach$lines))),
+      "i" = "{.arg outcome_range} is the outcome's physical range, and every prediction is clamped to it. The default, {.code c(0, Inf)}, is for non-negative properties.",
+      "i" = "Set {.arg outcome_range} to the property's physical bounds: {.code c(-Inf, Inf)} for a signed property."
+    ), kind = "input")
 
   }
 
@@ -580,7 +534,7 @@ configure <- function(x,
   ## object is usable, and starting again from an earlier object is the
   ## user's call.
 
-  warn_selection_properties(x, outcome_var)
+  warn_selection_properties(x, outcome_var, collector)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Build configuration grid
@@ -671,29 +625,44 @@ configure <- function(x,
 
   x <- validate_horizons_data(x)
 
+  x$log <- log_close(collector, x$log)
+
   ## ---------------------------------------------------------------------------
   ## Step 6: CLI output
   ## ---------------------------------------------------------------------------
 
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring pipelines"), "...\n"))
-  cat(paste0("\u2502  \u251C\u2500 Outcome: ", outcome_var,
-             if (!identical(x$config$outcome_range, DEFAULT_OUTCOME_RANGE)) {
-               paste0(" (range ", format_outcome_range(x$config$outcome_range), ")")
-             },
-             "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
-             grid_size, "\n"))
+  if (verbose) {
 
-  window_cm <- x$config$recipe$sg_window * axis_spacing_cm(x)
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring pipelines"), "...\n"))
 
-  cat(paste0("\u2502  \u251C\u2500 Recipe: SG window ", x$config$recipe$sg_window,
-             if (!is.na(window_cm)) paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)"),
-             if ("pca" %in% feature_selection) paste0(", PCA threshold ", pca_threshold),
-             "\n"))
+    if (reconfigured && length(discarded) == 0) {
 
-  cat(paste0("\u2502  \u2514\u2500 Configs: ", nrow(config_grid), " total\n"))
-  cat("\u2502\n")
+      cat(paste0("\u2502  \u251C\u2500 Replaced the previous configuration\n"))
+
+    }
+
+    cat(paste0("\u2502  \u251C\u2500 Outcome: ", outcome_var,
+               if (!identical(x$config$outcome_range, DEFAULT_OUTCOME_RANGE)) {
+                 paste0(" (range ", format_outcome_range(x$config$outcome_range), ")")
+               },
+               "\n"))
+    cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
+    cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
+               grid_size, "\n"))
+
+    window_cm <- x$config$recipe$sg_window * axis_spacing_cm(x)
+
+    cat(paste0("\u2502  \u251C\u2500 Recipe: SG window ", x$config$recipe$sg_window,
+               if (!is.na(window_cm)) paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)"),
+               if ("pca" %in% feature_selection) paste0(", PCA threshold ", pca_threshold),
+               "\n"))
+
+    cat(paste0("\u2502  \u2514\u2500 Configs: ", nrow(config_grid), " total\n"))
+    cat("\u2502\n")
+
+  }
+
+  signal_log(collector, x)
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Return
@@ -765,7 +734,7 @@ axis_spacing_cm <- function(x) {
 
   role_map   <- x$data$role_map
   predictors <- role_map$variable[role_map$role == "predictor"]
-  wn         <- suppressWarnings(as.numeric(sub("^wn_", "", predictors)))
+  wn         <- wn_values(predictors)
 
   if (length(wn) > 1 && !anyNA(wn)) {
 
@@ -897,7 +866,7 @@ outcome_range_breach <- function(values, outcome_range) {
 #' @param verb `character(1)`. The calling verb, named in the message.
 #' @param call The call the condition is attributed to. Default: the caller.
 #'
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
@@ -930,13 +899,13 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
 
   ## The breach lines are built from numbers and the package's own words, but
   ## the column name is the user's, so both go in as values, not templates.
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.field {outcome_col}} lies outside {.arg outcome_range}, {range_text}, so {.fn {verb}} would score it against predictions clamped to that range.",
     stats::setNames(sprintf("{breach$lines[%d]}", seq_along(breach$lines)),
                     rep("x", length(breach$lines))),
     "i" = "{.arg outcome_range} is the outcome's physical range, set by {.fn configure}. The default, {.code c(0, Inf)}, is for non-negative properties.",
     "i" = "Re-run {.fn configure} with the property's physical bounds as {.arg outcome_range}: {.code c(-Inf, Inf)} for a signed property."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -957,7 +926,7 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
 #' @param verb `character(1)`. The calling verb, named in the message.
 #' @param call The call the condition is attributed to. Default: the caller.
 #'
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_rank_metric_range <- function(metric, outcome_range, verb,
@@ -971,11 +940,11 @@ check_rank_metric_range <- function(metric, outcome_range, verb,
 
   range_text <- format_outcome_range(outcome_range)
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.fn {verb}} cannot rank by {.val rrmse} under {.arg outcome_range} {range_text}.",
     "x" = "{.val rrmse} divides the RMSE by the mean outcome, which can be zero or negative when the outcome can be, so a smaller value is not a better model.",
     "i" = "Rank by {.val rmse}, {.val mae}, {.val rpd}, {.val rsq} or {.val ccc}."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1035,7 +1004,7 @@ format_outcome_value <- function(value) {
 #' @param x A configured `horizons_data` object.
 #' @param verb `character(1)`. The calling verb, named in the message.
 #' @param call The call the condition is attributed to. Default: the caller.
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_outcome_variance <- function(x, verb, call = rlang::caller_env()) {
@@ -1056,11 +1025,11 @@ check_outcome_variance <- function(x, verb, call = rlang::caller_env()) {
 
   value_text <- format_outcome_value(constant$value)
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.fn {verb}} cannot model {.field {outcome_col}}: it has zero variance.",
     "x" = "All {constant$n} rows with an observed {.field {outcome_col}} have the value {value_text}.",
     "i" = "A model fitted to a constant learns nothing from the spectra. Check that the outcome role names the right column and that its values were joined to the right samples."
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1088,7 +1057,7 @@ check_outcome_variance <- function(x, verb, call = rlang::caller_env()) {
 #' @param rerun `character(1)`. The verb that applies the trim, named in the
 #'   advice to drop it: `"evaluate"`, or `"fit"` on a cold start.
 #' @param call The call the condition is attributed to. Default: the caller.
-#' @return `NULL`, invisibly. Aborts with class `horizons_input_error`.
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
 check_training_outcome_variance <- function(train_values, held_out, outcome_col,
@@ -1125,12 +1094,12 @@ check_training_outcome_variance <- function(train_values, held_out, outcome_col,
     "{.field {outcome_col}} needs more samples where it varies."
   }))
 
-  cli::cli_abort(c(
+  abort_horizons(c(
     "{.fn {verb}} cannot fit {.field {outcome_col}}: all {constant$n} training rows have the value {value_text}.",
     "x" = if (k_other > 0) "The {k_other} modelled row{?s} with another value {?is/are all} outside the training rows: {where}.",
     "i" = "Every model would be fitted to a constant.",
     remedies
-  ), class = "horizons_input_error", call = call)
+  ), kind = "input", call = call)
 
 }
 
@@ -1159,11 +1128,13 @@ format_outcome_range <- function(outcome_range) {
 #'
 #' @param x `horizons_data`. The object being configured.
 #' @param outcome_var `character(1)`. The outcome being configured.
+#' @param collector `configure()`'s collector ([log_open()]), which the
+#'   warning is added to.
 #'
 #' @return `NULL`, invisibly. Called for its warning.
 #' @noRd
 
-warn_selection_properties <- function(x, outcome_var) {
+warn_selection_properties <- function(x, outcome_var, collector) {
 
   settings <- x$selection$settings
 
@@ -1174,12 +1145,12 @@ warn_selection_properties <- function(x, outcome_var) {
 
   }
 
-  warning(paste0(
-    "The training rows were drawn by select_training() for ",
-    paste0("'", settings$properties, "'", collapse = ", "), "; '",
-    outcome_var, "' is not one of them, so each target's k nearest rows ",
-    "were not drawn for it."
-  ), call. = FALSE)
+  properties <- settings$properties
+
+  log_warning(collector, "input", c(
+    "The training rows were drawn by {.fn select_training} for {.field {properties}}, and {.field {outcome_var}} is not one of them, so each target's k nearest rows were not drawn for it.",
+    "i" = "Re-run {.fn select_training} with {.field {outcome_var}} among {.arg properties} to draw rows for it."
+  ))
 
   invisible(NULL)
 
