@@ -434,6 +434,47 @@ describe("build_warmstart_grid() - max_points truncation", {
 
   })
 
+  it("holds max_points rows at a best penalty near 1e-9, whose log-scale neighbours are other points", {
+
+    ## Matched at an absolute tolerance of 1.5e-8, every candidate penalty
+    ## from 10^-9.5 to 10^-8.5 was taken for the best point, so five rows
+    ## left the grid before sampling and it came out 21
+    wf <- workflows::workflow(
+      SOC ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    enet <- workflows::extract_parameter_set_dials(wf)
+    best <- tibble::tibble(penalty = 1e-9, mixture = 0.5)
+
+    full <- tidyr::expand_grid(
+      penalty = generate_candidates(1e-9, enet$object[[which(enet$name == "penalty")]]),
+      mixture = generate_candidates(0.5, enet$object[[which(enet$name == "mixture")]])
+    )
+
+    expect_identical(sum(point_matches(best, full)), 1L)
+
+    grid <- build_warmstart_grid(best, enet, max_points = 24L)
+
+    expect_identical(nrow(grid), 24L)
+    expect_identical(sum(point_matches(best, grid)), 1L)
+
+  })
+
+  it("matches a value that differs from the best point only in its last bits", {
+
+    ## A transformed parameter's candidate at offset 0 is the best value's
+    ## round trip through its scale
+    best   <- tibble::tibble(penalty = 1e-9, mixture = 0.5, trees = 500L)
+    nudged <- tibble::tibble(penalty = 1e-9 * (1 + 4 * .Machine$double.eps),
+                             mixture = 0.5 * (1 - 4 * .Machine$double.eps),
+                             trees   = 500L)
+
+    expect_true(point_matches(best, nudged))
+    expect_true(point_in_grid(best, nudged))
+
+  })
+
   it("adds a best point its candidates miss, and still holds at most max_points", {
 
     ## fit() passes tune::select_best() output, which always lies on its own

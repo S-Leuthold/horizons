@@ -259,7 +259,11 @@ point_in_grid <- function(point, grid) {
 
 #' Which rows of a grid match a single-row tibble
 #'
-#' Numeric columns match within `sqrt(.Machine$double.eps)`, others exactly.
+#' Numeric columns match within `sqrt(.Machine$double.eps)` relative to the
+#' point's value, others exactly. The tolerance is relative so that a value
+#' differing only in its last bits matches at any magnitude, while a penalty
+#' near 1e-9 does not match its neighbours on the log scale, which an
+#' absolute tolerance of 1.5e-8 would take for the same point.
 #'
 #' @param point Single-row tibble, with no missing value.
 #' @param grid Tibble holding `point`'s columns.
@@ -275,8 +279,9 @@ point_matches <- function(point, grid) {
 
     if (is.numeric(point[[col]])) {
 
+      p       <- point[[col]]
       matches <- matches &
-        (abs(grid[[col]] - point[[col]]) < .Machine$double.eps^0.5)
+        (abs(grid[[col]] - p) <= sqrt(.Machine$double.eps) * pmax(abs(p), .Machine$double.xmin))
 
     } else {
 
