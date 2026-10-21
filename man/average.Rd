@@ -95,8 +95,10 @@ is not finite or has no spread to \code{\link[=standardize]{standardize()}}, whi
 order \code{spectra() |> parse_ids() |> average() |> standardize()} such a
 sample is averaged and then flagged, not refused. Quality control fails a
 replicate it cannot correlate, such as a flat scan, so it is removed
-rather than averaged in; under \code{quality_check = FALSE} it is averaged
-in, as asked.
+rather than averaged in: it is set aside before the iterative removal, as
+a flagged replicate is. A sample left with one replicate is that
+replicate; one left with none is averaged, and \code{standardize()} flags it.
+Under \code{quality_check = FALSE} such a replicate is averaged in, as asked.
 
 \strong{Handling All-Outlier Groups:}
 If QC flags all replicates as outliers:

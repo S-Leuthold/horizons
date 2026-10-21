@@ -592,7 +592,7 @@ test_that("average() reports single-replicate groups as not QC'd, not clean (#89
   expect_identical(qc_report(out), c(
     "│  ├─ QC (r > 0.996)",
     "│  │  ├─ 2/3 groups clean",
-    "│  │  ├─ 1 single-replicate group (not QC'd)",
+    "│  │  ├─ 1 group with fewer than two usable replicates (not QC'd)",
     "│  │  └─ 3 samples retained"
   ))
 
@@ -1413,16 +1413,84 @@ test_that("average()'s quality check fails a replicate it cannot correlate, rath
   s1 <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
   expect_equal(unlist(s1), colMeans(as.matrix(hd$data$analysis[2:3, wn])))
 
-  ## With two scans, one flat, QC's own rule fails the group, handled by
-  ## on_all_outliers
+  ## With two scans, one flat, the flat one is set aside before QC's own
+  ## rule, so the group has not failed: S1 is its other scan, in every mode
   two <- make_test_hd_average(n_samples = 2, n_reps = 2)
   two$data$analysis[1, wn] <- 0.5
 
-  expect_warning(average(two, verbose = FALSE),
-                 "All replicates failed QC for 1 sample", fixed = TRUE,
-                 class = "horizons_warning_quality")
-  kept <- average(two, on_all_outliers = "keep_best", verbose = FALSE)$data$analysis
-  expect_equal(unlist(kept[kept$sample_id == "S1", wn]), unlist(two$data$analysis[2, wn]))
+  for (mode in c("warn", "keep_best", "drop")) {
+
+    expect_no_warning(kept <- average(two, on_all_outliers = mode, verbose = FALSE))
+    kept <- kept$data$analysis
+    expect_equal(unlist(kept[kept$sample_id == "S1", wn]), unlist(two$data$analysis[2, wn]),
+                 info = mode)
+
+  }
+
+})
+
+test_that("average() gives the same sample whether standardize() runs before or after it, when a replicate is flat", {
+
+  ## Arrange — scans QC cannot correlate, here flat
+  wn  <- grep("^wn_", names(make_test_hd_average()$data$analysis), value = TRUE)
+  std <- function(h) suppressWarnings(standardize(h, resample = NULL, trim = NULL,
+                                                  remove_water = FALSE, baseline = FALSE,
+                                                  verbose = FALSE))
+  s1_of <- function(h) unlist(h$data$analysis[h$data$analysis$sample_id == "S1", wn])
+
+  cases <- list(
+    "two scans, one flat"   = list(n_reps = 2, dead = 1,   good = 2),
+    "three scans, two flat" = list(n_reps = 3, dead = 1:2, good = 3)
+  )
+
+  for (name in names(cases)) {
+
+    cs <- cases[[name]]
+    hd <- make_test_hd_average(n_samples = 2, n_reps = cs$n_reps)
+    hd$data$analysis[cs$dead, wn] <- 0
+    good <- unlist(hd$data$analysis[cs$good, wn])
+
+    ## Act — the documented order, and standardize() first
+    expect_no_warning(averaged <- average(hd, verbose = FALSE))
+    readme_order <- std(averaged)
+    expect_no_warning(std_first <- average(std(hd), verbose = FALSE))
+
+    ## Assert — both are the good scan, unflagged
+    expect_equal(s1_of(readme_order), good, info = name)
+    expect_equal(s1_of(std_first), good, info = name)
+    expect_false(any(flagged_rows(readme_order$data$analysis)), info = name)
+    expect_false(any(flagged_rows(std_first$data$analysis)), info = name)
+
+  }
+
+})
+
+test_that("average() averages a sample whose every replicate is unusable, for standardize() to flag", {
+
+  ## Arrange — both of S1's scans are flat
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[1, wn] <- 0.2
+  hd$data$analysis[2, wn] <- 0.4
+
+  ## Act — no warning: QC could not look at the group, so it has not failed
+  expect_no_warning(averaged <- average(hd, verbose = FALSE))
+  s1 <- unlist(averaged$data$analysis[averaged$data$analysis$sample_id == "S1", wn])
+
+  ## Assert — the mean of both, which standardize() flags
+  expect_equal(unname(s1), rep(0.3, length(wn)))
+  flagged <- suppressWarnings(standardize(averaged, resample = NULL, trim = NULL,
+                                          remove_water = FALSE, baseline = FALSE,
+                                          verbose = FALSE))
+  expect_identical(flagged$data$analysis$.flag, c("standardize", NA))
+
+  ## The tree counts it among the groups QC could not look at, not clean
+  expect_identical(qc_report(utils::capture.output(average(hd, verbose = TRUE))), c(
+    "│  ├─ QC (r > 0.996)",
+    "│  │  ├─ 1/2 groups clean",
+    "│  │  ├─ 1 group with fewer than two usable replicates (not QC'd)",
+    "│  │  └─ 2 samples retained"
+  ))
 
 })
 

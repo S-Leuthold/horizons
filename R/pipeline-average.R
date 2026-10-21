@@ -39,8 +39,10 @@
 #' order `spectra() |> parse_ids() |> average() |> standardize()` such a
 #' sample is averaged and then flagged, not refused. Quality control fails a
 #' replicate it cannot correlate, such as a flat scan, so it is removed
-#' rather than averaged in; under `quality_check = FALSE` it is averaged
-#' in, as asked.
+#' rather than averaged in: it is set aside before the iterative removal, as
+#' a flagged replicate is. A sample left with one replicate is that
+#' replicate; one left with none is averaged, and `standardize()` flags it.
+#' Under `quality_check = FALSE` such a replicate is averaged in, as asked.
 #'
 #' **Handling All-Outlier Groups:**
 #' If QC flags all replicates as outliers:
@@ -654,9 +656,10 @@ average <- function(x,
 
       ## One line per kind of group, so the lines add up to n_groups and a
       ## group whose every replicate failed is never counted clean (#89). A
-      ## group with fewer than two scans left once flagged ones are out has
-      ## nothing to correlate against, so QC never looked at it; it is not
-      ## counted clean either, nor is a sample kept flagged.
+      ## group with fewer than two scans left once flagged ones are out, or
+      ## none QC can correlate, has nothing to correlate against, so QC never
+      ## looked at it; it is not counted clean either, nor is a sample kept
+      ## flagged.
 
       n_single <- n_not_qcd
       n_clean  <- n_groups - n_single - n_kept_flagged - n_groups_partial - n_groups_failed
@@ -670,7 +673,7 @@ average <- function(x,
         if (n_single > 0) {
 
           cat(paste0("\u2502  \u2502  \u251C\u2500 ", cli::format_inline(
-            "{n_single} single-replicate group{?s} (not QC'd)"
+            "{n_single} group{?s} with fewer than two usable replicates (not QC'd)"
           ), "\n"))
 
         }
@@ -739,13 +742,21 @@ average <- function(x,
 #' and recomputing correlations. This prevents a single bad replicate from
 #' dragging all others below threshold.
 #'
+#' A replicate QC cannot correlate, one with no spread (a flat or empty
+#' scan) or with no correlation against any other replicate, is set aside
+#' first, as a flagged replicate is, and the iterative removal runs on the
+#' rest. Its mean correlation would be `NaN`, which no threshold catches.
+#'
 #' @param predictor_matrix Numeric matrix with rows = replicates, cols = wavelengths.
 #' @param threshold Numeric. Minimum mean correlation to pass QC.
 #'
 #' @return A list with:
+#'   * `uncorrelatable`: Integer indices of the replicates QC cannot
+#'     correlate, set aside before the removal
 #'   * `outliers`: Integer indices of removed replicates (in original
 #'     indexing), in the order they were removed
-#'   * `all_fail`: Logical, TRUE if only 1 replicate survived
+#'   * `all_fail`: Logical, TRUE if two or more replicates could be
+#'     correlated and only 1 survived
 #'
 #' @noRd
 compute_replicate_quality <- function(predictor_matrix, threshold) {
@@ -757,19 +768,51 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
   if (n < 2) {
 
     return(list(
-      outliers = integer(0),
-      all_fail = FALSE
+      uncorrelatable = integer(0),
+      outliers       = integer(0),
+      all_fail       = FALSE
     ))
 
   }
 
+  ## Replicates QC cannot correlate ------------------------------------------
+  ## A replicate with no spread has no correlation at all, and stats::cor()
+  ## sees only the replicates with spread, so base R's zero-deviation warning
+  ## is not raised. Among two or more with spread, one can still share no
+  ## complete band with any other.
+
+  spread    <- apply(predictor_matrix, 1, function(r) length(unique(r[is.finite(r)])) > 1)
+  correlate <- spread
+
+  if (sum(spread) >= 2) {
+
+    cor_matrix <- stats::cor(t(predictor_matrix[spread, , drop = FALSE]),
+                             use = "pairwise.complete.obs")
+    diag(cor_matrix) <- NA
+    correlate[spread] <- rowSums(!is.na(cor_matrix)) > 0
+
+  }
+
+  uncorrelatable <- which(!correlate)
+
   ## Track which rows are still active (not yet flagged as outliers) ---------
 
-  active_idx <- seq_len(n)
-  outliers <- integer(0)
+  active_idx <- which(correlate)
+  outliers   <- integer(0)
+
+  ## Fewer than two left to correlate: no QC possible ------------------------
+
+  if (length(active_idx) < 2) {
+
+    return(list(
+      uncorrelatable = uncorrelatable,
+      outliers       = integer(0),
+      all_fail       = FALSE
+    ))
+
+  }
 
   ## Iteratively remove worst replicate until all pass or only 1 remains -----
-
 
   repeat {
 
@@ -784,31 +827,17 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
     }
 
     ## Mean correlation for each active replicate (excluding self) -----------
-    ## A replicate QC cannot correlate fails rather than passes: one with no
-    ## spread (a flat or empty scan), or with no band it shares with another,
-    ## would have a mean correlation of NaN, which no threshold catches, and
-    ## would be averaged in. Its mean is set below every other, so it is
-    ## removed first. stats::cor() sees only the replicates with spread, so
-    ## base R's zero-deviation warning is not raised.
+    ## A replicate whose only partners have been removed has no correlation
+    ## left; it fails rather than passes, so it is removed first.
 
-    active_matrix <- predictor_matrix[active_idx, , drop = FALSE]
-    spread        <- apply(active_matrix, 1, function(r) length(unique(r[is.finite(r)])) > 1)
+    cor_matrix <- stats::cor(
+      t(predictor_matrix[active_idx, , drop = FALSE]),
+      use = "pairwise.complete.obs"
+    )
 
-    mean_cors_active          <- rep(NA_real_, n_active)
-    mean_cors_active[!spread] <- -Inf
-
-    if (sum(spread) >= 2) {
-
-      cor_matrix <- stats::cor(
-        t(active_matrix[spread, , drop = FALSE]),
-        use = "pairwise.complete.obs"
-      )
-
-      diag(cor_matrix) <- NA
-      live <- rowMeans(cor_matrix, na.rm = TRUE)
-      mean_cors_active[spread] <- ifelse(is.nan(live), -Inf, live)
-
-    }
+    diag(cor_matrix) <- NA
+    mean_cors_active <- rowMeans(cor_matrix, na.rm = TRUE)
+    mean_cors_active[is.nan(mean_cors_active)] <- -Inf
 
     ## Check if any are below threshold --------------------------------------
 
@@ -835,14 +864,13 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 
   ## Determine if "all failed" ------------------------------------------------
   ## With iterative removal, we define this as: only 1 replicate survived
-  ## (or all were removed, which shouldn't happen but handle it)
 
-  n_remaining <- length(active_idx)
-  all_fail <- n_remaining <= 1 && n >= 2
+  all_fail <- length(active_idx) <= 1
 
   list(
-    outliers = as.integer(outliers),
-    all_fail = all_fail
+    uncorrelatable = uncorrelatable,
+    outliers       = as.integer(outliers),
+    all_fail       = all_fail
   )
 
 }
@@ -879,7 +907,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #'     usable
 #'   * `n_flag_out`: Flagged replicates left out of QC and the mean
 #'   * `qc_run`: Whether QC looked at the group (two usable replicates or
-#'     more, with `quality_check`)
+#'     more, with `quality_check`, not every one of them one it cannot
+#'     correlate)
 #'
 #' @noRd
 average_group <- function(group_data,
@@ -929,8 +958,28 @@ average_group <- function(group_data,
     ## Compute quality, on the usable replicates, in their indexing ------------
 
     qc <- compute_replicate_quality(predictor_matrix, threshold)
-    qc$outliers <- usable[qc$outliers]
+    qc$uncorrelatable <- usable[qc$uncorrelatable]
+    qc$outliers       <- usable[qc$outliers]
     qc_info <- qc
+
+    ## Replicates QC cannot correlate ----------------------------------------
+    ## Left out of the mean, as a flagged replicate is, and counted among the
+    ## replicates QC removed. When every one is, they are all averaged and
+    ## standardize() decides on the result, as it does for a lone flat scan.
+
+    n_uncorrelatable <- length(qc$uncorrelatable)
+
+    if (n_uncorrelatable == length(usable)) {
+
+      qc_run <- FALSE
+
+    } else if (n_uncorrelatable > 0) {
+
+      usable          <- setdiff(usable, qc$uncorrelatable)
+      rows_to_average <- usable
+      n_dropped       <- n_uncorrelatable
+
+    }
 
     ## Handle outliers -------------------------------------------------------
 
@@ -965,7 +1014,7 @@ average_group <- function(group_data,
           ## so the first is removed and the second kept (#109).
 
           rows_to_average <- setdiff(usable, qc$outliers)
-          n_dropped <- length(usable) - length(rows_to_average)
+          n_dropped <- n_dropped + length(usable) - length(rows_to_average)
 
         } else {
 
@@ -980,7 +1029,7 @@ average_group <- function(group_data,
         ## Some pass, some fail: drop outliers -------------------------------
 
         rows_to_average <- setdiff(usable, qc$outliers)
-        n_dropped <- length(qc$outliers)
+        n_dropped <- n_dropped + length(qc$outliers)
 
       }
 
