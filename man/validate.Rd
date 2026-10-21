@@ -96,7 +96,7 @@ when many components are kept for the sample count. The check runs from
 three samples. Rows a step flagged (\code{.flag}) are left out of it, and of
 the near-zero-variance check, as modelling leaves them out; a flagged row
 is never removed as an outlier. Response outliers use IQR-based Tukey
-fences on the outcome variable.
+fences on the outcome variable, over the unflagged rows too.
 
 \strong{Response outliers are trimmed from the training partition, not here:}
 

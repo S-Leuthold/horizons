@@ -34,7 +34,7 @@
 #' three samples. Rows a step flagged (`.flag`) are left out of it, and of
 #' the near-zero-variance check, as modelling leaves them out; a flagged row
 #' is never removed as an outlier. Response outliers use IQR-based Tukey
-#' fences on the outcome variable.
+#' fences on the outcome variable, over the unflagged rows too.
 #'
 #' **Response outliers are trimmed from the training partition, not here:**
 #'
@@ -446,8 +446,10 @@ validate <- function(x,
 
   if (has_outcome) {
 
+    ### Flagged rows are left out, as P005, P007 and evaluate()'s trim
+    ### leave them out.
     response <- detect_response_outliers(
-      analysis    = analysis,
+      analysis    = clean_analysis,
       outcome_col = outcome_col,
       threshold   = response_threshold
     )

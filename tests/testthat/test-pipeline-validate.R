@@ -856,6 +856,22 @@ describe("validate() response outlier detection", {
 
   })
 
+  test_that("P006 leaves flagged rows out of its fences and its flags", {
+
+    ## An extreme label on a flagged row: modelling never reads it
+    outcome_vals <- c(1000, seq(10, 20, length.out = 99))
+    hd <- make_configured_hd(outcome_values = outcome_vals)
+    hd$data$analysis$.flag <- c("standardize", rep(NA_character_, 99))
+    hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+    result <- quiet_validate(hd)
+
+    expect_identical(result$validation$outliers$response_ids, character(0))
+    expect_identical(result$validation$checks$value[result$validation$checks$check_id == "P006"],
+                     "0 flagged")
+
+  })
+
   test_that("P006 is INFO severity and does not affect passed", {
 
     outcome_vals <- c(stats::rnorm(97, 15, 2), 100, 200, 300)
