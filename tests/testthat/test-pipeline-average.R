@@ -716,11 +716,12 @@ test_that("average() under keep_best keeps the later of two replicates QC cannot
 
 test_that("average() leaves a flagged replicate out of QC and the mean, and flags a sample only when every replicate is (#226)", {
 
-  ## Arrange — S2's first scan is flagged and flat; every scan of S3 is
-  ## flagged
+  ## Arrange — S2's first scan is flagged, though QC would pass it: it is
+  ## its second scan shifted, so averaged in it would move the mean; every
+  ## scan of S3 is flagged
   hd  <- make_test_hd_average(n_samples = 3, n_reps = 3)
   wn  <- grep("^wn_", names(hd$data$analysis), value = TRUE)
-  hd$data$analysis[4, wn] <- 0.5
+  hd$data$analysis[4, wn] <- hd$data$analysis[5, wn] + 0.3
   hd$data$analysis$.flag  <- c(NA, NA, NA, "standardize", NA, NA, rep("standardize", 3))
   hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
 
@@ -728,9 +729,9 @@ test_that("average() leaves a flagged replicate out of QC and the mean, and flag
   expect_no_warning(result <- average(hd, verbose = FALSE))
   out <- result$data$analysis
 
-  ## Assert — S2 is the mean of its two clean scans, unflagged
-  expect_equal(unlist(out[out$sample_id == "S2", wn]),
-               colMeans(as.matrix(hd$data$analysis[5:6, wn])))
+  ## Assert — S2 is exactly the mean of its two clean scans, unflagged
+  expect_identical(unname(unlist(out[out$sample_id == "S2", wn])),
+                   unname(vapply(hd$data$analysis[5:6, wn], mean, numeric(1))))
   expect_true(is.na(out$.flag[out$sample_id == "S2"]))
 
   ## S3 is one row, flagged with the step, and validates
@@ -746,13 +747,19 @@ test_that("average() leaves a flagged replicate out of QC and the mean, and flag
 
 test_that("average() writes no .flag column when no sample is flagged", {
 
-  ## A flagged replicate among clean ones leaves its sample unflagged
+  ## A flagged replicate among clean ones leaves its sample unflagged; it is
+  ## one QC would pass, so only the flag keeps it out of S1's mean
   hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[1, wn] <- hd$data$analysis[2, wn] + 0.3
   hd$data$analysis$.flag <- c("standardize", rep(NA, 5))
   hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
 
   result <- average(hd, verbose = FALSE)
 
+  s1 <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_identical(unname(unlist(s1)),
+                   unname(vapply(hd$data$analysis[2:3, wn], mean, numeric(1))))
   expect_false(".flag" %in% names(result$data$analysis))
   expect_false(".flag" %in% result$data$role_map$variable)
   expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
