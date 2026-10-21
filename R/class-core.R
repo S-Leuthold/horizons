@@ -370,6 +370,12 @@ new_horizons_data <- function(analysis = NULL,
 #'     request for that outcome with a usable threshold. Every class
 #'     validator reaches these through the chain.
 #'
+#' 15. **No provenance**: an object carrying a `provenance` slot was made
+#'     before it was retired, and is refused with the remedy of re-running
+#'     the pipeline: the verbs read the standardization record from
+#'     `data$standardization` and the history from the log, so its record
+#'     would go unread.
+#'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction. The selection record is
 #' checked even on an otherwise empty object.
@@ -457,6 +463,20 @@ validate_horizons_data <- function(x,
 
     errors <- c(errors, cli::format_inline(
       "The object has no {.field log}, or its log is not the table the verbs write ({.field {names(new_log())}})"
+    ))
+
+  }
+
+  ## Provenance ----
+  ## Retired: how an object was made is its data verbs' notes on the log, and
+  ## the standardization record is data$standardization. An object still
+  ## carrying the slot was made by an earlier version, whose record the verbs
+  ## no longer read, so it would pass as never standardized.
+
+  if ("provenance" %in% names(x)) {
+
+    errors <- c(errors, cli::format_inline(
+      "The object carries a {.field provenance} slot, which horizons no longer writes: it was made by an earlier version. Re-run the pipeline from {.fn spectra}."
     ))
 
   }

@@ -3240,6 +3240,36 @@ describe("the log and flagged rows in the base validator", {
 
   })
 
+  it("refuses an object made before provenance was retired, at every door, with the remedy", {
+
+    ## The slot as an earlier version wrote it
+    old_slot <- list(spectra_source = "scans", spectra_type = "opus",
+                     standardization = list(baseline = TRUE))
+
+    obj <- configured_object()
+    obj$provenance <- old_slot
+    err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+    expect_true(any(grepl("carries a provenance slot, which horizons no longer writes",
+                          finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+    expect_match(cli::ansi_strip(conditionMessage(err)), "Re-run the pipeline from `spectra()`", fixed = TRUE)
+
+    ## A data verb's door, predict()'s and select_training()'s
+    raw <- spectra(tibble::tibble(sample_id = c("a", "b"), `4000` = c(0.1, 0.2), `3998` = c(0.2, 0.3)),
+                   verbose = FALSE)
+    raw$provenance <- old_slot
+    expect_error(standardize(raw, verbose = FALSE), "provenance slot", class = "horizons_error_validation")
+
+    fx <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+    fx$provenance <- old_slot
+    expect_error(predict(fx, fx$data$analysis), "provenance slot", class = "horizons_error_validation")
+
+    sel <- select_fixture(n_pool = 40)
+    sel$targets$provenance <- old_slot
+    expect_error(select_training(sel$targets, sel$pool, k = 5), "provenance slot",
+                 class = "horizons_error_validation")
+
+  })
+
   it("admits non-finite predictors only in flagged rows, and only a meta .flag", {
 
     obj <- configured_object()
