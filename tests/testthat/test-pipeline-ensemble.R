@@ -1750,11 +1750,9 @@ describe("print() and summary() of an ensemble - its own intervals", {
 
   ## The intervals predict() serves for an ensemble are its CV+ ones, not its
   ## members', so they get a line of their own with their measured coverage
-  ## on the held-out test rows beside nominal
-  line_of <- function(uq) {
-    paste0("Ensemble intervals (CV+): UQ coverage: ", round(uq$test_coverage * 100, 1), "% on ",
-           uq$n_test, " held-out test rows (nominal 90%, mean width ", signif(uq$test_mean_width, 3), ")")
-  }
+  ## on the held-out test rows beside nominal, through the one formatter
+  ## (its wording is tested with it)
+  line_of <- function(uq) paste0("Ensemble intervals (CV+): ", format_test_coverage(uq))
 
   it("reports the CV+ intervals' measured coverage beside nominal, after the members' UQ line", {
 

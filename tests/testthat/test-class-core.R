@@ -2919,12 +2919,12 @@ test_that("summary() reports models$best_config, its test and CV metrics, and it
              " ± ", round(best_row$cv_rmse_se, 3)))
   )
   ## Measured coverage beside nominal, through the one formatter every
-  ## place that reports intervals uses
+  ## place that reports intervals uses (its wording is tested with it)
   at <- which(section == "   ├─ UQ: enabled (2 configs)")
   expect_length(at, 1)
   expect_identical(section[at + 1],
-                   paste0("   │     └─ ", fx$models$best_config, ": UQ coverage: 91.5% on 40 ",
-                          "held-out test rows (nominal 90%, mean width 3.04)"))
+                   paste0("   │     └─ ", fx$models$best_config, ": ",
+                          format_test_coverage(fx$models$uq[[fx$models$best_config]])))
   expect_false(any(grepl(case$rival, section, fixed = TRUE)))
 
 })
@@ -2939,16 +2939,16 @@ test_that("print() reports the selected member's measured interval coverage besi
 
   expect_length(at, 1)
   expect_identical(section[at + 1],
-                   paste0("         └─ ", fx$models$best_config, ": UQ coverage: 91.5% on 40 ",
-                          "held-out test rows (nominal 90%, mean width 3.04)"))
+                   paste0("         └─ ", fx$models$best_config, ": ",
+                          format_test_coverage(fx$models$uq[[fx$models$best_config]])))
   expect_false(any(grepl(case$rival, section, fixed = TRUE)))
 
   ## A bundle made before coverage was measured says so, with nominal
   fx$models$uq[[fx$models$best_config]][c("test_coverage", "test_mean_width", "n_test")] <- NULL
   section <- models_section(utils::capture.output(print(fx)), "Models")
 
-  expect_true(paste0("         └─ ", fx$models$best_config,
-                     ": UQ coverage on held-out test rows: not measured (nominal 90%)") %in% section)
+  expect_true(paste0("         └─ ", fx$models$best_config, ": ",
+                     format_test_coverage(fx$models$uq[[fx$models$best_config]])) %in% section)
 
 })
 
@@ -2962,7 +2962,7 @@ test_that("print() and summary() report the first member with a bundle when the 
   fx   <- with_two_uq_bundles(case)
   fx$models$uq[[fx$models$best_config]] <- NULL
 
-  line <- paste0(case$rival, ": UQ coverage: 50% on 40 held-out test rows (nominal 90%, mean width 1.2)")
+  line <- paste0(case$rival, ": ", format_test_coverage(fx$models$uq[[case$rival]]))
 
   expect_true(paste0("         └─ ", line) %in% models_section(utils::capture.output(print(fx)), "Models"))
   expect_true(paste0("   │     └─ ", line) %in% models_section(utils::capture.output(summary(fx)), "Models (fit)"))
