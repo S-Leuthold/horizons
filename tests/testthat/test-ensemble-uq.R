@@ -372,6 +372,39 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
 
   })
 
+  it("leaves out a trimmed row a member could not use, as predict() does", {
+
+    ## An xgb meta-model would read the member's NA as missing and give the
+    ## row a finite residual from a combination predict() never serves
+    ens     <- trimmed_ens()
+    members <- ens$ensemble$uq$members
+    ids     <- ens$evaluation$response_trim$trimmed_ids
+    real    <- predict_members
+
+    local_mocked_bindings(predict_members = function(object, members, new_spectra, ...) {
+
+      out     <- real(object, members, new_spectra, ...)
+      records <- attr(out, "unit_records")
+      flagged <- attr(out, "flagged")
+
+      ## The first member could not use the first trimmed row
+      out$.pred[out$config_id == members[1] & out$sample_id == ids[1]] <- NA_real_
+      flagged[[members[1]]] <- ids[1]
+
+      attr(out, "unit_records") <- records
+      attr(out, "flagged")      <- flagged
+      out
+
+    })
+
+    trimmed <- ensemble_trimmed_rows(ens, members)
+
+    expect_setequal(trimmed$sample_id, ids[-1])
+    expect_length(trimmed$truth, length(ids) - 1L)
+    expect_false(anyNA(trimmed$predictors))
+
+  })
+
   it("calibrates an ensemble without a trim on its meta rows alone, as the fold pass at the stored seed does", {
 
     ## The trimmed rows' folds are drawn only when there are some, after the

@@ -593,12 +593,14 @@ compute_ensemble_uq <- function(oof,
 #' the response bound off, the outcome's range applied, which is how the
 #' out-of-fold predictions the meta frame holds were made. A member that
 #' cannot predict them aborts with `horizons_error_prediction_failed`, which
-#' `ensemble()`'s CV+ unit records.
+#' `ensemble()`'s CV+ unit records. A row any member could not use (not
+#' finite after its recipe) is left out, as `predict()` leaves it out.
 #'
 #' @param x A `horizons_ensemble`.
 #' @param members Character vector of member `config_id`s.
 #' @param call The frame a member's failure reports.
-#' @return `NULL` when the trim set no row aside; otherwise a list with
+#' @return `NULL` when the trim set no row aside, or no member could use
+#'   one; otherwise a list with
 #'   `predictors` (one `member_<config_id>` column per member, in `members`
 #'   order), `truth` and `sample_id`, aligned by row.
 #' @keywords internal
@@ -624,6 +626,14 @@ ensemble_trimmed_rows <- function(x, members, call = rlang::caller_env()) {
     header = "The ensemble's intervals could not be calibrated: {n_failed} of its {n_total} member{?s} could not predict the training rows the response trim set aside.",
     call   = call
   )
+
+  ## A row any member could not use is left out, as predict() leaves it out:
+  ## an xgb meta-model would read the member's NA as missing and give the
+  ## row a residual from a combination predict() never serves
+  bad         <- unique(unlist(attr(member_pred, "flagged")))
+  member_pred <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+
+  if (nrow(member_pred) == 0) return(NULL)
 
   wide <- member_pred |>
     dplyr::select("sample_id", "config_id", ".pred") |>
