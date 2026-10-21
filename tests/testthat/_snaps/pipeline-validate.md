@@ -10,7 +10,7 @@
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
       │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
-      │  ├─ ℹ Spectral outliers: 0
+      │  ├─ ℹ Spectral outliers: 2
       │  ├─ ℹ Response outliers: 1
       │  └─ Status: PASSED
       │
@@ -27,7 +27,7 @@
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
       │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
-      │  ├─ ℹ Spectral outliers: 0
+      │  ├─ ℹ Spectral outliers: 2
       │  ├─ ℹ Response outliers: not run
       │  └─ Status: FAILED
       │

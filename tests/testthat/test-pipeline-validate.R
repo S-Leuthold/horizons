@@ -606,11 +606,26 @@ describe("validate() cubist feasibility check (P010)", {
 
 describe("validate() spectral outlier detection", {
 
-  test_that("P005 detects no outliers in clean data", {
+  test_that("P005 compares each distance with its exact in-sample reference, which can flag where chi-squared cannot (#227)", {
 
-    result <- quiet_validate(make_configured_hd())
+    ## Clean noise, 100 x 50: 47 components are kept, and chi-squared's
+    ## 97.5% point lies above every distance, so it could never flag
+    hd     <- make_configured_hd()
+    result <- quiet_validate(hd)
 
-    expect_equal(length(result$validation$outliers$spectral_ids), 0)
+    pred   <- as.matrix(hd$data$analysis[, -c(1, ncol(hd$data$analysis))])
+    pca    <- stats::prcomp(pred, scale. = TRUE)
+    n      <- nrow(pred)
+    k      <- min(which(cumsum(pca$sdev^2) / sum(pca$sdev^2) >= 0.99)[1], n - 2, 50)
+    scores <- pca$x[, 1:k, drop = FALSE]
+    d      <- stats::mahalanobis(scores, colMeans(scores), stats::cov(scores))
+
+    exact  <- (n - 1)^2 / n * stats::qbeta(0.975, k / 2, (n - k - 1) / 2)
+
+    expect_identical(result$validation$outliers$spectral_ids,
+                     hd$data$analysis$sample_id[d > exact])
+    expect_length(result$validation$outliers$spectral_ids, 2L)
+    expect_false(any(d > stats::qchisq(0.975, df = k)))
 
   })
 
@@ -666,31 +681,62 @@ describe("validate() spectral outlier detection", {
 
   })
 
-  test_that("P005 skips with fewer than 5 samples", {
+  test_that("P005 skips when the cap leaves no component, below three samples (#227)", {
 
-    hd <- make_configured_hd(n_samples = 4, cv_folds = 2L)
+    hd <- make_configured_hd(n_samples = 2, cv_folds = 2L)
 
-    w <- expect_warning(result <- validate(hd),
-                        "Spectral outlier detection did not run: too few samples (4).", fixed = TRUE,
-                        class = "horizons_warning_skipped")
+    ## The response check skips too, so the spectral skip is one bullet
+    w <- expect_warning(result <- validate(hd), class = "horizons_warning_skipped")
+    expect_match(conditionMessage(w), "Spectral outlier detection did not run: too few samples (2).",
+                 fixed = TRUE)
 
     expect_equal(length(result$validation$outliers$spectral_ids), 0)
 
     ## The report says the check did not run, rather than that it found nothing
     p005 <- result$validation$checks[result$validation$checks$check_id == "P005", ]
-    expect_identical(p005$value, "not run: too few samples (4)")
+    expect_identical(p005$value, "not run: too few samples (2)")
     expect_identical(w$log, result$log[result$log$verb == "validate", ])
 
   })
 
-  test_that("P005 runs with exactly 5 samples (boundary)", {
+  test_that("P005 runs from three samples, with no fixed minimum (#227)", {
 
-    hd <- make_configured_hd(n_samples = 5, cv_folds = 2L)
+    for (n in 3:4) {
 
-    ## No skip warning at n = 5: the guard is n < 5
-    expect_no_warning(capture.output(result <- validate(hd)))
+      hd <- make_configured_hd(n_samples = n, cv_folds = 2L)
 
-    expect_true("P005" %in% result$validation$checks$check_id)
+      warnings <- testthat::capture_warnings(result <- validate(hd))
+      expect_false(any(grepl("Spectral outlier detection did not run", warnings, fixed = TRUE)),
+                   info = paste("n =", n))
+
+      p005 <- result$validation$checks[result$validation$checks$check_id == "P005", ]
+      expect_match(p005$value, "flagged$", info = paste("n =", n))
+
+    }
+
+  })
+
+  test_that("P005 and P007 leave flagged rows out, and never flag or remove one", {
+
+    ## A flagged row holding NA, and a column constant among the other rows:
+    ## left in, the NA would stop the PCA and the column would vary
+    hd <- make_configured_hd(n_predictors = 20)
+    pred <- hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+
+    hd$data$analysis[[pred[1]]] <- c(9, rep(0.5, 99))
+    hd$data$analysis[[pred[5]]][1] <- NA
+    hd$data$analysis[[pred[6]]][1] <- 1000
+    hd$data$analysis$.flag <- c("standardize", rep(NA_character_, 99))
+    hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+
+    p007 <- result$validation$checks[result$validation$checks$check_id == "P007", ]
+    expect_identical(p007$value, "1")
+    expect_match(result$validation$checks$value[result$validation$checks$check_id == "P005"], "flagged$")
+
+    expect_false("S001" %in% result$validation$outliers$spectral_ids)
+    expect_true("S001" %in% result$data$analysis$sample_id)
 
   })
 
@@ -981,9 +1027,10 @@ describe("validate() outlier removal", {
   test_that("no outliers detected: remove_outliers=TRUE does nothing", {
 
     ## Use controlled outcome to ensure no IQR outliers
+    ## A threshold at which the clean fixture flags nothing
     outcome_vals <- seq(10, 20, length.out = 100)
     hd     <- make_configured_hd(outcome_values = outcome_vals)
-    result <- quiet_validate(hd, remove_outliers = TRUE)
+    result <- quiet_validate(hd, remove_outliers = TRUE, spectral_threshold = 0.9999)
 
     expect_false(result$validation$outliers$removed)
     expect_equal(result$validation$outliers$removed_ids, character(0))

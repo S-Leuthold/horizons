@@ -26,8 +26,15 @@
 #'
 #' Spectral outliers are detected via Mahalanobis distance on PCA scores
 #' of the raw (unpreprocessed) spectral matrix, scaled to unit variance per
-#' wavenumber. Response outliers use IQR-based Tukey fences on the outcome
-#' variable.
+#' wavenumber. Each sample's squared distance is compared with its exact
+#' in-sample reference distribution, a scaled Beta (Tracy, Young and Mason
+#' 1992), rather than chi-squared, which ignores that the centre and
+#' covariance are estimated from the same samples and cannot flag any sample
+#' when many components are kept for the sample count. The check runs from
+#' three samples. Rows a step flagged (`.flag`) are left out of it, and of
+#' the near-zero-variance check, as modelling leaves them out; a flagged row
+#' is never removed as an outlier. Response outliers use IQR-based Tukey
+#' fences on the outcome variable.
 #'
 #' **Response outliers are trimmed from the training partition, not here:**
 #'
@@ -76,8 +83,9 @@
 #'   with `response_threshold` as the multiplier. `TRUE` does both.
 #' @param spectral_method `character(1)`. Spectral outlier detection method.
 #'   Currently only `"mahalanobis"`. Default: `"mahalanobis"`.
-#' @param spectral_threshold `numeric(1)`. Chi-squared quantile for
-#'   Mahalanobis distance cutoff. Default: `0.975`.
+#' @param spectral_threshold `numeric(1)`. The quantile of the squared
+#'   Mahalanobis distance's exact in-sample reference distribution above
+#'   which a sample is flagged. Default: `0.975`.
 #' @param response_method `character(1)`. Response outlier detection method.
 #'   Currently only `"iqr"`. Default: `"iqr"`.
 #' @param response_threshold `numeric(1)`. IQR multiplier for Tukey fences,
@@ -292,11 +300,18 @@ validate <- function(x,
   predictor_cols <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
   predictor_cols <- intersect(predictor_cols, names(analysis))
 
+  ## A flagged row is one a step could not use, and modelling leaves it out,
+  ## so the predictor checks and the spectral outlier check read the other
+  ## rows. The same rows in both, so the columns the PCA scales are the ones
+  ## that vary among the rows it sees. A flagged row is never removed as an
+  ## outlier.
+  clean_analysis <- analysis[!flagged_rows(analysis), , drop = FALSE]
+
   nzv_cols <- character(0)
   if (length(predictor_cols) > 0) {
 
     variances <- vapply(
-      analysis[, predictor_cols, drop = FALSE],
+      clean_analysis[, predictor_cols, drop = FALSE],
       function(col) {
         non_na <- col[!is.na(col)]
         if (length(non_na) < 2) return(NA_real_)
@@ -392,7 +407,7 @@ validate <- function(x,
   ## ---------------------------------------------------------------------------
 
   spectral <- detect_spectral_outliers(
-    analysis       = analysis,
+    analysis       = clean_analysis,
     predictor_cols = predictor_cols,
     nzv_cols       = nzv_cols,
     threshold      = spectral_threshold
@@ -703,13 +718,25 @@ validate <- function(x,
 #' @description
 #' Computes PCA on the raw spectral matrix (scaled to unit variance per
 #' wavenumber), retains components capturing 99% of variance, then flags
-#' samples whose squared Mahalanobis distance exceeds the chi-squared
-#' quantile threshold.
+#' samples whose squared Mahalanobis distance exceeds the `threshold`
+#' quantile of its exact in-sample reference distribution.
 #'
-#' @param analysis `tibble`. The analysis table.
+#' @details
+#' The centre and covariance are estimated from the same samples the
+#' distances are computed for, so the distances are not chi-squared: each
+#' is `(n - 1)^2 / n` times a Beta(`k / 2`, `(n - k - 1) / 2`) variable
+#' (Tracy, Young and Mason 1992), bounded above by `(n - 1)^2 / n`. The
+#' chi-squared cutoff exceeds that bound when `k` is large for `n`, so it
+#' could flag nothing (#227). The Beta exists whenever `k <= n - 2`, which
+#' the cap below guarantees, so the check runs whenever the cap leaves a
+#' component: from three samples.
+#'
+#' @param analysis `tibble`. The rows to check: the analysis table less its
+#'   flagged rows.
 #' @param predictor_cols `character`. Predictor column names.
 #' @param nzv_cols `character`. Near-zero variance columns to exclude.
-#' @param threshold `numeric(1)`. Chi-squared quantile (0-1).
+#' @param threshold `numeric(1)`. The reference distribution's quantile
+#'   (0-1).
 #'
 #' @return `list`: `ids`, the `sample_id` values flagged, and `skipped`,
 #'   `NULL` when the check ran, otherwise why it could not.
@@ -729,8 +756,9 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 
   n <- nrow(analysis)
 
-  ## Guard: too few samples for meaningful PCA
-  if (n < 5) {
+  ## The cap below keeps k <= n - 2, so with fewer than three samples it
+  ## leaves no component to test.
+  if (n - 2 < 1) {
 
     return(list(ids = character(0),
                 skipped = paste0("too few samples (", n, ")")))
@@ -751,23 +779,16 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 
   k <- min(k, n - 2, 50)
 
-  ## Guard: k must still be >= 1 after capping
-  if (k < 1) {
-
-    return(list(ids = character(0),
-                skipped = "too few principal components after capping"))
-
-  }
-
   ## The scores' covariance is diagonal, with the kept components' positive
   ## variances, so it is never singular.
   scores <- pca$x[, 1:k, drop = FALSE]
   center <- colMeans(scores)
   S      <- stats::cov(scores)
 
-  ## Compute Mahalanobis distances
-  distances  <- stats::mahalanobis(scores, center, S)
-  cutoff     <- stats::qchisq(threshold, df = k)
+  ## Distances against the exact in-sample reference ---------------------------
+
+  distances <- stats::mahalanobis(scores, center, S)
+  cutoff    <- (n - 1)^2 / n * stats::qbeta(threshold, k / 2, (n - k - 1) / 2)
 
   list(ids = analysis$sample_id[distances > cutoff], skipped = NULL)
 

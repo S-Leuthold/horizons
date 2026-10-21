@@ -27,8 +27,9 @@ with \code{response_threshold} as the multiplier. \code{TRUE} does both.}
 \item{spectral_method}{\code{character(1)}. Spectral outlier detection method.
 Currently only \code{"mahalanobis"}. Default: \code{"mahalanobis"}.}
 
-\item{spectral_threshold}{\code{numeric(1)}. Chi-squared quantile for
-Mahalanobis distance cutoff. Default: \code{0.975}.}
+\item{spectral_threshold}{\code{numeric(1)}. The quantile of the squared
+Mahalanobis distance's exact in-sample reference distribution above
+which a sample is flagged. Default: \code{0.975}.}
 
 \item{response_method}{\code{character(1)}. Response outlier detection method.
 Currently only \code{"iqr"}. Default: \code{"iqr"}.}
@@ -85,8 +86,15 @@ set to \code{FALSE}.
 
 Spectral outliers are detected via Mahalanobis distance on PCA scores
 of the raw (unpreprocessed) spectral matrix, scaled to unit variance per
-wavenumber. Response outliers use IQR-based Tukey fences on the outcome
-variable.
+wavenumber. Each sample's squared distance is compared with its exact
+in-sample reference distribution, a scaled Beta (Tracy, Young and Mason
+1992), rather than chi-squared, which ignores that the centre and
+covariance are estimated from the same samples and cannot flag any sample
+when many components are kept for the sample count. The check runs from
+three samples. Rows a step flagged (\code{.flag}) are left out of it, and of
+the near-zero-variance check, as modelling leaves them out; a flagged row
+is never removed as an outlier. Response outliers use IQR-based Tukey
+fences on the outcome variable.
 
 \strong{Response outliers are trimmed from the training partition, not here:}
 
