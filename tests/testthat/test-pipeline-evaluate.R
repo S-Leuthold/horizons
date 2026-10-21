@@ -1618,6 +1618,24 @@ describe("checkpoint scoring schema", {
 
   })
 
+  it("drops a row scored before untransformed tuning metrics were clamped (#104)", {
+
+    run_fp   <- list(data_hash = "h", data_n_rows = 10L,
+                     data_fields = list(ids = "i", outcome = "SOC"))
+    settings <- eval_settings(cv_folds = 3L, seed = 42L)
+
+    ## Schema 4 scored a "none" configuration's cv_* on unclamped predictions,
+    ## so its rows are not ranked beside rows scored on clamped ones
+    row <- tibble::tibble(config_id = "a", scoring_schema = 4L)
+    row <- stamp_eval_settings(stamp_data_fingerprint(row, run_fp), settings)
+
+    expect_identical(checkpoint_row_verdict(row, run_fp, settings)$verdict, "foreign_schema")
+
+    row$scoring_schema <- SCORING_SCHEMA
+    expect_identical(checkpoint_row_verdict(row, run_fp, settings)$verdict, "keep")
+
+  })
+
   it("checks the fingerprint before the schema, field by field", {
 
     run_fp <- list(data_hash = "this", data_n_rows = 10L,

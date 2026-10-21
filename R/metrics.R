@@ -218,12 +218,13 @@ ccc <- yardstick::new_numeric_metric(
 #'
 #' @description
 #' Returns the `yardstick::metric_set()` that `evaluate_single_config()` and
-#' `fit_single_config()` hand to `tune::tune_grid()` and `tune::tune_bayes()`.
-#' For `transformation = "none"` it is the plain set of the requested metrics.
-#' For `"log"`, `"log10"` and `"sqrt"` every metric is wrapped so that the
-#' estimate is back-transformed with [back_transform_predictions()] before it
-#' is compared to the truth, and the whole set is therefore scored on the
-#' original response scale.
+#' `fit_single_config()` hand to `tune::tune_grid()` and `tune::tune_bayes()`,
+#' and that the ensemble's meta-learner tunes with. Every metric is wrapped so
+#' that the estimate goes through [back_transform_predictions()] before it is
+#' compared to the truth: for `"log"`, `"log10"` and `"sqrt"` it is
+#' back-transformed and clamped to `outcome_range`, and for `"none"` it is
+#' clamped only. The whole set is therefore scored on the original response
+#' scale, on the predictions horizons serves.
 #'
 #' @details
 #' **Why this exists.** `build_recipe()` applies the response transformation
@@ -260,10 +261,8 @@ ccc <- yardstick::new_numeric_metric(
 #' @param metrics Character vector naming the metrics to include, in order.
 #'   Any of `"rmse"`, `"rrmse"`, `"rsq"`, `"mae"`, `"rpd"`, `"ccc"`.
 #' @param outcome_range Numeric length-2 vector. The outcome's physical range,
-#'   which the back-transformed estimate is clamped to, as
-#'   [back_transform_predictions()] clamps every scored prediction. Read only
-#'   for a transformed response; the `"none"` set scores the estimate as tune
-#'   produced it, as it did before the range existed. Default `c(0, Inf)`.
+#'   which the estimate is clamped to, as [back_transform_predictions()] clamps
+#'   every scored prediction, whatever the transformation. Default `c(0, Inf)`.
 #'
 #' @return A `yardstick` metric set.
 #' @seealso [back_transform_predictions()], [compute_original_scale_metrics()]
@@ -277,12 +276,12 @@ tuning_metric_set <- function(transformation,
   transformation <- tolower(as.character(transformation))
 
   registry <- list(
-    rmse  = list(vec = yardstick::rmse_vec, direction = "minimize", plain = yardstick::rmse),
-    rrmse = list(vec = rrmse_vec,           direction = "minimize", plain = rrmse),
-    rsq   = list(vec = yardstick::rsq_vec,  direction = "maximize", plain = yardstick::rsq),
-    mae   = list(vec = yardstick::mae_vec,  direction = "minimize", plain = yardstick::mae),
-    rpd   = list(vec = rpd_vec,             direction = "maximize", plain = rpd),
-    ccc   = list(vec = ccc_vec,             direction = "maximize", plain = ccc)
+    rmse  = list(vec = yardstick::rmse_vec, direction = "minimize"),
+    rrmse = list(vec = rrmse_vec,           direction = "minimize"),
+    rsq   = list(vec = yardstick::rsq_vec,  direction = "maximize"),
+    mae   = list(vec = yardstick::mae_vec,  direction = "minimize"),
+    rpd   = list(vec = rpd_vec,             direction = "maximize"),
+    ccc   = list(vec = ccc_vec,             direction = "maximize")
   )
 
   ### Both callers pass constant metric names, and every caller reads the range
@@ -294,20 +293,8 @@ tuning_metric_set <- function(transformation,
   force(outcome_range)
 
   ## -------------------------------------------------------------------------
-  ## No transformation: the plain metric set, exactly as before
-  ## -------------------------------------------------------------------------
-
-  if (!needs_back_transformation(transformation)) {
-
-    plain <- lapply(registry[metrics], function(entry) entry$plain)
-    names(plain) <- metrics
-
-    return(do.call(yardstick::metric_set, plain))
-
-  }
-
-  ## -------------------------------------------------------------------------
-  ## Transformed response: wrap each metric to back-transform the estimate
+  ## Wrap each metric to back-transform and clamp the estimate. Under "none"
+  ## the clamp alone applies, as it does to every prediction horizons serves.
   ## -------------------------------------------------------------------------
 
   wrapped <- lapply(metrics, function(name) {
@@ -345,8 +332,9 @@ make_original_scale_metric <- function(name, vec_fn, direction, transformation,
 
   force(outcome_range)
 
-  ### The estimate arrives on the transformed scale; the truth does not.
-  ### Back-transform the estimate only, then score as usual.
+  ### The estimate arrives on the transformed scale (under "none", the original
+  ### one); the truth on the original. Back-transform and clamp the estimate
+  ### only, then score as usual.
   scaled_vec <- function(truth, estimate, na_rm = TRUE, ...) {
 
     estimate <- back_transform_predictions(estimate, transformation,

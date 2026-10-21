@@ -174,27 +174,6 @@ meta_tune_control <- function(kind = c("grid", "resamples"), allow_par = FALSE) 
 }
 
 ## ---------------------------------------------------------------------------
-## horizons_metric_set()
-## ---------------------------------------------------------------------------
-
-#' The Package Regression Metric Set
-#'
-#' @description
-#' The canonical six-metric panel (rmse, rrmse, rsq, ccc, rpd, mae) used for
-#' regression scoring throughout the package. Returned as a `yardstick`
-#' `metric_set` so it can drive `tune_grid()`; the data-consuming scorer
-#' [compute_original_scale_metrics()] uses the same six metrics.
-#'
-#' @return A `yardstick` metric set.
-#' @keywords internal
-horizons_metric_set <- function() {
-
-  yardstick::metric_set(yardstick::rmse, rrmse, yardstick::rsq, ccc, rpd,
-                        yardstick::mae)
-
-}
-
-## ---------------------------------------------------------------------------
 ## predict_members_on_test()
 ## ---------------------------------------------------------------------------
 
@@ -309,7 +288,9 @@ with_run_records <- function(contract, member_pred, warning_log = new_warning_lo
 #' performance is honest), refit the winner on the full matrix, then have the
 #' members predict `test_F` and combine those predictions *through* the fitted
 #' meta-model. The engine supplies the model spec, the tuning grid, and a
-#' closure that extracts member weights from the fitted model.
+#' closure that extracts member weights from the fitted model. Candidates are
+#' scored on their combination clamped to the outcome's range, as the served
+#' combination is ([tuning_metric_set()] with `transformation = "none"`).
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s.
@@ -372,6 +353,15 @@ fit_tuned_meta_learner <- function(object,
     workflows::add_model(spec) |>
     workflows::add_formula(.truth ~ .)
 
+  ## Combined predictions are clamped to the outcome's range, as every served
+  ## prediction is (#76); a floor at 0 under the default range. The tuning
+  ## scores the clamped combination too, so the candidate chosen is the one
+  ## best on what is served (#104).
+  outcome_range <- outcome_range_setting(object)
+  meta_metrics  <- tuning_metric_set("none",
+                                     metrics       = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"),
+                                     outcome_range = outcome_range)
+
   ## The warnings tune keeps as notes: the chosen candidate's (#109) and the
   ## out-of-fold pass's. They are the ensemble's own, for its `warnings`.
   warning_log <- new_warning_log()
@@ -403,7 +393,7 @@ fit_tuned_meta_learner <- function(object,
         meta_wflow,
         resamples = folds,
         grid      = grid,
-        metrics   = horizons_metric_set(),
+        metrics   = meta_metrics,
         control   = meta_tune_control("grid", allow_par)
       ))
       check_tune_result(results, "every meta-learner candidate failed", debug = debug)
@@ -489,7 +479,7 @@ fit_tuned_meta_learner <- function(object,
     oof_res <- suppressMessages(tune::fit_resamples(
       final_wflow,
       resamples = folds,
-      metrics   = horizons_metric_set(),
+      metrics   = meta_metrics,
       control   = meta_tune_control("resamples", allow_par)
     ))
 
@@ -528,10 +518,6 @@ fit_tuned_meta_learner <- function(object,
     n          = length(oof_by_pos),
     n_expected = length(oof$row)
   )
-
-  ## Combined predictions are clamped to the outcome's range, as every served
-  ## prediction is (#76); a floor at 0 under the default range.
-  outcome_range <- outcome_range_setting(object)
 
   oof_pred <- tibble::tibble(
     .row  = oof$row,

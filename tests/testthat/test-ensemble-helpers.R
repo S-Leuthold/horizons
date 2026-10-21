@@ -67,6 +67,87 @@ describe("fit_tuned_meta_learner() - refusals", {
 
 
 ## =========================================================================
+## fit_tuned_meta_learner() - the clamped combination (#104)
+## =========================================================================
+
+describe("fit_tuned_meta_learner() - the clamped combination (#104)", {
+
+  it("scores its candidates and its out-of-fold pass on the combination clamped to the range", {
+
+    fitted  <- ens_fitted()
+    members <- gather_members(fitted)$members
+    oof     <- build_oof_matrix(fitted, members)
+
+    ## Truth and members moved down by the median, and the truth floored at
+    ## zero: a linear combination of the members fits that hinge with values
+    ## below the default range's floor at the low end
+    shift <- stats::median(oof$truth)
+    oof$truth <- pmax(oof$truth - shift, 0)
+    oof$predictors[] <- lapply(oof$predictors, function(v) v - shift)
+
+    ## tune's own results, with the grid's fold predictions kept
+    real_grid      <- tune::tune_grid
+    real_resamples <- tune::fit_resamples
+    seen <- list()
+    local_mocked_bindings(
+      tune_grid = function(object, ..., control) {
+        control$save_pred <- TRUE
+        seen$grid <<- real_grid(object, ..., control = control)
+        seen$grid
+      },
+      fit_resamples = function(...) {
+        seen$oof <<- real_resamples(...)
+        seen$oof
+      },
+      .package = "tune"
+    )
+
+    spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+      parsnip::set_engine("glmnet")
+    grid <- tidyr::expand_grid(penalty = c(1e-4, 1e-2), mixture = c(0, 1))
+
+    ## suppressWarnings(): rsample's note that the meta rows are too few for
+    ## its default strata breaks
+    suppressWarnings(fit_tuned_meta_learner(
+      fitted, members, oof,
+      rank_metric     = "rpd",
+      optimize        = TRUE,
+      method          = "penalized",
+      spec            = spec,
+      grid            = grid,
+      extract_weights = extract_weights_penalized
+    ))
+
+    expect_named(seen, c("grid", "oof"), ignore.order = TRUE)
+
+    for (stage in names(seen)) {
+
+      preds <- tune::collect_predictions(seen[[stage]], summarize = FALSE)
+      expect_true(any(preds$.pred < 0), info = stage)
+
+      per_fold <- dplyr::summarise(
+        preds,
+        clamped = yardstick::rmse_vec(.data$.truth, pmax(.data$.pred, 0)),
+        raw     = yardstick::rmse_vec(.data$.truth, .data$.pred),
+        .by     = c("id", ".config")
+      )
+
+      scored <- tune::collect_metrics(seen[[stage]], summarize = FALSE)
+      scored <- scored[scored$.metric == "rmse", c("id", ".config", ".estimate")]
+      joined <- dplyr::inner_join(per_fold, scored, by = c("id", ".config"))
+
+      expect_equal(nrow(joined), nrow(per_fold), info = stage)
+      expect_equal(joined$.estimate, joined$clamped, tolerance = 1e-12, info = stage)
+      expect_true(any(abs(joined$raw - joined$clamped) > 1e-6), info = stage)
+
+    }
+
+  })
+
+})
+
+
+## =========================================================================
 ## The engines' run time
 ## =========================================================================
 
