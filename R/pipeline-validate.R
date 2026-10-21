@@ -85,7 +85,9 @@
 #'   Currently only `"mahalanobis"`. Default: `"mahalanobis"`.
 #' @param spectral_threshold `numeric(1)`. The quantile of the squared
 #'   Mahalanobis distance's exact in-sample reference distribution above
-#'   which a sample is flagged. Default: `0.975`.
+#'   which a sample is flagged. Default: `0.975`. A threshold low enough to
+#'   flag every sample is refused when the spectral outliers are to be
+#'   removed, since nothing would be left to model.
 #' @param response_method `character(1)`. Response outlier detection method.
 #'   Currently only `"iqr"`. Default: `"iqr"`.
 #' @param response_threshold `numeric(1)`. IQR multiplier for Tukey fences,
@@ -513,6 +515,19 @@ validate <- function(x,
   did_remove     <- FALSE
 
   if (remove_spectral && length(spectral_outlier_ids) > 0) {
+
+    ## A low threshold can flag every row the check saw, and removing them
+    ## would leave nothing to model. The threshold is the user's, so it is
+    ## refused here, by name, rather than reaching subset_rows()'s tripwire
+    ## as a bug. Flagged rows are never removed, and never modelled either.
+    if (length(spectral_outlier_ids) == nrow(clean_analysis)) {
+
+      abort_horizons(c(
+        "{.arg spectral_threshold} = {spectral_threshold} flags every sample the check reads as a spectral outlier, so removing them would leave none to model.",
+        "i" = "Raise {.arg spectral_threshold} (the default is 0.975), or keep the samples with {.code remove_outliers = FALSE}."
+      ), kind = "input")
+
+    }
 
     ## Removing rows from an evaluated or fitted object would strand its
     ## splits; refused here, where the rows would change, so an object with

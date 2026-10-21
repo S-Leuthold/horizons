@@ -1067,6 +1067,47 @@ describe("validate() outlier removal", {
 
   })
 
+  test_that("validate() refuses a spectral_threshold that would remove every sample", {
+
+    ## Three samples, two alike: at 0.3 every distance exceeds the cutoff
+    hd   <- make_configured_hd(n_samples = 3, cv_folds = 2L)
+    pred <- hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+    base <- sin(seq(0, 6, length.out = length(pred))) + 2
+    hd$data$analysis[, pred] <- as.data.frame(rbind(base, base, base * 1.5 + 0.3))
+
+    ## Ten noise spectra: at 0.05 every one is flagged
+    ten <- make_configured_hd(n_samples = 10, cv_folds = 2L)
+
+    for (case in list(list(hd, 0.3), list(ten, 0.05))) {
+
+      x <- case[[1]]; thr <- case[[2]]
+
+      ## Detection alone flags every sample, and keeps them
+      kept <- quiet_validate(x, spectral_threshold = thr)
+      expect_length(kept$validation$outliers$spectral_ids, nrow(x$data$analysis))
+
+      ## Removal is refused as the argument's, not as a bug
+      expect_error(
+        suppressWarnings(capture.output(validate(x, remove_outliers = TRUE, spectral_threshold = thr))),
+        "flags every sample the check reads as a spectral outlier", fixed = TRUE,
+        class = "horizons_error_input"
+      )
+
+    }
+
+    ## A flagged row is never removed nor modelled, so it leaves nothing either
+    ten$data$analysis$.flag <- c("standardize", rep(NA_character_, 9))
+    ten$data$role_map <- tibble::add_row(ten$data$role_map, variable = ".flag", role = "meta")
+    expect_length(quiet_validate(ten, spectral_threshold = 0.05)$validation$outliers$spectral_ids, 9L)
+
+    err <- expect_error(
+      suppressWarnings(capture.output(validate(ten, remove_outliers = "spectral", spectral_threshold = 0.05))),
+      class = "horizons_error_input"
+    )
+    expect_identical(rlang::call_name(err$call), "validate")
+
+  })
+
 })
 
 

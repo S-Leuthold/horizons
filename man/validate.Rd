@@ -29,7 +29,9 @@ Currently only \code{"mahalanobis"}. Default: \code{"mahalanobis"}.}
 
 \item{spectral_threshold}{\code{numeric(1)}. The quantile of the squared
 Mahalanobis distance's exact in-sample reference distribution above
-which a sample is flagged. Default: \code{0.975}.}
+which a sample is flagged. Default: \code{0.975}. A threshold low enough to
+flag every sample is refused when the spectral outliers are to be
+removed, since nothing would be left to model.}
 
 \item{response_method}{\code{character(1)}. Response outlier detection method.
 Currently only \code{"iqr"}. Default: \code{"iqr"}.}
