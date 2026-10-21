@@ -195,6 +195,16 @@ describe("ccc_vec()", {
 
   })
 
+  it("returns NA when na_rm = FALSE and NAs present, as rpd_vec() and rrmse_vec() do (#176)", {
+
+    truth    <- c(1, 2, NA, 4, 5)
+    estimate <- c(1.1, 2.2, 2.8, 4.1, 4.9)
+
+    expect_identical(ccc_vec(truth, estimate, na_rm = FALSE), NA_real_)
+    expect_identical(ccc_vec(estimate, truth, na_rm = FALSE), NA_real_)
+
+  })
+
 })
 
 ## ===========================================================================

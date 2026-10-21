@@ -164,6 +164,9 @@ ccc_vec <- function(truth, estimate, na_rm = TRUE, ...) {
   sd_truth      <- stats::sd(truth)
   sd_estimate   <- stats::sd(estimate)
 
+  ## NA propagation (NAs present and na_rm = FALSE)
+  if (is.na(sd_truth) || is.na(sd_estimate)) return(NA_real_)
+
   ## Either vector constant → agreement undefined
   if (sd_truth < .Machine$double.eps || sd_estimate < .Machine$double.eps) {
 
