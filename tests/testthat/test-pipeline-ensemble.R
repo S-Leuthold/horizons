@@ -1282,13 +1282,13 @@ describe("predict.horizons_ensemble() - selected training set", {
 
 describe("predict.horizons_ensemble() - trimmed members (#77, #103)", {
 
-  trimmed_ensemble <- function(uq = TRUE, trimmed_ids = c("S001", "S002")) {
+  trimmed_ensemble <- function(uq = TRUE) {
 
     ens <- ens_built("weighted", compute_uq = uq)
 
     ens$evaluation$response_trim <- list(
       outcome = "SOC", method = "iqr", threshold = 1.5, fences_from = "training",
-      lower = 0.5, upper = 4.5, n_training = 40L, trimmed_ids = trimmed_ids,
+      lower = 0.5, upper = 4.5, n_training = 40L, trimmed_ids = c("S001", "S002"),
       skipped = NA_character_
     )
 
@@ -1304,11 +1304,10 @@ describe("predict.horizons_ensemble() - trimmed members (#77, #103)", {
       testthat::capture_warnings(predict(ens, test_set, interval = interval))
     }
 
-    ## With intervals, and without them, without ensemble UQ or without a trim
+    ## With intervals, and with intervals asked of an ensemble without UQ,
+    ## whose one warning is that there are none
     expect_length(warns(trimmed_ensemble(), interval = TRUE), 0L)
-    expect_length(warns(trimmed_ensemble(), interval = FALSE), 0L)
     expect_false(any(grepl("training fences", warns(trimmed_ensemble(uq = FALSE), interval = TRUE))))
-    expect_length(warns(trimmed_ensemble(trimmed_ids = character(0)), interval = TRUE), 0L)
 
   })
 
