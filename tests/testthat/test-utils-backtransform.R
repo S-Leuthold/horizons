@@ -56,6 +56,23 @@ describe("back_transform_predictions()", {
 
   })
 
+  it("treats \"notrans\", \"na\", \"\" and NA as unknown, as it treats \"boxcox\"", {
+
+    ## "none" is the only spelling of no transformation, so these are never
+    ## mistaken for it, and are refused as a bug
+    preds <- c(1, 2, 3)
+
+    for (trans in list("notrans", "NoTrans", "na", "NA", "", NA)) {
+
+      label <- deparse(trans)
+
+      expect_error(back_transform_predictions(preds, trans),
+                   class = "horizons_error_internal", label = label)
+
+    }
+
+  })
+
   it("raises no warning on large or negative transformed values", {
 
     ## Large log-scale values are the response bound's to report, where
@@ -225,58 +242,6 @@ describe("log_winsorized()", {
     col <- log_open("predict")
     log_winsorized(col, list(NULL, NULL))
     expect_length(col$events, 0)
-
-  })
-
-})
-
-describe("needs_back_transformation()", {
-
-  it("returns TRUE for log, sqrt, log10", {
-
-    expect_true(needs_back_transformation("log"))
-    expect_true(needs_back_transformation("sqrt"))
-    expect_true(needs_back_transformation("log10"))
-
-  })
-
-  it("returns FALSE for none", {
-
-    expect_false(needs_back_transformation("none"))
-
-  })
-
-  it("returns FALSE for NULL", {
-
-    expect_false(needs_back_transformation(NULL))
-
-  })
-
-  it("treats \"notrans\", \"na\", \"\" and NA as unknown, as back_transform_predictions() does", {
-
-    ## "none" is the only spelling of no transformation. These are unknown
-    ## values like any other, so both functions handle them as they handle
-    ## "boxcox": never mistaken for none, and refused as a bug.
-    preds <- c(1, 2, 3)
-
-    for (trans in list("notrans", "NoTrans", "na", "NA", "", NA)) {
-
-      label <- deparse(trans)
-
-      expect_true(needs_back_transformation(trans), label = label)
-
-      expect_error(back_transform_predictions(preds, trans),
-                   class = "horizons_error_internal", label = label)
-
-    }
-
-  })
-
-  it("is case-insensitive", {
-
-    expect_true(needs_back_transformation("LOG"))
-    expect_true(needs_back_transformation("Sqrt"))
-    expect_false(needs_back_transformation("None"))
 
   })
 
