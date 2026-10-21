@@ -5,8 +5,9 @@
 ## AD assesses whether a new sample falls within the training distribution, so
 ## predict() can flag or abstain on out-of-domain (OOD) inputs. The metric is
 ## the squared Mahalanobis distance in the model's own feature space (the baked
-## predictor matrix a fitted workflow sees), using a Ledoit-Wolf shrinkage
-## covariance so it is well-defined when p > n (wide spectral features).
+## predictor matrix a fitted workflow sees), using the Schäfer-Strimmer
+## shrinkage covariance (corpcor), which is well-defined when p > n (wide
+## spectral features).
 ##
 ## The OOD threshold is calibrated on a HELD-OUT calibration set disjoint from
 ## the rows used to estimate the centroid + covariance, with the conformal
@@ -20,16 +21,25 @@
 #' Compute applicability-domain center and covariance (training phase)
 #'
 #' @description
-#' Estimates the AD centroid (feature means) and a Ledoit-Wolf shrinkage
-#' covariance from a training feature matrix. These define the Mahalanobis
-#' geometry; the OOD/quartile thresholds are calibrated separately on held-out
-#' data by [compute_ad_thresholds()].
+#' Estimates the AD centroid (feature means) and a shrinkage covariance from a
+#' training feature matrix. These define the Mahalanobis geometry; the
+#' OOD/quartile thresholds are calibrated separately on held-out data by
+#' [compute_ad_thresholds()].
 #'
 #' @details
-#' The covariance uses `corpcor::cov.shrink()` (Ledoit-Wolf shrinkage toward a
-#' scaled identity), which stays positive-definite and invertible when p > n —
-#' the regime wide spectral feature matrices produce, where the sample
-#' covariance is singular.
+#' The covariance is `corpcor::cov.shrink()`, the Schäfer-Strimmer shrinkage
+#' estimator: the empirical variances are shrunk toward their median and the
+#' correlations toward the identity, each with an intensity estimated
+#' analytically from the data.
+#'
+#' It is the estimator for fewer samples than features, the regime full spectra
+#' produce, where the sample covariance is singular. The shrinkage estimate is
+#' positive definite and well conditioned whatever the ratio, so its inverse is
+#' stable, and the fewer the rows, the more the correlations are shrunk, so the
+#' distance moves toward one that scales each feature by its shrunk variance. The
+#' out-of-domain cutoff is calibrated on held-out rows, not taken from a
+#' distribution. So p > n is the case the estimator is built for, not a
+#' degraded one, and it is not warned about.
 #'
 #' Because the distance is computed with a *shrinkage* inverse covariance, the
 #' squared Mahalanobis distance is NOT chi-squared distributed; do not apply a
@@ -45,8 +55,7 @@
 #'   and at least `min_ad_rows` rows: [fit_ad()], its one caller, checks both.
 #'
 #' @return List with `centroid` (numeric length p, named), `cov_matrix`
-#'   (p x p shrinkage covariance). Warns when there are fewer samples than
-#'   features.
+#'   (p x p shrinkage covariance).
 #'
 #' @seealso [compute_ad_thresholds()], [calculate_ad_distance()].
 #'
@@ -60,22 +69,6 @@ compute_ad_metadata <- function(feature_matrix) {
   if (is.null(colnames(feature_matrix))) {
 
     abort_horizons("{.arg feature_matrix} must have column names", kind = "internal")
-
-  }
-
-  n_samples  <- nrow(feature_matrix)
-  n_features <- ncol(feature_matrix)
-
-  ## Warn when the covariance cannot be meaningfully estimated -------------------
-  ## Below n ~ p the shrinkage target dominates; the AD is still well-defined
-  ## but its geometry is close to a scaled identity. Warn, do not block.
-
-  if (n_samples < n_features) {
-
-    cli::cli_warn(c(
-      "AD covariance estimated with fewer samples than features ({n_samples} < {n_features}).",
-      "i" = "The shrinkage target dominates; AD distances may be unreliable."
-    ))
 
   }
 
@@ -292,8 +285,9 @@ assign_ad_bin <- function(distances, thresholds) {
 #' fewer than `min_ad_rows` rows, or when the training or calibration
 #' features hold a value that is not finite (NA, NaN or Inf); and with the
 #' step's label (`ad_covariance`, `ad_calibration_bake`, `ad_thresholds`)
-#' when one of those steps errors. The covariance's warning for fewer samples
-#' than features is recorded on the member's row.
+#' when one of those steps errors. Fewer training rows than features is the
+#' regime the covariance is built for (see [compute_ad_metadata()]) and is not
+#' warned about.
 #'
 #' @param fitted_workflow A trained `workflows::workflow` (pre-butcher).
 #' @param calib_data Data frame for threshold calibration — the same held-out
@@ -337,8 +331,7 @@ fit_ad <- function(fitted_workflow,
 
   check_finite_features(train_matrix, "training")
 
-  ## Centroid + shrinkage covariance. Its warning for fewer samples than
-  ## features is recorded on the member's row, not muffled.
+  ## Centroid + shrinkage covariance --------------------------------------------
 
   ad_metadata <- unit_step("ad_covariance", compute_ad_metadata(train_matrix))
 

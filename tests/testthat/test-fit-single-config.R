@@ -1242,24 +1242,22 @@ describe("fit_single_config() - UQ and AD as units of their own (#145)", {
 
   })
 
-  it("records the AD covariance's warning for fewer samples than features on the member's row", {
+  it("a member at p > n carries no AD warning on its row", {
 
     ## 60 wavenumbers keep 52 predictors past the raw step's edge trim, more
     ## than the 45 training rows
-    setup  <- make_fit_setup(n_wn = 60)
-    result <- run_addons(setup, compute_ad = TRUE, min_calib_rows = 5L, min_ad_rows = 5L)
+    setup   <- make_fit_setup(n_wn = 60)
+    result  <- run_addons(setup, compute_ad = TRUE, min_calib_rows = 5L, min_ad_rows = 5L)
+    without <- run_addons(setup, min_calib_rows = 5L, min_ad_rows = 5L)
 
     expect_equal(result$status, "success")
     expect_false(is.null(result$ad))
-    expect_true(any(grepl("AD covariance estimated with fewer samples than features",
-                          result$warnings, fixed = TRUE)))
+    expect_gt(length(result$ad$centroid), 45L)
 
-    ## Not a horizons topic, so it stays on the row and is not lifted; it is
-    ## the member's record, as every add-on record the member keeps is
-    records <- attr(result, "unit_records")
-    covariance <- grepl("fewer samples than features", records$message, fixed = TRUE)
-    expect_false(any(startsWith(records$class[covariance], "horizons_warning_")))
-    expect_identical(unique(records$unit[covariance]), "member")
+    ## The domain adds nothing to the member's warnings or its records
+    expect_identical(result$warnings, without$warnings)
+    expect_identical(attr(result, "unit_records")$message,
+                     attr(without, "unit_records")$message)
 
   })
 

@@ -34,11 +34,13 @@ test_that("compute_ad_metadata returns centroid and positive-definite covariance
 
 })
 
-test_that("compute_ad_metadata handles p > n via shrinkage (with a warning)", {
+test_that("compute_ad_metadata estimates a positive-definite covariance at p > n without a warning", {
 
+  ## Fewer samples than features is the regime the shrinkage estimator is
+  ## built for, not a degraded one
   X <- ad_matrix(50, 100, seed = 456)               # p > n
 
-  expect_warning(md <- compute_ad_metadata(X), "fewer samples than features")
+  expect_no_warning(md <- compute_ad_metadata(X))
   expect_equal(dim(md$cov_matrix), c(100, 100))
   expect_true(all(eigen(md$cov_matrix)$values > 0))
 
@@ -411,7 +413,7 @@ test_that("fit_ad fails at the covariance, the calibration bake or the threshold
 
 })
 
-test_that("fit_ad records the covariance's warning for fewer samples than features, and keeps the bundle", {
+test_that("fit_ad keeps the bundle at p > n and records no warning", {
 
   ## 12 training rows against 30 features
   fx    <- ad_fitted_workflow(n = 12, n_wn = 30, seed = 44)
@@ -421,7 +423,9 @@ test_that("fit_ad records the covariance's warning for fewer samples than featur
 
   expect_false(out$failed)
   expect_named(out$value, c("centroid", "cov_matrix", "ad_thresholds", "n_calib"))
-  expect_true(any(out$records$type == "warning" &
-                    grepl("fewer samples than features (12 <", out$records$message, fixed = TRUE)))
+  p <- length(out$value$centroid)
+  expect_gt(p, 12L)
+  expect_equal(dim(out$value$cov_matrix), c(p, p))
+  expect_false(any(out$records$type == "warning"))
 
 })
