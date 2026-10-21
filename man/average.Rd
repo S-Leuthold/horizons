@@ -19,10 +19,8 @@ average(
 \item{by}{Character. Column name to group replicates by. Default: \code{"sample_id"}.
 With any other column, the grouping values are coerced to character and
 become the new \code{sample_id} of the averaged rows; the original ids are not
-kept as a column, but the mapping from each new id to the scans it came
-from is recorded in \code{provenance$average$source_ids}. The column name is
-recorded in \code{provenance$aggregation_by}, which is written whatever \code{by}
-is. A custom \code{by} is refused on an object carrying a \code{select_training()}
+kept as a column. The column name is recorded in the call's note on the
+log. A custom \code{by} is refused on an object carrying a \code{select_training()}
 record, because renaming the rows breaks the link between the record and
 the object; average first, then select.}
 
@@ -59,14 +57,9 @@ disagree are refused together, not a silent pick
 varies within any sample dropped
 \item \code{data$role_map}: Updated to remove dropped columns and to point the
 \code{id} role at the new \code{sample_id}
-\item \code{provenance$average}: The call's settings and counts, and
-\code{source_ids}, the mapping from each averaged \code{sample_id} to the source
-scans it was built from
 \item \code{log}: The samples whose replicates all failed QC, and the metadata
 columns dropped, then a note recording the call: \code{by}, the scans in
 and samples out, the quality check, and the scans left out
-\item \code{provenance$aggregation_by}: The \code{by} column name, written on every
-call
 }
 }
 \description{

@@ -5,6 +5,10 @@
 library(testthat)
 library(horizons)
 
+#' The note spectra() records each call with, the last row of its log
+#' @noRd
+read_note <- function(x) x$log[x$log$verb == "spectra" & x$log$type == "note", ]
+
 
 ## ---------------------------------------------------------------------------
 ## spectra() — Basic functionality
@@ -275,10 +279,10 @@ test_that("spectra() preserves meta columns", {
 
 
 ## ---------------------------------------------------------------------------
-## spectra() — Provenance tracking
+## spectra() — The record of the call
 ## ---------------------------------------------------------------------------
 
-test_that("spectra() records provenance for tibble input", {
+test_that("spectra() records a data frame source in its note, and the object carries no provenance", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -293,10 +297,10 @@ test_that("spectra() records provenance for tibble input", {
 
   ## Assert ----------------------------------------------------------------
 
-  expect_equal(result$provenance$spectra_source, "tibble")
-  expect_equal(result$provenance$spectra_type, "tibble")
-  expect_s3_class(result$provenance$created, "POSIXct")
-  expect_false("schema_version" %in% names(result$provenance))
+  expect_identical(read_note(result)$ids[[1]], character(0))
+  expect_match(read_note(result)$message, "^Read a data frame")
+  expect_false("provenance" %in% names(result))
+  expect_false("schema_version" %in% names(result))
   expect_false("artifacts" %in% names(result))
 
 })
@@ -388,8 +392,8 @@ test_that("spectra() from a CSV builds the new_horizons_data() shape", {
   ## Assert ----------------------------------------------------------------
 
   expect_contract_shape(result)
-  expect_identical(result$provenance$spectra_source, temp_csv)
-  expect_equal(result$provenance$spectra_type, "csv")
+  expect_identical(read_note(result)$ids[[1]], temp_csv)
+  expect_match(read_note(result)$message, "^Read 1 CSV file")
   expect_equal(result$data$n_rows, 2)
 
   ## No filename column for CSV (no per-sample files)
@@ -435,7 +439,7 @@ test_that("spectra() reads a directory of OPUS files, one row per file", {
   ## Assert ----------------------------------------------------------------
 
   expect_contract_shape(result)
-  expect_equal(result$provenance$spectra_type, "opus")
+  expect_match(read_note(result)$message, "^Read [0-9]+ OPUS file")
   expect_identical(result$data$analysis$sample_id, c("S01-1", "S01-1", "S02-1"))
   expect_identical(result$data$analysis$filename, c("S01-1", "S01-1", "S02-1"))
 
@@ -479,7 +483,7 @@ test_that("spectra() reads a single OPUS file and detects its type", {
 
   ## Assert ----------------------------------------------------------------
 
-  expect_equal(result$provenance$spectra_type, "opus")
+  expect_match(read_note(result)$message, "^Read [0-9]+ OPUS file")
   expect_identical(result$data$analysis$sample_id, "S02-1")
   expect_equal(result$data$n_rows, 1)
 
@@ -493,7 +497,7 @@ test_that("spectra() detects a directory of OPUS files without being told the ty
 
   ## Assert ----------------------------------------------------------------
 
-  expect_equal(result$provenance$spectra_type, "opus")
+  expect_match(read_note(result)$message, "^Read [0-9]+ OPUS file")
   expect_equal(result$data$n_rows, 3)
 
 })
@@ -611,7 +615,7 @@ test_that("spectra() reads a vector of OPUS files as it reads their directory, a
   by_dir    <- read_opus_dir()
 
   expect_identical(by_vector$data$analysis, by_dir$data$analysis)
-  expect_identical(by_vector$provenance$spectra_source, paths)
+  expect_identical(read_note(by_vector)$ids[[1]], paths)
 
   ## A file, then a directory: the file's row first
   both <- spectra(c(file.path(opus_dir(), "S02-1.0"), opus_dir()))
@@ -641,7 +645,7 @@ test_that("spectra() reads a vector of CSV files, and a directory of them", {
 
   expect_identical(by_vector$data$analysis$sample_id, c("A", "B", "C"))
   expect_identical(by_vector$data$analysis$wn_3998, c(0.3, 0.4, 0.6))
-  expect_identical(by_vector$provenance$spectra_type, "csv")
+  expect_match(read_note(by_vector)$message, "^Read [0-9]+ CSV file")
 
   ## A directory read as CSV, told or detected, is its files
   expect_identical(by_dir$data$analysis, by_vector$data$analysis)
@@ -659,7 +663,7 @@ test_that("spectra(recursive = TRUE) detects the type of a directory whose files
   out <- spectra(top, recursive = TRUE)
 
   expect_identical(out$data$analysis$sample_id, "A")
-  expect_identical(out$provenance$spectra_type, "csv")
+  expect_match(read_note(out)$message, "^Read [0-9]+ CSV file")
 
   expect_error(spectra(top, recursive = "yes"), "`recursive` must be `TRUE` or `FALSE`",
                fixed = TRUE, class = "horizons_error_input")

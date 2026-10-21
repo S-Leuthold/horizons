@@ -92,10 +92,8 @@
 #' @param by Character. Column name to group replicates by. Default: `"sample_id"`.
 #'   With any other column, the grouping values are coerced to character and
 #'   become the new `sample_id` of the averaged rows; the original ids are not
-#'   kept as a column, but the mapping from each new id to the scans it came
-#'   from is recorded in `provenance$average$source_ids`. The column name is
-#'   recorded in `provenance$aggregation_by`, which is written whatever `by`
-#'   is. A custom `by` is refused on an object carrying a `select_training()`
+#'   kept as a column. The column name is recorded in the call's note on the
+#'   log. A custom `by` is refused on an object carrying a `select_training()`
 #'   record, because renaming the rows breaks the link between the record and
 #'   the object; average first, then select.
 #' @param quality_check Logical. Enable correlation-based outlier detection.
@@ -124,14 +122,9 @@
 #'     varies within any sample dropped
 #'   * `data$role_map`: Updated to remove dropped columns and to point the
 #'     `id` role at the new `sample_id`
-#'   * `provenance$average`: The call's settings and counts, and
-#'     `source_ids`, the mapping from each averaged `sample_id` to the source
-#'     scans it was built from
 #'   * `log`: The samples whose replicates all failed QC, and the metadata
 #'     columns dropped, then a note recording the call: `by`, the scans in
 #'     and samples out, the quality check, and the scans left out
-#'   * `provenance$aggregation_by`: The `by` column name, written on every
-#'     call
 #'
 #' @examples
 #' \dontrun{
@@ -530,7 +523,7 @@ average <- function(x,
   ## that column by name. The original sample_id column is never carried into
   ## the averaged table (only `by`, retained meta, responses and predictors
   ## are): the door validator requires the id role on sample_id, so it is
-  ## neither meta nor a response. `provenance$aggregation_by` keeps the name.
+  ## neither meta nor a response. The call's note on the log keeps the name.
 
   if (by != "sample_id") {
 
@@ -555,39 +548,7 @@ average <- function(x,
   x <- set_analysis(x, averaged, new_role_map)
 
   ## -------------------------------------------------------------------------
-  ## Step 10: Update provenance
-  ## -------------------------------------------------------------------------
-
-  ## Which scans each averaged row came from. Without this the source ids are
-  ## gone entirely once `by` is promoted, and any earlier
-  ## validation$outliers$*_ids become dangling references.
-
-  source_ids <- tibble::tibble(
-    sample_id        = as.character(group_values),
-    source_sample_id = as.character(analysis$sample_id)
-  )
-
-  source_ids <- source_ids[!source_ids$sample_id %in% dropped_samples, , drop = FALSE]
-
-  ### What happened to particular samples and columns is on the log
-  ### (Step 11); this records how the call was made.
-  x$provenance$average <- list(
-    by                    = by,
-    source_ids            = source_ids,
-    quality_check         = quality_check,
-    correlation_threshold = correlation_threshold,
-    on_all_outliers       = on_all_outliers,
-    n_groups              = n_groups,
-    n_replicates_before   = nrow(analysis),
-    n_replicates_after    = nrow(averaged),
-    n_replicates_dropped  = n_dropped,
-    applied_at            = Sys.time()
-  )
-
-  x$provenance$aggregation_by <- by
-
-  ## -------------------------------------------------------------------------
-  ## Step 10b: Re-validate
+  ## Step 10: Re-validate
   ## -------------------------------------------------------------------------
 
   ### Every finding but the spectra's: in the documented order average()

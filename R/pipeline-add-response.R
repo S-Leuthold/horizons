@@ -34,10 +34,10 @@
 #'
 #' "Matched" counts samples whose join key is found in the source. A matched
 #' sample whose value is `NA` in the source is matched but unmeasured, so the
-#' console also reports, and provenance records, the non-missing count of
-#' each variable. Rows with missing values are kept: an object can carry
-#' several responses (`select_training()` puts every pool response on one
-#' object), and a row missing one of them may carry another. `evaluate()` and
+#' console also reports, and the call's note on the log records, the
+#' non-missing count of each variable. Rows with missing values are kept: an
+#' object can carry several responses (`select_training()` puts every pool
+#' response on one object), and a row missing one of them may carry another. `evaluate()` and
 #' `fit()` drop the rows whose outcome is `NA` when they model it.
 #'
 #' An `NA` join key on either side is refused before anything is joined, and
@@ -79,8 +79,6 @@
 #'   * Response columns added to `data$analysis`
 #'   * New entries in `data$role_map` with `role = "response"`
 #'   * Updated `data$n_responses` count
-#'   * Provenance record appended to `provenance$add_response`, including
-#'     `n_non_missing`, a named integer of non-missing values per variable
 #'   * A note on the object's `log` recording the call, after any coverage
 #'     warning or note: the variables, which are its `ids`, the source (its
 #'     path, or a data frame), the key, the samples matched and the measured
@@ -460,28 +458,6 @@ add_response <- function(x,
   x <- add_columns(x,
                    columns = joined[, intersect(c("sample_id", variable), names(joined)), drop = FALSE],
                    role    = "response")
-
-  ## Record provenance ---------------------------------------------------------
-
-  prov_entry <- list(
-    source        = source_label,
-    variables     = variable,
-    by            = by,
-    n_matched     = n_matched,
-    n_unmatched   = n_unmatched,
-    n_non_missing = n_non_missing,
-    applied_at    = Sys.time()
-  )
-
-  if (is.null(x$provenance$add_response)) {
-
-    x$provenance$add_response <- list(prov_entry)
-
-  } else {
-
-    x$provenance$add_response <- c(x$provenance$add_response, list(prov_entry))
-
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 5b: Re-validate

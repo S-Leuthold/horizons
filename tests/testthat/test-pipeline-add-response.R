@@ -32,8 +32,7 @@ make_test_hd <- function(sample_ids = c("S001", "S002", "S003")) {
     role     = c("id", "predictor", "predictor")
   )
 
-  new_horizons_data(analysis = analysis, role_map = role_map,
-                    spectra_source = "test", spectra_type = "opus")
+  new_horizons_data(analysis = analysis, role_map = role_map)
 
 }
 
@@ -194,7 +193,7 @@ test_that("add_response() reads CSV path source, and records the path", {
   ## Assert ----------------------------------------------------------------
 
   expect_equal(result$data$analysis$SOC, c(1.2, 3.4, 5.6))
-  expect_equal(result$provenance$add_response[[1]]$source, temp_csv)
+  expect_match(log_rows_added(hd, result)$message, temp_csv, fixed = TRUE)
 
 })
 
@@ -323,8 +322,7 @@ test_that("add_response() errors on duplicate keys in horizons (pre-average)", {
     role     = c("id", "predictor", "predictor")
   )
 
-  hd <- new_horizons_data(analysis = analysis, role_map = role_map,
-                          spectra_source = "test", spectra_type = "opus")
+  hd <- new_horizons_data(analysis = analysis, role_map = role_map)
 
   lab <- tibble::tibble(
     sample_id = c("S001", "S002"),
@@ -551,7 +549,7 @@ test_that("add_response() carries its low-match hints in the warning, and the tr
 ## add_response() — Provenance tracking
 ## ---------------------------------------------------------------------------
 
-test_that("add_response() records provenance (tibble source)", {
+test_that("add_response() records a data frame source in its note", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -567,13 +565,11 @@ test_that("add_response() records provenance (tibble source)", {
 
   ## Assert ----------------------------------------------------------------
 
-  prov <- result$provenance$add_response[[1]]
+  note <- log_rows_added(hd, result)
 
-  expect_equal(prov$source, "tibble")
-  expect_equal(prov$variables, "SOC")
-  expect_equal(prov$n_matched, 3)
-  expect_equal(prov$n_unmatched, 0)
-  expect_s3_class(prov$applied_at, "POSIXct")
+  expect_match(note$message, "from a data frame", fixed = TRUE)
+  expect_identical(note$ids[[1]], "SOC")
+  expect_match(note$message, "3 of 3 samples matched", fixed = TRUE)
 
 })
 
@@ -646,10 +642,10 @@ test_that("add_response() reports and records non-missing counts, not only key m
   expect_true(any(grepl("clay: 2/4 non-missing", out, fixed = TRUE)))
   expect_true(any(grepl("oc: 4/4 non-missing", out, fixed = TRUE)))
 
-  prov <- result$provenance$add_response[[1]]
+  note <- log_rows_added(hd, result)
 
-  expect_equal(prov$n_matched, 4)
-  expect_identical(prov$n_non_missing, c(clay = 2L, oc = 4L))
+  expect_match(note$message, "4 of 4 samples matched", fixed = TRUE)
+  expect_match(note$message, "measured values per variable: clay 2, oc 4.", fixed = TRUE)
 
   ## Rows are kept; NA outcomes are dropped per outcome when modelled
   expect_equal(nrow(result$data$analysis), 4)
@@ -682,10 +678,10 @@ test_that("add_response() allows joining from multiple sources", {
   expect_true("pH" %in% names(result$data$analysis))
   expect_equal(result$data$n_responses, 2)
 
-  ## Each call appends its own provenance entry
-  expect_length(result$provenance$add_response, 2)
-  expect_equal(result$provenance$add_response[[1]]$variables, "SOC")
-  expect_equal(result$provenance$add_response[[2]]$variables, "pH")
+  ## Each call appends its own note
+  notes <- result$log[result$log$verb == "add_response", ]
+  expect_identical(notes$type, c("note", "note"))
+  expect_identical(notes$ids, list("SOC", "pH"))
 
 })
 

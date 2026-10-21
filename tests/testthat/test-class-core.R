@@ -16,13 +16,12 @@ test_that("new_horizons_data creates object with correct class", {
 
 })
 
-test_that("new_horizons_data creates object with all 9 sections, the log among them", {
+test_that("new_horizons_data creates object with all 8 sections, the log among them and no provenance", {
 
   obj <- new_horizons_data()
 
   expected_sections <- c(
     "data",
-    "provenance",
     "config",
     "validation",
     "evaluation",
@@ -36,6 +35,11 @@ test_that("new_horizons_data creates object with all 9 sections, the log among t
   expect_null(obj$selection)
   expect_identical(obj$log, new_log())
 
+  ## The standardization record is declared on data, empty until
+  ## standardize() writes it
+  expect_true("standardization" %in% names(obj$data))
+  expect_null(obj$data$standardization)
+
 })
 
 test_that("new_horizons_data carries no artifacts slot, row_index or schema_version (#130, #131)", {
@@ -44,16 +48,7 @@ test_that("new_horizons_data carries no artifacts slot, row_index or schema_vers
 
   expect_false("artifacts" %in% names(obj))
   expect_false("row_index" %in% names(obj$models))
-  expect_false("schema_version" %in% names(obj$provenance))
-
-})
-
-test_that("new_horizons_data sets provenance defaults", {
-
-  obj <- new_horizons_data()
-
-  expect_s3_class(obj$provenance$created, "POSIXct")
-  expect_true(inherits(obj$provenance$horizons_version, "package_version"))
+  expect_false("schema_version" %in% c(names(obj), names(obj$data)))
 
 })
 
@@ -82,19 +77,6 @@ test_that("new_horizons_data accepts data argument", {
   expect_equal(obj$data$n_predictors, 2L)
 
 })
-
-test_that("new_horizons_data accepts provenance arguments", {
-
-  obj <- new_horizons_data(
-    spectra_source = "/path/to/opus",
-    spectra_type = "opus"
-  )
-
-  expect_equal(obj$provenance$spectra_source, "/path/to/opus")
-  expect_equal(obj$provenance$spectra_type, "opus")
-
-})
-
 
 ## ---------------------------------------------------------------------------
 ## validate_horizons_data() — Structural Validator
@@ -1152,10 +1134,8 @@ console_object <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "outcome")
   )
 
-  obj <- new_horizons_data(analysis       = analysis,
-                           role_map       = role_map,
-                           spectra_source = "/path/to/spectra",
-                           spectra_type   = "opus")
+  obj <- new_horizons_data(analysis = analysis,
+                           role_map = role_map)
 
   obj$log <- tibble::add_row(
     new_log(),
@@ -2752,7 +2732,7 @@ test_that("the committed ensemble fixture carries the current contract and valid
   expect_true(all(c("response_bound", "selection_present") %in% names(fx$models)))
   expect_false("row_index" %in% names(fx$models))
   expect_false("artifacts" %in% names(fx))
-  expect_false("schema_version" %in% names(fx$provenance))
+  expect_false("schema_version" %in% names(fx))
   expect_true("sample_id" %in% names(fx$models$cv_predictions))
 
   expect_identical(validate_horizons_eval(fx), fx)

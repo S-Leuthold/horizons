@@ -297,10 +297,8 @@ make_axis_spectra <- function(wn, f = NULL, n = 3) {
   )
 
   new_horizons_data(
-    analysis       = analysis,
-    role_map       = role_map,
-    spectra_source = "test",
-    spectra_type   = "tibble"
+    analysis = analysis,
+    role_map = role_map
   )
 
 }

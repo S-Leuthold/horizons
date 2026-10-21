@@ -88,7 +88,6 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   * `sample_id` updated from the `sampleid` token (if present)
 #'   * New metadata columns added to `data$analysis`
 #'   * `data$role_map` updated with new columns (role: meta)
-#'   * Provenance recorded in `provenance$parse_ids`
 #'   * A note on the object's `log` recording the call, after any warning:
 #'     the format or the patterns, the filenames matched, and the columns
 #'     added, which are its `ids`
@@ -409,24 +408,7 @@ parse_ids <- function(x,
   }
 
   ## -------------------------------------------------------------------------
-  ## Step 8: Update provenance
-  ## -------------------------------------------------------------------------
-
-  x$provenance$parse_ids <- list(
-    format        = format,
-    patterns      = if (has_patterns && !has_format) patterns else NULL,
-    matched       = n_matched,
-    unmatched     = n_unmatched,
-    columns_added = cols_to_add,
-    applied_at    = Sys.time()
-  )
-
-  ### list() keeps the key when format is NULL (patterns = was used);
-  ### `$<-` with NULL would delete it.
-  x$provenance["id_pattern"] <- list(format)
-
-  ## -------------------------------------------------------------------------
-  ## Step 8b: Re-validate
+  ## Step 8: Re-validate
   ## -------------------------------------------------------------------------
   ## Raw stage: parse_ids() runs before average() collapses replicates, so a
   ## duplicate parsed sample_id (several filenames parsing to the same id) or

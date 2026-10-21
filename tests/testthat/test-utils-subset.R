@@ -51,16 +51,6 @@ test_that("subset_rows() leaves role_map and column counts untouched", {
 })
 
 
-test_that("subset_rows() writes no provenance of its own", {
-
-  fx  <- select_fixture(n_pool = 40)
-  out <- subset_rows(fx$pool, c("P001", "P002"))
-
-  expect_identical(out$provenance, fx$pool$provenance)
-
-})
-
-
 ## =============================================================================
 ## subset_rows() — Input validation
 ## =============================================================================

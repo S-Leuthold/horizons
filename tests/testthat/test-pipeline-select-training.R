@@ -1825,11 +1825,11 @@ test_that("the record carries the targets' source, size and id hash", {
   expect_identical(reordered$selection$targets$id_hash, rec$id_hash)
 
   ## It describes the draw, so rows leaving afterwards leave it alone; the
-  ## object's provenance stays the library's.
+  ## object's log stays the library's.
   kept <- subset_rows(out, out$data$analysis$sample_id[-1])
 
   expect_identical(kept$selection$targets, rec)
-  expect_identical(out$provenance$spectra_source, "tibble")
+  expect_identical(kept$log, out$log)
 
 })
 

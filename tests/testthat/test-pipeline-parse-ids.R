@@ -12,13 +12,12 @@ library(horizons)
 
 #' Create minimal horizons_data object for testing parse_ids
 #'
-#' Simulates OPUS file input (with filename column and provenance type "opus")
+#' Simulates OPUS file input (with a filename column)
 #'
 #' @param filenames Character vector of filenames.
-#' @param spectra_type Provenance type, default "opus" for testing parse_ids.
 #' @return A horizons_data object.
 #' @noRd
-make_test_hd <- function(filenames, spectra_type = "opus") {
+make_test_hd <- function(filenames) {
 
   n <- length(filenames)
 
@@ -34,8 +33,7 @@ make_test_hd <- function(filenames, spectra_type = "opus") {
     role     = c("id", "meta", "predictor", "predictor")
   )
 
-  new_horizons_data(analysis = analysis, role_map = role_map,
-                    spectra_source = "test", spectra_type = spectra_type)
+  new_horizons_data(analysis = analysis, role_map = role_map)
 
 }
 
@@ -253,17 +251,6 @@ test_that("parse_ids() works with explicit patterns", {
 
 })
 
-test_that("parse_ids() with patterns keeps the id_pattern key, set to NULL", {
-
-  hd <- make_test_hd(c("PROJ-A_S100-1_rest", "PROJ-B_S200-2_rest"))
-
-  result <- parse_ids(hd, patterns = c(project = "[^_]+", "_", sampleid = "S\\d+-\\d+", "_.*"))
-
-  expect_true("id_pattern" %in% names(result$provenance))
-  expect_null(result$provenance$id_pattern)
-
-})
-
 test_that("parse_ids() patterns mode ignores unnamed patterns", {
 
   ## Arrange ---------------------------------------------------------------
@@ -294,7 +281,7 @@ test_that("parse_ids() patterns mode ignores unnamed patterns", {
 ## parse_ids() — Provenance tracking
 ## ---------------------------------------------------------------------------
 
-test_that("parse_ids() records provenance", {
+test_that("parse_ids() records the format, the counts and the columns added in its note", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -306,14 +293,12 @@ test_that("parse_ids() records provenance", {
 
   ## Assert ----------------------------------------------------------------
 
-  prov <- result$provenance$parse_ids
+  note <- log_rows_added(hd, result)
 
-  expect_equal(prov$format, "{first}_{second}")
-  expect_equal(prov$matched, 2)
-  expect_equal(prov$unmatched, 0)
-  expect_true("first" %in% prov$columns_added)
-  expect_true("second" %in% prov$columns_added)
-  expect_s3_class(prov$applied_at, "POSIXct")
+  expect_match(note$message, 'the format "{first}_{second}"', fixed = TRUE)
+  expect_match(note$message, "2 of 2 filenames matched", fixed = TRUE)
+  expect_true("first" %in% note$ids[[1]])
+  expect_true("second" %in% note$ids[[1]])
 
 })
 
@@ -387,10 +372,9 @@ test_that("parse_ids() records and reports the unmatched count", {
 
   ## Assert ----------------------------------------------------------------
 
-  prov <- result$provenance$parse_ids
+  note <- log_rows_added(hd, result)
 
-  expect_equal(prov$matched, 2)
-  expect_equal(prov$unmatched, 1)
+  expect_match(note$message[nrow(note)], "2 of 3 filenames matched", fixed = TRUE)
 
 })
 
@@ -445,19 +429,16 @@ test_that("parse_ids() strips file extensions before parsing", {
 ## parse_ids() — Any source with a filename column
 ## ---------------------------------------------------------------------------
 
-test_that("parse_ids() reads CSV, tibble and OPUS data alike, without a warning", {
+test_that("parse_ids() reads any object with a filename column, without a warning", {
 
-  for (type in c("csv", "tibble", "opus")) {
+  ### The object records no source type, so none can change what it does
+  hd <- make_test_hd(c("A_B"))
 
-    hd <- make_test_hd(c("A_B"), spectra_type = type)
-
-    expect_no_warning(result <- parse_ids(hd, format = "{first}_{second}"))
-    expect_identical(result$data$analysis$first, "A", info = type)
-    ### Nothing on the log but the call's record
-    expect_identical(nrow(result$log), 1L, info = type)
-    expect_match(result$log$message, "^Parsed sample ids", info = type)
-
-  }
+  expect_no_warning(result <- parse_ids(hd, format = "{first}_{second}"))
+  expect_identical(result$data$analysis$first, "A")
+  ### Nothing on the log but the call's record
+  expect_identical(nrow(result$log), 1L)
+  expect_match(result$log$message, "^Parsed sample ids")
 
 })
 

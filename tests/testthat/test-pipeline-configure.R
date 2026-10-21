@@ -35,8 +35,7 @@ make_single_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response")
   )
 
-  new_horizons_data(analysis = analysis, role_map = role_map,
-                    spectra_source = "test", spectra_type = "mir")
+  new_horizons_data(analysis = analysis, role_map = role_map)
 
 }
 
@@ -62,8 +61,7 @@ make_multi_response_hd <- function() {
     role     = c("id", "predictor", "predictor", "predictor", "response", "response")
   )
 
-  new_horizons_data(analysis = analysis, role_map = role_map,
-                    spectra_source = "test", spectra_type = "mir")
+  new_horizons_data(analysis = analysis, role_map = role_map)
 
 }
 
@@ -109,8 +107,7 @@ describe("configure() validation", {
       role     = c("id", "predictor")
     )
 
-    hd <- new_horizons_data(analysis = analysis, role_map = role_map,
-                            spectra_source = "test", spectra_type = "mir")
+    hd <- new_horizons_data(analysis = analysis, role_map = role_map)
 
     expect_error(
       configure(hd),
@@ -614,7 +611,7 @@ describe("configure() storage", {
   test_that("axis_spacing_cm() reads the axis before a recorded grid step that disagrees", {
 
     ## An object select_training() returned before #90 carries the pool's
-    ## standardize() provenance on the targets' axis, so the recorded step
+    ## standardize() record on the targets' axis, so the recorded step
     ## can describe a different grid.
     hd <- make_single_response_hd()
     hd$data$standardization <- list(grid = list(step = 4))

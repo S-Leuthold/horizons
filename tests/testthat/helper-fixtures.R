@@ -41,8 +41,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 
   ## Built from the constructor, so every key the contract declares (the log
   ## among them) arrives on its own; only what the tests set is written here.
-  obj <- new_horizons_data(analysis = df, role_map = roles,
-                           spectra_source = "test", spectra_type = "mir")
+  obj <- new_horizons_data(analysis = df, role_map = roles)
 
   obj$config$configs   <- configs
   obj$config$n_configs <- n_configs
@@ -97,8 +96,7 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
 
   ## Built from the constructor, so every key the contract declares (the log
   ## among them) arrives on its own; only what the tests set is written here.
-  obj <- new_horizons_data(analysis = df, role_map = roles,
-                           spectra_source = "test", spectra_type = "mir")
+  obj <- new_horizons_data(analysis = df, role_map = roles)
 
   obj$config$configs   <- configs
   obj$config$n_configs <- n_configs

@@ -110,7 +110,6 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'   * `data$analysis`: tibble with `sample_id`, `filename`, `wn_*` columns, and
 #'     any additional columns
 #'   * `data$role_map`: tibble mapping columns to roles
-#'   * `provenance`: source and creation metadata
 #'   * `log`: after any warnings, a note recording the call: the source type,
 #'     the files read from the paths given, the scans and predictors, and the
 #'     horizons version, with the paths as given as its `ids` (none for a
@@ -204,7 +203,6 @@ spectra <- function(source,
 
     tables      <- list(tibble = spectra_from_tibble(source, id_col, wavelength_cols, call = call))
     source_type <- "tibble"
-    source_name <- "tibble"
 
   } else {
 
@@ -212,7 +210,6 @@ spectra <- function(source,
                                      verbose = verbose, collector = collector, call = call)
     tables      <- read$tables
     source_type <- read$type
-    source_name <- source
 
   }
 
@@ -229,9 +226,7 @@ spectra <- function(source,
       wn_cols    = wn_cols,
       meta_cols  = setdiff(names(analysis), c("sample_id", wn_cols)),
       other_cols = character()
-    ),
-    spectra_source = source_name,
-    spectra_type   = source_type
+    )
   )
 
   ## -------------------------------------------------------------------------

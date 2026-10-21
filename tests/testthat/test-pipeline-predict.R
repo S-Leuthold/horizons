@@ -42,8 +42,7 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
 
   ## Built from the constructor, so every key the contract declares (the log
   ## among them) arrives on its own; only what the tests set is written here.
-  obj <- new_horizons_data(analysis = df, role_map = roles,
-                           spectra_source = "test", spectra_type = "mir")
+  obj <- new_horizons_data(analysis = df, role_map = roles)
 
   obj$config$configs   <- configs
   obj$config$n_configs <- 1L

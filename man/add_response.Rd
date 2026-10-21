@@ -35,8 +35,6 @@ A modified \code{horizons_data} object with:
 \item Response columns added to \code{data$analysis}
 \item New entries in \code{data$role_map} with \code{role = "response"}
 \item Updated \code{data$n_responses} count
-\item Provenance record appended to \code{provenance$add_response}, including
-\code{n_non_missing}, a named integer of non-missing values per variable
 \item A note on the object's \code{log} recording the call, after any coverage
 warning or note: the variables, which are its \code{ids}, the source (its
 path, or a data frame), the key, the samples matched and the measured
@@ -77,10 +75,10 @@ and how to fix it.
 
 "Matched" counts samples whose join key is found in the source. A matched
 sample whose value is \code{NA} in the source is matched but unmeasured, so the
-console also reports, and provenance records, the non-missing count of
-each variable. Rows with missing values are kept: an object can carry
-several responses (\code{select_training()} puts every pool response on one
-object), and a row missing one of them may carry another. \code{evaluate()} and
+console also reports, and the call's note on the log records, the
+non-missing count of each variable. Rows with missing values are kept: an
+object can carry several responses (\code{select_training()} puts every pool
+response on one object), and a row missing one of them may carry another. \code{evaluate()} and
 \code{fit()} drop the rows whose outcome is \code{NA} when they model it.
 
 An \code{NA} join key on either side is refused before anything is joined, and

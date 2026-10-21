@@ -26,14 +26,15 @@
 #'
 #' 1. **data**: The analysis tibble, role_map, the stored counts and the
 #'    standardization record
-#' 2. **provenance**: Source files, transforms applied, version info
-#' 3. **config**: Model configurations and tuning parameters
-#' 4. **validation**: Pre-flight check results and outlier tracking
-#' 5. **evaluation**: Model comparison results (populated by evaluate())
-#' 6. **models**: Fitted workflows and UQ models (populated by fit())
-#' 7. **ensemble**: Optional stacked ensemble (populated by ensemble())
-#' 8. **selection**: The record of a draw from a reference pool, `NULL`
+#' 2. **config**: Model configurations and tuning parameters
+#' 3. **validation**: Pre-flight check results and outlier tracking
+#' 4. **evaluation**: Model comparison results (populated by evaluate())
+#' 5. **models**: Fitted workflows and UQ models (populated by fit())
+#' 6. **ensemble**: Optional stacked ensemble (populated by ensemble())
+#' 7. **selection**: The record of a draw from a reference pool, `NULL`
 #'    unless the object came from `select_training()`
+#' 8. **log**: What the verbs reported, and the data verbs' record of each
+#'    call: the sources and settings the object was made with
 #'
 #' The selection record is a list with `settings` (every lever the draw used),
 #' `reconciliation` (which of the targets' wavenumbers the training set has:
@@ -63,10 +64,6 @@
 #' @param role_map `tibble or NULL.` Maps variable names to roles (id,
 #'   predictor, outcome, response, meta). Must have columns `variable` and
 #'   `role`. Default: `NULL`.
-#' @param spectra_source `character or NULL.` Path to source spectra files.
-#'   Default: `NULL`.
-#' @param spectra_type `character or NULL.` Type of spectra source: "opus",
-#'   "csv" or "tibble". Default: `NULL`.
 #'
 #' @return `horizons_data`. An unvalidated horizons_data object with class
 #'   `c("horizons_data", "list")`.
@@ -75,10 +72,8 @@
 #'   `spectra()` for user-facing construction.
 #'
 #' @noRd
-new_horizons_data <- function(analysis       = NULL,
-                              role_map       = NULL,
-                              spectra_source = NULL,
-                              spectra_type   = NULL) {
+new_horizons_data <- function(analysis = NULL,
+                              role_map = NULL) {
 
  ## ----------------------------------------------------------------------------
  ## Compute derived counts from role_map
@@ -121,23 +116,7 @@ new_horizons_data <- function(analysis       = NULL,
                 standardization = NULL),
 
     ## -------------------------------------------------------------------------
-    ## Section 2: PROVENANCE — Source and transform history
-    ## -------------------------------------------------------------------------
-
-    ## Source provenance (immutable once set)  ---------------------------------
-
-    provenance = list(spectra_source   = spectra_source,
-                      spectra_type     = spectra_type,
-                      created          = Sys.time(),
-                      horizons_version = utils::packageVersion("horizons"),
-
-    ## Transform provenance (updated by pipeline verbs) ------------------------
-
-                      id_pattern     = NULL,
-                      aggregation_by = NULL),
-
-    ## -------------------------------------------------------------------------
-    ## Section 3: CONFIG — Model configurations
+    ## Section 2: CONFIG — Model configurations
     ## -------------------------------------------------------------------------
 
     config = list(configs   = NULL,
@@ -168,7 +147,7 @@ new_horizons_data <- function(analysis       = NULL,
                   expansion = NULL),
 
     ## -------------------------------------------------------------------------
-    ## Section 4: VALIDATION — Pre-flight check results
+    ## Section 3: VALIDATION — Pre-flight check results
     ## -------------------------------------------------------------------------
 
     validation = list(passed    = NULL,
@@ -186,7 +165,7 @@ new_horizons_data <- function(analysis       = NULL,
                                       removed        = FALSE)),
 
     ## -------------------------------------------------------------------------
-    ## Section 5: EVALUATION — Model comparison results (horizons_eval+)
+    ## Section 4: EVALUATION — Model comparison results (horizons_eval+)
     ## -------------------------------------------------------------------------
 
     ## Populated by evaluate(); keys mirror what it writes. fit()'s cold start
@@ -207,7 +186,7 @@ new_horizons_data <- function(analysis       = NULL,
                       timestamp        = NULL), ## POSIXct
 
     ## -------------------------------------------------------------------------
-    ## Section 6: MODELS — Finalized models + UQ (horizons_fit+)
+    ## Section 5: MODELS — Finalized models + UQ (horizons_fit+)
     ## -------------------------------------------------------------------------
 
     ## Populated by fit(); keys mirror what it writes.
@@ -228,7 +207,7 @@ new_horizons_data <- function(analysis       = NULL,
                   runtime_secs      = NULL), ## numeric
 
     ## -------------------------------------------------------------------------
-    ## Section 7: ENSEMBLE — Optional ensemble (horizons_ensemble)
+    ## Section 6: ENSEMBLE — Optional ensemble (horizons_ensemble)
     ## -------------------------------------------------------------------------
 
     ## Populated by ensemble(); shape mirrors build_ensemble_contract().
@@ -249,7 +228,7 @@ new_horizons_data <- function(analysis       = NULL,
                     runtime_secs    = NULL),
 
     ## -------------------------------------------------------------------------
-    ## Section 8: SELECTION — The record of a draw from a reference pool
+    ## Section 7: SELECTION — The record of a draw from a reference pool
     ## -------------------------------------------------------------------------
 
     ## Populated by select_training(); NULL on every object that never went
@@ -257,11 +236,12 @@ new_horizons_data <- function(analysis       = NULL,
     selection = NULL,
 
     ## -------------------------------------------------------------------------
-    ## Section 9: LOG — What the verbs reported
+    ## Section 8: LOG — What the verbs reported
     ## -------------------------------------------------------------------------
 
-    ## Every verb appends the warnings it raised and the notes it reported;
-    ## nothing resets it (see ?horizons_conditions).
+    ## Every verb appends the warnings it raised and the notes it reported,
+    ## and the data verbs a note recording each call; nothing resets it (see
+    ## ?horizons_conditions).
     log = new_log()
   )
 
@@ -2854,9 +2834,10 @@ selected_member <- function(x) {
 #'
 #' @description
 #' `spectra()` records the paths it was given, which can be thousands of
-#' files, so `print()` and `summary()` show the first and count the rest.
+#' files, so `summary()` shows the first of a training set's targets and
+#' counts the rest.
 #'
-#' @param source `provenance$spectra_source`: character.
+#' @param source `selection$targets$source`: character.
 #' @return Character(1).
 #' @keywords internal
 #' @noRd
