@@ -1802,9 +1802,13 @@ calib_split_seed <- function(seed) {
 
 #' Describe a UQ bundle's measured coverage on the held-out test rows
 #'
-#' @param uq A UQ bundle carrying `test_coverage`, `test_mean_width`,
-#'   `n_test` and `level_default`. Bundles fitted before these fields existed
-#'   read as unmeasured.
+#' The one line every place that reports intervals uses: `fit()`'s tree for
+#' each member, `ensemble()`'s tree, and `print()` and `summary()` for a
+#' member's intervals and an ensemble's.
+#'
+#' @param uq A member's UQ bundle or an ensemble's CV+ bundle, carrying
+#'   `test_coverage`, `test_mean_width`, `n_test` and `level_default`.
+#'   Bundles made before these fields existed read as unmeasured.
 #' @return Character(1).
 #' @keywords internal
 #' @noRd

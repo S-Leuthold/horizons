@@ -29,7 +29,8 @@
       │  Summary
       │  ├─ Ensemble rpd: 1.87
       │  ├─ Improvement over best member: +0.0412
-      │  ├─ UQ: CV+ conformal (level 0.9, n_calib = 24)
+      │  ├─ UQ: CV+ conformal (n_calib = 24)
+      │  │  └─ UQ coverage: 83.3% on 12 held-out test rows (nominal 90%, mean width 3.04)
       │  └─ Runtime: 12.4s
       │
       └─ Class: horizons_fit → horizons_ensemble

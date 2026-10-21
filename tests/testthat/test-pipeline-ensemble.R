@@ -1746,6 +1746,53 @@ describe("combine_ensemble_metamodel() - row alignment", {
 ## The summary ensemble() prints
 ## ---------------------------------------------------------------------------
 
+describe("print() and summary() of an ensemble - its own intervals", {
+
+  ## The intervals predict() serves for an ensemble are its CV+ ones, not its
+  ## members', so they get a line of their own with their measured coverage
+  ## on the held-out test rows beside nominal
+  line_of <- function(uq) {
+    paste0("Ensemble intervals (CV+): UQ coverage: ", round(uq$test_coverage * 100, 1), "% on ",
+           uq$n_test, " held-out test rows (nominal 90%, mean width ", signif(uq$test_mean_width, 3), ")")
+  }
+
+  it("reports the CV+ intervals' measured coverage beside nominal, after the members' UQ line", {
+
+    ens <- ens_built("weighted")
+    uq  <- ens$ensemble$uq
+
+    printed <- utils::capture.output(print(ens))
+    summed  <- utils::capture.output(summary(ens))
+
+    expect_identical(uq$n_test, 12L)
+    expect_identical(which(printed == paste0("   └─ ", line_of(uq))),
+                     which(grepl("├─ UQ: ", printed, fixed = TRUE)) + 1L)
+    expect_identical(which(summed == paste0("   ├─ ", line_of(uq))),
+                     which(grepl("├─ UQ: ", summed, fixed = TRUE)) + 1L)
+
+  })
+
+  it("says the ensemble's intervals are disabled when it has none", {
+
+    ens0 <- ens_built("weighted", compute_uq = FALSE)
+
+    expect_true("   └─ Ensemble intervals (CV+): disabled" %in% utils::capture.output(print(ens0)))
+    expect_true("   ├─ Ensemble intervals (CV+): disabled" %in% utils::capture.output(summary(ens0)))
+
+  })
+
+  it("reports a fit's members without an ensemble line", {
+
+    fitted <- ens_fitted()
+
+    expect_false(any(grepl("Ensemble intervals", utils::capture.output(print(fitted)), fixed = TRUE)))
+    expect_false(any(grepl("Ensemble intervals", utils::capture.output(summary(fitted)), fixed = TRUE)))
+
+  })
+
+})
+
+
 describe("ensemble() - the summary it prints", {
 
   ## render_ensemble_summary() is what ensemble(verbose = TRUE) ends with. It
@@ -1761,7 +1808,8 @@ describe("ensemble() - the summary it prints", {
       metrics      = tibble::tibble(.metric = c("rmse", "rpd"), .estimator = "standard",
                                     .estimate = c(2.31, 1.87)),
       improvement  = improvement,
-      uq           = if (uq) list(level_default = 0.9, n_calib = 24L),
+      uq           = if (uq) list(level_default = 0.9, n_calib = 24L, test_coverage = 0.8333,
+                                  test_mean_width = 3.04, n_test = 12L),
       runtime_secs = runtime_secs
     )
   }

@@ -390,8 +390,9 @@ ensemble <- function(x,
 #'
 #' @description
 #' Render layer for [ensemble()]: prints member weights, the ensemble's
-#' performance on the rank metric, and the improvement over the best single
-#' member. A non-positive improvement is surfaced in yellow rather than hidden,
+#' performance on the rank metric, the improvement over the best single
+#' member, and the CV+ intervals' measured coverage on the held-out test rows
+#' beside their nominal level. A non-positive improvement is surfaced in yellow rather than hidden,
 #' because an ensemble that does not beat its best member is a real outcome.
 #'
 #' @param contract The ensemble contract list.
@@ -448,20 +449,21 @@ render_ensemble_summary <- function(contract, rank_metric) {
 
   ## UQ status ---------------------------------------------------------------
 
+  ## The intervals' measured coverage on the held-out test rows, as fit()'s
+  ## tree gives a member's (format_test_coverage())
+
   uq <- contract$uq
 
-  uq_line <- if (!is.null(uq)) {
+  if (!is.null(uq)) {
 
-    paste0("UQ: CV+ conformal (level ", uq$level_default,
-           ", n_calib = ", uq$n_calib, ")")
+    cat(paste0("\u2502  \u251c\u2500 UQ: CV+ conformal (n_calib = ", uq$n_calib, ")\n"))
+    cat(paste0("\u2502  \u2502  \u2514\u2500 ", format_test_coverage(uq), "\n"))
 
   } else {
 
-    "UQ: not computed"
+    cat(paste0("\u2502  \u251c\u2500 UQ: not computed\n"))
 
   }
-
-  cat(paste0("\u2502  \u251c\u2500 ", uq_line, "\n"))
 
   ## Runtime -----------------------------------------------------------------
 
