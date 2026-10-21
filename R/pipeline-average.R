@@ -34,6 +34,13 @@
 #' to ensure baseline shifts don't confound quality control. Spectra with baseline
 #' offsets can correlate ~1.0 but shouldn't be averaged without correction.
 #'
+#' **Missing and non-finite values:** an `Inf`, `-Inf` or `NaN` in a
+#' replicate is treated as a missing value, as `NA` is. Quality control
+#' correlates replicates over the bands they share, and the mean at each band
+#' uses the replicates with a value there, so a replicate missing a few
+#' bands is still averaged in at the rest. A band no replicate has is `NA` in
+#' the result, and [standardize()] decides on it.
+#'
 #' **Unusable spectra:** `average()` leaves the decision on a spectrum that
 #' is not finite or has no spread to [standardize()], which flags it. In the
 #' order `spectra() |> parse_ids() |> average() |> standardize()` such a
@@ -264,6 +271,17 @@ average <- function(x,
   ## -------------------------------------------------------------------------
 
   analysis <- x$data$analysis
+
+  ## Non-finite values are missing values ------------------------------------
+  ## An Inf, -Inf or NaN in a replicate is lost data at that band, as an NA
+  ## is: QC correlates over the bands the replicates share, and the mean at a
+  ## band uses the replicates with a value there. A band no replicate has
+  ## stays NA, for standardize() to decide on. is.na() is TRUE for NaN.
+
+  analysis[predictor_cols] <- lapply(analysis[predictor_cols], function(v) {
+    v[is.na(v) | is.infinite(v)] <- NA
+    v
+  })
 
   ## Get grouping vector -----------------------------------------------------
 
@@ -1076,9 +1094,11 @@ average_group <- function(group_data,
   } else {
 
     ## Multiple rows: compute column means -----------------------------------
+    ## Over the replicates with a value at each band, NA where none has one,
+    ## as a numeric response is averaged
 
     averaged_predictors <- tibble::as_tibble(
-      lapply(rows_to_use[, predictor_cols, drop = FALSE], mean, na.rm = TRUE)
+      lapply(rows_to_use[, predictor_cols, drop = FALSE], mean_present)
     )
 
   }
@@ -1202,13 +1222,7 @@ collapse_response <- function(values) {
 
   if (is.numeric(values)) {
 
-    if (all(is.na(values))) {
-
-      return(NA_real_)
-
-    }
-
-    return(mean(values, na.rm = TRUE))
+    return(mean_present(values))
 
   }
 
@@ -1219,6 +1233,34 @@ collapse_response <- function(values) {
   }
 
   structure(as.character(unique(values[!is.na(values)])), class = "conflict")
+
+}
+
+
+## ---------------------------------------------------------------------------
+## mean_present() — The mean of the values a group has
+## ---------------------------------------------------------------------------
+
+#' Mean of the non-missing values, NA when there are none
+#'
+#' @description
+#' `mean(na.rm = TRUE)` over no values is `NaN`; a band or a response no
+#' replicate has is missing, so it is `NA`.
+#'
+#' @param values Numeric vector of the group's values.
+#'
+#' @return Length-one numeric.
+#'
+#' @noRd
+mean_present <- function(values) {
+
+  if (all(is.na(values))) {
+
+    return(NA_real_)
+
+  }
+
+  mean(values, na.rm = TRUE)
 
 }
 

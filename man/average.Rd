@@ -90,6 +90,13 @@ method when group sizes are small (n=2-3).
 to ensure baseline shifts don't confound quality control. Spectra with baseline
 offsets can correlate ~1.0 but shouldn't be averaged without correction.
 
+\strong{Missing and non-finite values:} an \code{Inf}, \code{-Inf} or \code{NaN} in a
+replicate is treated as a missing value, as \code{NA} is. Quality control
+correlates replicates over the bands they share, and the mean at each band
+uses the replicates with a value there, so a replicate missing a few
+bands is still averaged in at the rest. A band no replicate has is \code{NA} in
+the result, and \code{\link[=standardize]{standardize()}} decides on it.
+
 \strong{Unusable spectra:} \code{average()} leaves the decision on a spectrum that
 is not finite or has no spread to \code{\link[=standardize]{standardize()}}, which flags it. In the
 order \code{spectra() |> parse_ids() |> average() |> standardize()} such a

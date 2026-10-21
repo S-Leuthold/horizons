@@ -1562,6 +1562,67 @@ test_that("average() averages a sample whose every replicate is unusable, for st
 
 })
 
+test_that("average() treats a non-finite value as missing, so the sample is kept in either order", {
+
+  ## Arrange — S1's first scan holds an Inf, or an NA, at one band
+  std <- function(h) suppressWarnings(standardize(h, resample = NULL, trim = NULL,
+                                                  remove_water = FALSE, baseline = FALSE,
+                                                  verbose = FALSE))
+
+  for (bad in list(Inf, NA_real_)) {
+
+    hd   <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 50)
+    wn   <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+    band <- wn[10]
+    hd$data$analysis[[band]][1] <- bad
+    other <- hd$data$analysis[[band]][2]
+
+    ## Act — the documented order, and standardize() first
+    expect_no_warning(averaged <- average(hd, verbose = FALSE))
+    readme_order <- std(averaged)
+    expect_no_warning(std_first <- average(std(hd), verbose = FALSE))
+
+    ## Assert — kept and unflagged both ways; in the documented order the
+    ## band is the other scan's value, and the rest the mean of both
+    for (r in list(readme_order, std_first)) {
+      expect_identical(r$data$analysis$sample_id, c("S1", "S2"), info = format(bad))
+      expect_false(any(flagged_rows(r$data$analysis)), info = format(bad))
+    }
+
+    s1 <- readme_order$data$analysis[readme_order$data$analysis$sample_id == "S1", ]
+    expect_identical(s1[[band]], other, info = format(bad))
+    rest <- setdiff(wn, band)
+    expect_equal(unlist(s1[rest]), colMeans(as.matrix(hd$data$analysis[1:2, rest])),
+                 info = format(bad))
+
+  }
+
+})
+
+test_that("average() leaves a band missing when every replicate lacks it, for standardize() to flag", {
+
+  ## Arrange — both of S1's scans are non-finite at one band
+  hd   <- make_test_hd_average(n_samples = 2, n_reps = 2, n_wavelengths = 50)
+  wn   <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  band <- wn[10]
+  hd$data$analysis[[band]][1:2] <- c(Inf, NaN)
+
+  ## Act
+  expect_no_warning(averaged <- average(hd, verbose = FALSE))
+
+  ## Assert — NA at that band, the mean of both elsewhere, then flagged
+  s1 <- averaged$data$analysis[averaged$data$analysis$sample_id == "S1", ]
+  expect_identical(s1[[band]], NA_real_)
+  rest <- setdiff(wn, band)
+  expect_equal(unlist(s1[rest]), colMeans(as.matrix(hd$data$analysis[1:2, rest])))
+
+  flagged <- suppressWarnings(standardize(averaged, resample = NULL, trim = NULL,
+                                          remove_water = FALSE, baseline = FALSE,
+                                          verbose = FALSE))
+  expect_identical(flagged$data$analysis$.flag, c("standardize", NA))
+
+})
+
 test_that("average() refuses a column with no role_map entry instead of silently dropping it (#24)", {
 
   ## Arrange — Step 8 rebuilds the averaged table from role_map's predictor,
