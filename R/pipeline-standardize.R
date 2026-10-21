@@ -1162,6 +1162,13 @@ standardize <- function(x,
 
   }
 
+  ## Refuse a promoted object ------------------------------------------------
+  ## Past the no-op return, every path rewrites the predictor columns (or
+  ## sorts or flags them), and the models and splits a promotion earned are
+  ## keyed to those.
+
+  check_unpromoted(x)
+
   operations <- list()
 
   if (!is.null(x$provenance$standardization) && force) {

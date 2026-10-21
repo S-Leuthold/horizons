@@ -65,36 +65,12 @@ test_that("subset_rows() writes no provenance of its own", {
 ## subset_rows() — Input validation
 ## =============================================================================
 
-test_that("subset_rows() rejects non-horizons_data input", {
-
-  ## The promotion check would refuse a data frame too, with the same class,
-  ## so the message is what shows this guard caught it
-  expect_error(subset_rows(data.frame(sample_id = "a"), "a"),
-               "must be a <horizons_data>, not <data.frame>", fixed = TRUE,
-               class = "horizons_input_error")
-
-})
-
-
-test_that("subset_rows() refuses a keep that is neither ids nor logical", {
-
-  ## Arrange — row numbers are not a way to name rows here
-  fx <- select_fixture(n_pool = 40)
-
-  ## Act & Assert
-  expect_error(subset_rows(fx$pool, 1:3),
-               "must be character ids or a logical vector, not <integer>", fixed = TRUE,
-               class = "horizons_input_error")
-
-})
-
-
 test_that("subset_rows() aborts on unknown ids and names them", {
 
   fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, c("P001", "nope", "also_nope")),
-               regexp = "nope", class = "horizons_input_error")
+               regexp = "nope", class = "horizons_error_internal")
 
 })
 
@@ -104,7 +80,7 @@ test_that("subset_rows() aborts on duplicated ids in keep", {
   fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, c("P001", "P001")),
-               class = "horizons_input_error")
+               class = "horizons_error_internal")
 
 })
 
@@ -114,7 +90,7 @@ test_that("subset_rows() aborts on a logical keep of the wrong length", {
   fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, c(TRUE, FALSE)),
-               class = "horizons_input_error")
+               class = "horizons_error_internal")
 
 })
 
@@ -124,7 +100,7 @@ test_that("subset_rows() aborts when keep selects no rows", {
   fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, character(0)),
-               class = "horizons_input_error")
+               class = "horizons_error_internal")
 
 })
 
@@ -172,7 +148,7 @@ test_that("set_analysis() aborts when analysis columns and role_map disagree, na
 
   expect_error(set_analysis(fx$pool, analysis),
                "Columns without a role: extra", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_internal")
 
   ## And the other way round: a role whose column is gone
   no_family <- fx$pool$data$analysis
@@ -180,28 +156,13 @@ test_that("set_analysis() aborts when analysis columns and role_map disagree, na
 
   expect_error(set_analysis(fx$pool, no_family),
                "Roles without a column: family", fixed = TRUE,
-               class = "horizons_input_error")
-
-})
-
-
-test_that("set_analysis() rejects non-horizons_data input", {
-
-  ## Arrange
-  fx       <- select_fixture(n_pool = 40)
-  analysis <- fx$pool$data$analysis
-
-  ## Act & Assert — the promotion check would refuse a data frame too, with
-  ## the same class, so the message is what shows this guard caught it
-  expect_error(set_analysis(analysis, analysis),
-               "must be a <horizons_data>, not <tbl_df>", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_internal")
 
 })
 
 
 ## =============================================================================
-## Promoted objects — both primitives refuse
+## Promoted objects — both primitives refuse, as a bug behind the verbs' doors
 ## =============================================================================
 
 test_that("subset_rows() aborts on an object carrying an ensemble", {
@@ -212,11 +173,11 @@ test_that("subset_rows() aborts on an object carrying an ensemble", {
 
   err <- expect_error(subset_rows(en, c("P001", "P002")),
                       regexp = "ensemble",
-                      class  = "horizons_input_error")
+                      class  = "horizons_error_internal")
 
-  ## The refusal names the operation that refused
-  expect_match(conditionMessage(err), "`subset_rows()` needs an unpromoted <horizons_data>",
-               fixed = TRUE)
+  ## Behind the verbs' doors this is a bug, reported by the helper that
+  ## caught it
+  expect_identical(rlang::call_name(err$call), "subset_rows")
 
 })
 
@@ -233,14 +194,14 @@ test_that("subset_rows() aborts on a stored split", {
 
   expect_error(subset_rows(ev, c("P001", "P002")),
                regexp = "evaluation split",
-               class  = "horizons_input_error")
+               class  = "horizons_error_internal")
 
   sp <- fx$pool
   sp$models$split <- "an rsplit"
 
   expect_error(subset_rows(sp, c("P001", "P002")),
                regexp = "model split",
-               class  = "horizons_input_error")
+               class  = "horizons_error_internal")
 
 })
 
@@ -263,7 +224,7 @@ test_that("promoted_state() reads models$workflows, not a stray row_index (#131)
   expect_identical(promoted_state(wf), "fitted models")
   expect_error(subset_rows(wf, c("P001", "P002")),
                regexp = "fitted models",
-               class  = "horizons_input_error")
+               class  = "horizons_error_internal")
 
 })
 
@@ -279,7 +240,7 @@ test_that("subset_rows() refuses an object whose class claims a promotion", {
   ## Act & Assert
   expect_error(subset_rows(ev, c("P001", "P002")),
                regexp = "horizons_eval",
-               class  = "horizons_input_error")
+               class  = "horizons_error_internal")
 
 })
 
@@ -291,7 +252,7 @@ test_that("subset_rows() names every promoted state it found", {
   pr$evaluation$results <- tibble::tibble(config_id = "cfg_a")
   pr$models$workflows   <- list(cfg_a = "a fitted workflow")
 
-  err <- expect_error(subset_rows(pr, "P001"), class = "horizons_input_error")
+  err <- expect_error(subset_rows(pr, "P001"), class = "horizons_error_internal")
 
   expect_match(conditionMessage(err), "evaluation results")
   expect_match(conditionMessage(err), "fitted models")
@@ -305,9 +266,10 @@ test_that("set_analysis() aborts on a promoted object", {
   ft <- fx$pool
   ft$models$workflows <- list(cfg_a = "a fitted workflow")
 
-  expect_error(set_analysis(ft, ft$data$analysis[1:3, ]),
-               "`set_analysis()` needs an unpromoted <horizons_data>", fixed = TRUE,
-               class = "horizons_input_error")
+  err <- expect_error(set_analysis(ft, ft$data$analysis[1:3, ]),
+                      "must not be evaluated, fitted or ensembled", fixed = TRUE,
+                      class = "horizons_error_internal")
+  expect_identical(rlang::call_name(err$call), "set_analysis")
 
 })
 
@@ -612,7 +574,7 @@ test_that("set_analysis() refuses to carry a record onto renamed rows", {
   ## Act & Assert
   expect_error(set_analysis(obj, analysis),
                regexp = "selection record",
-               class  = "horizons_input_error")
+               class  = "horizons_error_internal")
 
 })
 
@@ -691,7 +653,7 @@ test_that("add_columns() checks a sample_id key against the table and drops it",
   expect_error(add_columns(fx$pool, tibble::tibble(sample_id = rev(ids), site = "A"),
                            role = "meta"),
                regexp = "row order",
-               class  = "horizons_input_error")
+               class  = "horizons_error_internal")
 
 })
 
@@ -702,18 +664,7 @@ test_that("add_columns() refuses columns with the wrong row count", {
 
   expect_error(add_columns(fx$pool, tibble::tibble(site = rep("A", 39)), role = "meta"),
                regexp = "one row per row",
-               class  = "horizons_input_error")
-
-})
-
-
-test_that("add_columns() refuses a column name already present", {
-
-  fx <- select_fixture(n_pool = 40)
-
-  expect_error(add_columns(fx$pool, tibble::tibble(family = rep(9L, 40)), role = "meta"),
-               regexp = "already in the analysis table",
-               class  = "horizons_input_error")
+               class  = "horizons_error_internal")
 
 })
 
@@ -728,54 +679,8 @@ test_that("add_columns() refuses roles that modelling reads, and anything but on
 
     expect_error(add_columns(fx$pool, new, role = role),
                  "`role` must be \"response\" or \"meta\"", fixed = TRUE,
-                 class = "horizons_input_error",
+                 class = "horizons_error_internal",
                  info  = paste(role, collapse = ", "))
-
-  }
-
-})
-
-
-test_that("add_columns() rejects non-horizons_data input", {
-
-  ## Arrange
-  fx       <- select_fixture(n_pool = 40)
-  analysis <- fx$pool$data$analysis
-
-  ## Act & Assert
-  expect_error(add_columns(analysis, tibble::tibble(site = rep("A", 40)), role = "meta"),
-               "must be a <horizons_data>, not <tbl_df>", fixed = TRUE,
-               class = "horizons_input_error")
-
-})
-
-
-test_that("add_columns() refuses columns that are not a data frame", {
-
-  ## Arrange — a named list has the right shape but no row count to check
-  fx <- select_fixture(n_pool = 40)
-
-  ## Act & Assert
-  expect_error(add_columns(fx$pool, list(site = rep("A", 40)), role = "meta"),
-               "must be a data frame, not <list>", fixed = TRUE,
-               class = "horizons_input_error")
-
-})
-
-
-test_that("add_columns() refuses an after that names no column of the table", {
-
-  ## Arrange
-  fx <- select_fixture(n_pool = 40)
-
-  ## Act & Assert — a name not in the table, and two names that both are
-  for (after in list("not_a_column", c("sample_id", "family"))) {
-
-    expect_error(add_columns(fx$pool, tibble::tibble(site = rep("A", 40)),
-                             role = "meta", after = after),
-                 "must name one column of the analysis table", fixed = TRUE,
-                 class = "horizons_input_error",
-                 info = paste(after, collapse = ", "))
 
   }
 
@@ -794,7 +699,7 @@ test_that("reset_slots() refuses a slot the constructor does not have", {
   ## Act & Assert
   expect_error(reset_slots(fx$pool, c("models", "ensembel")),
                "does not know ensembel", fixed = TRUE,
-               class = "horizons_input_error")
+               class = "horizons_error_internal")
 
 })
 

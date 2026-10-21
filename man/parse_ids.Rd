@@ -83,7 +83,10 @@ requires unique ids.
 \strong{Before modelling only:} \code{parse_ids()} rewrites \code{sample_id}, and the
 splits and models that \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} and \code{\link[=ensemble]{ensemble()}} store are
 keyed to it, so an evaluated, fitted or ensembled object is refused. Parse
-the ids before \code{evaluate()}.
+the ids before \code{evaluate()}. For the same reason a parse that would
+rewrite the ids of a \code{\link[=select_training]{select_training()}} result is refused: parse them
+before selecting. A token named like a column already in the data is
+refused rather than overwriting it.
 }
 \examples{
 \dontrun{

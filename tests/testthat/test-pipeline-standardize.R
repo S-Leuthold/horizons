@@ -1727,6 +1727,25 @@ test_that("standardize() validates an already-standardized object before returni
 })
 
 
+test_that("standardize() refuses an evaluated object it would change, and returns one it would not", {
+
+  hd_std <- standardize(create_test_spectra(), resample = NULL, trim = NULL,
+                        remove_water = FALSE, baseline = FALSE)
+  hd_std$evaluation$results <- tibble::tibble(config_id = "cfg_a")
+
+  ## force = TRUE rewrites the predictor columns the models are keyed to
+  err <- expect_error(standardize(hd_std, force = TRUE),
+                      "It carries evaluation results.", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "standardize")
+
+  ## The already-standardized return changes nothing, so it is not refused
+  expect_warning(again <- standardize(hd_std), class = "horizons_warning_skipped")
+  expect_identical(again$evaluation, hd_std$evaluation)
+
+})
+
+
 ## =============================================================================
 ## Combined Operations Tests
 ## =============================================================================

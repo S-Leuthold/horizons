@@ -773,6 +773,21 @@ test_that("average() refuses a grouping column with NA values", {
 })
 
 
+test_that("average() refuses an evaluated or fitted object at its door", {
+
+  ## Arrange — averaging rebuilds the rows a promotion's splits are keyed to
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  hd$evaluation$results <- tibble::tibble(config_id = "cfg_a")
+
+  ## Act & Assert — the verb's input error, not the row helper's bug report
+  err <- expect_error(average(hd, verbose = FALSE),
+                      "It carries evaluation results.", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "average")
+
+})
+
+
 ## ---------------------------------------------------------------------------
 ## Helper function tests
 ## ---------------------------------------------------------------------------

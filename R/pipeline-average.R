@@ -189,6 +189,9 @@ average <- function(x,
 
   on_all_outliers <- match.arg(on_all_outliers)
 
+  ## Averaging rebuilds the rows that a promotion's splits are keyed to.
+  check_unpromoted(x)
+
   ## -------------------------------------------------------------------------
   ## Step 1b: Structural validation before the rebuild
   ## -------------------------------------------------------------------------

@@ -491,6 +491,11 @@ validate <- function(x,
 
   if (remove_spectral && length(spectral_outlier_ids) > 0) {
 
+    ## Removing rows from an evaluated or fitted object would strand its
+    ## splits; refused here, where the rows would change, so an object with
+    ## nothing to remove is still validated.
+    check_unpromoted(x)
+
     ## validate() records the removal in x$validation$outliers below.
     x <- subset_rows(x, keep = !x$data$analysis$sample_id %in% spectral_outlier_ids)
 

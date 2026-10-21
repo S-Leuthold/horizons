@@ -1300,11 +1300,16 @@ describe("validate() and the selection record", {
     hd <- make_selected_hd()
     hd$models$workflows <- list(cfg_a = "a fitted workflow")
 
-    ## Act & Assert
-    expect_error(
+    ## Act & Assert — refused at validate()'s door, not by the row helper
+    err <- expect_error(
       suppressWarnings(capture.output(validate(hd, remove_outliers = "spectral"))),
-      class = "horizons_input_error"
+      "It carries fitted models.", fixed = TRUE,
+      class = "horizons_error_input"
     )
+    expect_identical(rlang::call_name(err$call), "validate")
+
+    ## With nothing to remove the object is still validated
+    expect_no_error(suppressWarnings(capture.output(validate(hd, remove_outliers = FALSE))))
 
   })
 

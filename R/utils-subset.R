@@ -3,7 +3,8 @@
 # internals: replace the table and recompute every derived count, select rows
 # by sample_id, and append columns. The first two refuse to run on a promoted
 # object, because everything a promotion earns is keyed to a row order they
-# can change; appending columns moves no rows and runs on any class.
+# can change; the verbs refuse it at their door, so here it is a bug.
+# Appending columns moves no rows and runs on any class.
 
 
 ## ---------------------------------------------------------------------------
@@ -167,8 +168,7 @@ reset_slots <- function(x, slots) {
 
   if (length(unknown)) {
 
-    cli::cli_abort("{.fn reset_slots} does not know {.field {unknown}}",
-                   class = "horizons_input_error")
+    abort_horizons("{.fn reset_slots} does not know {.field {unknown}}.", kind = "internal")
 
   }
 
@@ -194,15 +194,24 @@ reset_slots <- function(x, slots) {
 #' Aborts when `x` carries any state from [evaluate()], [fit()] or
 #' [ensemble()], naming what it found. Silent otherwise.
 #'
+#' The verbs that change an object's rows (`parse_ids()`, `average()`,
+#' `standardize()`, `validate()`) call it at their door, as a refusal of the
+#' user's input. [set_analysis()] and [subset_rows()] call it again with
+#' `kind = "internal"`: behind those doors a promoted object reaching them is
+#' a bug.
+#'
 #' @param x [horizons_data.] The object to check.
-#' @param fn [Character.] The calling function's name, for the message.
+#' @param kind [Character.] `"input"` at a verb's door, `"internal"` in the
+#'   helpers.
+#' @param call The frame the error reports, the caller's by default, so the
+#'   message names the verb.
 #'
 #' @return [NULL.] Called for its side effect. Aborts with class
-#'   `horizons_input_error` when `x` is promoted.
+#'   `horizons_error_<kind>` when `x` is promoted.
 #'
 #' @seealso [promoted_state()]
 #' @noRd
-check_unpromoted <- function(x, fn) {
+check_unpromoted <- function(x, kind = "input", call = rlang::caller_env()) {
 
   states <- promoted_state(x)
 
@@ -212,12 +221,12 @@ check_unpromoted <- function(x, fn) {
 
   }
 
-  cli::cli_abort(c(
-    "{.fn {fn}} needs an unpromoted {.cls horizons_data}",
-    "x" = "This object carries {states}",
-    "i" = "Changing rows now would leave that state keyed to rows the object no longer has",
-    "i" = "Select rows before {.fn evaluate}, or start again from the object you evaluated"
-  ), class = "horizons_input_error")
+  abort_horizons(c(
+    "{.arg x} must not be evaluated, fitted or ensembled, as this changes its rows.",
+    "x" = "It carries {states}.",
+    "i" = "Changing rows now would leave that state keyed to rows the object no longer has.",
+    "i" = "Change the rows before {.fn evaluate}, or start again from the object you evaluated."
+  ), kind = kind, call = call)
 
 }
 
@@ -237,7 +246,7 @@ check_unpromoted <- function(x, fn) {
 #'
 #' @details
 #' The role map and the analysis columns must agree exactly; a mismatch is
-#' an input error, not something this function repairs. Structural
+#' a bug in the caller, not something this function repairs. Structural
 #' validation (`validate_horizons_data()`) is the caller's job, because a
 #' verb may make several changes before the object is whole again.
 #'
@@ -254,6 +263,8 @@ check_unpromoted <- function(x, fn) {
 #' fitted models or an ensemble is refused by name, because `models$split`,
 #' `models$cv_predictions` and `evaluation$results` are keyed to a row order
 #' this function is free to change, and nothing downstream would notice.
+#' The verbs refuse such an object at their door ([check_unpromoted()]), so
+#' one reaching here is a bug.
 #'
 #' @param x [horizons_data.] The object to update.
 #' @param analysis [Tibble.] The new analysis table.
@@ -267,14 +278,7 @@ check_unpromoted <- function(x, fn) {
 #' @noRd
 set_analysis <- function(x, analysis, role_map = NULL) {
 
-  if (!inherits(x, "horizons_data")) {
-
-    cli::cli_abort("{.arg x} must be a {.cls horizons_data}, not {.cls {class(x)[1]}}",
-                   class = "horizons_input_error")
-
-  }
-
-  check_unpromoted(x, "set_analysis")
+  check_unpromoted(x, kind = "internal")
 
   if (is.null(role_map)) role_map <- x$data$role_map
 
@@ -285,11 +289,11 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 
   if (length(missing_roles) || length(missing_cols)) {
 
-    cli::cli_abort(c(
-      "{.arg analysis} and {.arg role_map} disagree",
-      "x" = if (length(missing_roles)) "Columns without a role: {.field {missing_roles}}",
-      "x" = if (length(missing_cols))  "Roles without a column: {.field {missing_cols}}"
-    ), class = "horizons_input_error")
+    abort_horizons(c(
+      "{.arg analysis} and {.arg role_map} disagree.",
+      "x" = if (length(missing_roles)) "Columns without a role: {.field {missing_roles}}.",
+      "x" = if (length(missing_cols))  "Roles without a column: {.field {missing_cols}}."
+    ), kind = "internal")
 
   }
 
@@ -309,13 +313,15 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 
       unknown <- setdiff(new_ids, old_ids)
 
+      ### The verbs that rename rows refuse an object with a record at their
+      ### door (average()'s custom `by`, parse_ids()), so this is a bug.
       if (length(unknown)) {
 
-        cli::cli_abort(c(
-          "{.fn set_analysis} cannot maintain the selection record",
-          "x" = "{length(unknown)} new {.field sample_id}{?s} {?is/are} not in the object the draw described",
-          "i" = "A record can be refiltered when rows leave, not when they are renamed"
-        ), class = "horizons_input_error")
+        abort_horizons(c(
+          "{.fn set_analysis} cannot maintain the selection record.",
+          "x" = "{length(unknown)} new {.field sample_id}{?s} {?is/are} not in the object the draw described.",
+          "i" = "A record can be refiltered when rows leave, not when they are renamed."
+        ), kind = "internal")
 
       }
 
@@ -364,9 +370,9 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 #' vouches for the order itself, as `parse_ids()` does when it parses the
 #' table's own `filename` column in place.
 #'
-#' A name already in the table or the role map is refused, so a column is
-#' never overwritten here. Structural validation is the caller's job, as for
-#' [set_analysis()].
+#' A name already in the table is refused at the callers' doors, so a
+#' column is never overwritten here. Structural validation is the caller's
+#' job, as for [set_analysis()].
 #'
 #' @param x [horizons_data.] The object to update, of any class.
 #' @param columns [Data frame.] The new columns, one row per row of
@@ -379,33 +385,19 @@ set_analysis <- function(x, analysis, role_map = NULL) {
 #'
 #' @return [horizons_data.] `x` with the columns, their roles and the counts
 #'   updated. The input is not modified. Errors of class
-#'   `horizons_input_error` on a wrong row count, a key out of step with the
-#'   table, a name already present, or a role other than the two above.
+#'   `horizons_error_internal` on a wrong row count, a key out of step with
+#'   the table, or a role other than the two above.
 #'
 #' @seealso [set_analysis()], [validate_horizons_data()]
 #' @noRd
 add_columns <- function(x, columns, role, after = NULL) {
 
-  if (!inherits(x, "horizons_data")) {
+  if (!rlang::is_string(role) || !role %in% c("response", "meta")) {
 
-    cli::cli_abort("{.arg x} must be a {.cls horizons_data}, not {.cls {class(x)[1]}}",
-                   class = "horizons_input_error")
-
-  }
-
-  if (!is.data.frame(columns)) {
-
-    cli::cli_abort("{.arg columns} must be a data frame, not {.cls {class(columns)[1]}}",
-                   class = "horizons_input_error")
-
-  }
-
-  if (!is.character(role) || length(role) != 1 || !role %in% c("response", "meta")) {
-
-    cli::cli_abort(c(
-      "{.arg role} must be {.val response} or {.val meta}",
-      "i" = "A new predictor, outcome or id column changes what modelling reads; write it with {.fn set_analysis}"
-    ), class = "horizons_input_error")
+    abort_horizons(c(
+      "{.arg role} must be {.val response} or {.val meta}.",
+      "i" = "A new predictor, outcome or id column changes what modelling reads; write it with {.fn set_analysis}."
+    ), kind = "internal")
 
   }
 
@@ -416,10 +408,10 @@ add_columns <- function(x, columns, role, after = NULL) {
 
   if (nrow(columns) != n_rows) {
 
-    cli::cli_abort(c(
-      "{.arg columns} must have one row per row of the analysis table",
-      "x" = "Got {nrow(columns)} row{?s} for {n_rows}"
-    ), class = "horizons_input_error")
+    abort_horizons(c(
+      "{.arg columns} must have one row per row of the analysis table.",
+      "x" = "Got {nrow(columns)} row{?s} for {n_rows}."
+    ), kind = "internal")
 
   }
 
@@ -427,11 +419,11 @@ add_columns <- function(x, columns, role, after = NULL) {
 
     if (!identical(columns$sample_id, analysis$sample_id)) {
 
-      cli::cli_abort(c(
-        "{.arg columns} are not in the analysis table's row order",
-        "x" = "Their {.field sample_id} key differs from the table's, row for row",
-        "i" = "New columns attach by position, so they must keep the table's rows in its order"
-      ), class = "horizons_input_error")
+      abort_horizons(c(
+        "{.arg columns} are not in the analysis table's row order.",
+        "x" = "Their {.field sample_id} key differs from the table's, row for row.",
+        "i" = "New columns attach by position, so they must keep the table's rows in its order."
+      ), kind = "internal")
 
     }
 
@@ -439,28 +431,10 @@ add_columns <- function(x, columns, role, after = NULL) {
 
   }
 
-  ## Names: new, never an overwrite ---------------------------------------------
-
-  present <- intersect(names(columns), c(names(analysis), x$data$role_map$variable))
-
-  if (length(present)) {
-
-    cli::cli_abort(c(
-      "{cli::qty(present)}Column{?s} {.field {present}} {?is/are} already in the analysis table",
-      "i" = "New columns are added, never overwritten"
-    ), class = "horizons_input_error")
-
-  }
-
-  if (!is.null(after) &&
-      !(is.character(after) && length(after) == 1 && after %in% names(analysis))) {
-
-    cli::cli_abort("{.arg after} must name one column of the analysis table",
-                   class = "horizons_input_error")
-
-  }
-
   ## Append ---------------------------------------------------------------------
+  ### A name already in the table is refused by its callers' doors
+  ### (add_response(), parse_ids()), and by tibble::add_column() behind them,
+  ### so a column is never overwritten here.
 
   new_roles <- tibble::tibble(
     variable = names(columns),
@@ -530,6 +504,7 @@ recount_data <- function(x) {
 #' and the fitted workflows are all keyed to a row order this function
 #' changes, and a subset taken after `evaluate()` would produce right-looking
 #' numbers against the wrong samples.
+#' As in [set_analysis()], the verbs refuse it at their door first.
 #'
 #' When `x` carries a selection record from `select_training()`, the record
 #' is recomputed rather than left describing the pre-subset object.
@@ -550,21 +525,14 @@ recount_data <- function(x) {
 #'   vector of length `n_rows`. Every id must exist and none may repeat.
 #'
 #' @return [horizons_data.] The subset. Errors of class
-#'   `horizons_input_error` on a promoted object, or on unknown, duplicated
-#'   or empty `keep`.
+#'   `horizons_error_internal` on a promoted object, or on unknown,
+#'   duplicated or empty `keep`: its callers pass neither.
 #'
 #' @seealso [set_analysis()], [subset_selection()]
 #' @noRd
 subset_rows <- function(x, keep) {
 
-  if (!inherits(x, "horizons_data")) {
-
-    cli::cli_abort("{.arg x} must be a {.cls horizons_data}, not {.cls {class(x)[1]}}",
-                   class = "horizons_input_error")
-
-  }
-
-  check_unpromoted(x, "subset_rows")
+  check_unpromoted(x, kind = "internal")
 
   analysis <- x$data$analysis
   ids      <- analysis$sample_id
@@ -572,29 +540,30 @@ subset_rows <- function(x, keep) {
 
   ## Resolve keep to a row index ----------------------------------------------
 
+  ### Every caller passes sample_ids or a logical over the rows.
   if (is.logical(keep)) {
 
     if (length(keep) != n_before) {
 
-      cli::cli_abort(c(
-        "A logical {.arg keep} must have one entry per row",
-        "x" = "Got {length(keep)} for {n_before} rows"
-      ), class = "horizons_input_error")
+      abort_horizons(c(
+        "A logical {.arg keep} must have one entry per row.",
+        "x" = "Got {length(keep)} for {n_before} rows."
+      ), kind = "internal")
 
     }
 
     rows <- which(keep)
 
-  } else if (is.character(keep)) {
+  } else {
 
     dup <- keep[duplicated(keep)]
 
     if (length(dup)) {
 
-      cli::cli_abort(c(
-        "{.arg keep} contains duplicated ids",
+      abort_horizons(c(
+        "{.arg keep} contains duplicated ids.",
         "x" = "{.val {unique(dup)}}"
-      ), class = "horizons_input_error")
+      ), kind = "internal")
 
     }
 
@@ -604,25 +573,20 @@ subset_rows <- function(x, keep) {
 
       shown <- utils::head(unknown, 5)
 
-      cli::cli_abort(c(
-        "{length(unknown)} id{?s} in {.arg keep} {?is/are} not in the data",
+      abort_horizons(c(
+        "{length(unknown)} id{?s} in {.arg keep} {?is/are} not in the data.",
         "x" = "{.val {shown}}{if (length(unknown) > 5) ', ...' else ''}"
-      ), class = "horizons_input_error")
+      ), kind = "internal")
 
     }
 
     rows <- match(keep, ids)
 
-  } else {
-
-    cli::cli_abort("{.arg keep} must be character ids or a logical vector, not {.cls {class(keep)[1]}}",
-                   class = "horizons_input_error")
-
   }
 
   if (!length(rows)) {
 
-    cli::cli_abort("{.arg keep} selects no rows", class = "horizons_input_error")
+    abort_horizons("{.arg keep} selects no rows.", kind = "internal")
 
   }
 
@@ -778,7 +742,7 @@ sort_axis_decreasing <- function(x) {
 
   ### A predictor name that is not a wavenumber leaves the order to the
   ### validator rather than being pushed to the end.
-  wavenumbers <- suppressWarnings(as.numeric(gsub("^wn_", "", pred_vars)))
+  wavenumbers <- wn_values(pred_vars)
   axis_order  <- order(wavenumbers, decreasing = TRUE)
 
   if (anyNA(wavenumbers) || identical(axis_order, seq_along(pred_vars))) {
