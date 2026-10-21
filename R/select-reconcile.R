@@ -375,16 +375,15 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
 #' `axis_spacing_cm()` falls back to.
 #'
 #' @details
-#' `n_wavelengths` and `wavelength_range` are read off the returned axis.
-#' `grid` is `min`, `max`, `step` and `n` of the returned axis, in the order
-#' `standardize()` writes them, when the library's record had a grid and the
-#' returned wavenumbers are evenly spaced; otherwise `NULL`, `standardize()`'s
-#' convention for an axis on no grid. The arguments (`resample`, `trim`,
-#' `remove_water`, `baseline`), `resampled` and `applied_at` stay the
-#' library's, since they produced the values, which are not interpolated:
-#' `resample` can then differ from `grid$step`. When every library column is
-#' kept, the record is the library's, unchanged; a library never standardized
-#' has none, and gets none.
+#' `wavelength_range` is read off the returned axis. `grid` is `min`, `max`,
+#' `step` and `n` of the returned axis, in the order `standardize()` writes
+#' them, when the library's record had a grid and the returned wavenumbers
+#' are evenly spaced; otherwise `NULL`, `standardize()`'s convention for an
+#' axis on no grid. `baseline` and `baseline_range` stay the library's,
+#' since its hull is in the values, which are not interpolated; the
+#' library's settings are in its `standardize()` note, on the training set's
+#' log. When every library column is kept, the record is the library's,
+#' unchanged; a library never standardized has none, and gets none.
 #'
 #' @param pool_record [List or NULL.] The library's
 #'   `data$standardization`.
@@ -410,7 +409,6 @@ returned_standardization <- function(pool_record, wn, n_library) {
   ### Assigned by name through single brackets, so a NULL grid is kept as an
   ### entry rather than deleting the key, as standardize() writes it.
   axis <- list(grid             = grid,
-               n_wavelengths    = length(wn),
                wavelength_range = c(min(wn), max(wn)))
 
   record <- pool_record

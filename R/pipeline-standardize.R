@@ -1100,17 +1100,16 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return `horizons_data.` The input object with standardized spectra.
-#'   `data$standardization` records the arguments, whether the spectra
-#'   were actually re-interpolated (`resampled`), and the grid they sit on
-#'   (`grid`: `min`, `max`, `step`, `n`; `NULL` without resampling).
-#'   `resample` records the argument as given, never the axis's spacing;
-#'   read that from `grid$step` or from the columns. A training set
-#'   `select_training()` returns carries its library's record, with the axis
-#'   fields describing the columns it returns (see [select_training()]).
-#'   `baseline` says whether the spectra carry a convex-hull correction, from
-#'   this call or, under `force = TRUE`, an earlier one, and `baseline_range`
-#'   is the range that hull was fitted over (`NULL` without one), which
-#'   [select_training()] compares between a library and its targets.
+#'   `data$standardization` records what the verbs read of how the spectra
+#'   were standardized. `baseline` says whether they carry a convex-hull
+#'   correction, from this call or, under `force = TRUE`, an earlier one,
+#'   and `baseline_range` is the range that hull was fitted over (`NULL`
+#'   without one), which [select_training()] compares between a library and
+#'   its targets. `wavelength_range` is the range of the axis returned, and
+#'   `grid` the grid it sits on (`min`, `max`, `step`, `n`; `NULL` without
+#'   resampling). A training set `select_training()` returns carries its
+#'   library's record, with the axis fields describing the columns it
+#'   returns (see [select_training()]).
 #'   The call is recorded as a note on the object's `log`, after any
 #'   warnings: the arguments as given, whether the axis was re-interpolated,
 #'   already on the grid or left as it was, the wavenumbers kept, and under
@@ -1282,25 +1281,20 @@ standardize <- function(x,
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
     ### Under force = TRUE the object may already sit on a grid an earlier
-    ### call built. The axis is untouched here, so that record still holds.
+    ### call built. The axis is untouched here, so that grid still holds.
     prior      <- x$data$standardization
     keep_prior <- !is.null(prior) && !sorted$sorted
 
     ### The axis as it stands, recorded as the full path records it.
     axis_wn <- wn_values(axis_vars)
 
-    ### A hull an earlier call fitted is still in the values, sorted or not
+    ### A hull an earlier call fitted is still in the values, sorted or not.
+    ### The settings are in the call's note.
     x$data$standardization <- list(
-      resample         = NULL,
-      trim             = NULL,
-      remove_water     = FALSE,
       baseline         = isTRUE(prior$baseline),
-      resampled        = keep_prior && isTRUE(prior$resampled),
-      grid             = if (keep_prior) prior$grid else NULL,
-      applied_at       = Sys.time(),
-      n_wavelengths    = length(axis_vars),
+      baseline_range   = prior_hull_range(prior),
       wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_),
-      baseline_range   = prior_hull_range(prior)
+      grid             = if (keep_prior) prior$grid else NULL
     )
 
     standardize_note(collector, resample, trim, remove_water, baseline,
@@ -1726,20 +1720,15 @@ standardize <- function(x,
   ## Record the standardization ----------------------------------------------
 
   ### Under force = TRUE the spectra may carry a hull an earlier call fitted,
-  ### which this call's record keeps: the values still hold it
+  ### which this call's record keeps: the values still hold it. The record
+  ### keeps what the verbs read; the settings are in the call's note.
   earlier <- x$data$standardization
 
   x$data$standardization <- list(
-    resample         = resample,
-    trim             = trim,
-    remove_water     = remove_water,
     baseline         = baseline || isTRUE(earlier$baseline),
-    resampled        = identical(operations$resample$status, "resampled"),
-    grid             = grid_record,
-    applied_at       = Sys.time(),
-    n_wavelengths    = length(new_predictor_names),
+    baseline_range   = hull_range %||% prior_hull_range(earlier),
     wavelength_range = c(min(wavelengths), max(wavelengths)),
-    baseline_range   = hull_range %||% prior_hull_range(earlier)
+    grid             = grid_record
   )
 
   ## ---------------------------------------------------------------------------

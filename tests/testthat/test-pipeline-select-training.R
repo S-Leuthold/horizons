@@ -1870,7 +1870,7 @@ test_that("targets on a coarser grid get the library's own values there, and the
   expect_equal(rec$grid$step, stats::median(abs(diff(wn))))
   expect_equal(rec$grid$step, 8)
   expect_identical(rec$grid, targets$data$standardization$grid)
-  expect_identical(rec$n_wavelengths, length(wn))
+  expect_identical(rec$grid$n, length(wn))
   expect_equal(rec$wavelength_range, range(wn))
 
   ## So axis_spacing_cm()'s fallback agrees with the axis it reads first
@@ -1879,14 +1879,14 @@ test_that("targets on a coarser grid get the library's own values there, and the
   ## Nothing was moved, so there is no record of a move
   expect_false("reconciliation" %in% names(rec))
 
-  ## The standardize() arguments that produced the values stay the pool's,
-  ## and so do whether it resampled and when
-  expect_identical(rec$resample, 4)
-  expect_identical(rec$trim, c(600, 4000))
-  expect_identical(rec$remove_water, FALSE)
+  ## The record keeps the pool's hull, and the standardize() arguments that
+  ## produced the values are the pool's note, at the head of the training
+  ## set's log
   expect_identical(rec$baseline, FALSE)
-  expect_identical(rec$resampled, pool$data$standardization$resampled)
-  expect_identical(rec$applied_at, pool$data$standardization$applied_at)
+  expect_identical(out$log[seq_len(nrow(pool$log)), ], pool$log)
+  expect_match(pool$log$message[nrow(pool$log)],
+               "`resample = 4, trim = c(600, 4000), remove_water = FALSE, baseline = FALSE`",
+               fixed = TRUE)
 
 })
 
@@ -1925,7 +1925,7 @@ test_that("the record describes the columns returned whatever the targets' recor
 
   expect_null(targets$data$standardization$grid)
   expect_identical(rec$grid, list(min = 600, max = 4000, step = 8, n = 426L))
-  expect_identical(rec$n_wavelengths, fx$targets$data$n_predictors)
+  expect_identical(rec$grid$n, fx$targets$data$n_predictors)
 
   ## A pool standardize() never saw is not marked standardized
   expect_null(quiet_select(fx, k = 10)$data$standardization)
@@ -2112,7 +2112,7 @@ test_that("targets on an offset step get the columns both grids share, at their 
 
   rec <- out$data$standardization
   expect_identical(rec$grid, list(min = 600, max = 3996, step = 12, n = length(wn)))
-  expect_identical(rec$resample, 4)
+  expect_match(out$log$message[nrow(pool$log)], "`resample = 4", fixed = TRUE)
   expect_match(gsub("\\s+", " ", conditionMessage(w)),
                "standardize the targets at a multiple of 4 cm-1 to share every column", fixed = TRUE)
 

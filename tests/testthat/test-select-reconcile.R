@@ -221,35 +221,30 @@ std_record <- function(step, ...) {
 
   n <- length(seq(4000, 600, by = -step))
 
-  c(list(resample         = step,
-         trim             = c(600, 4000),
-         remove_water     = FALSE,
-         baseline         = TRUE,
-         resampled        = FALSE,
-         grid             = list(min = 600, max = 4000, step = step, n = n),
-         applied_at       = as.POSIXct("2026-09-24 08:00:00", tz = "UTC"),
-         n_wavelengths    = n,
-         wavelength_range = c(600, 4000)),
+  c(list(baseline         = TRUE,
+         baseline_range   = c(600, 4000),
+         wavelength_range = c(600, 4000),
+         grid             = list(min = 600, max = 4000, step = step, n = n)),
     list(...))
 
 }
 
 
-test_that("returned_standardization() describes the columns kept and keeps the library's arguments (#90)", {
+test_that("returned_standardization() describes the columns kept and keeps the rest of the library's record (#90)", {
 
   ## A library at 4 cm-1, its columns kept at the targets' 8: the record says
   ## step 8, the axis's spacing, not the library's 4
   pool <- std_record(4, extra = "kept")
   wn   <- seq(4000, 600, by = -8)
 
-  rec <- returned_standardization(pool, wn, n_library = pool$n_wavelengths)
+  rec <- returned_standardization(pool, wn, n_library = pool$grid$n)
 
   expect_identical(rec$grid, std_record(8)$grid)
-  expect_identical(rec$n_wavelengths, length(wn))
+  expect_identical(rec$grid$n, length(wn))
   expect_identical(rec$wavelength_range, c(600, 4000))
 
-  ## The call that produced the values, and anything else the library carried
-  for (key in c("resample", "trim", "remove_water", "baseline", "resampled", "applied_at", "extra")) {
+  ## The library's hull, and anything else the library carried
+  for (key in c("baseline", "baseline_range", "extra")) {
 
     expect_identical(rec[[key]], pool[[key]], info = key)
 
@@ -265,21 +260,21 @@ test_that("returned_standardization() keeps a whole axis's record, writes a NULL
   pool <- std_record(4)
 
   ## Every library column kept: the record as it was
-  expect_identical(returned_standardization(pool, seq(4000, 600, by = -4), pool$n_wavelengths), pool)
+  expect_identical(returned_standardization(pool, seq(4000, 600, by = -4), pool$grid$n), pool)
 
   ## Columns not evenly spaced are on no grid, and the key stays
   uneven <- c(seq(4000, 2000, by = -4), seq(1992, 600, by = -8))
-  rec    <- returned_standardization(pool, uneven, pool$n_wavelengths)
+  rec    <- returned_standardization(pool, uneven, pool$grid$n)
 
   expect_true("grid" %in% names(rec))
   expect_null(rec$grid)
-  expect_identical(rec$n_wavelengths, length(uneven))
+  expect_identical(names(rec), names(pool))
   expect_identical(rec$wavelength_range, c(600, 4000))
 
   ## A library on no grid gives its subset none either
   nogrid <- pool
   nogrid["grid"] <- list(NULL)
-  rec <- returned_standardization(nogrid, seq(4000, 600, by = -8), pool$n_wavelengths)
+  rec <- returned_standardization(nogrid, seq(4000, 600, by = -8), pool$grid$n)
 
   expect_true("grid" %in% names(rec))
   expect_null(rec$grid)

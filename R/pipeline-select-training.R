@@ -308,12 +308,12 @@
 #'   chosen as the outcome).
 #'   `data$standardization` is the library's, describing the returned
 #'   axis: when only some of the library's columns are returned (targets on a
-#'   coarser or narrower grid), `n_wavelengths`, `wavelength_range` and `grid`
-#'   describe the columns returned (`grid` is `NULL` when they are not evenly
-#'   spaced, or the library was on no grid), while the `standardize()`
-#'   arguments (`resample`, `trim`, `remove_water`, `baseline`), `resampled`
-#'   and `applied_at` stay the library's, since they produced the values; so
-#'   `resample` can differ from `grid$step`. A library never standardized has
+#'   coarser or narrower grid), `wavelength_range` and `grid` describe the
+#'   columns returned (`grid` is `NULL` when they are not evenly spaced, or
+#'   the library was on no grid), while `baseline` and `baseline_range` stay
+#'   the library's, since its hull is in the values. The library's
+#'   `standardize()` settings are in its note on the log, so the `resample`
+#'   it gives can differ from `grid$step`. A library never standardized has
 #'   no record, and the training set gets none. `x$selection$reconciliation`
 #'   records the columns returned: `operation` (`"none"` when every library
 #'   column is returned, else `"subset"`), `n_shared`, `shared_range`, and

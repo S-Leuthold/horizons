@@ -43,17 +43,16 @@ Default \code{FALSE}. Not recommended — may cause data quality issues.}
 }
 \value{
 \code{horizons_data.} The input object with standardized spectra.
-\code{data$standardization} records the arguments, whether the spectra
-were actually re-interpolated (\code{resampled}), and the grid they sit on
-(\code{grid}: \code{min}, \code{max}, \code{step}, \code{n}; \code{NULL} without resampling).
-\code{resample} records the argument as given, never the axis's spacing;
-read that from \code{grid$step} or from the columns. A training set
-\code{select_training()} returns carries its library's record, with the axis
-fields describing the columns it returns (see \code{\link[=select_training]{select_training()}}).
-\code{baseline} says whether the spectra carry a convex-hull correction, from
-this call or, under \code{force = TRUE}, an earlier one, and \code{baseline_range}
-is the range that hull was fitted over (\code{NULL} without one), which
-\code{\link[=select_training]{select_training()}} compares between a library and its targets.
+\code{data$standardization} records what the verbs read of how the spectra
+were standardized. \code{baseline} says whether they carry a convex-hull
+correction, from this call or, under \code{force = TRUE}, an earlier one,
+and \code{baseline_range} is the range that hull was fitted over (\code{NULL}
+without one), which \code{\link[=select_training]{select_training()}} compares between a library and
+its targets. \code{wavelength_range} is the range of the axis returned, and
+\code{grid} the grid it sits on (\code{min}, \code{max}, \code{step}, \code{n}; \code{NULL} without
+resampling). A training set \code{select_training()} returns carries its
+library's record, with the axis fields describing the columns it
+returns (see \code{\link[=select_training]{select_training()}}).
 The call is recorded as a note on the object's \code{log}, after any
 warnings: the arguments as given, whether the axis was re-interpolated,
 already on the grid or left as it was, the wavenumbers kept, and under

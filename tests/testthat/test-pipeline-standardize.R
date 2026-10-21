@@ -322,6 +322,11 @@ smooth_spectrum <- function(wn) {
 
 predictor_names <- function(hd) hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
 
+#' The message of the last row of an object's log: a standardize() call's
+#' note, when that call ran last
+#' @noRd
+record_message <- function(hd) hd$log$message[nrow(hd$log)]
+
 KSSL_WN <- seq(600, 4000, by = 2)
 OFFGRID_WN <- 599.74 + 1.93 * (0:3574)
 
@@ -350,7 +355,7 @@ test_that("an off-grid axis lands on the same columns as a KSSL-shaped one", {
   expect_identical(predictor_names(offgrid), predictor_names(kssl))
   expect_identical(predictor_names(offgrid)[c(1, 851)], c("wn_4000", "wn_600"))
 
-  expect_true(offgrid$data$standardization$resampled)
+  expect_match(record_message(offgrid), "re-interpolated onto the 4 cm-1 grid", fixed = TRUE)
   expect_identical(offgrid$data$standardization$grid,
                    list(min = 600, max = 4000, step = 4, n = 851L))
 
@@ -447,7 +452,7 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
   ## agree to about 1e-12
   after <- as.matrix(out$data$analysis[, predictor_names(out)])
   expect_identical(after, before)
-  expect_false(out$data$standardization$resampled)
+  expect_match(record_message(out), "already on the 2 cm-1 grid", fixed = TRUE)
   expect_identical(out$data$standardization$grid$n, 1701L)
 
   ## Stored increasing (make_axis_spectra() bypasses spectra()'s own sort,
@@ -620,7 +625,7 @@ test_that("resample = NULL keeps trim-as-subset but still sorts", {
   out  <- no_output(standardize(kssl, resample = NULL, trim = c(1000, 2000)))
 
   expect_identical(predictor_names(out), paste0("wn_", seq(2000, 1000, by = -2)))
-  expect_false(out$data$standardization$resampled)
+  expect_match(record_message(out), "not resampled", fixed = TRUE)
   expect_null(out$data$standardization$grid)
 
   ## A subset, with no margin: 599.74 is outside c(600, 4000) and stays out
@@ -721,14 +726,16 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
   note <- rows[1, ]
   expect_match(note$message, "Re-standardizing previously standardized data", fixed = TRUE)
 
-  expect_true(again$data$standardization$resampled)
+  ### The earlier call's note, which says it re-interpolated, is still on the
+  ### log
+  expect_match(again$log$message[nrow(on_4$log)], "re-interpolated onto the 4 cm-1 grid", fixed = TRUE)
   expect_identical(again$data$standardization$grid,
                    on_4$data$standardization$grid)
   expect_identical(predictor_names(again), predictor_names(on_4))
 
   ## The no-op record describes the axis the way the full path does
-  expect_identical(again$data$standardization$n_wavelengths,
-                   on_4$data$standardization$n_wavelengths)
+  expect_identical(names(again$data$standardization), names(on_4$data$standardization))
+  expect_match(record_message(again), paste0(length(predictor_names(on_4)), " wavenumbers kept"), fixed = TRUE)
   expect_equal(again$data$standardization$wavelength_range,
                on_4$data$standardization$wavelength_range)
 
@@ -879,7 +886,7 @@ test_that("an axis with the water bands cut upstream is not spline-filled, and s
   ## The same 1329 columns and the same values: on the grid apart from the gaps
   expect_identical(predictor_names(out), predictor_names(cut))
   expect_identical(as.matrix(out$data$analysis[, predictor_names(out)]), cut_values)
-  expect_false(out$data$standardization$resampled)
+  expect_match(record_message(out), "already on the", fixed = TRUE)
   expect_false(any(in_water_band(as.numeric(sub("^wn_", "", predictor_names(out))))))
 
 })
@@ -1813,15 +1820,14 @@ test_that("standardize() with every operation on trims, drops the water bands, r
                          remove_water = TRUE,
                          baseline     = TRUE)
 
-  ## Check the provenance records each argument --------------------------------
+  ## The record keeps what the verbs read; the note records each argument -----
 
   std <- hd_full$data$standardization
-  expect_false(is.null(std))
-  expect_equal(std$resample, 2)
-  expect_equal(std$trim, c(600, 4000))
-  expect_true(std$remove_water)
+  expect_named(std, c("baseline", "baseline_range", "wavelength_range", "grid"))
   expect_true(std$baseline)
-  expect_s3_class(std$applied_at, "POSIXct")
+  expect_match(record_message(hd_full),
+               "`resample = 2, trim = c(600, 4000), remove_water = TRUE, baseline = TRUE`",
+               fixed = TRUE)
 
   ## Check final wavelengths are in expected range -----------------------------
 

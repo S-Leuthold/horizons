@@ -150,12 +150,12 @@ emptied property is not among them, so \code{\link[=configure]{configure()}} war
 chosen as the outcome).
 \code{data$standardization} is the library's, describing the returned
 axis: when only some of the library's columns are returned (targets on a
-coarser or narrower grid), \code{n_wavelengths}, \code{wavelength_range} and \code{grid}
-describe the columns returned (\code{grid} is \code{NULL} when they are not evenly
-spaced, or the library was on no grid), while the \code{standardize()}
-arguments (\code{resample}, \code{trim}, \code{remove_water}, \code{baseline}), \code{resampled}
-and \code{applied_at} stay the library's, since they produced the values; so
-\code{resample} can differ from \code{grid$step}. A library never standardized has
+coarser or narrower grid), \code{wavelength_range} and \code{grid} describe the
+columns returned (\code{grid} is \code{NULL} when they are not evenly spaced, or
+the library was on no grid), while \code{baseline} and \code{baseline_range} stay
+the library's, since its hull is in the values. The library's
+\code{standardize()} settings are in its note on the log, so the \code{resample}
+it gives can differ from \code{grid$step}. A library never standardized has
 no record, and the training set gets none. \code{x$selection$reconciliation}
 records the columns returned: \code{operation} (\code{"none"} when every library
 column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range}, and
