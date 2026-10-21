@@ -434,8 +434,15 @@ parse_ids <- function(x,
 
   } else {
 
+    ### As the user typed them, names included, so the note says which
+    ### pattern became which column
+    pattern_names <- names(patterns) %||% rep("", length(patterns))
+    typed         <- encodeString(patterns, quote = "\"")
+    typed         <- ifelse(nzchar(pattern_names), paste0(pattern_names, " = ", typed), typed)
+    pattern_text  <- paste0("c(", paste(typed, collapse = ", "), ")")
+
     log_note(collector,
-             paste0("Parsed sample ids with the patterns {.val {patterns}}: {n_matched} of {n_files} filename{?s} matched, ", added, "."),
+             paste0("Parsed sample ids with the patterns {.code {pattern_text}}: {n_matched} of {n_files} filename{?s} matched, ", added, "."),
              ids = cols_to_add)
 
   }

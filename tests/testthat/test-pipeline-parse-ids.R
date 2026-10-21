@@ -334,7 +334,7 @@ test_that("parse_ids() records the call as its last row, a note with the format 
   expect_identical(note$type, "note")
   expect_identical(note$ids[[1]], "project")
   expect_identical(note$message,
-                   'Parsed sample ids with the patterns "[^_]+", "_", "S\\\\d+-\\\\d+", and "_.*": 2 of 2 filenames matched, the column project added.')
+                   'Parsed sample ids with the patterns `c(project = "[^_]+", "_", sampleid = "S\\\\d+-\\\\d+", "_.*")`: 2 of 2 filenames matched, the column project added.')
 
   ### A parse that adds no column says so
   hd     <- make_test_hd(c("X1", "X2"))
