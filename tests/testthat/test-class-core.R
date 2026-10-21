@@ -1135,8 +1135,8 @@ test_that("validate_horizons_data checks the selection record alongside the data
 
 ## A small populated object for the print() and summary() snapshots: four
 ## samples, so summary()'s preview is cut short, three wavenumbers, an
-## outcome, and both provenance fields. Validated, so the snapshots show a
-## well-formed object.
+## outcome, and a log with a note and a warning. Validated, so the snapshots
+## show a well-formed object.
 console_object <- function() {
 
   analysis <- tibble::tibble(
@@ -1157,39 +1157,66 @@ console_object <- function() {
                            spectra_source = "/path/to/spectra",
                            spectra_type   = "opus")
 
+  obj$log <- tibble::add_row(
+    new_log(),
+    verb    = c("spectra", "add_response"),
+    type    = c("note", "warning"),
+    topic   = c(NA, "coverage"),
+    message = c("Read 1 OPUS file from 1 path: 4 scans and 3 predictors, with horizons 0.12.0.",
+                "2 of 4 samples matched the source, so 2 have no response values."),
+    ids     = list("/path/to/spectra", c("SAMPLE_003", "SAMPLE_004")),
+    n       = c(1L, 2L)
+  )
+
   validate_horizons_data(obj)
 
 }
 
-## summary() prints the creation time, the package version and the table's
-## size in memory, which change between runs, releases and R versions. The
+## summary() prints the package version spectra()'s note names and the
+## table's size in memory, which change between releases and R versions. The
 ## snapshots keep each line and replace its value. Each pattern matches the
 ## value's own form, so a value printed in some other form fails the snapshot.
 scrub_summary <- function(lines) {
 
-  lines <- sub("(Created:) [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$",
-               "\\1 <time>", lines)
-  lines <- sub("(Horizons version:) [0-9]+(\\.[0-9]+)+$", "\\1 <version>", lines)
+  lines <- sub("(with horizons) [0-9]+(\\.[0-9]+)+\\.$", "\\1 <version>.", lines)
   sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
 
 }
 
-test_that("print.horizons_data shows the empty state and the spectra() hint, and an object with only provenance as not empty", {
+test_that("print.horizons_data shows the empty state and the spectra() hint, and an object with only a log as not empty", {
 
-  obj <- new_horizons_data()
+  obj    <- new_horizons_data()
+  logged <- obj
+  logged$log <- console_object()$log
 
   expect_snapshot({
     print(obj)
-    print(new_horizons_data(spectra_source = "/path/to/spectra", spectra_type = "opus"))
+    print(logged)
   })
 
 })
 
-test_that("print.horizons_data shows the counts, the outcome and the provenance", {
+test_that("print.horizons_data shows the counts, the outcome and the log's warnings and notes", {
 
   obj <- console_object()
 
   expect_snapshot(print(obj))
+
+})
+
+test_that("print() and summary() of an object without a log show no Log section, and do not abort", {
+
+  ## An object saved before objects carried a log; neither method validates
+  obj <- console_object()
+  obj$log <- NULL
+
+  printed <- capture.output(print(obj))
+  summed  <- capture.output(summary(obj))
+
+  expect_true(any(grepl("^Data", printed)))
+  expect_false(any(grepl("^Log", printed)))
+  expect_true(any(grepl("^Pipeline Status", summed)))
+  expect_false(any(grepl("^Log", summed)))
 
 })
 
@@ -1212,7 +1239,7 @@ test_that("print.horizons_data returns object invisibly", {
 ## summary.horizons_data() — Summary Method
 ## ---------------------------------------------------------------------------
 
-test_that("summary.horizons_data of an empty object shows the tuning defaults, the version and spectra() as the next step", {
+test_that("summary.horizons_data of an empty object shows the tuning defaults, an empty log and spectra() as the next step", {
 
   obj <- new_horizons_data()
 
@@ -1234,7 +1261,7 @@ test_that("summary.horizons_data returns object invisibly", {
 
 })
 
-test_that("summary.horizons_data shows the data, provenance, configuration and validation blocks, and configure() as the next step", {
+test_that("summary.horizons_data shows the data, configuration, validation and log blocks, and configure() as the next step", {
 
   obj <- console_object()
 
@@ -1242,18 +1269,19 @@ test_that("summary.horizons_data shows the data, provenance, configuration and v
 
 })
 
-test_that("summary.horizons_data shows no schema version, even on an object carrying one (#130)", {
+test_that("summary.horizons_data shows no schema version or provenance, even on an object carrying them (#130)", {
 
-  ## Arrange: the key older objects carried
+  ## Arrange: the keys older objects carried
   obj <- new_horizons_data()
   obj$provenance$schema_version <- 1L
 
   ## Act
   output <- capture.output(summary(obj))
 
-  ## Assert: the provenance tree ends at the horizons version
+  ## Assert: nothing of either, and the log's section in their place
   expect_false(any(grepl("(?i)schema", output)))
-  expect_true(any(grepl("└─ Horizons version", output)))
+  expect_false(any(grepl("(?i)provenance", output)))
+  expect_true(any(grepl("^Log", output)))
 
 })
 
@@ -2741,10 +2769,6 @@ test_that("print.horizons_data shows the selection section", {
 
   obj <- make_selected_object()
 
-  ## Read from many files: the source line shows the first and counts the rest
-  obj$provenance$spectra_source <- c("scans/T01.0", "scans/T02.0", "scans/T03.0")
-  obj$provenance$spectra_type   <- "opus"
-
   expect_snapshot(print(obj))
 
 })
@@ -2770,12 +2794,10 @@ test_that("summary.horizons_data mirrors the selection block and names it in the
 
   obj <- make_selected_object()
 
-  ## Targets read from many files: the source and the targets lines both show
-  ## the first and count the rest
+  ## Targets read from many files: the targets line shows the first and
+  ## counts the rest
   paths <- c("scans/T01.0", "scans/T02.0", "scans/T03.0")
-  obj$provenance$spectra_source <- paths
-  obj$provenance$spectra_type   <- "opus"
-  obj$selection$targets$source  <- paths
+  obj$selection$targets$source <- paths
 
   expect_snapshot(summary(obj), transform = scrub_summary)
 

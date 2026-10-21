@@ -2868,19 +2868,88 @@ source_label <- function(source) {
 
 }
 
+#' print()'s line for the log: its warnings and notes, counted
+#'
+#' @description
+#' Reads the log as a table, as every reader of it does: no verb's row is
+#' singled out.
+#'
+#' @param log The object's log, shaped like [new_log()]'s.
+#' @return `NULL`, invisibly; prints the section.
+#' @keywords internal
+#' @noRd
+print_log_count <- function(log) {
+
+  if (!is.data.frame(log)) return(invisible(NULL))
+
+  n_warn <- sum(log$type == "warning", na.rm = TRUE)
+  n_note <- sum(log$type == "note", na.rm = TRUE)
+
+  cat(cli::style_bold("Log\n"))
+  cat(paste0("   \u2514\u2500 ", n_warn, " warning", if (n_warn != 1) "s", ", ",
+             n_note, " note", if (n_note != 1) "s", "\n"))
+  cat("\n")
+
+  invisible(NULL)
+
+}
+
+#' summary()'s section for the log: every row, in order
+#'
+#' @description
+#' One line per row: the verb, for a warning its topic, and the message, in
+#' the order the verbs wrote them. The data verbs' notes record how the
+#' object was made, so the section reads as its history. Like
+#' [print_log_count()], it reads the log as a table.
+#'
+#' @inheritParams print_log_count
+#' @return `NULL`, invisibly; prints the section.
+#' @keywords internal
+#' @noRd
+summary_log <- function(log) {
+
+  if (!is.data.frame(log)) return(invisible(NULL))
+
+  cat(cli::style_bold("Log\n"))
+
+  n <- nrow(log)
+
+  if (n == 0) {
+
+    cat(cli::col_silver("   \u2514\u2500 (empty)\n\n"))
+    return(invisible(NULL))
+
+  }
+
+  lines <- paste0(log$verb, "()",
+                  ifelse(log$type == "warning", paste0(" warning (", log$topic, ")"), ""),
+                  ": ", log$message)
+
+  branch <- c(rep("\u251C\u2500", n - 1), "\u2514\u2500")
+
+  cat(paste0("   ", branch, " ", lines, "\n"), sep = "")
+  cat("\n")
+
+  invisible(NULL)
+
+}
+
 #' Print method for horizons_data objects
 #'
 #' @description
 #' Displays a concise, tree-style summary of a horizons_data object. Shows
-#' key dimensions, provenance info, and current pipeline stage at a glance.
+#' key dimensions, the current pipeline stage and how many warnings and notes
+#' the log holds at a glance.
 #'
 #' @details
 #' The print output adapts based on what's populated in the object:
 #'
-#' - **Empty objects**: Shows "(empty)" with a hint to use `spectra()`
+#' - **Empty objects** (no data and an empty log): Shows "(empty)" with a
+#'   hint to use `spectra()`
 #' - **Objects with data**: Shows sample count, predictor count, wavenumber
 #'   range, and the outcome and responses if present
-#' - **Objects with provenance**: Shows source path and spectra type
+#' - **The log**: How many warnings and notes it holds; [summary()] lists
+#'   them
 #'
 #' The output uses the tree-style formatting of the verbs' progress output.
 #'
@@ -2911,14 +2980,13 @@ print.horizons_data <- function(x, ...) {
   cat(cli::style_bold(paste0("\u2500\u2500 ", class_label, " \u2500\u2500\n\n")))
 
   ## ---------------------------------------------------------------------------
-  ## Check if truly empty (no data AND no provenance)
+  ## Check if truly empty (no data and nothing on the log)
   ## ---------------------------------------------------------------------------
 
-  has_data       <- !is.null(x$data$analysis)
-  has_provenance <- !is.null(x$provenance$spectra_source) ||
-                    !is.null(x$provenance$spectra_type)
+  has_data <- !is.null(x$data$analysis)
+  has_log  <- is.data.frame(x$log) && nrow(x$log) > 0
 
-  if (!has_data && !has_provenance) {
+  if (!has_data && !has_log) {
 
     cat(cli::col_silver("(empty)\n\n"))
     cat(cli::col_silver("Use spectra() to load data.\n"))
@@ -2978,32 +3046,6 @@ print.horizons_data <- function(x, ...) {
 
       response_vars <- x$data$role_map$variable[x$data$role_map$role == "response"]
       cat(paste0("   \u2514\u2500 Responses: ", paste(response_vars, collapse = ", "), "\n"))
-
-    }
-
-    cat("\n")
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Provenance section
-  ## ---------------------------------------------------------------------------
-
-  if (has_provenance) {
-
-    cat(cli::style_bold("Provenance\n"))
-
-    if (!is.null(x$provenance$spectra_source)) {
-
-      has_type <- !is.null(x$provenance$spectra_type)
-      branch   <- if (has_type) "\u251C\u2500" else "\u2514\u2500"
-      cat(paste0("   ", branch, " Source: ", source_label(x$provenance$spectra_source), "\n"))
-
-    }
-
-    if (!is.null(x$provenance$spectra_type)) {
-
-      cat(paste0("   \u2514\u2500 Type: ", x$provenance$spectra_type, "\n"))
 
     }
 
@@ -3134,6 +3176,12 @@ print.horizons_data <- function(x, ...) {
   }
 
   ## ---------------------------------------------------------------------------
+  ## Log section: what the verbs reported, counted
+  ## ---------------------------------------------------------------------------
+
+  print_log_count(x$log)
+
+  ## ---------------------------------------------------------------------------
   ## Status hint
   ## ---------------------------------------------------------------------------
 
@@ -3148,16 +3196,15 @@ print.horizons_data <- function(x, ...) {
 #'
 #' @description
 #' Displays a comprehensive, detailed summary of a horizons_data object. Shows
-#' full provenance, data characteristics, configuration status, and pipeline
-#' state. Designed for scientists who want to see the complete picture.
+#' data characteristics, configuration status, every row of the log, and
+#' pipeline state. Designed for scientists who want to see the complete
+#' picture.
 #'
 #' @details
 #' The summary output provides significantly more detail than `print()`:
 #'
 #' - **Data section**: Sample ID preview, wavenumber range and step size,
 #'   response names, outcome variable, memory footprint
-#' - **Provenance section**: Full source paths, timestamps, version info,
-#'   preprocessing history, aggregation settings
 #' - **Selection section**: Scope and groups, properties, k, pool size, rows
 #'   drawn per property, similarity space and metric, twins excluded, and any
 #'   rows removed since the draw (present only for objects from
@@ -3165,6 +3212,9 @@ print.horizons_data <- function(x, ...) {
 #' - **Configuration section**: Tuning parameter defaults, config count, and
 #'   the outcome range when it is not the default `c(0, Inf)`
 #' - **Validation section**: Whether validation has run, pass/fail status
+#' - **Log section**: Every row of the log, in order: the verb, the message,
+#'   and for a warning its topic. The data verbs' notes record how the object
+#'   was made, from the source onward
 #' - **Pipeline status**: Current stage and next step guidance, noting when
 #'   the rows were drawn from a pool
 #'
@@ -3287,49 +3337,6 @@ summary.horizons_data <- function(object, ...) {
     cat(cli::col_silver("   \u2514\u2500 (no data loaded)\n\n"))
 
   }
-
-  ## ---------------------------------------------------------------------------
-  ## Provenance section
-  ## ---------------------------------------------------------------------------
-
-  cat(cli::style_bold("Provenance\n"))
-
-  # Count how many provenance items we have to display
-  prov_items <- c(
-    !is.null(x$provenance$spectra_source),
-    !is.null(x$provenance$spectra_type),
-    TRUE,  # created (always present)
-    TRUE,  # horizons_version (always present)
-    !is.null(x$provenance$aggregation_by)
-  )
-  n_prov <- sum(prov_items)
-  prov_idx <- 0
-
-  get_branch <- function() {
-    prov_idx <<- prov_idx + 1
-    if (prov_idx < n_prov) "\u251C\u2500" else "\u2514\u2500"
-  }
-
-  if (!is.null(x$provenance$spectra_source)) {
-    cat(paste0("   ", get_branch(), " Spectra source: ", source_label(x$provenance$spectra_source), "\n"))
-  }
-
-  if (!is.null(x$provenance$spectra_type)) {
-    cat(paste0("   ", get_branch(), " Spectra type: ", x$provenance$spectra_type, "\n"))
-  }
-
-  # Created timestamp
-  created_str <- format(x$provenance$created, "%Y-%m-%d %H:%M:%S")
-  cat(paste0("   ", get_branch(), " Created: ", created_str, "\n"))
-
-  # Horizons version
-  cat(paste0("   ", get_branch(), " Horizons version: ", x$provenance$horizons_version, "\n"))
-
-  if (!is.null(x$provenance$aggregation_by)) {
-    cat(paste0("   ", get_branch(), " Aggregation: ", x$provenance$aggregation_by, "\n"))
-  }
-
-  cat("\n")
 
   ## ---------------------------------------------------------------------------
   ## Selection section (rows drawn from a pool by select_training())
@@ -3637,6 +3644,12 @@ summary.horizons_data <- function(object, ...) {
     cat("\n")
 
   }
+
+  ## ---------------------------------------------------------------------------
+  ## Log section: every row, in order
+  ## ---------------------------------------------------------------------------
+
+  summary_log(x$log)
 
   ## ---------------------------------------------------------------------------
   ## Pipeline status
