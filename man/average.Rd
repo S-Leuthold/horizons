@@ -56,9 +56,11 @@ disagree are refused together, not a silent pick
 \item Metadata columns: Uniform values preserved, non-uniform dropped
 \item \code{data$role_map}: Updated to remove dropped columns and to point the
 \code{id} role at the new \code{sample_id}
-\item \code{provenance$average}: Processing metadata including QC results and
+\item \code{provenance$average}: The call's settings and counts, and
 \code{source_ids}, the mapping from each averaged \code{sample_id} to the source
 scans it was built from
+\item \code{log}: The samples whose replicates all failed QC, and the metadata
+columns dropped
 \item \code{provenance$aggregation_by}: The \code{by} column name, written on every
 call
 }
@@ -98,9 +100,16 @@ If QC flags all replicates as outliers:
 Metadata columns are checked for uniformity within groups:
 \itemize{
 \item Uniform values: preserved in output
-\item Non-uniform values: column dropped (tracked in provenance)
+\item Non-uniform values: column dropped, and named in a note on the
+object's log
 \item \code{filename} column: always dropped (not meaningful after averaging)
 }
+
+\strong{The log:}
+Every sample whose replicates all failed QC is named on the object's
+log, whatever \code{on_all_outliers} is: under \code{"warn"} as the
+\code{horizons_warning_quality} it raises, under \code{"keep_best"} and \code{"drop"}
+as a note, since either is your explicit choice.
 }
 \examples{
 \dontrun{

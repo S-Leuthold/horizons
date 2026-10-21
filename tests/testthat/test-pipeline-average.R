@@ -299,7 +299,31 @@ test_that("average() on_all_outliers='warn' keeps all and warns", {
 
   ## Sample 1 should still be in results
   expect_true("S1" %in% result$data$analysis$sample_id)
-  expect_equal(length(result$provenance$average$samples_all_outliers), 1)
+
+  ## The sample is on the log, not in provenance (#231)
+  expect_null(result$provenance$average$samples_all_outliers)
+
+})
+
+test_that("average() names every sample whose replicates all failed, on the log, in every mode (#231)", {
+
+  ## Two of three samples fail on every replicate
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 3, all_outliers = TRUE)
+  set.seed(7)
+  for (col in grep("^wn_", names(hd$data$analysis), value = TRUE)) {
+    hd$data$analysis[[col]][4:6] <- stats::runif(3, 0, 2)
+  }
+
+  for (mode in c("warn", "keep_best", "drop")) {
+
+    result <- suppressWarnings(average(hd, on_all_outliers = mode, verbose = FALSE))
+    row    <- result$log[result$log$verb == "average", ]
+
+    expect_identical(nrow(row), 1L, info = mode)
+    expect_setequal(row$ids[[1]], c("S1", "S2"))
+    expect_identical(row$type, if (mode == "warn") "warning" else "note", info = mode)
+
+  }
 
 })
 
@@ -318,7 +342,15 @@ test_that("average() on_all_outliers='drop' removes sample", {
   ## Sample 1 should be dropped
   expect_false("S1" %in% result$data$analysis$sample_id)
   expect_equal(nrow(result$data$analysis), 1)
-  expect_equal(result$provenance$average$samples_dropped, "S1")
+
+  ## Dropped as asked: a note naming it, not a warning, and not in
+  ## provenance (#231)
+  expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE))
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$type, "note")
+  expect_identical(row$ids[[1]], "S1")
+  expect_match(row$message, 'on_all_outliers = "drop"` dropped', fixed = TRUE)
+  expect_null(result$provenance$average$samples_dropped)
 
 })
 
@@ -339,6 +371,12 @@ test_that("average() on_all_outliers='keep_best' keeps highest correlation repli
 
   ## Should have dropped 2 replicates from S1
   expect_equal(result$provenance$average$n_replicates_dropped, 2)
+
+  ## Kept as asked: a note naming the sample, not a warning (#231)
+  expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "keep_best", verbose = FALSE))
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$type, "note")
+  expect_identical(row$ids[[1]], "S1")
 
   ## Verify keep_best retained the QC survivor (not an all-NA artifact)
   s1_result <- result$data$analysis[result$data$analysis$sample_id == "S1", ]
@@ -632,8 +670,11 @@ test_that("average() drops non-uniform metadata", {
   ## project should be dropped (different per row)
   expect_false("project" %in% names(result$data$analysis))
 
-  ## Should be tracked in provenance
-  expect_true("rep_num" %in% result$provenance$average$meta_columns_dropped)
+  ## Named in a note on the log, not in provenance
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$type, "note")
+  expect_setequal(row$ids[[1]], c("project", "rep_num"))
+  expect_null(result$provenance$average$meta_columns_dropped)
 
 })
 
@@ -650,7 +691,9 @@ test_that("average() always drops filename column", {
   ## Assert ----------------------------------------------------------------
 
   expect_false("filename" %in% names(result$data$analysis))
-  expect_true("filename" %in% result$provenance$average$meta_columns_dropped)
+
+  ## Dropped by design on every call, so nothing is logged
+  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
 
 })
 

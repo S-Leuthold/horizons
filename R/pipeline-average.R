@@ -44,8 +44,15 @@
 #' **Metadata Handling:**
 #' Metadata columns are checked for uniformity within groups:
 #' * Uniform values: preserved in output
-#' * Non-uniform values: column dropped (tracked in provenance)
+#' * Non-uniform values: column dropped, and named in a note on the
+#'   object's log
 #' * `filename` column: always dropped (not meaningful after averaging)
+#'
+#' **The log:**
+#' Every sample whose replicates all failed QC is named on the object's
+#' log, whatever `on_all_outliers` is: under `"warn"` as the
+#' `horizons_warning_quality` it raises, under `"keep_best"` and `"drop"`
+#' as a note, since either is your explicit choice.
 #'
 #' @param x A `horizons_data` object from the pipeline.
 #' @param by Character. Column name to group replicates by. Default: `"sample_id"`.
@@ -80,9 +87,11 @@
 #'   * Metadata columns: Uniform values preserved, non-uniform dropped
 #'   * `data$role_map`: Updated to remove dropped columns and to point the
 #'     `id` role at the new `sample_id`
-#'   * `provenance$average`: Processing metadata including QC results and
+#'   * `provenance$average`: The call's settings and counts, and
 #'     `source_ids`, the mapping from each averaged `sample_id` to the source
 #'     scans it was built from
+#'   * `log`: The samples whose replicates all failed QC, and the metadata
+#'     columns dropped
 #'   * `provenance$aggregation_by`: The `by` column name, written on every
 #'     call
 #'
@@ -479,6 +488,8 @@ average <- function(x,
 
   source_ids <- source_ids[!source_ids$sample_id %in% dropped_samples, , drop = FALSE]
 
+  ### What happened to particular samples and columns is on the log
+  ### (Step 11); this records how the call was made.
   x$provenance$average <- list(
     by                    = by,
     source_ids            = source_ids,
@@ -489,9 +500,6 @@ average <- function(x,
     n_replicates_before   = nrow(analysis),
     n_replicates_after    = nrow(averaged),
     n_replicates_dropped  = n_dropped,
-    samples_all_outliers  = all_outlier_samples,
-    samples_dropped       = dropped_samples,
-    meta_columns_dropped  = dropped_meta,
     applied_at            = Sys.time()
   )
 
@@ -504,20 +512,56 @@ average <- function(x,
   x <- validate_horizons_data(x)
 
   ## -------------------------------------------------------------------------
-  ## Step 11: The samples averaged though every replicate failed
+  ## Step 11: The samples whose every replicate failed, in every mode (#231)
   ## -------------------------------------------------------------------------
-  ## Everything ran as asked, but these averages are weaker than the result
-  ## shows.
+  ## Under "warn" everything ran as asked, but these averages are weaker than
+  ## the result shows, so it is warned. "keep_best" and "drop" are the user's
+  ## explicit choice: reported, not warned. Under "drop" the failed samples
+  ## are the dropped ones.
 
-  if (length(all_outlier_samples) > 0 && on_all_outliers == "warn") {
+  failed_samples <- c(all_outlier_samples, dropped_samples)
 
-    shown <- utils::head(all_outlier_samples, 5)
+  if (length(failed_samples) > 0) {
 
-    log_warning(collector, "quality", c(
-      "All replicates failed QC for {length(all_outlier_samples)} sample{?s}, averaged anyway.",
-      "i" = "Samples: {.val {shown}}{if (length(all_outlier_samples) > 5) paste0(' and ', length(all_outlier_samples) - 5, ' more') else ''}.",
-      "i" = "Use {.code on_all_outliers = \"keep_best\"} to keep one replicate of each, or {.code \"drop\"} to drop them."
-    ), ids = all_outlier_samples)
+    n_failed <- length(failed_samples)
+    shown    <- utils::head(failed_samples, 5)
+    more     <- if (n_failed > 5) paste0(" and ", n_failed - 5, " more") else ""
+
+    if (on_all_outliers == "warn") {
+
+      log_warning(collector, "quality", c(
+        "All replicates failed QC for {n_failed} sample{?s}, averaged anyway.",
+        "i" = "Samples: {.val {shown}}{more}.",
+        "i" = "Use {.code on_all_outliers = \"keep_best\"} to keep one replicate of each, or {.code \"drop\"} to drop them."
+      ), ids = failed_samples)
+
+    } else {
+
+      statement <- if (on_all_outliers == "drop") {
+        "All replicates failed QC for {n_failed} sample{?s}, so {.code on_all_outliers = \"drop\"} dropped {?it/them}."
+      } else {
+        "All replicates failed QC for {n_failed} sample{?s}, so {.code on_all_outliers = \"keep_best\"} kept one replicate of {?it/each}."
+      }
+
+      log_note(collector, c(
+        statement,
+        "i" = "Samples: {.val {shown}}{more}."
+      ), ids = failed_samples)
+
+    }
+
+  }
+
+  ## The metadata columns a sample's replicates disagreed on -----------------
+  ## filename is dropped on every call, by design, so it is not reported.
+
+  dropped_cols <- setdiff(dropped_meta, "filename")
+
+  if (length(dropped_cols) > 0) {
+
+    log_note(collector,
+             "Dropped {length(dropped_cols)} metadata column{?s} whose values differ between a sample's replicates: {.field {dropped_cols}}.",
+             ids = dropped_cols)
 
   }
 
