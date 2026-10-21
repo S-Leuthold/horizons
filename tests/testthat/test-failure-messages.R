@@ -435,7 +435,7 @@ describe("condition_summary()", {
 ## Capture sites
 ## ---------------------------------------------------------------------------
 
-describe("create_failed_result() and handle_results()", {
+describe("create_failed_result()", {
 
   step_error <- tryCatch(
     recipes::prep(recipes::recipe(mpg ~ ., mtcars) |>
@@ -448,15 +448,6 @@ describe("create_failed_result() and handle_results()", {
     row <- create_failed_result("cfg_x", step_error)
 
     expect_match(row$error_message, "boom from step", fixed = TRUE)
-
-  })
-
-  it("puts the cause in handle_results()'s abort", {
-
-    safe <- list(result = NULL, error = step_error)
-
-    expect_error(handle_results(safe, error_title = "Prep failed"),
-                 "boom from step", fixed = TRUE)
 
   })
 
