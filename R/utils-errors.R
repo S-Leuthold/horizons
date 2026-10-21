@@ -244,9 +244,12 @@ check_arg <- function(check,
 #' Each verb raises a topic at most once per call, at its end, and only after
 #' writing it to the object's log, so a warning that is silenced or never
 #' seen is still on the object. The log also keeps the notes a verb reports
-#' without warning, such as samples dropped as the user asked, so a
-#' pipeline's history is in one place. `predict()`, which changes no object,
-#' carries each warning's record as the field `log`.
+#' without warning, such as samples dropped as the user asked, and the note
+#' each of [spectra()], [parse_ids()], [standardize()], [average()] and
+#' [add_response()] writes as the last row of every call, recording its
+#' source and settings, so a pipeline's history is in one place. Notes are
+#' never raised. `predict()`, which changes no object, carries each
+#' warning's record as the field `log`.
 #'
 #' Under `options(warn = 2)`, a warning that no handler takes ends the call
 #' with `horizons_error_promoted_warnings`, which carries the finished result

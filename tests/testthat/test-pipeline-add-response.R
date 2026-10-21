@@ -224,8 +224,10 @@ test_that("add_response() assigns NA for unmatched horizons samples", {
   expect_equal(result$data$analysis$SOC[3], 5.6)
 
   ## Half or more matched: the unmatched sample is named in a note, not warned
-  row <- result$log[result$log$verb == "add_response", ]
-  expect_identical(row$type, "note")
+  ### The event, then the call's record
+  rows <- log_rows_added(hd, result)
+  expect_identical(rows$type, c("note", "note"))
+  row <- rows[1, ]
   expect_identical(row$ids[[1]], "S002")
   expect_match(row$message, "1 of 3 samples matched nothing in the source", fixed = TRUE)
 
@@ -254,7 +256,7 @@ test_that("add_response() warns about unmatched samples", {
   )
 
   ## Recorded on the object before it was raised, naming the unmatched samples
-  row <- result$log[result$log$verb == "add_response", ]
+  row <- result$log[result$log$verb == "add_response" & result$log$type == "warning", ]
   expect_identical(row$topic, "coverage")
   expect_identical(row$ids[[1]], c("S002", "S003"))
   expect_identical(w$log, row)
@@ -572,6 +574,47 @@ test_that("add_response() records provenance (tibble source)", {
   expect_equal(prov$n_matched, 3)
   expect_equal(prov$n_unmatched, 0)
   expect_s3_class(prov$applied_at, "POSIXct")
+
+})
+
+
+test_that("add_response() records the call as its last row, a note with the variables, the source and the counts", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd  <- make_test_hd(c("S001", "S002", "S003", "S004"))
+  lab <- tibble::tibble(
+    sample_id = c("S001", "S002", "S003", "S004"),
+    clay      = c(12, NA, 30, NA),
+    oc        = c(1.1, 2.2, 3.3, 4.4)
+  )
+
+  ## Act -------------------------------------------------------------------
+
+  expect_no_warning(result <- add_response(hd, lab, variable = c("clay", "oc"), verbose = FALSE))
+
+  ## Assert ----------------------------------------------------------------
+
+  note <- log_rows_added(hd, result)
+  expect_identical(note$verb, "add_response")
+  expect_identical(note$type, "note")
+  expect_true(is.na(note$topic))
+  expect_identical(note$ids[[1]], c("clay", "oc"))
+  expect_identical(note$message,
+                   "Joined clay and oc from a data frame on sample_id: 4 of 4 samples matched, with measured values per variable: clay 2, oc 4.")
+
+  ### A file source by its path, a named key, and the coverage warning first
+  lab <- tibble::tibble(ID = "S001", SOC = 1.2)
+  csv <- withr::local_tempfile(fileext = ".csv")
+  readr::write_csv(lab, csv)
+  result <- suppressWarnings(add_response(hd, csv, variable = "SOC", by = c(sample_id = "ID"),
+                                          verbose = FALSE))
+  rows <- log_rows_added(hd, result)
+  expect_identical(rows$type, c("warning", "note"))
+  expect_identical(rows$ids[[2]], "SOC")
+  expect_identical(rows$message[2], paste0(
+    "Joined SOC from '", csv, "' on sample_id = ID: 1 of 4 samples matched, with measured values per variable: SOC 1."
+  ))
 
 })
 

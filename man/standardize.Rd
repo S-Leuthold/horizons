@@ -54,6 +54,12 @@ fields describing the columns it returns (see \code{\link[=select_training]{sele
 this call or, under \code{force = TRUE}, an earlier one, and \code{baseline_range}
 is the range that hull was fitted over (\code{NULL} without one), which
 \code{\link[=select_training]{select_training()}} compares between a library and its targets.
+The call is recorded as a note on the object's \code{log}, after any
+warnings: the arguments as given, whether the axis was re-interpolated,
+already on the grid or left as it was, the wavenumbers kept, and under
+\code{force = TRUE} a hull an earlier call fitted that is kept. A call that
+returns early because the spectra are already standardized records only
+its warning.
 }
 \description{
 Applies standardization operations to get spectra into a consistent format

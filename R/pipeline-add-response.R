@@ -81,6 +81,10 @@
 #'   * Updated `data$n_responses` count
 #'   * Provenance record appended to `provenance$add_response`, including
 #'     `n_non_missing`, a named integer of non-missing values per variable
+#'   * A note on the object's `log` recording the call, after any coverage
+#'     warning or note: the variables, which are its `ids`, the source (its
+#'     path, or a data frame), the key, the samples matched and the measured
+#'     values per variable
 #'
 #' @examples
 #' \dontrun{
@@ -484,6 +488,19 @@ add_response <- function(x,
   ## ---------------------------------------------------------------------------
 
   x <- validate_horizons_data(x)
+
+  ## The call's record: what was joined, from where --------------------------
+  ## A note, never raised, after the coverage event; its ids are the
+  ## variables joined.
+
+  from     <- if (identical(source_label, "tibble")) "a data frame" else "{.file {source_label}}"
+  on       <- if (identical(by_horizons, by_source)) "{.field {by_horizons}}" else "{.field {by_horizons}} = {.field {by_source}}"
+  measured <- paste0(variable, " ", n_non_missing, collapse = ", ")
+
+  log_note(collector,
+           paste0("Joined {.field {variable}} from ", from, " on ", on,
+                  ": {n_matched} of {n_horizons} samples matched, with measured values per variable: {measured}."),
+           ids = variable)
 
   x$log <- log_close(collector, x$log)
 

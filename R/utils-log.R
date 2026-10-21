@@ -4,9 +4,10 @@
 ## Every object carries one log of what its verbs reported (see
 ## ?horizons_conditions): each warning a verb raised, one row per topic per
 ## call, and each note, an event a verb reports without warning (samples
-## dropped as the user asked, a cache rebuilt), one row each. A verb collects
-## both in a per-call collector as it runs; at its end log_close() writes the
-## rows, and only then does signal_log() raise each warning row, once. No site
+## dropped as the user asked, a cache rebuilt) or a data verb's record of its
+## call, one row each. A verb collects both in a per-call collector as it
+## runs; at its end log_close() writes the rows, and only then does
+## signal_log() raise each warning row, once. No site
 ## raises a warning itself, and signal_log() raises only what log_close()
 ## wrote, so "recorded before raised" and "once per topic per call" hold by
 ## construction.
@@ -132,8 +133,9 @@ check_log_topic <- function(topic) {
 #' asked for that changed the data (samples dropped under
 #' `on_all_outliers = "drop"`), or a recovery that cost only time (a stale
 #' cache rebuilt). The verb shows it in its verbose output; the log keeps it
-#' with the warnings, so a pipeline's history is in one place. A note is
-#' never raised.
+#' with the warnings, so a pipeline's history is in one place. The data
+#' verbs also record each call as a note, its source and settings, as the
+#' call's last row. A note is never raised.
 #'
 #' @inheritParams log_warning
 #' @return `collector`, invisibly.

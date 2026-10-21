@@ -158,7 +158,7 @@ test_that("parse_ids() too_few='keep_original' keeps filename as sample_id", {
 
   ## Recorded on the object, naming the file, whether or not it is seen
   quiet <- suppressWarnings(parse_ids(hd, format = "{project}_{sampleid}_{fraction}"))
-  row   <- quiet$log[quiet$log$verb == "parse_ids", ]
+  row   <- quiet$log[quiet$log$verb == "parse_ids" & quiet$log$type == "warning", ]
   expect_identical(row$topic, "substitution")
   expect_identical(row$ids[[1]], "weird_format")
 
@@ -181,8 +181,10 @@ test_that("parse_ids() too_few='na' sets sample_id to NA, with or without a samp
     result <- parse_ids(hd, format = "{project}_{sampleid}", too_few = "na")
   )
 
-  note <- result$log[result$log$verb == "parse_ids", ]
-  expect_identical(note$type, "note")
+  ### The event, then the call's record
+  rows <- log_rows_added(hd, result)
+  expect_identical(rows$type, c("note", "note"))
+  note <- rows[1, ]
   expect_identical(note$ids[[1]], "nomatch")
   expect_match(note$message, "Pattern did not match 1 filename", fixed = TRUE)
 
@@ -315,6 +317,48 @@ test_that("parse_ids() records provenance", {
 
 })
 
+test_that("parse_ids() records the call as its last row, a note with the format or patterns, the counts and the columns added", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  hd <- make_test_hd(c("A_B", "no-match", "C_D"))
+
+  ## Act -------------------------------------------------------------------
+
+  result <- suppressWarnings(parse_ids(hd, format = "{first}_{second}", verbose = FALSE))
+
+  ## Assert ----------------------------------------------------------------
+
+  ### The substitution warning first, then the record
+  rows <- log_rows_added(hd, result)
+  expect_identical(rows$type, c("warning", "note"))
+  note <- rows[2, ]
+  expect_identical(note$verb, "parse_ids")
+  expect_true(is.na(note$topic))
+  expect_identical(note$ids[[1]], c("first", "second"))
+  expect_identical(note$message,
+                   'Parsed sample ids with the format "{first}_{second}": 2 of 3 filenames matched, the columns first and second added.')
+
+  ### Patterns are recorded in place of a format; a clean call warns nothing
+  hd <- make_test_hd(c("PROJ-A_S100-1_rest", "PROJ-B_S200-2_rest"))
+  expect_no_warning(
+    result <- parse_ids(hd, patterns = c(project = "[^_]+", "_", sampleid = "S\\d+-\\d+", "_.*"),
+                        verbose = FALSE)
+  )
+  note <- log_rows_added(hd, result)
+  expect_identical(note$type, "note")
+  expect_identical(note$ids[[1]], "project")
+  expect_identical(note$message,
+                   'Parsed sample ids with the patterns "[^_]+", "_", "S\\\\d+-\\\\d+", and "_.*": 2 of 2 filenames matched, the column project added.')
+
+  ### A parse that adds no column says so
+  hd     <- make_test_hd(c("X1", "X2"))
+  result <- parse_ids(hd, format = "{sampleid}", verbose = FALSE)
+  expect_identical(result$log$ids[[1]], character(0))
+  expect_match(result$log$message, "2 of 2 filenames matched, no column added.", fixed = TRUE)
+
+})
+
 test_that("parse_ids() prints nothing under verbose = FALSE, and refuses a verbose that is not TRUE or FALSE", {
 
   hd <- make_test_hd(c("A_B", "C_D"))
@@ -409,7 +453,9 @@ test_that("parse_ids() reads CSV, tibble and OPUS data alike, without a warning"
 
     expect_no_warning(result <- parse_ids(hd, format = "{first}_{second}"))
     expect_identical(result$data$analysis$first, "A", info = type)
-    expect_identical(nrow(result$log), 0L, info = type)
+    ### Nothing on the log but the call's record
+    expect_identical(nrow(result$log), 1L, info = type)
+    expect_match(result$log$message, "^Parsed sample ids", info = type)
 
   }
 

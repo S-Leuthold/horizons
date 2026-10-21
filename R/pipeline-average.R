@@ -128,7 +128,8 @@
 #'     `source_ids`, the mapping from each averaged `sample_id` to the source
 #'     scans it was built from
 #'   * `log`: The samples whose replicates all failed QC, and the metadata
-#'     columns dropped
+#'     columns dropped, then a note recording the call: `by`, the scans in
+#'     and samples out, the quality check, and the scans left out
 #'   * `provenance$aggregation_by`: The `by` column name, written on every
 #'     call
 #'
@@ -648,6 +649,21 @@ average <- function(x,
              ids = dropped_cols)
 
   }
+
+  ## The call's record: how the replicates were averaged ----------------------
+  ## A note, never raised, after the events above.
+
+  n_before <- nrow(analysis)
+  n_after  <- nrow(averaged)
+  qc_text  <- if (quality_check) {
+    "quality check on at a correlation of {correlation_threshold}, with {.code on_all_outliers = {.val {on_all_outliers}}}"
+  } else {
+    "quality check off"
+  }
+
+  log_note(collector,
+           paste0("Averaged {n_before} scan{?s} into {n_after} sample{?s} by {.field {by}}: ",
+                  qc_text, "; {n_dropped} scan{?s} left out."))
 
   x$log <- log_close(collector, x$log)
 

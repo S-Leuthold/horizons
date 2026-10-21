@@ -63,7 +63,8 @@ varies within any sample dropped
 \code{source_ids}, the mapping from each averaged \code{sample_id} to the source
 scans it was built from
 \item \code{log}: The samples whose replicates all failed QC, and the metadata
-columns dropped
+columns dropped, then a note recording the call: \code{by}, the scans in
+and samples out, the quality check, and the scans left out
 \item \code{provenance$aggregation_by}: The \code{by} column name, written on every
 call
 }

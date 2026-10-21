@@ -400,7 +400,7 @@ test_that("an uncovered grid and a gap are one coverage warning with two bullets
   expect_match(msg, "does not cover the 4 cm-1 grid", fixed = TRUE)
   expect_match(msg, "gap in it", fixed = TRUE)
 
-  rows <- out$log[out$log$verb == "standardize", ]
+  rows <- out$log[out$log$verb == "standardize" & out$log$type == "warning", ]
   expect_identical(rows$topic, "coverage")
   expect_identical(rows$n, 2L)
 
@@ -662,6 +662,49 @@ test_that("a call with every operation off still sorts, validates, and changes n
 })
 
 
+test_that("standardize() records the call as its last row, a note with its settings and what they did to the axis", {
+
+  hd     <- make_axis_spectra(seq(4000, 600, by = -4), f = smooth_spectrum)
+  record <- function(before, after) {
+    rows <- log_rows_added(before, after)
+    expect_identical(rows$type[nrow(rows)], "note")
+    expect_identical(rows$ids[[nrow(rows)]], character(0))
+    rows$message[nrow(rows)]
+  }
+
+  ## Re-interpolated, already on the grid, or not resampled; never raised
+  expect_no_warning(fine <- standardize(hd, resample = 2, verbose = FALSE))
+  expect_identical(record(hd, fine),
+                   "Standardized with `resample = 2, trim = c(600, 4000), remove_water = FALSE, baseline = FALSE`: re-interpolated onto the 2 cm-1 grid, 1701 wavenumbers kept.")
+
+  hulled <- standardize(hd, resample = 4, baseline = TRUE, verbose = FALSE)
+  expect_identical(record(hd, hulled),
+                   "Standardized with `resample = 4, trim = c(600, 4000), remove_water = FALSE, baseline = TRUE`: already on the 4 cm-1 grid, 851 wavenumbers kept.")
+
+  ### Whole numbers given as integers read the same
+  ints <- standardize(hd, resample = 4L, trim = c(600L, 4000L), baseline = TRUE, verbose = FALSE)
+  expect_identical(record(hd, ints), record(hd, hulled))
+
+  as_is <- standardize(hd, resample = NULL, verbose = FALSE)
+  expect_identical(record(hd, as_is),
+                   "Standardized with `resample = NULL, trim = c(600, 4000), remove_water = FALSE, baseline = FALSE`: not resampled, 851 wavenumbers kept.")
+
+  ## Every operation off, and a hull an earlier call fitted kept under force
+  off <- standardize(hulled, resample = NULL, trim = NULL, force = TRUE, verbose = FALSE)
+  expect_identical(record(hulled, off),
+                   "Standardized with `resample = NULL, trim = NULL, remove_water = FALSE, baseline = FALSE`: nothing applied, 851 wavenumbers kept, and the convex hull an earlier call fitted is kept.")
+
+  kept <- standardize(hulled, resample = 4, force = TRUE, verbose = FALSE)
+  expect_match(record(hulled, kept),
+               "already on the 4 cm-1 grid, 851 wavenumbers kept, and the convex hull an earlier call fitted is kept.",
+               fixed = TRUE)
+
+  ## A hull this call fits is its own
+  refit <- standardize(hulled, resample = 4, baseline = TRUE, force = TRUE, verbose = FALSE)
+  expect_false(grepl("earlier call", record(hulled, refit), fixed = TRUE))
+
+})
+
 test_that("force = TRUE with every operation off keeps the grid an earlier call recorded", {
 
   on_4 <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = 4))
@@ -672,8 +715,10 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
     again <- no_output(standardize(on_4, resample = NULL, trim = NULL, force = TRUE))
   )
 
-  note <- again$log[again$log$verb == "standardize", ]
-  expect_identical(note$type, "note")
+  ### The event, then the call's record
+  rows <- log_rows_added(on_4, again)
+  expect_identical(rows$type, c("note", "note"))
+  note <- rows[1, ]
   expect_match(note$message, "Re-standardizing previously standardized data", fixed = TRUE)
 
   expect_true(again$data$standardization$resampled)
@@ -1701,15 +1746,16 @@ test_that("standardize() warns on already-standardized object, once, after writi
     "already standardized", class = "horizons_warning_skipped"
   )
 
-  ## The object is unchanged but for its log
-  row <- again$log[again$log$verb == "standardize", ]
+  ## The object is unchanged but for its log, which gains the warning and
+  ## no record of a call that did nothing
+  row <- log_rows_added(hd_std, again)
   expect_identical(row$topic, "skipped")
   again$log <- hd_std$log
   expect_identical(again, hd_std)
 
   ## Recorded whether or not the warning is seen
   quiet <- suppressWarnings(standardize(hd_std))
-  expect_identical(quiet$log$topic[quiet$log$verb == "standardize"], "skipped")
+  expect_identical(log_rows_added(hd_std, quiet)$topic, "skipped")
 
 })
 

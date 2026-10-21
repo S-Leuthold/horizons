@@ -111,6 +111,10 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'     any additional columns
 #'   * `data$role_map`: tibble mapping columns to roles
 #'   * `provenance`: source and creation metadata
+#'   * `log`: after any warnings, a note recording the call: the source type,
+#'     the files read from the paths given, the scans and predictors, and the
+#'     horizons version, with the paths as given as its `ids` (none for a
+#'     data frame)
 #'
 #' @examples
 #' \dontrun{
@@ -257,7 +261,32 @@ spectra <- function(source,
 
   sorted_result <- sort_axis_decreasing(result)
   result        <- validate_horizons_data(sorted_result$x, stage = "raw")
-  result$log    <- log_close(collector, result$log)
+
+  ## The call's record: what was read, and by which version of horizons ----
+  ## A note, never raised; its ids are the paths as given.
+
+  n_scans <- result$data$n_rows
+  n_pred  <- result$data$n_predictors
+  version <- as.character(utils::packageVersion("horizons"))
+
+  if (is_tibble) {
+
+    log_note(collector,
+             "Read a data frame: {n_scans} row{?s} and {n_pred} predictor{?s}, with horizons {version}.")
+
+  } else {
+
+    n_files    <- length(tables)
+    n_paths    <- length(source)
+    type_label <- toupper(source_type)
+
+    log_note(collector,
+             "Read {n_files} {type_label} {cli::qty(n_files)}file{?s} from {n_paths} path{?s}: {n_scans} scan{?s} and {n_pred} predictor{?s}, with horizons {version}.",
+             ids = source)
+
+  }
+
+  result$log <- log_close(collector, result$log)
 
   ## -------------------------------------------------------------------------
   ## Step 3: CLI output

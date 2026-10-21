@@ -740,6 +740,45 @@ test_that("a file that cannot be read is dropped by name, and the rest returned,
 
 })
 
+test_that("spectra() records the call as its last row, a note naming the paths given and the horizons version", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  files <- local_opus_files(c("a.0", "b.0", "c.0"))
+  local_reads(list(
+    a.0 = list(ab = fake_block(FAKE_WN, c(1, 2, 3))),
+    b.0 = function() stop("corrupt header"),
+    c.0 = list(ab = fake_block(FAKE_WN, c(4, 5, 6)))
+  ))
+  version <- as.character(utils::packageVersion("horizons"))
+
+  ## Act -------------------------------------------------------------------
+
+  out <- suppressWarnings(spectra(files, verbose = FALSE))
+
+  ## Assert ----------------------------------------------------------------
+
+  ### The partial_failure warning first, then the record
+  expect_identical(out$log$type, c("warning", "note"))
+  note <- out$log[2, ]
+  expect_identical(note$verb, "spectra")
+  expect_true(is.na(note$topic))
+  expect_identical(note$ids[[1]], files)
+  expect_identical(note$message, paste0(
+    "Read 2 OPUS files from 3 paths: 2 scans and 3 predictors, with horizons ", version, "."
+  ))
+
+  ### A data frame has no paths; the note is never raised
+  df <- tibble::tibble(sample_id = c("S1", "S2"), `4000` = c(0.1, 0.2), `3998` = c(0.2, 0.3))
+  expect_no_warning(out <- spectra(df, verbose = FALSE))
+  expect_identical(out$log$type, "note")
+  expect_identical(out$log$ids[[1]], character(0))
+  expect_identical(out$log$message, paste0(
+    "Read a data frame: 2 rows and 2 predictors, with horizons ", version, "."
+  ))
+
+})
+
 test_that("spectra() aborts with every file's failure when none can be read, naming the blocks a file holds", {
 
   ## Arrange ---------------------------------------------------------------

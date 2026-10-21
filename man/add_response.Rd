@@ -37,6 +37,10 @@ A modified \code{horizons_data} object with:
 \item Updated \code{data$n_responses} count
 \item Provenance record appended to \code{provenance$add_response}, including
 \code{n_non_missing}, a named integer of non-missing values per variable
+\item A note on the object's \code{log} recording the call, after any coverage
+warning or note: the variables, which are its \code{ids}, the source (its
+path, or a data frame), the key, the samples matched and the measured
+values per variable
 }
 }
 \description{

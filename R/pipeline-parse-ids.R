@@ -89,6 +89,9 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   * New metadata columns added to `data$analysis`
 #'   * `data$role_map` updated with new columns (role: meta)
 #'   * Provenance recorded in `provenance$parse_ids`
+#'   * A note on the object's `log` recording the call, after any warning:
+#'     the format or the patterns, the filenames matched, and the columns
+#'     added, which are its `ids`
 #'
 #' @examples
 #' \dontrun{
@@ -430,6 +433,30 @@ parse_ids <- function(x,
   ## an NA one (too_few = "na") passes here.
 
   x <- validate_horizons_data(x, stage = "raw")
+
+  ## The call's record: how the ids were parsed --------------------------------
+  ## A note, never raised; its ids are the columns added.
+
+  n_files <- n_matched + n_unmatched
+  added   <- if (length(cols_to_add) > 0) {
+    "{cli::qty(length(cols_to_add))}the column{?s} {.field {cols_to_add}} added"
+  } else {
+    "no column added"
+  }
+
+  if (has_format) {
+
+    log_note(collector,
+             paste0("Parsed sample ids with the format {.val {format}}: {n_matched} of {n_files} filename{?s} matched, ", added, "."),
+             ids = cols_to_add)
+
+  } else {
+
+    log_note(collector,
+             paste0("Parsed sample ids with the patterns {.val {patterns}}: {n_matched} of {n_files} filename{?s} matched, ", added, "."),
+             ids = cols_to_add)
+
+  }
 
   x$log <- log_close(collector, x$log)
 
