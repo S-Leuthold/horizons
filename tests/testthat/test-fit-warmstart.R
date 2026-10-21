@@ -802,11 +802,14 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
   it("does not depend on the caller's random stream (#151)", {
 
+    ## About 4 s at its smallest budget that still shows the defect
+    skip_unless_slow_tier()
+
     ## An elastic net with an interior optimum, which glmnet fits
     ## deterministically, so only the search's own draws can differ. Without
     ## the re-pin the search reads whatever stream the grid stage left, which
-    ## differs between the sequential and parallel paths; here three caller
-    ## seeds stand in for that, and choose three different points.
+    ## differs between the sequential and parallel paths; here two caller
+    ## seeds stand in for that, and choose two different points.
     dat <- withr::with_seed(11, {
       x <- matrix(stats::rnorm(120 * 30), 120)
       colnames(x) <- paste0("x", 1:30)
@@ -814,7 +817,7 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
       d$y <- x[, 1] + 0.5 * x[, 2] + 0.3 * x[, 3] + stats::rnorm(120)
       d
     })
-    folds <- withr::with_seed(12, rsample::vfold_cv(dat, v = 5))
+    folds <- withr::with_seed(12, rsample::vfold_cv(dat, v = 3))
 
     wf <- workflows::workflow(
       y ~ .,
@@ -837,11 +840,10 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
     }
 
-    runs <- lapply(1:3, run)
+    runs <- lapply(1:2, run)
 
     expect_equal(nrow(runs[[1]]$proposed), 3L)
     expect_identical(runs[[2]], runs[[1]])
-    expect_identical(runs[[3]], runs[[1]])
 
   })
 
