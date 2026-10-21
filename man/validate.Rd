@@ -109,10 +109,19 @@ that differs from the trim \code{evaluate()} applied makes \code{fit()} refuse u
 with the rest of the verdict, since it was made for the outcome being
 replaced.
 
+\strong{Checks that cannot run:}
+
+When the spectral check cannot run (fewer than two predictor columns vary,
+or too few samples) or the response check cannot (too few outcome values,
+or an IQR of zero), its row in \code{validation$checks} reads "not run" and
+says why, and the call raises one \code{horizons_warning_skipped} naming each,
+after writing it to the object's log.
+
 \strong{Idempotency:}
 
 Running \code{validate()} again replaces the verdict, the checks, the flagged
-ids and the response-trim request. The removal record accumulates
+ids and the response-trim request, and says so in verbose output and a
+note on the object's log. The removal record accumulates
 instead: rows an earlier call removed are gone from the object and stay
 gone, so their ids and detail rows are kept and this call's removals are
 added to them. Re-validation operates on the reduced dataset.

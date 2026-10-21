@@ -97,8 +97,9 @@ package raised while predicting under this topic, naming the
 configurations (or an ensemble's units) that raised it, and
 \code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such
-as a member's prediction intervals, or a response \code{\link[=select_training]{select_training()}}
-could not draw for under \code{properties = NULL}.}
+as a member's prediction intervals, a response \code{\link[=select_training]{select_training()}}
+could not draw for under \code{properties = NULL}, or a \code{\link[=validate]{validate()}} check
+that could not run.}
 \item{\code{horizons_warning_flagged}}{A step kept samples it could not use;
 modelling leaves them out. From \code{\link[=standardize]{standardize()}}, the spectra it
 flagged (\code{.flag}); from \code{step_transform_spectra()}, the spectra its

@@ -213,8 +213,9 @@ check_arg <- function(check,
 #'     configurations (or an ensemble's units) that raised it, and
 #'     [spectra()] each one raised while reading, naming the files.}
 #'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
-#'     as a member's prediction intervals, or a response [select_training()]
-#'     could not draw for under `properties = NULL`.}
+#'     as a member's prediction intervals, a response [select_training()]
+#'     could not draw for under `properties = NULL`, or a [validate()] check
+#'     that could not run.}
 #'   \item{`horizons_warning_flagged`}{A step kept samples it could not use;
 #'     modelling leaves them out. From [standardize()], the spectra it
 #'     flagged (`.flag`); from `step_transform_spectra()`, the spectra its

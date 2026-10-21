@@ -19,9 +19,6 @@
 
     Code
       validate(hd, verbose = TRUE)
-    Condition
-      Warning:
-      IQR is zero or near-zero — skipping response outlier detection.
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)
@@ -31,9 +28,12 @@
       │  ├─ ✓ Near-zero variance: 0
       │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
       │  ├─ ℹ Spectral outliers: 0
-      │  ├─ ℹ Response outliers: 0
+      │  ├─ ℹ Response outliers: not run
       │  └─ Status: FAILED
       │
+    Condition
+      Warning:
+      Response outlier detection did not run: the outcome's IQR is zero.
 
 # validate() passed logic and CLI output / CLI output shows outlier removal summary when removal happens
 

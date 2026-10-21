@@ -50,10 +50,19 @@
 #' with the rest of the verdict, since it was made for the outcome being
 #' replaced.
 #'
+#' **Checks that cannot run:**
+#'
+#' When the spectral check cannot run (fewer than two predictor columns vary,
+#' or too few samples) or the response check cannot (too few outcome values,
+#' or an IQR of zero), its row in `validation$checks` reads "not run" and
+#' says why, and the call raises one `horizons_warning_skipped` naming each,
+#' after writing it to the object's log.
+#'
 #' **Idempotency:**
 #'
 #' Running `validate()` again replaces the verdict, the checks, the flagged
-#' ids and the response-trim request. The removal record accumulates
+#' ids and the response-trim request, and says so in verbose output and a
+#' note on the object's log. The removal record accumulates
 #' instead: rows an earlier call removed are gone from the object and stay
 #' gone, so their ids and detail rows are kept and this call's removals are
 #' added to them. Re-validation operates on the reduced dataset.
@@ -121,26 +130,6 @@ validate <- function(x,
   ## ---------------------------------------------------------------------------
 
   ## ---------------------------------------------------------------------------
-  ## Helper: abort with tree-nested error
-  ## ---------------------------------------------------------------------------
-
-  abort_nested <- function(header, details, error_class = "horizons_validate_error") {
-
-    cat(cli::col_red(paste0("\u2502  \u2514\u2500 ", header, "\n")))
-    for (i in seq_along(details)) {
-      branch <- if (i < length(details)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("\u2502        ", branch, " ", details[i], "\n")))
-    }
-    cat("\n")
-    rlang::abort(
-      header,
-      class = error_class,
-      call  = NULL
-    )
-
-  }
-
-  ## ---------------------------------------------------------------------------
   ## Helper: record a single check result
   ## ---------------------------------------------------------------------------
 
@@ -164,13 +153,9 @@ validate <- function(x,
 
   if (!inherits(x, "horizons_data")) {
 
-    cat(cli::col_red(paste0(
-      "\u2502  \u2514\u2500 x must be a horizons_data object (got ", class(x)[1], ")\n"
-    )))
-    cat("\n")
-    rlang::abort(
-      paste("Expected a `horizons_data` object. Got:", class(x)[1]),
-      class = "horizons_validate_error"
+    abort_horizons(
+      "{.arg x} must be a horizons_data object, not {.obj_type_friendly {x}}.",
+      kind = "input"
     )
 
   }
@@ -185,74 +170,74 @@ validate <- function(x,
 
   if (is.null(x$config$configs)) {
 
-    abort_nested(
-      "Object not configured",
-      c("Run `configure()` first.")
-    )
+    abort_horizons(c(
+      "{.arg x} is not configured.",
+      "i" = "Run {.fn configure} first."
+    ), kind = "input")
 
   }
 
   ## 1.3 Validate arguments -----------------------------------------------------
 
-  valid_remove <- c(FALSE, TRUE, "spectral", "response")
   if (!isFALSE(remove_outliers) && !isTRUE(remove_outliers) &&
-      !(is.character(remove_outliers) && remove_outliers %in% c("spectral", "response"))) {
+      !(rlang::is_string(remove_outliers) && remove_outliers %in% c("spectral", "response"))) {
 
-    abort_nested(
-      "Invalid `remove_outliers`",
-      c("Must be FALSE, TRUE, \"spectral\", or \"response\"",
-        paste0("Got: ", deparse(remove_outliers)))
-    )
-
-  }
-
-  if (!is.character(spectral_method) || length(spectral_method) != 1 ||
-      spectral_method != "mahalanobis") {
-
-    abort_nested(
-      "Invalid `spectral_method`",
-      c("Must be \"mahalanobis\"",
-        paste0("Got: \"", spectral_method, "\""))
-    )
+    abort_horizons(c(
+      "{.arg remove_outliers} must be {.code FALSE}, {.code TRUE}, {.val spectral} or {.val response}.",
+      "x" = "Got {.code {paste(deparse(remove_outliers), collapse = ' ')}}."
+    ), kind = "input")
 
   }
 
-  if (!is.character(response_method) || length(response_method) != 1 ||
-      response_method != "iqr") {
+  if (!rlang::is_string(spectral_method) || spectral_method != "mahalanobis") {
 
-    abort_nested(
-      "Invalid `response_method`",
-      c("Must be \"iqr\"",
-        paste0("Got: \"", response_method, "\""))
-    )
+    abort_horizons(c(
+      "{.arg spectral_method} must be one of {.val mahalanobis}.",
+      "x" = "Got {.code {paste(deparse(spectral_method), collapse = ' ')}}."
+    ), kind = "input")
 
   }
 
+  if (!rlang::is_string(response_method) || response_method != "iqr") {
+
+    abort_horizons(c(
+      "{.arg response_method} must be one of {.val iqr}.",
+      "x" = "Got {.code {paste(deparse(response_method), collapse = ' ')}}."
+    ), kind = "input")
+
+  }
+
+  ### Open intervals, which rlang's checkers cannot state.
   if (!is.numeric(spectral_threshold) || length(spectral_threshold) != 1 ||
       is.na(spectral_threshold) || spectral_threshold <= 0 || spectral_threshold >= 1) {
 
-    abort_nested(
-      "`spectral_threshold` must be between 0 and 1 (exclusive)",
-      c(paste0("Got: ", spectral_threshold))
-    )
+    abort_horizons(c(
+      "{.arg spectral_threshold} must be a single number between 0 and 1, exclusive.",
+      "x" = "Got {.code {paste(deparse(spectral_threshold), collapse = ' ')}}."
+    ), kind = "input")
 
   }
 
   if (!is.numeric(response_threshold) || length(response_threshold) != 1 ||
       is.na(response_threshold) || response_threshold <= 0) {
 
-    abort_nested(
-      "`response_threshold` must be positive",
-      c(paste0("Got: ", response_threshold))
-    )
+    abort_horizons(c(
+      "{.arg response_threshold} must be a single positive number.",
+      "x" = "Got {.code {paste(deparse(response_threshold), collapse = ' ')}}."
+    ), kind = "input")
 
   }
 
-  ## 1.4 Warn on re-validation --------------------------------------------------
+  collector <- log_open("validate")
 
-  if (!is.null(x$validation$passed)) {
+  ## 1.4 Re-validation ----------------------------------------------------------
+  ## What the user asked for: reported, not warned.
 
-    warning("Overwriting previous validation", call. = FALSE)
+  revalidated <- !is.null(x$validation$passed)
+
+  if (revalidated) {
+
+    log_note(collector, "Replaced the previous validation.")
 
   }
 
@@ -406,18 +391,33 @@ validate <- function(x,
   ## Step 10: P005 — Spectral outlier detection
   ## ---------------------------------------------------------------------------
 
-  spectral_outlier_ids <- detect_spectral_outliers(
+  spectral <- detect_spectral_outliers(
     analysis       = analysis,
     predictor_cols = predictor_cols,
     nzv_cols       = nzv_cols,
     threshold      = spectral_threshold
   )
 
+  spectral_outlier_ids <- spectral$ids
+
+  ### A check that could not run says so, here and in the report, rather
+  ### than reading as one that found nothing.
+  if (!is.null(spectral$skipped)) {
+
+    log_warning(collector, "skipped",
+                "Spectral outlier detection did not run: {spectral$skipped}.")
+
+  }
+
   checks <- rbind(checks, run_check(
     "P005", "Spectral outliers",
     condition = TRUE,
     severity  = "INFO",
-    value     = paste0(length(spectral_outlier_ids), " flagged")
+    value     = if (is.null(spectral$skipped)) {
+      paste0(length(spectral_outlier_ids), " flagged")
+    } else {
+      paste0("not run: ", spectral$skipped)
+    }
   ))
 
   ## ---------------------------------------------------------------------------
@@ -425,20 +425,35 @@ validate <- function(x,
   ## ---------------------------------------------------------------------------
 
   response_outlier_ids <- character(0)
+  response_skipped     <- NULL
 
   if (has_outcome) {
 
-    response_outlier_ids <- detect_response_outliers(
-      analysis  = analysis,
+    response <- detect_response_outliers(
+      analysis    = analysis,
       outcome_col = outcome_col,
       threshold   = response_threshold
     )
+
+    response_outlier_ids <- response$ids
+    response_skipped     <- response$skipped
+
+    if (!is.null(response_skipped)) {
+
+      log_warning(collector, "skipped",
+                  "Response outlier detection did not run: {response_skipped}.")
+
+    }
 
     checks <- rbind(checks, run_check(
       "P006", "Response outliers",
       condition = TRUE,
       severity  = "INFO",
-      value     = paste0(length(response_outlier_ids), " flagged")
+      value     = if (is.null(response_skipped)) {
+        paste0(length(response_outlier_ids), " flagged")
+      } else {
+        paste0("not run: ", response_skipped)
+      }
     ))
 
   }
@@ -464,18 +479,6 @@ validate <- function(x,
                        n_pred_cols, " = ", format(n_cells, big.mark = ",", scientific = FALSE),
                        " cells")
   ))
-
-  if (length(cubist_flagged_ids) > 0) {
-
-    cli::cli_warn(c(
-      "Cubist may not finish at full resolution",
-      "!" = "{length(cubist_flagged_ids)} config{?s} {?pairs/pair} {.val cubist} with {.code feature_selection = \"none\"} on this {n_total}-row x {n_pred_cols}-predictor table ({format(n_cells, big.mark = ',', scientific = FALSE)} cells, over the {format(CUBIST_MAX_CELLS, big.mark = ',', scientific = FALSE)}-cell heuristic floor).",
-      "i" = "Cubist fits a linear model in every rule, so its cost grows sharply with predictor count. Measured: cubist + snv on 14,228 x 851 (12.1M cells) did not finish a single tune task in 29.5 minutes; the same config with {.code feature_selection = \"pca\"} finished in 368 s (test RPD 3.82).",
-      "i" = "Affected: {.val {cubist_flagged_ids}}",
-      "i" = "Set {.code feature_selection = \"pca\"} for these configs."
-    ), class = "horizons_validate_warning")
-
-  }
 
   ## ---------------------------------------------------------------------------
   ## Step 12: Outlier removal (if requested)
@@ -574,6 +577,8 @@ validate <- function(x,
 
   x <- validate_horizons_data(x)
 
+  x$log <- log_close(collector, x$log)
+
   ## ---------------------------------------------------------------------------
   ## Step 15: CLI output
   ## ---------------------------------------------------------------------------
@@ -581,6 +586,12 @@ validate <- function(x,
   if (verbose) {
 
     cat(paste0("\u251C\u2500 ", cli::style_bold("Validating"), "...\n"))
+
+    if (revalidated) {
+
+      cat(paste0("\u2502  \u251C\u2500 Replaced the previous validation\n"))
+
+    }
 
     ## Sample checks --------------------------------------------------------------
 
@@ -626,13 +637,13 @@ validate <- function(x,
 
     cat(paste0("\u2502  \u251C\u2500 ",
                cli::col_cyan("\u2139"), " Spectral outliers: ",
-               length(spectral_outlier_ids), "\n"))
+               if (is.null(spectral$skipped)) length(spectral_outlier_ids) else "not run", "\n"))
 
     if (has_outcome) {
 
       cat(paste0("\u2502  \u251C\u2500 ",
                  cli::col_cyan("\u2139"), " Response outliers: ",
-                 length(response_outlier_ids),
+                 if (is.null(response_skipped)) length(response_outlier_ids) else "not run",
                  if (!is.null(response_trim)) " on the whole table, not removed" else "",
                  "\n"))
 
@@ -671,6 +682,8 @@ validate <- function(x,
 
   }
 
+  signal_log(collector, x)
+
   ## ---------------------------------------------------------------------------
   ## Return
   ## ---------------------------------------------------------------------------
@@ -698,7 +711,8 @@ validate <- function(x,
 #' @param nzv_cols `character`. Near-zero variance columns to exclude.
 #' @param threshold `numeric(1)`. Chi-squared quantile (0-1).
 #'
-#' @return `character`. sample_id values of flagged outliers.
+#' @return `list`: `ids`, the `sample_id` values flagged, and `skipped`,
+#'   `NULL` when the check ran, otherwise why it could not.
 #'
 #' @noRd
 detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, threshold) {
@@ -708,9 +722,8 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 
   if (length(clean_cols) < 2) {
 
-    warning("Fewer than 2 predictor columns after NZV removal. Skipping spectral outlier detection.",
-            call. = FALSE)
-    return(character(0))
+    return(list(ids = character(0),
+                skipped = "fewer than 2 predictor columns vary"))
 
   }
 
@@ -719,9 +732,8 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
   ## Guard: too few samples for meaningful PCA
   if (n < 5) {
 
-    warning(paste0("Too few samples for spectral outlier detection (n=", n,
-                   "). Skipping."), call. = FALSE)
-    return(character(0))
+    return(list(ids = character(0),
+                skipped = paste0("too few samples (", n, ")")))
 
   }
 
@@ -732,51 +744,32 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 
   pca <- stats::prcomp(spectra_matrix, scale. = TRUE)
 
-  ## Retain components capturing 99% variance, capped
+  ## Retain components capturing 99% variance, capped. The cumulative share
+  ## ends at 1, so some component reaches 99%.
   cumvar <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
   k <- which(cumvar >= 0.99)[1]
-
-  ## Guard: k is NA or < 1
-  if (is.na(k) || k < 1) {
-
-    warning("PCA retained zero components. Skipping spectral outlier detection.",
-            call. = FALSE)
-    return(character(0))
-
-  }
 
   k <- min(k, n - 2, 50)
 
   ## Guard: k must still be >= 1 after capping
   if (k < 1) {
 
-    warning("Too few usable PCA components after capping. Skipping spectral outlier detection.",
-            call. = FALSE)
-    return(character(0))
+    return(list(ids = character(0),
+                skipped = "too few principal components after capping"))
 
   }
 
+  ## The scores' covariance is diagonal, with the kept components' positive
+  ## variances, so it is never singular.
   scores <- pca$x[, 1:k, drop = FALSE]
   center <- colMeans(scores)
-
-  ## Singularity check via Cholesky decomposition
-  S <- stats::cov(scores)
-  chol_result <- tryCatch(chol(S), error = function(e) NULL)
-
-  if (is.null(chol_result)) {
-
-    warning("Covariance matrix singular \u2014 skipping spectral outlier detection.",
-            call. = FALSE)
-    return(character(0))
-
-  }
+  S      <- stats::cov(scores)
 
   ## Compute Mahalanobis distances
   distances  <- stats::mahalanobis(scores, center, S)
   cutoff     <- stats::qchisq(threshold, df = k)
-  outlier_ids <- analysis$sample_id[distances > cutoff]
 
-  outlier_ids
+  list(ids = analysis$sample_id[distances > cutoff], skipped = NULL)
 
 }
 
@@ -794,7 +787,8 @@ detect_spectral_outliers <- function(analysis, predictor_cols, nzv_cols, thresho
 #' @param outcome_col `character(1)`. Name of the outcome column.
 #' @param threshold `numeric(1)`. IQR multiplier.
 #'
-#' @return `character`. sample_id values of flagged outliers.
+#' @return `list`: `ids`, the `sample_id` values flagged, and `skipped`,
+#'   `NULL` when the check ran, otherwise why it could not.
 #'
 #' @noRd
 detect_response_outliers <- function(analysis, outcome_col, threshold) {
@@ -804,24 +798,21 @@ detect_response_outliers <- function(analysis, outcome_col, threshold) {
 
   if (identical(fences$skipped, "too_few")) {
 
-    warning(paste0("Too few non-NA outcome values for IQR detection (n=",
-                   fences$n, "). Skipping."), call. = FALSE)
-    return(character(0))
+    return(list(ids = character(0),
+                skipped = paste0("too few outcome values (", fences$n, ")")))
 
   }
 
   if (identical(fences$skipped, "zero_iqr")) {
 
-    warning("IQR is zero or near-zero \u2014 skipping response outlier detection.",
-            call. = FALSE)
-    return(character(0))
+    return(list(ids = character(0), skipped = "the outcome's IQR is zero"))
 
   }
 
   outlier_mask <- !is.na(outcome_vals) &
     (outcome_vals < fences$lower | outcome_vals > fences$upper)
 
-  analysis$sample_id[outlier_mask]
+  list(ids = analysis$sample_id[outlier_mask], skipped = NULL)
 
 }
 
