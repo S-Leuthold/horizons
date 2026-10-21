@@ -24,7 +24,8 @@
 #' horizons_eval → horizons_fit → horizons_ensemble). This constructor
 #' initializes all 8 sections with either provided values or NULL defaults:
 #'
-#' 1. **data**: The analysis tibble and role_map
+#' 1. **data**: The analysis tibble, role_map, the stored counts and the
+#'    standardization record
 #' 2. **provenance**: Source files, transforms applied, version info
 #' 3. **config**: Model configurations and tuning parameters
 #' 4. **validation**: Pre-flight check results and outlier tracking
@@ -108,11 +109,16 @@ new_horizons_data <- function(analysis       = NULL,
     ## Section 1: DATA — The canonical modeling table
     ## -------------------------------------------------------------------------
 
-    data = list(analysis     = analysis,
-                role_map     = role_map,
-                n_rows       = n_rows,
-                n_predictors = n_predictors,
-                n_responses  = n_responses),
+    data = list(analysis        = analysis,
+                role_map        = role_map,
+                n_rows          = n_rows,
+                n_predictors    = n_predictors,
+                n_responses     = n_responses,
+
+                ## Written by standardize(): what the verbs read of how the
+                ## spectra were standardized (see ?standardize). NULL until
+                ## then.
+                standardization = NULL),
 
     ## -------------------------------------------------------------------------
     ## Section 2: PROVENANCE — Source and transform history

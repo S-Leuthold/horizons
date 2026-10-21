@@ -306,7 +306,7 @@
 #'   `settings$properties` are the properties drawn for (a skipped or
 #'   emptied property is not among them, so [configure()] warns when one is
 #'   chosen as the outcome).
-#'   `provenance$standardization` is the library's, describing the returned
+#'   `data$standardization` is the library's, describing the returned
 #'   axis: when only some of the library's columns are returned (targets on a
 #'   coarser or narrower grid), `n_wavelengths`, `wavelength_range` and `grid`
 #'   describe the columns returned (`grid` is `NULL` when they are not evenly
@@ -637,7 +637,7 @@ select_training <- function(x, library,
   }
 
   target_vars   <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
-  restandardize <- !is.null(x$provenance$standardization)
+  restandardize <- !is.null(x$data$standardization)
 
   ## A registered library's columns and baseline are known from the
   ## registry, which build_ossl_library() standardizes it with, so targets
@@ -655,7 +655,7 @@ select_training <- function(x, library,
 
     check_same_standardization(list(baseline         = isTRUE(reg_grid$baseline),
                                     wavelength_range = c(reg_grid$wn_min, reg_grid$wn_max)),
-                               x$provenance$standardization,
+                               x$data$standardization,
                                pool_step     = reg_grid$wn_step,
                                target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
                                library_form  = "registered",
@@ -743,13 +743,13 @@ select_training <- function(x, library,
   pool_vars <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
   cols      <- check_shared_columns(target_vars, pool_vars, restandardize = restandardize,
                                     library_form         = resolved$record$form,
-                                    library_standardized = !is.null(pool$provenance$standardization),
-                                    library_baseline     = isTRUE(pool$provenance$standardization$baseline))
+                                    library_standardized = !is.null(pool$data$standardization),
+                                    library_baseline     = isTRUE(pool$data$standardization$baseline))
 
   ## Standardized alike (#107): a hull on one side only, or hulls fitted over
   ## different ranges, would train on one preprocessing and predict another.
 
-  check_same_standardization(pool$provenance$standardization, x$provenance$standardization,
+  check_same_standardization(pool$data$standardization, x$data$standardization,
                              pool_step     = grid_summary(predictor_wavenumbers(pool))$resolution,
                              target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
                              library_form  = resolved$record$form,
@@ -1418,8 +1418,8 @@ select_training <- function(x, library,
 
   ## The library's standardization record, its axis fields describing the
   ## columns returned when they are only some of the library's (#90)
-  out$provenance$standardization <- returned_standardization(
-    pool$provenance$standardization, as.numeric(sub("^wn_", "", cols$shared)), length(pool_vars)
+  out$data$standardization <- returned_standardization(
+    pool$data$standardization, as.numeric(sub("^wn_", "", cols$shared)), length(pool_vars)
   )
 
   ## Pool sizes per property ------------------------------------------------
@@ -1760,7 +1760,7 @@ check_pool_unpromoted <- function(pool) {
 #' refused as a gap.
 #'
 #' @param pool_record,target_record [List or NULL.] Each side's
-#'   `provenance$standardization`.
+#'   `data$standardization`.
 #' @param pool_step,target_step [Numeric.] Each axis's median spacing.
 #' @param library_form [Character.] The library's `form` (`"object"`,
 #'   `"path"`, `"registered"`): a pool in memory or a library file is the

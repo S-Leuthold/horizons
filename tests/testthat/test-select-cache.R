@@ -194,7 +194,7 @@ test_that("baseline-corrected targets are refused against the registered library
   msg <- gsub("\\s+", " ", conditionMessage(err))
 
   expect_match(msg, "The targets were baseline-corrected", fixed = TRUE)
-  expect_identical(m$pool$provenance$standardization$baseline, FALSE)
+  expect_identical(m$pool$data$standardization$baseline, FALSE)
 
   ## A registered library is not the user's to standardize again
   expect_false(grepl("Or correct the library", msg, fixed = TRUE))
@@ -211,7 +211,7 @@ test_that("the registry's grid and baseline are the built library's", {
 
   expect_identical(paste0("wn_", canonical_grid(f$wn_min, f$wn_max, f$wn_step)),
                    m$pool$data$role_map$variable[m$pool$data$role_map$role == "predictor"])
-  expect_identical(m$pool$provenance$standardization$baseline, f$baseline)
+  expect_identical(m$pool$data$standardization$baseline, f$baseline)
   expect_false(f$baseline)
 
 })

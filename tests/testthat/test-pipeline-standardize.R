@@ -350,8 +350,8 @@ test_that("an off-grid axis lands on the same columns as a KSSL-shaped one", {
   expect_identical(predictor_names(offgrid), predictor_names(kssl))
   expect_identical(predictor_names(offgrid)[c(1, 851)], c("wn_4000", "wn_600"))
 
-  expect_true(offgrid$provenance$standardization$resampled)
-  expect_identical(offgrid$provenance$standardization$grid,
+  expect_true(offgrid$data$standardization$resampled)
+  expect_identical(offgrid$data$standardization$grid,
                    list(min = 600, max = 4000, step = 4, n = 851L))
 
 })
@@ -381,7 +381,7 @@ test_that("grid points the data does not reach are dropped with a warning, never
 
   ## The covered multiples survive, and nothing beyond the data does
   expect_identical(predictor_names(out), paste0("wn_", seq(3500, 652, by = -4)))
-  expect_identical(out$provenance$standardization$grid$n, 713L)
+  expect_identical(out$data$standardization$grid$n, 713L)
 
 })
 
@@ -447,8 +447,8 @@ test_that("an axis already on the canonical grid is not re-interpolated", {
   ## agree to about 1e-12
   after <- as.matrix(out$data$analysis[, predictor_names(out)])
   expect_identical(after, before)
-  expect_false(out$provenance$standardization$resampled)
-  expect_identical(out$provenance$standardization$grid$n, 1701L)
+  expect_false(out$data$standardization$resampled)
+  expect_identical(out$data$standardization$grid$n, 1701L)
 
   ## Stored increasing (make_axis_spectra() bypasses spectra()'s own sort,
   ## #24, so this is genuinely unsorted input): standardize() sorts it, and
@@ -620,8 +620,8 @@ test_that("resample = NULL keeps trim-as-subset but still sorts", {
   out  <- no_output(standardize(kssl, resample = NULL, trim = c(1000, 2000)))
 
   expect_identical(predictor_names(out), paste0("wn_", seq(2000, 1000, by = -2)))
-  expect_false(out$provenance$standardization$resampled)
-  expect_null(out$provenance$standardization$grid)
+  expect_false(out$data$standardization$resampled)
+  expect_null(out$data$standardization$grid)
 
   ## A subset, with no margin: 599.74 is outside c(600, 4000) and stays out
   offgrid <- no_output(standardize(make_axis_spectra(OFFGRID_WN), resample = NULL, trim = c(600, 4000)))
@@ -643,7 +643,7 @@ test_that("a call with every operation off still sorts, validates, and changes n
   ## Decreasing columns, a valid object, marked standardized
   expect_identical(predictor_names(out), paste0("wn_", rev(KSSL_WN)))
   expect_no_error(validate_horizons_data(out))
-  expect_false(is.null(out$provenance$standardization))
+  expect_false(is.null(out$data$standardization))
 
   ## The same value at every wavenumber: only the column order moved
   after <- as.matrix(out$data$analysis[, predictor_names(out)])
@@ -676,16 +676,16 @@ test_that("force = TRUE with every operation off keeps the grid an earlier call 
   expect_identical(note$type, "note")
   expect_match(note$message, "Re-standardizing previously standardized data", fixed = TRUE)
 
-  expect_true(again$provenance$standardization$resampled)
-  expect_identical(again$provenance$standardization$grid,
-                   on_4$provenance$standardization$grid)
+  expect_true(again$data$standardization$resampled)
+  expect_identical(again$data$standardization$grid,
+                   on_4$data$standardization$grid)
   expect_identical(predictor_names(again), predictor_names(on_4))
 
   ## The no-op record describes the axis the way the full path does
-  expect_identical(again$provenance$standardization$n_wavelengths,
-                   on_4$provenance$standardization$n_wavelengths)
-  expect_equal(again$provenance$standardization$wavelength_range,
-               on_4$provenance$standardization$wavelength_range)
+  expect_identical(again$data$standardization$n_wavelengths,
+                   on_4$data$standardization$n_wavelengths)
+  expect_equal(again$data$standardization$wavelength_range,
+               on_4$data$standardization$wavelength_range)
 
 })
 
@@ -694,25 +694,25 @@ test_that("force = TRUE keeps the record of a hull an earlier call fitted, and t
 
   hulled <- no_output(standardize(make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum),
                                   resample = 4, trim = c(600, 4000), baseline = TRUE))
-  expect_true(hulled$provenance$standardization$baseline)
-  expect_identical(hulled$provenance$standardization$baseline_range, c(600, 4000))
+  expect_true(hulled$data$standardization$baseline)
+  expect_identical(hulled$data$standardization$baseline_range, c(600, 4000))
 
   ## Every operation off: the values still carry the hull
   again <- no_output(standardize(hulled, resample = NULL, trim = NULL, force = TRUE))
-  expect_true(again$provenance$standardization$baseline)
-  expect_identical(again$provenance$standardization$baseline_range, c(600, 4000))
+  expect_true(again$data$standardization$baseline)
+  expect_identical(again$data$standardization$baseline_range, c(600, 4000))
 
   ## A narrower trim without a hull: the hull is the first call's, over its range
   narrower <- no_output(standardize(hulled, resample = 4, trim = c(1000, 3000), force = TRUE))
-  expect_true(narrower$provenance$standardization$baseline)
-  expect_identical(narrower$provenance$standardization$wavelength_range, c(1000, 3000))
-  expect_identical(narrower$provenance$standardization$baseline_range, c(600, 4000))
+  expect_true(narrower$data$standardization$baseline)
+  expect_identical(narrower$data$standardization$wavelength_range, c(1000, 3000))
+  expect_identical(narrower$data$standardization$baseline_range, c(600, 4000))
 
   ## Without a hull anywhere there is no range
   plain <- no_output(standardize(make_axis_spectra(rev(KSSL_WN)), resample = 4))
-  expect_false(plain$provenance$standardization$baseline)
-  expect_true("baseline_range" %in% names(plain$provenance$standardization))
-  expect_null(plain$provenance$standardization$baseline_range)
+  expect_false(plain$data$standardization$baseline)
+  expect_true("baseline_range" %in% names(plain$data$standardization))
+  expect_null(plain$data$standardization$baseline_range)
 
 })
 
@@ -834,7 +834,7 @@ test_that("an axis with the water bands cut upstream is not spline-filled, and s
   ## The same 1329 columns and the same values: on the grid apart from the gaps
   expect_identical(predictor_names(out), predictor_names(cut))
   expect_identical(as.matrix(out$data$analysis[, predictor_names(out)]), cut_values)
-  expect_false(out$provenance$standardization$resampled)
+  expect_false(out$data$standardization$resampled)
   expect_false(any(in_water_band(as.numeric(sub("^wn_", "", predictor_names(out))))))
 
 })
@@ -1757,7 +1757,7 @@ test_that("standardize() with every operation on trims, drops the water bands, r
 
   hd <- create_test_spectra(n_wavelengths = 200, wn_min = 400, wn_max = 4500)
 
-  expect_null(hd$provenance$standardization)
+  expect_null(hd$data$standardization)
 
   ## Apply all operations ------------------------------------------------------
 
@@ -1769,7 +1769,7 @@ test_that("standardize() with every operation on trims, drops the water bands, r
 
   ## Check the provenance records each argument --------------------------------
 
-  std <- hd_full$provenance$standardization
+  std <- hd_full$data$standardization
   expect_false(is.null(std))
   expect_equal(std$resample, 2)
   expect_equal(std$trim, c(600, 4000))

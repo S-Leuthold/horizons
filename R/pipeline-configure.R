@@ -727,7 +727,7 @@ generate_config_id <- function(model, preprocessing, transformation,
 #' @param x `horizons_data`. The object being configured or evaluated.
 #'
 #' @return `numeric(1)`. The spacing in cm-1, or `NA` when neither the names
-#'   nor the provenance give one.
+#'   nor the standardization record give one.
 #' @noRd
 
 axis_spacing_cm <- function(x) {
@@ -742,7 +742,7 @@ axis_spacing_cm <- function(x) {
 
   }
 
-  step <- x$provenance$standardization$grid$step
+  step <- x$data$standardization$grid$step
 
   if (is.numeric(step) && length(step) == 1 && !is.na(step)) {
 

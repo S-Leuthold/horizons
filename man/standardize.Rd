@@ -43,7 +43,7 @@ Default \code{FALSE}. Not recommended — may cause data quality issues.}
 }
 \value{
 \code{horizons_data.} The input object with standardized spectra.
-\code{provenance$standardization} records the arguments, whether the spectra
+\code{data$standardization} records the arguments, whether the spectra
 were actually re-interpolated (\code{resampled}), and the grid they sit on
 (\code{grid}: \code{min}, \code{max}, \code{step}, \code{n}; \code{NULL} without resampling).
 \code{resample} records the argument as given, never the axis's spacing;

@@ -367,7 +367,7 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
 #' The standardization record of a training set on a subset of its columns
 #'
 #' @description
-#' `provenance$standardization` describes the object's own axis. The
+#' `data$standardization` describes the object's own axis. The
 #' training set carries its library's record, and when it keeps only some of
 #' the library's columns (targets on a coarser or narrower grid), the axis
 #' fields are rewritten to describe the columns it has: a library at 4 cm-1
@@ -387,7 +387,7 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
 #' has none, and gets none.
 #'
 #' @param pool_record [List or NULL.] The library's
-#'   `provenance$standardization`.
+#'   `data$standardization`.
 #' @param wn [Numeric.] The returned columns' wavenumbers.
 #' @param n_library [Integer.] How many predictor columns the library has.
 #'

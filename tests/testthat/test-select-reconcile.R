@@ -215,7 +215,7 @@ test_that("check_shared_columns() refuses targets that share no column, naming t
 #' @param step [Numeric.] Grid step in cm-1.
 #' @param ... Further keys, appended.
 #'
-#' @return [List.] Shaped as `standardize()` writes `provenance$standardization`.
+#' @return [List.] Shaped as `standardize()` writes `data$standardization`.
 #' @noRd
 std_record <- function(step, ...) {
 

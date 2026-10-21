@@ -1852,7 +1852,7 @@ test_that("targets on a coarser grid get the library's own values there, and the
   })
 
   out <- select_training(targets, pool, k = 10)
-  rec <- out$provenance$standardization
+  rec <- out$data$standardization
   wn  <- predictor_matrix(out)$wavenumbers
 
   ## Every target column is shared, so nothing is warned and none is missing
@@ -1869,7 +1869,7 @@ test_that("targets on a coarser grid get the library's own values there, and the
   ## The recorded step is the axis's spacing, the targets' 8, not the pool's 4
   expect_equal(rec$grid$step, stats::median(abs(diff(wn))))
   expect_equal(rec$grid$step, 8)
-  expect_identical(rec$grid, targets$provenance$standardization$grid)
+  expect_identical(rec$grid, targets$data$standardization$grid)
   expect_identical(rec$n_wavelengths, length(wn))
   expect_equal(rec$wavelength_range, range(wn))
 
@@ -1885,8 +1885,8 @@ test_that("targets on a coarser grid get the library's own values there, and the
   expect_identical(rec$trim, c(600, 4000))
   expect_identical(rec$remove_water, FALSE)
   expect_identical(rec$baseline, FALSE)
-  expect_identical(rec$resampled, pool$provenance$standardization$resampled)
-  expect_identical(rec$applied_at, pool$provenance$standardization$applied_at)
+  expect_identical(rec$resampled, pool$data$standardization$resampled)
+  expect_identical(rec$applied_at, pool$data$standardization$applied_at)
 
 })
 
@@ -1903,7 +1903,7 @@ test_that("a pool already on the targets' grid keeps its standardization record 
   out <- select_training(targets, pool, k = 10)
 
   expect_identical(out$selection$reconciliation$operation, "none")
-  expect_identical(out$provenance$standardization, pool$provenance$standardization)
+  expect_identical(out$data$standardization, pool$data$standardization)
 
 })
 
@@ -1921,14 +1921,14 @@ test_that("the record describes the columns returned whatever the targets' recor
     targets <- standardize(fx$targets, resample = NULL, trim = c(600, 4000))
   })
 
-  rec <- select_training(targets, pool, k = 10)$provenance$standardization
+  rec <- select_training(targets, pool, k = 10)$data$standardization
 
-  expect_null(targets$provenance$standardization$grid)
+  expect_null(targets$data$standardization$grid)
   expect_identical(rec$grid, list(min = 600, max = 4000, step = 8, n = 426L))
   expect_identical(rec$n_wavelengths, fx$targets$data$n_predictors)
 
   ## A pool standardize() never saw is not marked standardized
-  expect_null(quiet_select(fx, k = 10)$provenance$standardization)
+  expect_null(quiet_select(fx, k = 10)$data$standardization)
 
 })
 
@@ -2110,7 +2110,7 @@ test_that("targets on an offset step get the columns both grids share, at their 
   wn <- predictor_matrix(out)$wavenumbers
   expect_identical(wn, seq(3996, 600, by = -12))
 
-  rec <- out$provenance$standardization
+  rec <- out$data$standardization
   expect_identical(rec$grid, list(min = 600, max = 3996, step = 12, n = length(wn)))
   expect_identical(rec$resample, 4)
   expect_match(gsub("\\s+", " ", conditionMessage(w)),
@@ -2171,8 +2171,8 @@ test_that("a side never standardized counts as not baseline-corrected (#107)", {
     target_hull <- standardize(fx$targets, resample = 8, baseline = TRUE)
   })
 
-  expect_null(fx$pool$provenance$standardization)
-  expect_null(fx$targets$provenance$standardization)
+  expect_null(fx$pool$data$standardization)
+  expect_null(fx$targets$data$standardization)
 
   expect_error(select_training(target_hull, fx$pool, k = 5),
                "The targets were baseline-corrected", class = "horizons_error_input")
@@ -2222,7 +2222,7 @@ test_that("hulls over ranges an end apart by less than the coarser step pass (#1
     targets <- standardize(fx$targets, resample = 6, baseline = TRUE)
   })
 
-  expect_identical(targets$provenance$standardization$wavelength_range, c(600, 3996))
+  expect_identical(targets$data$standardization$wavelength_range, c(600, 3996))
 
   expect_warning(out <- select_training(targets, pool, k = 5), class = "horizons_warning_coverage")
   expect_s3_class(out, "horizons_data")
@@ -2252,7 +2252,7 @@ test_that("hulls over different ranges name the range both reach, which a librar
     pool    <- standardize(fx$pool, resample = 4, trim = c(600, 4000), baseline = TRUE)
   })
 
-  expect_identical(targets$provenance$standardization$wavelength_range, c(604, 3996))
+  expect_identical(targets$data$standardization$wavelength_range, c(604, 3996))
 
   err <- expect_error(select_training(targets, pool, k = 10, properties = "clay"), class = "horizons_error_input")
   msg <- gsub("\\s+", " ", conditionMessage(err))
@@ -2295,7 +2295,7 @@ test_that("a hull carried through standardize(force = TRUE) is compared over the
   expect_match(gsub("\\s+", " ", conditionMessage(err)),
                "the library's hull over 600 to 4000 cm-1 and the targets' over 1000 to 3000 cm-1", fixed = TRUE)
 
-  expect_identical(same$provenance$standardization$wavelength_range, c(1000, 3000))
+  expect_identical(same$data$standardization$wavelength_range, c(1000, 3000))
   expect_s3_class(suppressWarnings(select_training(same, pool, k = 5)), "horizons_data")
 
 })
@@ -2311,8 +2311,8 @@ test_that("a hull-corrected record written without its range is read by its axis
   })
 
   ## As standardize() wrote a record before it kept the hull's range
-  pool$provenance$standardization$baseline_range    <- NULL
-  targets$provenance$standardization$baseline_range <- NULL
+  pool$data$standardization$baseline_range    <- NULL
+  targets$data$standardization$baseline_range <- NULL
 
   expect_error(select_training(targets, pool, k = 5), "hulls are pinned at different ends",
                class = "horizons_error_input")

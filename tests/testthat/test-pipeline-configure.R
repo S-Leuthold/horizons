@@ -617,7 +617,7 @@ describe("configure() storage", {
     ## standardize() provenance on the targets' axis, so the recorded step
     ## can describe a different grid.
     hd <- make_single_response_hd()
-    hd$provenance$standardization <- list(grid = list(step = 4))
+    hd$data$standardization <- list(grid = list(step = 4))
 
     expect_equal(axis_spacing_cm(hd), 1)
 
@@ -634,7 +634,7 @@ describe("configure() storage", {
 
     expect_true(is.na(axis_spacing_cm(hd)))
 
-    hd$provenance$standardization <- list(grid = list(step = 2))
+    hd$data$standardization <- list(grid = list(step = 2))
     expect_equal(axis_spacing_cm(hd), 2)
 
   })

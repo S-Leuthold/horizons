@@ -826,7 +826,7 @@ flag_unusable <- function(analysis, role_map, reason, collector, short_range = N
 #' records, so its `wavelength_range` is read in its place; reading it as
 #' missing would let a hull pass a comparison it fails (#107).
 #'
-#' @param record A `provenance$standardization` record, or `NULL`.
+#' @param record A `data$standardization` record, or `NULL`.
 #' @return `numeric(2)`, or `NULL` when the record carries no hull.
 #' @keywords internal
 #' @noRd
@@ -1052,7 +1052,7 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return `horizons_data.` The input object with standardized spectra.
-#'   `provenance$standardization` records the arguments, whether the spectra
+#'   `data$standardization` records the arguments, whether the spectra
 #'   were actually re-interpolated (`resampled`), and the grid they sit on
 #'   (`grid`: `min`, `max`, `step`, `n`; `NULL` without resampling).
 #'   `resample` records the argument as given, never the axis's spacing;
@@ -1147,7 +1147,7 @@ standardize <- function(x,
   ## Step 1: Check idempotence
   ## ---------------------------------------------------------------------------
 
-  if (!is.null(x$provenance$standardization) && !force) {
+  if (!is.null(x$data$standardization) && !force) {
 
     ## Returned as it arrived, so validated as it arrived (#234). A
     ## standardized object is already on a decreasing axis.
@@ -1176,7 +1176,7 @@ standardize <- function(x,
 
   operations <- list()
 
-  if (!is.null(x$provenance$standardization) && force) {
+  if (!is.null(x$data$standardization) && force) {
 
     ### force = TRUE is the user's explicit choice: reported, not warned
     log_note(collector, "Re-standardizing previously standardized data ({.code force = TRUE}).")
@@ -1229,14 +1229,14 @@ standardize <- function(x,
 
     ### Under force = TRUE the object may already sit on a grid an earlier
     ### call built. The axis is untouched here, so that record still holds.
-    prior      <- x$provenance$standardization
+    prior      <- x$data$standardization
     keep_prior <- !is.null(prior) && !sorted$sorted
 
     ### The axis as it stands, recorded as the full path records it.
     axis_wn <- wn_values(axis_vars)
 
     ### A hull an earlier call fitted is still in the values, sorted or not
-    x$provenance$standardization <- list(
+    x$data$standardization <- list(
       resample         = NULL,
       trim             = NULL,
       remove_water     = FALSE,
@@ -1664,13 +1664,13 @@ standardize <- function(x,
 
   x <- set_analysis(x, new_analysis, new_role_map)
 
-  ## Update provenance ---------------------------------------------------------
+  ## Record the standardization ----------------------------------------------
 
   ### Under force = TRUE the spectra may carry a hull an earlier call fitted,
   ### which this call's record keeps: the values still hold it
-  earlier <- x$provenance$standardization
+  earlier <- x$data$standardization
 
-  x$provenance$standardization <- list(
+  x$data$standardization <- list(
     resample         = resample,
     trim             = trim,
     remove_water     = remove_water,

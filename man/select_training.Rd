@@ -148,7 +148,7 @@ response column the pool carried, three provenance columns with role
 \code{settings$properties} are the properties drawn for (a skipped or
 emptied property is not among them, so \code{\link[=configure]{configure()}} warns when one is
 chosen as the outcome).
-\code{provenance$standardization} is the library's, describing the returned
+\code{data$standardization} is the library's, describing the returned
 axis: when only some of the library's columns are returned (targets on a
 coarser or narrower grid), \code{n_wavelengths}, \code{wavelength_range} and \code{grid}
 describe the columns returned (\code{grid} is \code{NULL} when they are not evenly
