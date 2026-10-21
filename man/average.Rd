@@ -36,9 +36,9 @@ a replicate to pass QC. Default: \code{0.996}. Changing this is rarely needed.}
 \itemize{
 \item \code{"warn"} (default): Keep all replicates and average
 \item \code{"drop"}: Remove the sample entirely
-\item \code{"keep_best"}: Keep only the replicate with highest mean correlation.
-With two replicates, whose one correlation cannot tell them apart,
-the later scan is kept
+\item \code{"keep_best"}: Keep only the replicate with the highest mean
+correlation, measured before QC removes any. A tie goes to the earlier
+scan, so of two replicates the first is kept
 }}
 
 \item{verbose}{Logical. Print progress messages. Default:
@@ -106,8 +106,10 @@ If QC flags all replicates as outliers:
 \item \code{"warn"} (default): Keep all replicates and average, with one
 \code{horizons_warning_quality} naming the samples
 \item \code{"drop"}: Remove the entire sample from results
-\item \code{"keep_best"}: Keep only the replicate with highest mean correlation,
-the one QC's iterative removal leaves last
+\item \code{"keep_best"}: Keep only the replicate with the highest mean
+correlation against the sample's other replicates, measured before QC
+removes any. A tie goes to the earlier scan, so of two replicates,
+whose one correlation cannot tell them apart, the first is kept
 }
 
 \strong{Flagged replicates:}

@@ -49,8 +49,10 @@
 #' * `"warn"` (default): Keep all replicates and average, with one
 #'   `horizons_warning_quality` naming the samples
 #' * `"drop"`: Remove the entire sample from results
-#' * `"keep_best"`: Keep only the replicate with highest mean correlation,
-#'   the one QC's iterative removal leaves last
+#' * `"keep_best"`: Keep only the replicate with the highest mean
+#'   correlation against the sample's other replicates, measured before QC
+#'   removes any. A tie goes to the earlier scan, so of two replicates,
+#'   whose one correlation cannot tell them apart, the first is kept
 #'
 #' **Flagged replicates:**
 #' A replicate a step flagged (`.flag`, from [standardize()]) is one it
@@ -96,9 +98,9 @@
 #' @param on_all_outliers Character. Behavior when all replicates fail QC:
 #'   * `"warn"` (default): Keep all replicates and average
 #'   * `"drop"`: Remove the sample entirely
-#'   * `"keep_best"`: Keep only the replicate with highest mean correlation.
-#'     With two replicates, whose one correlation cannot tell them apart,
-#'     the later scan is kept
+#'   * `"keep_best"`: Keep only the replicate with the highest mean
+#'     correlation, measured before QC removes any. A tie goes to the earlier
+#'     scan, so of two replicates the first is kept
 #' @param verbose Logical. Print progress messages. Default:
 #'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
@@ -765,6 +767,10 @@ average <- function(x,
 #'     indexing), in the order they were removed
 #'   * `all_fail`: Logical, TRUE if two or more replicates could be
 #'     correlated and only 1 survived
+#'   * `best`: The index of the replicate with the highest mean correlation
+#'     against the others QC could correlate, from the first round, before
+#'     any removal; a tie goes to the earlier replicate. `integer(0)` when
+#'     fewer than two could be correlated
 #'
 #' @noRd
 compute_replicate_quality <- function(predictor_matrix, threshold) {
@@ -778,7 +784,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
     return(list(
       uncorrelatable = integer(0),
       outliers       = integer(0),
-      all_fail       = FALSE
+      all_fail       = FALSE,
+      best           = integer(0)
     ))
 
   }
@@ -807,6 +814,7 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 
   active_idx <- which(correlate)
   outliers   <- integer(0)
+  best       <- integer(0)
 
   ## Fewer than two left to correlate: no QC possible ------------------------
 
@@ -815,7 +823,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
     return(list(
       uncorrelatable = uncorrelatable,
       outliers       = integer(0),
-      all_fail       = FALSE
+      all_fail       = FALSE,
+      best           = integer(0)
     ))
 
   }
@@ -846,6 +855,11 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
     diag(cor_matrix) <- NA
     mean_cors_active <- rowMeans(cor_matrix, na.rm = TRUE)
     mean_cors_active[is.nan(mean_cors_active)] <- -Inf
+
+    ## The first round compares every replicate QC could correlate with all
+    ## the others, so its maximum is the best replicate. The last two the
+    ## removal leaves always tie, so they cannot say which is best.
+    if (length(best) == 0) best <- active_idx[which.max(mean_cors_active)]
 
     ## Check if any are below threshold --------------------------------------
 
@@ -878,7 +892,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
   list(
     uncorrelatable = uncorrelatable,
     outliers       = as.integer(outliers),
-    all_fail       = all_fail
+    all_fail       = all_fail,
+    best           = as.integer(best)
   )
 
 }
@@ -968,6 +983,7 @@ average_group <- function(group_data,
     qc <- compute_replicate_quality(predictor_matrix, threshold)
     qc$uncorrelatable <- usable[qc$uncorrelatable]
     qc$outliers       <- usable[qc$outliers]
+    qc$best           <- usable[qc$best]
     qc_info <- qc
 
     ## Replicates QC cannot correlate ----------------------------------------
@@ -1016,12 +1032,12 @@ average_group <- function(group_data,
         } else if (on_all_outliers == "keep_best") {
 
           ## Keep only the best replicate ------------------------------------
-          ## The removal stops at one replicate, so a group that fails QC
-          ## keeps exactly one: the last its iterative removal left. With
-          ## two replicates both mean correlations are their one correlation,
-          ## so the first is removed and the second kept (#109).
+          ## The one with the highest mean correlation before any removal,
+          ## not the one the removal left last: its last two always tie.
+          ## With two replicates both mean correlations are their one
+          ## correlation, so the first is kept (#109).
 
-          rows_to_average <- setdiff(usable, qc$outliers)
+          rows_to_average <- qc$best
           n_dropped <- n_dropped + length(usable) - length(rows_to_average)
 
         } else {

@@ -354,7 +354,7 @@ test_that("average() on_all_outliers='drop' removes sample", {
 
 })
 
-test_that("average() on_all_outliers='keep_best' keeps highest correlation replicate", {
+test_that("average() on_all_outliers='keep_best' keeps the replicate with the highest mean correlation", {
 
   ## Arrange ---------------------------------------------------------------
 
@@ -378,10 +378,44 @@ test_that("average() on_all_outliers='keep_best' keeps highest correlation repli
   expect_identical(row$type, "note")
   expect_identical(row$ids[[1]], "S1")
 
-  ## Verify keep_best retained the QC survivor (not an all-NA artifact)
+  ## S1 is exactly the scan whose mean correlation with the other two is
+  ## highest, measured before QC removes any
   s1_result <- result$data$analysis[result$data$analysis$sample_id == "S1", ]
   wn_cols   <- grep("^wn_", names(s1_result), value = TRUE)
-  expect_true(all(!is.na(s1_result[, wn_cols])))
+  scans     <- as.matrix(hd$data$analysis[1:3, wn_cols])
+  cm        <- stats::cor(t(scans))
+  diag(cm)  <- NA
+  best      <- which.max(rowMeans(cm, na.rm = TRUE))
+  expect_equal(unlist(s1_result[, wn_cols]), scans[best, ])
+
+})
+
+test_that("average() under keep_best keeps the best replicate, not the one QC's removal leaves last", {
+
+  ## Arrange — A and B correlate well, C correlates with A alone: their mean
+  ## correlations are 0.713, 0.661 and 0.387. The removal takes C, then one
+  ## of A and B, whose last correlation ties, and used to leave B
+  p  <- 50
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, n_wavelengths = p)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+
+  set.seed(1)
+  z1 <- rnorm(p); z2 <- rnorm(p); z3 <- rnorm(p)
+  A  <- z1 + 0.10 * z2
+  B  <- z1 + 0.10 * z3
+  C  <- z1 * 0.4 + 0.9 * (0.9 * z2 + 0.1 * rnorm(p))
+  for (k in seq_len(p)) hd$data$analysis[[wn[k]]][1:3] <- c(A[k], B[k], C[k])
+
+  cm <- stats::cor(t(rbind(A, B, C)))
+  diag(cm) <- NA
+  expect_equal(unname(round(rowMeans(cm, na.rm = TRUE), 3)), c(0.713, 0.661, 0.387))
+
+  ## Act
+  result <- average(hd, on_all_outliers = "keep_best", verbose = FALSE)
+
+  ## Assert — S1 is A
+  s1 <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_equal(unname(unlist(s1)), A)
 
 })
 
@@ -711,7 +745,7 @@ test_that("average() drops a metadata column that varies within any sample from 
 
 })
 
-test_that("average() under keep_best keeps the later of two replicates QC cannot tell apart (#109)", {
+test_that("average() under keep_best keeps the first of two replicates QC cannot tell apart (#109)", {
 
   ## Arrange — two uncorrelated replicates: both mean correlations are their
   ## one correlation
@@ -720,10 +754,10 @@ test_that("average() under keep_best keeps the later of two replicates QC cannot
   ## Act
   result <- average(hd, on_all_outliers = "keep_best", verbose = FALSE)
 
-  ## Assert — S1 is its second scan, exactly
+  ## Assert — S1 is its first scan, exactly
   wn  <- grep("^wn_", names(hd$data$analysis), value = TRUE)
   s1  <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
-  expect_equal(unlist(s1), unlist(hd$data$analysis[2, wn]))
+  expect_equal(unlist(s1), unlist(hd$data$analysis[1, wn]))
 
 })
 
