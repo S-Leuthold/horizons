@@ -36,7 +36,9 @@ a replicate to pass QC. Default: \code{0.996}. Changing this is rarely needed.}
 \itemize{
 \item \code{"warn"} (default): Keep all replicates and average
 \item \code{"drop"}: Remove the sample entirely
-\item \code{"keep_best"}: Keep only the replicate with highest mean correlation
+\item \code{"keep_best"}: Keep only the replicate with highest mean correlation.
+With two replicates, whose one correlation cannot tell them apart,
+the later scan is kept
 }}
 
 \item{verbose}{Logical. Print progress messages. Default:
@@ -53,7 +55,8 @@ not in the output.
 \item Response and outcome columns: Mean of replicate values when numeric,
 the shared value when not; samples whose non-numeric response values
 disagree are refused together, not a silent pick
-\item Metadata columns: Uniform values preserved, non-uniform dropped
+\item Metadata columns: Those uniform within every sample preserved; one that
+varies within any sample dropped
 \item \code{data$role_map}: Updated to remove dropped columns and to point the
 \code{id} role at the new \code{sample_id}
 \item \code{provenance$average}: The call's settings and counts, and
@@ -93,15 +96,16 @@ If QC flags all replicates as outliers:
 \item \code{"warn"} (default): Keep all replicates and average, with one
 \code{horizons_warning_quality} naming the samples
 \item \code{"drop"}: Remove the entire sample from results
-\item \code{"keep_best"}: Keep only the replicate with highest mean correlation
+\item \code{"keep_best"}: Keep only the replicate with highest mean correlation,
+the one QC's iterative removal leaves last
 }
 
 \strong{Metadata Handling:}
 Metadata columns are checked for uniformity within groups:
 \itemize{
-\item Uniform values: preserved in output
-\item Non-uniform values: column dropped, and named in a note on the
-object's log
+\item Uniform within every sample: preserved in output
+\item Non-uniform within any sample: column dropped from every row, and named
+in a note on the object's log
 \item \code{filename} column: always dropped (not meaningful after averaging)
 }
 

@@ -39,13 +39,14 @@
 #' * `"warn"` (default): Keep all replicates and average, with one
 #'   `horizons_warning_quality` naming the samples
 #' * `"drop"`: Remove the entire sample from results
-#' * `"keep_best"`: Keep only the replicate with highest mean correlation
+#' * `"keep_best"`: Keep only the replicate with highest mean correlation,
+#'   the one QC's iterative removal leaves last
 #'
 #' **Metadata Handling:**
 #' Metadata columns are checked for uniformity within groups:
-#' * Uniform values: preserved in output
-#' * Non-uniform values: column dropped, and named in a note on the
-#'   object's log
+#' * Uniform within every sample: preserved in output
+#' * Non-uniform within any sample: column dropped from every row, and named
+#'   in a note on the object's log
 #' * `filename` column: always dropped (not meaningful after averaging)
 #'
 #' **The log:**
@@ -71,7 +72,9 @@
 #' @param on_all_outliers Character. Behavior when all replicates fail QC:
 #'   * `"warn"` (default): Keep all replicates and average
 #'   * `"drop"`: Remove the sample entirely
-#'   * `"keep_best"`: Keep only the replicate with highest mean correlation
+#'   * `"keep_best"`: Keep only the replicate with highest mean correlation.
+#'     With two replicates, whose one correlation cannot tell them apart,
+#'     the later scan is kept
 #' @param verbose Logical. Print progress messages. Default:
 #'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
@@ -84,7 +87,8 @@
 #'   * Response and outcome columns: Mean of replicate values when numeric,
 #'     the shared value when not; samples whose non-numeric response values
 #'     disagree are refused together, not a silent pick
-#'   * Metadata columns: Uniform values preserved, non-uniform dropped
+#'   * Metadata columns: Those uniform within every sample preserved; one that
+#'     varies within any sample dropped
 #'   * `data$role_map`: Updated to remove dropped columns and to point the
 #'     `id` role at the new `sample_id`
 #'   * `provenance$average`: The call's settings and counts, and
@@ -295,6 +299,7 @@ average <- function(x,
   all_outlier_samples <- character()
   dropped_samples     <- character()
   conflicts           <- list()
+  varying_meta        <- character()
 
   ## For the report: the groups that lost some replicates to QC and averaged
   ## the rest, and the groups whose every replicate failed, handled by
@@ -327,7 +332,8 @@ average <- function(x,
 
     ## Handle results --------------------------------------------------------
 
-    conflicts <- c(conflicts, group_result$conflicts)
+    conflicts    <- c(conflicts, group_result$conflicts)
+    varying_meta <- union(varying_meta, group_result$meta_dropped)
 
     if (is.null(group_result$averaged)) {
 
@@ -414,10 +420,14 @@ average <- function(x,
   ## Step 6: Handle metadata uniformity
   ## -------------------------------------------------------------------------
 
-  ## Check which meta columns were actually retained -------------------------
+  ## A column that varies within any sample is dropped from every row ---------
+  ## Kept for the samples where it was uniform, it would be NA for the rest,
+  ## a value no replicate had (#226). .flag is a step's verdict on each row,
+  ## not a description of the sample, and is exempt.
 
-  retained_meta <- intersect(meta_cols, names(averaged))
-  dropped_meta <- setdiff(meta_cols, retained_meta)
+  dropped_meta  <- setdiff(varying_meta, ".flag")
+  retained_meta <- setdiff(intersect(meta_cols, names(averaged)), dropped_meta)
+  averaged      <- averaged[, setdiff(names(averaged), dropped_meta), drop = FALSE]
 
   ## filename is always dropped (not in meta_cols already) -------------------
 
@@ -680,9 +690,9 @@ average <- function(x,
 #' @param threshold Numeric. Minimum mean correlation to pass QC.
 #'
 #' @return A list with:
-#'   * `outliers`: Integer indices of removed replicates (in original indexing)
-#'   * `all_fail`: Logical, TRUE if only 1 replicate survived (or none)
-#'   * `mean_cors`: Numeric vector of final mean correlations (NA for removed)
+#'   * `outliers`: Integer indices of removed replicates (in original
+#'     indexing), in the order they were removed
+#'   * `all_fail`: Logical, TRUE if only 1 replicate survived
 #'
 #' @noRd
 compute_replicate_quality <- function(predictor_matrix, threshold) {
@@ -694,9 +704,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
   if (n < 2) {
 
     return(list(
-      outliers  = integer(0),
-      all_fail  = FALSE,
-      mean_cors = NA_real_
+      outliers = integer(0),
+      all_fail = FALSE
     ))
 
   }
@@ -758,23 +767,6 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 
   }
 
-  ## Compute final mean correlations for reporting ---------------------------
-
-  final_mean_cors <- rep(NA_real_, n)
-
-  if (length(active_idx) >= 2) {
-
-    active_matrix <- predictor_matrix[active_idx, , drop = FALSE]
-    cor_matrix <- stats::cor(t(active_matrix), use = "pairwise.complete.obs")
-    diag(cor_matrix) <- NA
-    final_mean_cors[active_idx] <- rowMeans(cor_matrix, na.rm = TRUE)
-
-  } else if (length(active_idx) == 1) {
-
-    final_mean_cors[active_idx] <- NA_real_
-
-  }
-
   ## Determine if "all failed" ------------------------------------------------
   ## With iterative removal, we define this as: only 1 replicate survived
   ## (or all were removed, which shouldn't happen but handle it)
@@ -783,9 +775,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
   all_fail <- n_remaining <= 1 && n >= 2
 
   list(
-    outliers  = as.integer(outliers),
-    all_fail  = all_fail,
-    mean_cors = final_mean_cors
+    outliers = as.integer(outliers),
+    all_fail = all_fail
   )
 
 }
@@ -817,6 +808,7 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #'   * `conflicts`: One entry per non-numeric response whose replicates
 #'     disagree (`column`, `group`, `values`), for `average()` to refuse
 #'     together
+#'   * `meta_dropped`: The meta columns whose values vary within the group
 #'
 #' @noRd
 average_group <- function(group_data,
@@ -878,16 +870,12 @@ average_group <- function(group_data,
         } else if (on_all_outliers == "keep_best") {
 
           ## Keep only the best replicate ------------------------------------
-          ## When all_fail is TRUE, mean_cors is all NA (single survivor).
-          ## which.max(all-NA) returns integer(0), so use the survivor index.
+          ## The removal stops at one replicate, so a group that fails QC
+          ## keeps exactly one: the last its iterative removal left. With
+          ## two replicates both mean correlations are their one correlation,
+          ## so the first is removed and the second kept (#109).
 
-          remaining_idx <- setdiff(seq_len(n_reps), qc$outliers)
-          best_idx <- if (length(remaining_idx) == 1L) {
-            remaining_idx
-          } else {
-            which.max(qc$mean_cors)
-          }
-          rows_to_average <- best_idx
+          rows_to_average <- setdiff(seq_len(n_reps), qc$outliers)
           n_dropped <- n_reps - length(rows_to_average)
 
         } else {
@@ -976,6 +964,10 @@ average_group <- function(group_data,
   result <- tibble::tibble(!!by := group_id)
 
   ## Check each meta column for uniformity -----------------------------------
+  ## A column that varies here is reported, so average() can drop it from
+  ## every row (#226).
+
+  meta_dropped <- character()
 
   for (col in meta_cols) {
 
@@ -985,9 +977,11 @@ average_group <- function(group_data,
 
       result[[col]] <- col_values[1]
 
-    }
+    } else {
 
-    ## Non-uniform: column not added (will be noted in provenance) -----------
+      meta_dropped <- c(meta_dropped, col)
+
+    }
 
   }
 
@@ -1008,7 +1002,8 @@ average_group <- function(group_data,
     n_dropped    = n_dropped,
     all_outliers = all_outliers,
     qc_info      = qc_info,
-    conflicts    = conflicts
+    conflicts    = conflicts,
+    meta_dropped = meta_dropped
   )
 
 }

@@ -678,6 +678,42 @@ test_that("average() drops non-uniform metadata", {
 
 })
 
+test_that("average() drops a metadata column that varies within any sample from every row (#226)", {
+
+  ## Arrange — site is uniform within S1 and S2, but varies within S3
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 3, add_meta = TRUE)
+  hd$data$analysis$site[9] <- "SiteZ"
+
+  ## Act
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert — gone from every row, not kept for S1 and S2 and NA for S3
+  expect_false("site" %in% names(result$data$analysis))
+  expect_false("site" %in% result$data$role_map$variable)
+  expect_true("project" %in% names(result$data$analysis))
+
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$ids[[1]], "site")
+  expect_no_error(validate_horizons_data(result))
+
+})
+
+test_that("average() under keep_best keeps the later of two replicates QC cannot tell apart (#109)", {
+
+  ## Arrange — two uncorrelated replicates: both mean correlations are their
+  ## one correlation
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2, all_outliers = TRUE)
+
+  ## Act
+  result <- average(hd, on_all_outliers = "keep_best", verbose = FALSE)
+
+  ## Assert — S1 is its second scan, exactly
+  wn  <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  s1  <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_equal(unlist(s1), unlist(hd$data$analysis[2, wn]))
+
+})
+
 test_that("average() always drops filename column", {
 
   ## Arrange ---------------------------------------------------------------
@@ -929,11 +965,6 @@ test_that("compute_replicate_quality() identifies outliers via iterative removal
   expect_equal(qc$outliers, 4L)
   expect_false(qc$all_fail)
 
-  ## Good spectra (1-3) should have high mean correlations after outlier removal
-  expect_true(all(qc$mean_cors[1:3] > 0.99, na.rm = TRUE))
-
-  ## Outlier's mean_cors is NA (it was removed)
-  expect_true(is.na(qc$mean_cors[4]))
 
 })
 
