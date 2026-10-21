@@ -380,6 +380,7 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     members <- ens$ensemble$uq$members
     ids     <- ens$evaluation$response_trim$trimmed_ids
     real    <- predict_members
+    flag    <- ids[1]
 
     local_mocked_bindings(predict_members = function(object, members, new_spectra, ...) {
 
@@ -387,9 +388,9 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
       records <- attr(out, "unit_records")
       flagged <- attr(out, "flagged")
 
-      ## The first member could not use the first trimmed row
-      out$.pred[out$config_id == members[1] & out$sample_id == ids[1]] <- NA_real_
-      flagged[[members[1]]] <- ids[1]
+      ## The first member could not use the rows in flag
+      out$.pred[out$config_id == members[1] & out$sample_id %in% flag] <- NA_real_
+      flagged[[members[1]]] <- flag
 
       attr(out, "unit_records") <- records
       attr(out, "flagged")      <- flagged
@@ -402,6 +403,11 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     expect_setequal(trimmed$sample_id, ids[-1])
     expect_length(trimmed$truth, length(ids) - 1L)
     expect_false(anyNA(trimmed$predictors))
+
+    ## With none usable there are no trimmed rows to calibrate, and no fold
+    ## is drawn for them
+    flag <- ids
+    expect_null(ensemble_trimmed_rows(ens, members))
 
   })
 
