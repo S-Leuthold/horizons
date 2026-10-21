@@ -714,6 +714,54 @@ test_that("average() under keep_best keeps the later of two replicates QC cannot
 
 })
 
+test_that("average() leaves a flagged replicate out of QC and the mean, and flags a sample only when every replicate is (#226)", {
+
+  ## Arrange — S2's first scan is flagged and flat; every scan of S3 is
+  ## flagged
+  hd  <- make_test_hd_average(n_samples = 3, n_reps = 3)
+  wn  <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[4, wn] <- 0.5
+  hd$data$analysis$.flag  <- c(NA, NA, NA, "standardize", NA, NA, rep("standardize", 3))
+  hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+  ## Act — no warning: standardize() warned about those spectra
+  expect_no_warning(result <- average(hd, verbose = FALSE))
+  out <- result$data$analysis
+
+  ## Assert — S2 is the mean of its two clean scans, unflagged
+  expect_equal(unlist(out[out$sample_id == "S2", wn]),
+               colMeans(as.matrix(hd$data$analysis[5:6, wn])))
+  expect_true(is.na(out$.flag[out$sample_id == "S2"]))
+
+  ## S3 is one row, flagged with the step, and validates
+  expect_identical(out$.flag[out$sample_id == "S3"], "standardize")
+  expect_no_error(validate_horizons_data(result))
+
+  ## Nothing on the log, and the tree counts both
+  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
+  expect_output(average(hd, verbose = TRUE),
+                "Flagged (.flag): 1 replicate left out, 1 sample kept flagged", fixed = TRUE)
+
+})
+
+test_that("average() writes no .flag column when no sample is flagged", {
+
+  ## A flagged replicate among clean ones leaves its sample unflagged
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+  hd$data$analysis$.flag <- c("standardize", rep(NA, 5))
+  hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+  result <- average(hd, verbose = FALSE)
+
+  expect_false(".flag" %in% names(result$data$analysis))
+  expect_false(".flag" %in% result$data$role_map$variable)
+  expect_identical(nrow(result$log[result$log$verb == "average", ]), 0L)
+
+  ## and none when the input had none
+  expect_false(".flag" %in% names(average(make_test_hd_average(), verbose = FALSE)$data$analysis))
+
+})
+
 test_that("average() always drops filename column", {
 
   ## Arrange ---------------------------------------------------------------

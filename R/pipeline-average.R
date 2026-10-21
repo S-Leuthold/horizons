@@ -42,6 +42,15 @@
 #' * `"keep_best"`: Keep only the replicate with highest mean correlation,
 #'   the one QC's iterative removal leaves last
 #'
+#' **Flagged replicates:**
+#' A replicate a step flagged (`.flag`, from [standardize()]) is one it
+#' could not use, so it is left out of quality control and the mean, as
+#' every verb that computes over predictors leaves a flagged row out. A
+#' sample is flagged only when every replicate is: it is kept as one row,
+#' with the replicates' step in `.flag`, and modelling leaves it out. The
+#' verbose output counts both; `standardize()` has already warned about the
+#' spectra. The result has a `.flag` column only when a sample is flagged.
+#'
 #' **Metadata Handling:**
 #' Metadata columns are checked for uniformity within groups:
 #' * Uniform within every sample: preserved in output
@@ -223,7 +232,7 @@ average <- function(x,
   ## Meta columns (excluding by column and filename) -------------------------
 
   meta_cols <- role_map$variable[role_map$role == "meta"]
-  meta_cols <- setdiff(meta_cols, c(by, "filename"))
+  meta_cols <- setdiff(meta_cols, c(by, "filename", ".flag"))
 
   ## Response and outcome columns --------------------------------------------
   ## Lab measurements of the same physical sample, so they collapse with the
@@ -311,6 +320,12 @@ average <- function(x,
   n_reps_partial   <- 0
   n_reps_failed    <- 0
 
+  ## And the replicates a step flagged, left out, and the samples kept
+  ## flagged because every replicate was; groups QC could not look at
+  n_flag_out     <- 0L
+  n_kept_flagged <- 0L
+  n_not_qcd      <- 0L
+
   for (i in seq_len(n_groups)) {
 
     group_id   <- unique_groups[i]
@@ -357,6 +372,10 @@ average <- function(x,
     }
 
     ## Tally for the report --------------------------------------------------
+
+    n_flag_out     <- n_flag_out + group_result$n_flag_out
+    n_kept_flagged <- n_kept_flagged + !is.na(group_result$flag)
+    n_not_qcd      <- n_not_qcd + (is.na(group_result$flag) && !group_result$qc_run)
 
     if (group_result$all_outliers) {
 
@@ -425,9 +444,22 @@ average <- function(x,
   ## a value no replicate had (#226). .flag is a step's verdict on each row,
   ## not a description of the sample, and is exempt.
 
-  dropped_meta  <- setdiff(varying_meta, ".flag")
+  dropped_meta  <- varying_meta
   retained_meta <- setdiff(intersect(meta_cols, names(averaged)), dropped_meta)
   averaged      <- averaged[, setdiff(names(averaged), dropped_meta), drop = FALSE]
+
+  ## .flag: on the result only when a sample is flagged ----------------------
+  ## A step's verdict on each row, not a description of the sample, so it is
+  ## not a metadata column: a sample is flagged when every replicate was.
+
+  if (".flag" %in% names(averaged) && all(is.na(averaged$.flag))) {
+
+    averaged$.flag <- NULL
+    dropped_meta   <- c(dropped_meta, ".flag")
+
+  }
+
+  retained_meta <- c(retained_meta, intersect(".flag", names(averaged)))
 
   ## filename is always dropped (not in meta_cols already) -------------------
 
@@ -563,9 +595,10 @@ average <- function(x,
   }
 
   ## The metadata columns a sample's replicates disagreed on -----------------
-  ## filename is dropped on every call, by design, so it is not reported.
+  ## filename is dropped on every call, by design, and .flag when no sample
+  ## is flagged, so neither is reported.
 
-  dropped_cols <- setdiff(dropped_meta, "filename")
+  dropped_cols <- setdiff(dropped_meta, c("filename", ".flag"))
 
   if (length(dropped_cols) > 0) {
 
@@ -596,17 +629,26 @@ average <- function(x,
     cat(paste0("\u2502  \u251C\u2500 ", n_groups, " groups from ",
                n_replicates, " scans (", reps_str, ")\n"))
 
+    if (n_flag_out > 0 || n_kept_flagged > 0) {
+
+      cat(paste0("\u2502  \u251C\u2500 ", cli::format_inline(
+        "Flagged (.flag): {n_flag_out} replicate{?s} left out, {n_kept_flagged} sample{?s} kept flagged"
+      ), "\n"))
+
+    }
+
     ## QC sub-tree -------------------------------------------------------------
 
     if (quality_check) {
 
       ## One line per kind of group, so the lines add up to n_groups and a
       ## group whose every replicate failed is never counted clean (#89). A
-      ## group of one scan has nothing to correlate against, so QC never
-      ## looked at it; it is not counted clean either.
+      ## group with fewer than two scans left once flagged ones are out has
+      ## nothing to correlate against, so QC never looked at it; it is not
+      ## counted clean either, nor is a sample kept flagged.
 
-      n_single <- sum(reps_per_group < 2)
-      n_clean  <- n_groups - n_single - n_groups_partial - n_groups_failed
+      n_single <- n_not_qcd
+      n_clean  <- n_groups - n_single - n_kept_flagged - n_groups_partial - n_groups_failed
 
       if (n_clean < n_groups) {
 
@@ -809,6 +851,11 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #'     disagree (`column`, `group`, `values`), for `average()` to refuse
 #'     together
 #'   * `meta_dropped`: The meta columns whose values vary within the group
+#'   * `flag`: The step that flagged every replicate, or `NA` when one is
+#'     usable
+#'   * `n_flag_out`: Flagged replicates left out of QC and the mean
+#'   * `qc_run`: Whether QC looked at the group (two usable replicates or
+#'     more, with `quality_check`)
 #'
 #' @noRd
 average_group <- function(group_data,
@@ -828,22 +875,37 @@ average_group <- function(group_data,
   n_dropped <- 0
   all_outliers <- FALSE
   qc_info <- NULL
-  rows_to_average <- seq_len(n_reps)
   conflicts <- list()
+
+  ## Flagged replicates ------------------------------------------------------
+  ## A replicate a step flagged is one it could not use, so it is left out of
+  ## QC and the mean, as every verb that computes over predictors leaves a
+  ## flagged row out. A sample whose every replicate is flagged is kept as
+  ## one row, flagged with their step: modelling leaves it out, and the step
+  ## that flagged it has said so.
+
+  flagged  <- flagged_rows(group_data)
+  usable   <- which(!flagged)
+  all_flag <- length(usable) == 0
+  flag     <- if (all_flag) group_data$.flag[1] else NA_character_
+
+  rows_to_average <- if (all_flag) seq_len(n_reps) else usable
+  qc_run          <- quality_check && length(usable) >= 2
 
   ## -------------------------------------------------------------------------
   ## Quality check (if enabled and n >= 2)
   ## -------------------------------------------------------------------------
 
-  if (quality_check && n_reps >= 2) {
+  if (qc_run) {
 
     ## Extract predictor matrix ----------------------------------------------
 
-    predictor_matrix <- as.matrix(group_data[, predictor_cols, drop = FALSE])
+    predictor_matrix <- as.matrix(group_data[usable, predictor_cols, drop = FALSE])
 
-    ## Compute quality -------------------------------------------------------
+    ## Compute quality, on the usable replicates, in their indexing ------------
 
     qc <- compute_replicate_quality(predictor_matrix, threshold)
+    qc$outliers <- usable[qc$outliers]
     qc_info <- qc
 
     ## Handle outliers -------------------------------------------------------
@@ -864,7 +926,10 @@ average_group <- function(group_data,
             averaged     = NULL,
             n_dropped    = n_reps,
             all_outliers = TRUE,
-            qc_info      = qc_info
+            qc_info      = qc_info,
+            flag         = NA_character_,
+            n_flag_out   = sum(flagged),
+            qc_run       = TRUE
           ))
 
         } else if (on_all_outliers == "keep_best") {
@@ -875,14 +940,14 @@ average_group <- function(group_data,
           ## two replicates both mean correlations are their one correlation,
           ## so the first is removed and the second kept (#109).
 
-          rows_to_average <- setdiff(seq_len(n_reps), qc$outliers)
-          n_dropped <- n_reps - length(rows_to_average)
+          rows_to_average <- setdiff(usable, qc$outliers)
+          n_dropped <- length(usable) - length(rows_to_average)
 
         } else {
 
           ## warn: keep all --------------------------------------------------
 
-          rows_to_average <- seq_len(n_reps)
+          rows_to_average <- usable
 
         }
 
@@ -890,7 +955,7 @@ average_group <- function(group_data,
 
         ## Some pass, some fail: drop outliers -------------------------------
 
-        rows_to_average <- setdiff(seq_len(n_reps), qc$outliers)
+        rows_to_average <- setdiff(usable, qc$outliers)
         n_dropped <- length(qc$outliers)
 
       }
@@ -963,6 +1028,8 @@ average_group <- function(group_data,
 
   result <- tibble::tibble(!!by := group_id)
 
+  if (".flag" %in% names(group_data)) result$.flag <- flag
+
   ## Check each meta column for uniformity -----------------------------------
   ## A column that varies here is reported, so average() can drop it from
   ## every row (#226).
@@ -1003,7 +1070,10 @@ average_group <- function(group_data,
     all_outliers = all_outliers,
     qc_info      = qc_info,
     conflicts    = conflicts,
-    meta_dropped = meta_dropped
+    meta_dropped = meta_dropped,
+    flag         = flag,
+    n_flag_out   = if (all_flag) 0L else sum(flagged),
+    qc_run       = qc_run
   )
 
 }

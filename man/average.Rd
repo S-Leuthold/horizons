@@ -100,6 +100,15 @@ If QC flags all replicates as outliers:
 the one QC's iterative removal leaves last
 }
 
+\strong{Flagged replicates:}
+A replicate a step flagged (\code{.flag}, from \code{\link[=standardize]{standardize()}}) is one it
+could not use, so it is left out of quality control and the mean, as
+every verb that computes over predictors leaves a flagged row out. A
+sample is flagged only when every replicate is: it is kept as one row,
+with the replicates' step in \code{.flag}, and modelling leaves it out. The
+verbose output counts both; \code{standardize()} has already warned about the
+spectra. The result has a \code{.flag} column only when a sample is flagged.
+
 \strong{Metadata Handling:}
 Metadata columns are checked for uniformity within groups:
 \itemize{
