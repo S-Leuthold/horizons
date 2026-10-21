@@ -1949,8 +1949,11 @@ test_that("the record describes the columns returned whatever the targets' recor
   expect_identical(rec$grid, list(min = 600, max = 4000, step = 8, n = 426L))
   expect_identical(rec$grid$n, fx$targets$data$n_predictors)
 
-  ## A pool standardize() never saw is not marked standardized
-  expect_null(quiet_select(fx, k = 10)$data$standardization)
+  ## A pool standardize() never saw is not marked standardized, and the
+  ## training set keeps the key the constructor declares
+  plain <- quiet_select(fx, k = 10)
+  expect_null(plain$data$standardization)
+  expect_true("standardization" %in% names(plain$data))
 
 })
 

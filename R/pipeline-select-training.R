@@ -1419,10 +1419,12 @@ select_training <- function(x, library,
   out <- set_analysis(drawn, analysis, role_map)
 
   ## The library's standardization record, its axis fields describing the
-  ## columns returned when they are only some of the library's (#90)
-  out$data$standardization <- returned_standardization(
+  ## columns returned when they are only some of the library's (#90).
+  ## Assigned through single brackets, so a library never standardized
+  ## keeps the key as NULL rather than deleting it.
+  out$data["standardization"] <- list(returned_standardization(
     pool$data$standardization, as.numeric(sub("^wn_", "", cols$shared)), length(pool_vars)
-  )
+  ))
 
   ## Pool sizes per property ------------------------------------------------
 
