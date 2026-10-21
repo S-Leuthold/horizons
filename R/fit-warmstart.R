@@ -79,7 +79,12 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
 
   if (nrow(full_grid) > max_points) {
 
-    ## Sample (max_points - 1) rows, then bind the best point.
+    ## Sample (max_points - 1) rows from the grid without the best point, then
+    ## bind it, so the grid holds max_points rows whether or not the sample
+    ## would have drawn it (#228). The best point is matched at
+    ## point_matches()'s tolerance rather than exactly: a transformed
+    ## parameter's candidate at offset 0 is the best value's round trip
+    ## through its scale, and can differ from it in the last bits.
     ##
     ## The seed is scoped and the caller's stream restored. A bare set.seed(1)
     ## here clobbered it partway through fit_single_config(), so everything
@@ -99,11 +104,11 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
       }
 
       set.seed(1, kind = "Mersenne-Twister")
-      dplyr::slice_sample(full_grid, n = max_points - 1L)
+      others <- full_grid[!point_matches(best_row, full_grid), , drop = FALSE]
+      dplyr::slice_sample(others, n = max_points - 1L)
 
     })
-    full_grid <- dplyr::bind_rows(best_row, sampled) |>
-      dplyr::distinct()
+    full_grid <- dplyr::bind_rows(best_row, sampled)
 
   }
 
@@ -263,7 +268,20 @@ clamp_to_range <- function(value, param_obj) {
 #' @keywords internal
 point_in_grid <- function(point, grid) {
 
-  if (nrow(grid) == 0) return(FALSE)
+  any(point_matches(point, grid))
+
+}
+
+#' Which rows of a grid match a single-row tibble
+#'
+#' Numeric columns match within `sqrt(.Machine$double.eps)`, others exactly.
+#'
+#' @param point Single-row tibble, with no missing value.
+#' @param grid Tibble holding `point`'s columns.
+#' @return Logical, one per row of `grid`.
+#' @keywords internal
+#' @noRd
+point_matches <- function(point, grid) {
 
   cols <- names(point)
   matches <- rep(TRUE, nrow(grid))
@@ -283,7 +301,7 @@ point_in_grid <- function(point, grid) {
 
   }
 
-  any(matches)
+  matches
 
 }
 

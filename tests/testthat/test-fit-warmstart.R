@@ -371,6 +371,61 @@ describe("build_warmstart_grid() - max_points truncation", {
 
   })
 
+  it("holds max_points rows, the best point once, when the sample would have drawn it (#228)", {
+
+    ## The issue's case: 25 candidate combinations against 24 points, where
+    ## the seeded sample of 23 drew the best point and the grid came out 23
+    wf <- workflows::workflow(
+      SOC ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    enet <- workflows::extract_parameter_set_dials(wf)
+    best <- tibble::tibble(penalty = 0.01, mixture = 0.5)
+
+    grid <- build_warmstart_grid(best, enet, max_points = 24L)
+
+    expect_identical(nrow(grid), 24L)
+    expect_identical(sum(point_matches(best, grid)), 1L)
+
+  })
+
+  it("holds max_points rows for every best point whose grid overflows (#228)", {
+
+    ## About one best point in ten lost a row at configure()'s default
+    ## grid_size of 10, the max_points fit()'s re-tune passes
+    wf <- workflows::workflow(
+      SOC ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    spaces <- list(rf = param_set, enet = workflows::extract_parameter_set_dials(wf))
+
+    for (model in names(spaces)) {
+
+      ps     <- spaces[[model]]
+      points <- withr::with_seed(228, dials::grid_random(ps, size = 100))
+
+      for (i in seq_len(nrow(points))) {
+
+        best   <- points[i, ps$name]
+        n_full <- prod(vapply(seq_len(nrow(ps)), function(j) {
+          length(generate_candidates(best[[ps$name[j]]], ps$object[[j]]))
+        }, integer(1)))
+
+        if (n_full <= 10) next
+
+        grid <- build_warmstart_grid(best, ps, max_points = 10L)
+
+        expect_identical(nrow(grid), 10L, info = paste(model, i))
+        expect_identical(sum(point_matches(best, grid)), 1L, info = paste(model, i))
+
+      }
+
+    }
+
+  })
+
   it("adds a best point its candidates miss, and still holds at most max_points", {
 
     ## fit() passes tune::select_best() output, which always lies on its own
