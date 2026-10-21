@@ -136,6 +136,13 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
 ## ---------------------------------------------------------------------------
 
 #' Check whether best_params is usable
+#'
+#' A row is usable when it holds every tuned parameter with a value. A row
+#' with any value missing starts from the space-filling grid, as one with
+#' none does: a warm start centred on some parameters and spread across the
+#' whole range of another would record `warm_start = TRUE` for a search that
+#' was not one (#229).
+#'
 #' @keywords internal
 usable_best_params <- function(best_params, param_set) {
 
@@ -147,9 +154,9 @@ usable_best_params <- function(best_params, param_set) {
   needed <- param_set$name
   if (!all(needed %in% names(best_params))) return(FALSE)
 
-  ## Must have at least one non-NA value
+  ## Must have every value
   vals <- unlist(best_params[1, needed])
-  if (all(is.na(vals))) return(FALSE)
+  if (anyNA(vals)) return(FALSE)
 
   TRUE
 
@@ -170,30 +177,8 @@ generate_candidates <- function(best_val, param_obj) {
   is_int <- isTRUE(param_obj$type == "integer")
   has_trans <- !is.null(trans)
 
-  ## Handle NA best_val: generate evenly-spaced candidates across full range
-  if (is.na(best_val)) {
-
-    if (has_trans) {
-
-      t_candidates <- seq(lower, upper, length.out = 5)
-      candidates   <- trans$inverse(t_candidates)
-
-    } else if (is_int) {
-
-      candidates <- as.integer(round(seq(lower, upper, length.out = 5)))
-
-    } else {
-
-      candidates <- seq(lower, upper, length.out = 5)
-
-    }
-
-    candidates <- pmax(candidates, if (has_trans) trans$inverse(lower) else lower)
-    candidates <- pmin(candidates, if (has_trans) trans$inverse(upper) else upper)
-
-    return(unique(candidates))
-
-  }
+  ## best_val is never missing: usable_best_params() sends a row with a
+  ## missing value to the space-filling grid
 
   if (has_trans) {
 

@@ -122,14 +122,6 @@ describe("generate_candidates()", {
 
   })
 
-  it("spreads five points across the range when the best value is missing", {
-
-    expect_equal(generate_candidates(NA, dials::learn_rate()), 10^seq(-10, -1, length.out = 5))
-    expect_identical(generate_candidates(NA, dials::mtry(c(1L, 20L))), c(1L, 6L, 10L, 15L, 20L))
-    expect_equal(generate_candidates(NA, dials::sample_prop()), seq(0.1, 1, length.out = 5))
-
-  })
-
 })
 
 
@@ -295,6 +287,22 @@ describe("build_warmstart_grid() - NULL/NA fallback", {
     grid <- build_warmstart_grid(bad_params, param_set, max_points = 25)
     expect_s3_class(grid, "tbl_df")
     expect_gte(nrow(grid), 1)
+
+  })
+
+  it("starts from the space-filling grid when one value of best_params is missing (#229)", {
+
+    ## A partly missing row errored in point_in_grid(), with and without
+    ## overflow; it is not a warm start, so it goes where an all-missing row goes
+    partial <- tibble::tibble(mtry = 10L, trees = NA_integer_, min_n = 5L)
+
+    expect_false(usable_best_params(partial, param_set))
+
+    for (n in c(25L, 200L)) {
+      grid <- build_warmstart_grid(partial, param_set, max_points = n)
+      expect_identical(grid, dials::grid_space_filling(param_set, size = n), info = n)
+      expect_identical(nrow(grid), n, info = n)
+    }
 
   })
 
