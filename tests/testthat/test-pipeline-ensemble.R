@@ -491,6 +491,28 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
+  it("counts a meta-learner grid candidate that failed on every fold among those left out (#249)", {
+
+    fitted <- ens_fitted()
+
+    ## glmnet fits one path per mixture, so failing mixture 0 fails its
+    ## twenty penalties on every fold; tune keeps no metrics for them
+    real_glmnet <- glmnet::glmnet
+    local_mocked_bindings(glmnet = function(...) {
+      if (isTRUE(all.equal(list(...)$alpha, 0))) stop("the engine broke on every fold")
+      real_glmnet(...)
+    }, .package = "glmnet")
+
+    ens <- suppressWarnings(ensemble(fitted, method = "penalized", optimize = TRUE,
+                                     compute_uq = FALSE))
+
+    expect_true(any(grepl(
+      "20 of 200 candidates were left out of the choice of hyperparameters, not being scored on every fold: the engine broke on every fold",
+      ens$ensemble$warnings, fixed = TRUE
+    )))
+
+  })
+
   it("fails when no meta-learner candidate was scored on every fold", {
 
     fitted <- ens_fitted()

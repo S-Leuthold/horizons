@@ -441,7 +441,7 @@ fit_tuned_meta_learner <- function(object,
 
     }
 
-    left_out <- incomplete_note(tune_res, n_folds)
+    left_out <- incomplete_note(tune_res, n_folds, nrow(grid))
 
     if (!is.null(left_out)) {
 

@@ -225,7 +225,7 @@ describe("cv_panel_at()", {
     }, .package = "tune")
 
     expect_setequal(complete_configs(tr, 3L), unique(tune::collect_metrics(tr)$.config))
-    expect_null(incomplete_note(tr, 3L))
+    expect_null(incomplete_note(tr, 3L, n_grid = 2L))
     expect_true(is.finite(cv_panel_at(tr, best, n_folds = 3L)$cv_rmse))
 
   })
@@ -572,7 +572,7 @@ describe("evaluate_single_config() - a Bayesian search that repeats a grid point
 
     chosen <- select_complete(bayes, "rmse", 5L)
     expect_identical(chosen$.config, tune::select_best(bayes, metric = "rmse")$.config)
-    expect_null(incomplete_note(bayes, 5L))
+    expect_null(incomplete_note(bayes, 5L, n_grid = nrow(grid)))
     expect_false(anyNA(unlist(cv_panel_at(bayes, chosen, 5L)[c("cv_rmse", "cv_rpd")])))
 
   })

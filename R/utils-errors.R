@@ -1590,19 +1590,37 @@ select_complete <- function(results, metric, n_folds, debug = FALSE) {
 
 #' The row's note on candidates left out for a missing fold
 #'
+#' @description
+#' tune keeps no metrics for a candidate that failed on every fold, so the
+#' result alone cannot count it: the grid's candidates the result does not
+#' hold are counted from the grid's size, and the Bayesian search's from
+#' `n_dropped`.
+#'
 #' @param results The tune result the hyperparameters were chosen from.
 #' @param n_folds Integer(1). The folds drawn.
+#' @param n_grid Integer(1). The candidates in the grid `tune_grid()` ran.
 #' @param n_dropped Integer(1). Candidates the Bayesian search proposed and
 #'   tune dropped, scored on no fold, which `results` does not hold.
 #' @return Character(1), or `NULL` when every candidate was scored on every
 #'   fold.
 #' @keywords internal
 #' @noRd
-incomplete_note <- function(results, n_folds, n_dropped = 0L) {
+incomplete_note <- function(results, n_folds, n_grid, n_dropped = 0L) {
 
-  all   <- unique(config_metrics(results)$.config)
-  n_out <- length(setdiff(all, complete_configs(results, n_folds))) + n_dropped
-  n_all <- length(all) + n_dropped
+  scored <- config_metrics(results)$.config
+  all    <- unique(scored)
+
+  ### A Bayesian result holds its initial grid as iteration 0.
+  per_fold <- tune::collect_metrics(results, summarize = FALSE)
+  in_grid  <- if (".iter" %in% names(per_fold)) {
+    unique(per_fold$.config[per_fold$.iter == 0L])
+  } else {
+    all
+  }
+  n_unscored <- max(as.integer(n_grid) - length(in_grid), 0L) + n_dropped
+
+  n_out <- length(setdiff(all, complete_configs(results, n_folds))) + n_unscored
+  n_all <- length(all) + n_unscored
 
   if (n_out == 0) return(NULL)
 

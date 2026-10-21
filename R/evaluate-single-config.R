@@ -353,7 +353,7 @@ evaluate_single_config <- function(config_row,
 
     }
 
-    left_out <- unit_step("select_best", incomplete_note(final_tune_results, n_folds, n_dropped))
+    left_out <- unit_step("select_best", incomplete_note(final_tune_results, n_folds, nrow(grid), n_dropped))
 
     if (!is.null(left_out)) {
 
