@@ -1158,6 +1158,20 @@ test_that("average() names every sample whose non-numeric response disagrees, in
   expect_match(conditionMessage(err), "texture in S1: sand, silt", fixed = TRUE)
   expect_match(conditionMessage(err), "texture in S2: clay, loam", fixed = TRUE)
 
+  ## One sample disagreeing on two columns is one sample, with a bullet each
+  one <- make_test_hd_average(n_samples = 2, n_reps = 3,
+                              add_responses = TRUE, conflict_texture = TRUE)
+  one$data$analysis$horizon    <- rep(c("A", "B"), each = 3)
+  one$data$analysis$horizon[2] <- "Bt"
+  one$data$role_map <- tibble::add_row(one$data$role_map, variable = "horizon", role = "response")
+  one$data$n_responses <- one$data$n_responses + 1L
+
+  err <- expect_error(average(one, quality_check = FALSE, verbose = FALSE),
+                      "1 sample has response values that disagree between replicates.", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "texture in S1: sand, silt", fixed = TRUE)
+  expect_match(conditionMessage(err), "horizon in S1: A, Bt", fixed = TRUE)
+
 })
 
 

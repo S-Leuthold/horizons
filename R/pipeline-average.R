@@ -416,11 +416,14 @@ average <- function(x,
     lines <- vapply(conflicts, function(cf) {
       paste0(cf$column, " in ", cf$group, ": ", paste(cf$values, collapse = ", "))
     }, character(1))
-    shown <- utils::head(lines, 5)
-    more  <- length(lines) - length(shown)
+    ### A sample can disagree on several columns: one bullet each, counted
+    ### once.
+    n_conflicted <- length(unique(vapply(conflicts, `[[`, character(1), "group")))
+    shown        <- utils::head(lines, 5)
+    more         <- length(lines) - length(shown)
 
     abort_horizons(c(
-      "{length(lines)} sample{?s} {?has/have} response values that disagree between replicates.",
+      "{n_conflicted} sample{?s} {?has/have} response values that disagree between replicates.",
       stats::setNames(sprintf("{shown[%d]}", seq_along(shown)), rep("x", length(shown))),
       "i" = if (more > 0) "And {more} more.",
       "i" = "Resolve the values before averaging, or drop the column."
