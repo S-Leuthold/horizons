@@ -362,7 +362,7 @@ describe("configure() - outcome_range", {
 
     out <- utils::capture.output(
       res <- configure(make_range_hd(value = to_d13c), models = "rf",
-                       outcome_range = c(lower = -Inf, upper = Inf))
+                       outcome_range = c(lower = -Inf, upper = Inf), verbose = TRUE)
     )
 
     expect_identical(res$config$outcome_range, c(-Inf, Inf))

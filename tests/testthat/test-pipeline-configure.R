@@ -725,6 +725,23 @@ describe("configure() reconfiguration", {
 
 describe("configure() CLI output", {
 
+  test_that("is quiet under horizons.verbose = FALSE, prints when asked, and checks verbose", {
+
+    hd <- make_single_response_hd()
+
+    withr::local_options(horizons.verbose = FALSE)
+    expect_silent(configure(hd, models = "rf"))
+    expect_output(configure(hd, models = "rf", verbose = TRUE), "Configuring pipelines")
+
+    withr::local_options(horizons.verbose = TRUE)
+    expect_output(configure(hd, models = "rf"), "Configuring pipelines")
+
+    expect_error(configure(hd, verbose = "yes"),
+                 "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
   test_that("prints the outcome, models, tuning, recipe settings and config count, with the PCA threshold only when PCA runs", {
 
     hd <- make_single_response_hd()
@@ -739,9 +756,9 @@ describe("configure() CLI output", {
     hd$data$role_map$variable[match(old, hd$data$role_map$variable)] <- new
 
     expect_snapshot({
-      result <- configure(hd, models = c("rf", "cubist"))
-      result <- configure(hd, sg_window = 11L)
-      result <- configure(hd, feature_selection = "pca", pca_threshold = 0.9)
+      result <- configure(hd, models = c("rf", "cubist"), verbose = TRUE)
+      result <- configure(hd, sg_window = 11L, verbose = TRUE)
+      result <- configure(hd, feature_selection = "pca", pca_threshold = 0.9, verbose = TRUE)
     })
 
   })

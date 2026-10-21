@@ -175,6 +175,8 @@
 #'   observed value of the outcome must lie inside it. A negative lower bound
 #'   rules out the `"log"`, `"log10"` and `"sqrt"` transformations. See
 #'   Outcome range.
+#' @param verbose `logical(1)`. Print the configuration's summary. Default:
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`
@@ -234,7 +236,8 @@ configure <- function(x,
                       final_bayesian_iter   = 25L,
                       sg_window             = 9L,
                       pca_threshold         = 0.995,
-                      outcome_range         = c(0, Inf)) {
+                      outcome_range         = c(0, Inf),
+                      verbose               = getOption("horizons.verbose", TRUE)) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Print header
@@ -285,6 +288,8 @@ configure <- function(x,
   ## Its configuration is not checked: rewriting it is the remedy for a bad one.
 
   x <- validate_horizons_data(x, config = FALSE)
+
+  check_arg(rlang::check_bool, verbose)
 
   ## 1.2 Response data must exist -----------------------------------------------
 
@@ -675,25 +680,29 @@ configure <- function(x,
   ## Step 6: CLI output
   ## ---------------------------------------------------------------------------
 
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring pipelines"), "...\n"))
-  cat(paste0("\u2502  \u251C\u2500 Outcome: ", outcome_var,
-             if (!identical(x$config$outcome_range, DEFAULT_OUTCOME_RANGE)) {
-               paste0(" (range ", format_outcome_range(x$config$outcome_range), ")")
-             },
-             "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
-  cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
-             grid_size, "\n"))
+  if (verbose) {
 
-  window_cm <- x$config$recipe$sg_window * axis_spacing_cm(x)
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Configuring pipelines"), "...\n"))
+    cat(paste0("\u2502  \u251C\u2500 Outcome: ", outcome_var,
+               if (!identical(x$config$outcome_range, DEFAULT_OUTCOME_RANGE)) {
+                 paste0(" (range ", format_outcome_range(x$config$outcome_range), ")")
+               },
+               "\n"))
+    cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
+    cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
+               grid_size, "\n"))
 
-  cat(paste0("\u2502  \u251C\u2500 Recipe: SG window ", x$config$recipe$sg_window,
-             if (!is.na(window_cm)) paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)"),
-             if ("pca" %in% feature_selection) paste0(", PCA threshold ", pca_threshold),
-             "\n"))
+    window_cm <- x$config$recipe$sg_window * axis_spacing_cm(x)
 
-  cat(paste0("\u2502  \u2514\u2500 Configs: ", nrow(config_grid), " total\n"))
-  cat("\u2502\n")
+    cat(paste0("\u2502  \u251C\u2500 Recipe: SG window ", x$config$recipe$sg_window,
+               if (!is.na(window_cm)) paste0(" (", signif(window_cm, 3), " cm\u207B\u00B9)"),
+               if ("pca" %in% feature_selection) paste0(", PCA threshold ", pca_threshold),
+               "\n"))
+
+    cat(paste0("\u2502  \u2514\u2500 Configs: ", nrow(config_grid), " total\n"))
+    cat("\u2502\n")
+
+  }
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Return

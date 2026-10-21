@@ -14,7 +14,7 @@
 # configure() CLI output / prints the outcome, models, tuning, recipe settings and config count, with the PCA threshold only when PCA runs
 
     Code
-      result <- configure(hd, models = c("rf", "cubist"))
+      result <- configure(hd, models = c("rf", "cubist"), verbose = TRUE)
     Output
       ├─ Configuring pipelines...
       │  ├─ Outcome: SOC
@@ -24,7 +24,7 @@
       │  └─ Configs: 2 total
       │
     Code
-      result <- configure(hd, sg_window = 11L)
+      result <- configure(hd, sg_window = 11L, verbose = TRUE)
     Output
       ├─ Configuring pipelines...
       │  ├─ Outcome: SOC
@@ -34,7 +34,8 @@
       │  └─ Configs: 3 total
       │
     Code
-      result <- configure(hd, feature_selection = "pca", pca_threshold = 0.9)
+      result <- configure(hd, feature_selection = "pca", pca_threshold = 0.9,
+        verbose = TRUE)
     Output
       ├─ Configuring pipelines...
       │  ├─ Outcome: SOC

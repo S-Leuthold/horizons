@@ -1,7 +1,7 @@
 # validate() passed logic and CLI output / CLI output shows PASSED when all clean
 
     Code
-      validate(hd)
+      validate(hd, verbose = TRUE)
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)
@@ -18,7 +18,7 @@
 # validate() passed logic and CLI output / CLI output shows FAILED when ERROR present
 
     Code
-      validate(hd)
+      validate(hd, verbose = TRUE)
     Condition
       Warning:
       IQR is zero or near-zero — skipping response outlier detection.
@@ -38,7 +38,7 @@
 # validate() passed logic and CLI output / CLI output shows outlier removal summary when removal happens
 
     Code
-      validate(hd, remove_outliers = TRUE)
+      validate(hd, remove_outliers = TRUE, verbose = TRUE)
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)

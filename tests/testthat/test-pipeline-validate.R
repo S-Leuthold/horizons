@@ -1114,6 +1114,23 @@ describe("validate() keeps the removal record", {
 
 describe("validate() passed logic and CLI output", {
 
+  test_that("is quiet under horizons.verbose = FALSE, prints when asked, and checks verbose", {
+
+    hd <- make_configured_hd(n_predictors = 20)
+
+    withr::local_options(horizons.verbose = FALSE)
+    expect_silent(validate(hd))
+    expect_output(validate(hd, verbose = TRUE), "Validating")
+
+    withr::local_options(horizons.verbose = TRUE)
+    expect_output(validate(hd), "Validating")
+
+    expect_error(validate(hd, verbose = "yes"),
+                 "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE,
+                 class = "horizons_error_input")
+
+  })
+
   test_that("passed=TRUE when all checks pass", {
 
     result <- quiet_validate(make_configured_hd())
@@ -1148,7 +1165,7 @@ describe("validate() passed logic and CLI output", {
 
     hd <- make_configured_hd()
 
-    expect_snapshot(validate(hd))
+    expect_snapshot(validate(hd, verbose = TRUE))
 
   })
 
@@ -1156,7 +1173,7 @@ describe("validate() passed logic and CLI output", {
 
     hd <- make_configured_hd(outcome_values = rep(5.0, 100))
 
-    expect_snapshot(validate(hd))
+    expect_snapshot(validate(hd, verbose = TRUE))
 
   })
 
@@ -1169,7 +1186,7 @@ describe("validate() passed logic and CLI output", {
 
     }
 
-    expect_snapshot(validate(hd, remove_outliers = TRUE))
+    expect_snapshot(validate(hd, remove_outliers = TRUE, verbose = TRUE))
 
   })
 
@@ -1178,8 +1195,9 @@ describe("validate() passed logic and CLI output", {
     outcome_vals <- c(stats::rnorm(97, 15, 2), 100, 200, 300)
     hd           <- make_configured_hd(outcome_values = outcome_vals)
 
-    requested <- capture.output(suppressWarnings(validate(hd, remove_outliers = "response")))
-    plain     <- capture.output(suppressWarnings(validate(hd)))
+    requested <- capture.output(suppressWarnings(validate(hd, remove_outliers = "response",
+                                                          verbose = TRUE)))
+    plain     <- capture.output(suppressWarnings(validate(hd, verbose = TRUE)))
 
     expect_true(any(grepl("Response outliers: [0-9]+ on the whole table, not removed", requested)))
     expect_true(any(grepl("Trim requested: evaluate() fences its training partition",

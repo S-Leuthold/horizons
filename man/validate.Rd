@@ -10,7 +10,8 @@ validate(
   spectral_method = "mahalanobis",
   spectral_threshold = 0.975,
   response_method = "iqr",
-  response_threshold = 1.5
+  response_threshold = 1.5,
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -35,6 +36,9 @@ Currently only \code{"iqr"}. Default: \code{"iqr"}.}
 \item{response_threshold}{\code{numeric(1)}. IQR multiplier for Tukey fences,
 both the whole-table flags and the training-partition fences
 \code{evaluate()} trims by. Default: \code{1.5}.}
+
+\item{verbose}{\code{logical(1)}. Print the report. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 \code{horizons_data}. Same object with \code{validation} section populated:

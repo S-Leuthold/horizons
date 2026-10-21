@@ -17,7 +17,8 @@ configure(
   final_bayesian_iter = 25L,
   sg_window = 9L,
   pca_threshold = 0.995,
-  outcome_range = c(0, Inf)
+  outcome_range = c(0, Inf),
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -69,6 +70,9 @@ Set it from the property's physical bounds, not the data's. Every
 observed value of the outcome must lie inside it. A negative lower bound
 rules out the \code{"log"}, \code{"log10"} and \code{"sqrt"} transformations. See
 Outcome range.}
+
+\item{verbose}{\code{logical(1)}. Print the configuration's summary. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 A modified \code{horizons_data} object with:

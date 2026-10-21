@@ -486,7 +486,7 @@ test_that("add_response() prints its low-match hints inside the tree, under the 
   ## Act -------------------------------------------------------------------
 
   expect_warning(
-    out <- utils::capture.output(add_response(hd, lab, variable = "SOC")),
+    out <- utils::capture.output(add_response(hd, lab, variable = "SOC", verbose = TRUE)),
     "1/4 samples matched"
   )
 
@@ -556,7 +556,7 @@ test_that("add_response() reports and records non-missing counts, not only key m
   ## Act -------------------------------------------------------------------
 
   out <- utils::capture.output(
-    result <- add_response(hd, lab, variable = c("clay", "oc"))
+    result <- add_response(hd, lab, variable = c("clay", "oc"), verbose = TRUE)
   )
 
   ## Assert ----------------------------------------------------------------
@@ -734,6 +734,25 @@ test_that("add_response() errors on invalid source type", {
     add_response(hd, 42, variable = "SOC"),
     "must be"
   )
+
+})
+
+
+test_that("add_response() is quiet under horizons.verbose = FALSE, prints when asked, and checks verbose", {
+
+  hd  <- make_test_hd()
+  lab <- tibble::tibble(sample_id = c("S001", "S002", "S003"), SOC = c(1, 2, 3))
+
+  withr::local_options(horizons.verbose = FALSE)
+  expect_silent(add_response(hd, lab, variable = "SOC"))
+  expect_output(add_response(hd, lab, variable = "SOC", verbose = TRUE), "Adding response data")
+
+  withr::local_options(horizons.verbose = TRUE)
+  expect_output(add_response(hd, lab, variable = "SOC"), "Adding response data")
+
+  expect_error(add_response(hd, lab, variable = "SOC", verbose = "yes"),
+               "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 

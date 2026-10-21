@@ -68,6 +68,8 @@
 #' @param by `character`. Join key. Default `"sample_id"`. Use a named vector
 #'   for mismatched column names: `c("sample_id" = "Lab_ID")` where the name
 #'   is the horizons-side column and the value is the source-side column.
+#' @param verbose `logical(1)`. Print the join's report. Default:
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return A modified `horizons_data` object with:
 #'   * Response columns added to `data$analysis`
@@ -99,7 +101,8 @@
 add_response <- function(x,
                          source,
                          variable,
-                         by = "sample_id") {
+                         by      = "sample_id",
+                         verbose = getOption("horizons.verbose", TRUE)) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Print header
@@ -151,6 +154,8 @@ add_response <- function(x,
   ## 1.1b The object as it arrives (#234) ------------------------------------------
 
   x <- validate_horizons_data(x)
+
+  check_arg(rlang::check_bool, verbose)
 
   ## 1.2 source type check -----------------------------------------------------
 
@@ -561,9 +566,6 @@ add_response <- function(x,
   ## Step 6: Progress output
   ## ---------------------------------------------------------------------------
 
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Adding response data"), "...\n"))
-  cat(paste0("\u2502  \u251C\u2500 Source: ", source_label, "\n"))
-
   matched_str <- paste0(n_matched, "/", n_horizons, " samples")
   if (n_unmatched > 0 && match_rate >= 0.5) {
 
@@ -577,25 +579,32 @@ add_response <- function(x,
 
   }
 
-  ## Under half matched: the line is yellow, and Step 3's pattern hints sit
-  ## under it.
-  matched_line <- paste0("Matched: ", matched_str)
-  cat(paste0("\u2502  \u251C\u2500 ",
-             if (low_match) cli::col_yellow(matched_line) else matched_line, "\n"))
+  if (verbose) {
 
-  for (i in seq_along(match_hints)) {
-    branch <- if (i < length(match_hints)) "\u251C\u2500" else "\u2514\u2500"
-    cat(paste0("\u2502  \u2502  ", branch, " ", cli::col_yellow(match_hints[i]), "\n"))
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Adding response data"), "...\n"))
+    cat(paste0("\u2502  \u251C\u2500 Source: ", source_label, "\n"))
+
+    ## Under half matched: the line is yellow, and Step 3's pattern hints sit
+    ## under it.
+    matched_line <- paste0("Matched: ", matched_str)
+    cat(paste0("\u2502  \u251C\u2500 ",
+               if (low_match) cli::col_yellow(matched_line) else matched_line, "\n"))
+
+    for (i in seq_along(match_hints)) {
+      branch <- if (i < length(match_hints)) "\u251C\u2500" else "\u2514\u2500"
+      cat(paste0("\u2502  \u2502  ", branch, " ", cli::col_yellow(match_hints[i]), "\n"))
+    }
+
+    cat("\u2502  \u2514\u2500 Variables:\n")
+
+    for (i in seq_along(variable)) {
+      branch <- if (i < length(variable)) "\u251C\u2500" else "\u2514\u2500"
+      cat(paste0("\u2502     ", branch, " ", variable[i], ": ",
+                 n_non_missing[[i]], "/", n_horizons, " non-missing\n"))
+    }
+    cat("\u2502\n")
+
   }
-
-  cat("\u2502  \u2514\u2500 Variables:\n")
-
-  for (i in seq_along(variable)) {
-    branch <- if (i < length(variable)) "\u251C\u2500" else "\u2514\u2500"
-    cat(paste0("\u2502     ", branch, " ", variable[i], ": ",
-               n_non_missing[[i]], "/", n_horizons, " non-missing\n"))
-  }
-  cat("\u2502\n")
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Return
