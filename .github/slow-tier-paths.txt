@@ -7,7 +7,7 @@
 ^R/pipeline-evaluate\.R$
 ^R/evaluate-single-config\.R$
 ^R/monitor-evaluate\.R$
-^R/utils-(parallel|resamples|recipes|errors|log|backtransform)\.R$
+^R/utils-(parallel|resamples|recipes|errors|log|tune|backtransform)\.R$
 ^R/class-core\.R$
 ^R/control\.R$
 ^R/pipeline-predict\.R$
