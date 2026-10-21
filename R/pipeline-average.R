@@ -34,6 +34,14 @@
 #' to ensure baseline shifts don't confound quality control. Spectra with baseline
 #' offsets can correlate ~1.0 but shouldn't be averaged without correction.
 #'
+#' **Unusable spectra:** `average()` leaves the decision on a spectrum that
+#' is not finite or has no spread to [standardize()], which flags it. In the
+#' order `spectra() |> parse_ids() |> average() |> standardize()` such a
+#' sample is averaged and then flagged, not refused. Quality control fails a
+#' replicate it cannot correlate, such as a flat scan, so it is removed
+#' rather than averaged in; under `quality_check = FALSE` it is averaged
+#' in, as asked.
+#'
 #' **Handling All-Outlier Groups:**
 #' If QC flags all replicates as outliers:
 #' * `"warn"` (default): Keep all replicates and average, with one
@@ -551,7 +559,10 @@ average <- function(x,
   ## Step 10b: Re-validate
   ## -------------------------------------------------------------------------
 
-  x <- validate_horizons_data(x)
+  ### Every finding but the spectra's: in the documented order average()
+  ### runs before standardize(), which decides and flags an unusable
+  ### spectrum, so one is left for it rather than refused here.
+  x <- validate_horizons_data(x, spectra = FALSE)
 
   ## -------------------------------------------------------------------------
   ## Step 11: The samples whose every replicate failed, in every mode (#231)
@@ -772,19 +783,32 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 
     }
 
-    ## Compute correlation matrix for active replicates ----------------------
+    ## Mean correlation for each active replicate (excluding self) -----------
+    ## A replicate QC cannot correlate fails rather than passes: one with no
+    ## spread (a flat or empty scan), or with no band it shares with another,
+    ## would have a mean correlation of NaN, which no threshold catches, and
+    ## would be averaged in. Its mean is set below every other, so it is
+    ## removed first. stats::cor() sees only the replicates with spread, so
+    ## base R's zero-deviation warning is not raised.
 
     active_matrix <- predictor_matrix[active_idx, , drop = FALSE]
+    spread        <- apply(active_matrix, 1, function(r) length(unique(r[is.finite(r)])) > 1)
 
-    cor_matrix <- stats::cor(
-      t(active_matrix),
-      use = "pairwise.complete.obs"
-    )
+    mean_cors_active          <- rep(NA_real_, n_active)
+    mean_cors_active[!spread] <- -Inf
 
-    ## Mean correlation for each active replicate (excluding self) -----------
+    if (sum(spread) >= 2) {
 
-    diag(cor_matrix) <- NA
-    mean_cors_active <- rowMeans(cor_matrix, na.rm = TRUE)
+      cor_matrix <- stats::cor(
+        t(active_matrix[spread, , drop = FALSE]),
+        use = "pairwise.complete.obs"
+      )
+
+      diag(cor_matrix) <- NA
+      live <- rowMeans(cor_matrix, na.rm = TRUE)
+      mean_cors_active[spread] <- ifelse(is.nan(live), -Inf, live)
+
+    }
 
     ## Check if any are below threshold --------------------------------------
 

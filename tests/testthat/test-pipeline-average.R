@@ -1358,20 +1358,71 @@ test_that("average() catches a corrupt input the verb itself never checks (#24)"
 
 test_that("average() validates the averaged object on return (#24)", {
 
-  ## Arrange — one replicate per sample, so the NA reaches the output as it
-  ## was. The entry check runs at the raw stage, where an NA predictor is
-  ## allowed before replicates are collapsed; only the full check on return
-  ## refuses it.
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 1)
-  hd$data$analysis$wn_500[1] <- NA
+  ## Arrange — a group's average that breaks the full stage the entry check
+  ## (raw) allows: every averaged row given one id
+  hd   <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  real <- average_group
+  local_mocked_bindings(average_group = function(...) {
+    out <- real(...)
+    out$averaged$sample_id <- "S1"
+    out
+  })
 
   ## Act & Assert --------------------------------------------------------------
 
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
-    "NA values in predictor columns", fixed = TRUE,
+    "Duplicate sample_id values: S1", fixed = TRUE,
     class = "horizons_error_validation"
   )
+
+})
+
+test_that("average() leaves an unusable spectrum to standardize(), which flags it, in the documented order", {
+
+  ## Arrange — a lone scan holding an NA, and a lone flat scan: before
+  ## standardize() runs, nothing has flagged either
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 1)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis$wn_500[1] <- NA
+  hd$data$analysis[2, wn]    <- 0.7
+
+  ## Act — average() returns them, and standardize() flags them
+  averaged <- average(hd, verbose = FALSE)
+  expect_identical(averaged$data$analysis$sample_id, c("S1", "S2", "S3"))
+
+  flagged <- suppressWarnings(standardize(averaged, resample = NULL, trim = NULL,
+                                          remove_water = FALSE, baseline = FALSE,
+                                          verbose = FALSE))
+  expect_identical(flagged$data$analysis$.flag, c("standardize", "standardize", NA))
+  expect_no_error(validate_horizons_data(flagged))
+
+})
+
+test_that("average()'s quality check fails a replicate it cannot correlate, rather than averaging it in", {
+
+  ## Arrange — S1's first scan is flat
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  hd$data$analysis[1, wn] <- 0.5
+
+  ## Act — no base R warning about a zero standard deviation
+  expect_no_warning(result <- average(hd, verbose = FALSE))
+
+  ## Assert — S1 is the mean of its two other scans
+  s1 <- result$data$analysis[result$data$analysis$sample_id == "S1", wn]
+  expect_equal(unlist(s1), colMeans(as.matrix(hd$data$analysis[2:3, wn])))
+
+  ## With two scans, one flat, QC's own rule fails the group, handled by
+  ## on_all_outliers
+  two <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  two$data$analysis[1, wn] <- 0.5
+
+  expect_warning(average(two, verbose = FALSE),
+                 "All replicates failed QC for 1 sample", fixed = TRUE,
+                 class = "horizons_warning_quality")
+  kept <- average(two, on_all_outliers = "keep_best", verbose = FALSE)$data$analysis
+  expect_equal(unlist(kept[kept$sample_id == "S1", wn]), unlist(two$data$analysis[2, wn]))
 
 })
 

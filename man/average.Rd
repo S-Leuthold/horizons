@@ -90,6 +90,14 @@ method when group sizes are small (n=2-3).
 to ensure baseline shifts don't confound quality control. Spectra with baseline
 offsets can correlate ~1.0 but shouldn't be averaged without correction.
 
+\strong{Unusable spectra:} \code{average()} leaves the decision on a spectrum that
+is not finite or has no spread to \code{\link[=standardize]{standardize()}}, which flags it. In the
+order \code{spectra() |> parse_ids() |> average() |> standardize()} such a
+sample is averaged and then flagged, not refused. Quality control fails a
+replicate it cannot correlate, such as a flat scan, so it is removed
+rather than averaged in; under \code{quality_check = FALSE} it is averaged
+in, as asked.
+
 \strong{Handling All-Outlier Groups:}
 If QC flags all replicates as outliers:
 \itemize{
