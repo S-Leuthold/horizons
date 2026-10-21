@@ -2,14 +2,10 @@
 
     Code
       configure(hd)
-    Output
-      │  └─ Multiple response variables found
-      │        ├─ Available: SOC, pH
-      │        └─ Specify `outcome` to select one
-      
-    Condition
-      Error:
-      ! Multiple response variables found
+    Condition <horizons_error_input>
+      Error in `configure()`:
+      ! `x` has several responses, so `outcome` must name one.
+      i Available: SOC and pH.
 
 # configure() CLI output / prints the outcome, models, tuning, recipe settings and config count, with the PCA threshold only when PCA runs
 

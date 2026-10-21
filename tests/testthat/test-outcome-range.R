@@ -380,7 +380,7 @@ describe("configure() - outcome_range", {
       expect_error(
         configure_small(make_range_hd(), outcome_range = bad),
         "`outcome_range` must be a numeric vector of length 2",
-        class = "horizons_configure_error",
+        class = "horizons_error_input",
         info  = deparse(bad)
       )
 
@@ -392,10 +392,11 @@ describe("configure() - outcome_range", {
 
     err <- expect_error(
       configure_small(make_range_hd(value = to_d13c)),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
-    expect_s3_class(err, "horizons_configure_error")
+    ## One kind only: the condition was classed twice before
+    expect_false(inherits(err, "horizons_configure_error"))
     expect_match(conditionMessage(err), "outcome_range")
     expect_match(conditionMessage(err), "c(-Inf, Inf)", fixed = TRUE)
 
@@ -406,7 +407,7 @@ describe("configure() - outcome_range", {
     expect_error(
       configure_small(make_range_hd(), outcome_range = c(0, 1)),
       "outcome_range",
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -430,7 +431,7 @@ describe("configure() - outcome_range", {
     hd$data$n_responses <- 2L
 
     expect_no_error(configure_small(hd, outcome = "SOC"))
-    expect_error(configure_small(hd, outcome = "d13C"), class = "horizons_input_error")
+    expect_error(configure_small(hd, outcome = "d13C"), class = "horizons_error_input")
     expect_no_error(configure_small(hd, outcome = "d13C", outcome_range = c(-Inf, Inf)))
 
   })
@@ -556,15 +557,15 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
     )
 
     expect_error(evaluate(cfg, metric = "rrmse"), "rrmse",
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
     expect_error(fit(ev, metric = "rrmse"), "rrmse",
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
     ## ...and when the rrmse comes from the evaluation fit() would re-tune
     by_rrmse <- ev
     by_rrmse$evaluation$rank_metric <- "rrmse"
     expect_error(fit(by_rrmse), "rrmse",
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
   })
 
@@ -577,7 +578,7 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
     ## One member would also be refused, later; the range check comes first
     expect_error(ensemble(stale), "outcome_range",
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
   })
 
@@ -635,7 +636,7 @@ describe("a negative outcome under the default range", {
     reached <- mock_expensive_steps()
 
     elapsed <- system.time(
-      err <- expect_error(evaluate(obj), class = "horizons_input_error")
+      err <- expect_error(evaluate(obj), class = "horizons_error_input")
     )[["elapsed"]]
 
     expect_match(conditionMessage(err), "outcome_range")
@@ -649,7 +650,7 @@ describe("a negative outcome under the default range", {
 
     reached <- mock_expensive_steps()
 
-    err <- expect_error(fit(obj), class = "horizons_input_error")
+    err <- expect_error(fit(obj), class = "horizons_error_input")
 
     expect_match(conditionMessage(err), "outcome_range")
     expect_length(reached$steps, 0)
@@ -824,7 +825,7 @@ describe("configure() - a range with a negative floor and a response transform",
         configure_small(make_range_hd(value = to_d13c),
                         transformations = c("none", tr),
                         outcome_range = c(-Inf, Inf)),
-        class = "horizons_configure_error",
+        class = "horizons_error_input",
         info  = tr
       )
 
@@ -838,7 +839,7 @@ describe("configure() - a range with a negative floor and a response transform",
     expect_error(
       configure_small(make_range_hd(), transformations = "sqrt",
                       outcome_range = c(-0.5, Inf)),
-      class = "horizons_configure_error"
+      class = "horizons_error_input"
     )
 
   })
@@ -860,9 +861,9 @@ describe("check_rank_metric_range()", {
   it("refuses rrmse only under a negative floor", {
 
     expect_error(check_rank_metric_range("rrmse", c(-Inf, Inf), "evaluate"),
-                 "rrmse", class = "horizons_input_error")
+                 "rrmse", class = "horizons_error_input")
     expect_error(check_rank_metric_range("rrmse", c(-5, 5), "fit"),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
     expect_null(check_rank_metric_range("rrmse", DEFAULT_OUTCOME_RANGE, "evaluate"))
     expect_null(check_rank_metric_range("rrmse", c(0, 100), "evaluate"))
@@ -1011,7 +1012,7 @@ describe("infinite outcome values", {
 
     hd <- make_range_hd(value = function(v) { v[2] <- Inf; v })
 
-    err <- expect_error(configure_small(hd), class = "horizons_input_error")
+    err <- expect_error(configure_small(hd), class = "horizons_error_input")
     expect_match(flat_message(err), "outcome_range")
 
   })
@@ -1026,7 +1027,7 @@ describe("the remedy text", {
     obj$data$analysis$SOC <- to_d13c(obj$data$analysis$SOC)
 
     expect_error(check_outcome_range(obj, verb = "evaluate"),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
     expect_snapshot(check_outcome_range(obj, verb = "evaluate"), error = TRUE)
 
   })

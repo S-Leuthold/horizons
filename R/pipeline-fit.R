@@ -183,7 +183,7 @@
 #' Every prediction `fit()` scores (out-of-fold, test and calibration) is
 #' clamped to `configure()`'s `outcome_range`, as `predict()` clamps what it
 #' serves. Before anything is drawn or fitted, on either path, `fit()` aborts
-#' with class `horizons_input_error` when an observed outcome lies outside
+#' with class `horizons_error_input` when an observed outcome lies outside
 #' the range or is infinite, naming `outcome_range` and how to set it (#76);
 #' when the ranking metric is `"rrmse"` and the range's lower bound is
 #' negative, since the mean outcome it divides by can then be zero or
@@ -194,7 +194,7 @@
 #'
 #' @section Zero outcome variance:
 #' On either path, before anything is drawn, `fit()` aborts with class
-#' `horizons_input_error` when every observed outcome has the same value, as
+#' `horizons_error_input` when every observed outcome has the same value, as
 #' `evaluate()` does. It also aborts, before any model is fitted, when the
 #' modelled rows vary but the rows its models are fitted on do not, because
 #' the rows with another value all fell in the test set or the calibration

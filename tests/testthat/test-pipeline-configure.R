@@ -89,8 +89,9 @@ describe("configure() validation", {
   test_that("rejects non-horizons_data input", {
 
     expect_error(
-      capture.output(configure(data.frame(x = 1))),
-      class = "horizons_configure_error"
+      configure(data.frame(x = 1)),
+      "`x` must be a horizons_data object, not a data frame.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -112,9 +113,9 @@ describe("configure() validation", {
                             spectra_source = "test", spectra_type = "mir")
 
     expect_error(
-      capture.output(configure(hd)),
-      "No response data found",
-      class = "horizons_configure_error"
+      configure(hd),
+      "Use `add_response()` to join response variables before configuring.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -124,9 +125,9 @@ describe("configure() validation", {
     hd <- make_multi_response_hd()
 
     expect_error(
-      capture.output(configure(hd)),
-      "Multiple response variables",
-      class = "horizons_configure_error"
+      configure(hd),
+      "`x` has several responses, so `outcome` must name one.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -135,9 +136,9 @@ describe("configure() validation", {
 
     hd <- make_multi_response_hd()
 
-    ## The condition carries only the header (asserted above); the list of
-    ## responses is printed to the console before it.
-    expect_snapshot(configure(hd), error = TRUE)
+    ## The responses are a bullet of the condition, and nothing prints
+    ## beside it (#109)
+    expect_snapshot(configure(hd), error = TRUE, cnd_class = TRUE)
 
   })
 
@@ -146,17 +147,17 @@ describe("configure() validation", {
     hd <- make_multi_response_hd()
 
     expect_error(
-      capture.output(configure(hd, outcome = "TotalN")),
-      "TotalN.*not found",
-      class = "horizons_configure_error"
+      configure(hd, outcome = "TotalN"),
+      "`outcome` must name a response, and \"TotalN\" is not one.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, outcome = "soc")),
-      "not found",
-      class = "horizons_configure_error"
+      configure(hd, outcome = "soc"),
+      "\"soc\" is not one", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -165,11 +166,13 @@ describe("configure() validation", {
 
     hd <- make_single_response_hd()
 
-    expect_error(
-      capture.output(configure(hd, models = c("rf", "fake_model"))),
-      "Invalid model",
-      class = "horizons_configure_error"
+    err <- expect_error(
+      configure(hd, models = c("rf", "fake_model")),
+      "`models` must be among the values horizons knows.", fixed = TRUE,
+      class = "horizons_error_input"
     )
+    expect_match(conditionMessage(err), "Not known: \"fake_model\".", fixed = TRUE)
+    expect_match(conditionMessage(err), "Valid values: \"rf\"", fixed = TRUE)
 
   })
 
@@ -178,9 +181,9 @@ describe("configure() validation", {
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, transformations = "box_cox")),
-      "Invalid transformation",
-      class = "horizons_configure_error"
+      configure(hd, transformations = "box_cox"),
+      "`transformations` must be among the values horizons knows.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -190,9 +193,9 @@ describe("configure() validation", {
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, preprocessing = "msc")),
-      "Invalid preprocessing",
-      class = "horizons_configure_error"
+      configure(hd, preprocessing = "msc"),
+      "`preprocessing` must be among the values horizons knows.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -202,9 +205,9 @@ describe("configure() validation", {
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, feature_selection = "rfe")),
-      "Invalid feature selection",
-      class = "horizons_configure_error"
+      configure(hd, feature_selection = "rfe"),
+      "`feature_selection` must be among the values horizons knows.", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -214,9 +217,9 @@ describe("configure() validation", {
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, cv_folds = 1)),
-      "cv_folds",
-      class = "horizons_configure_error"
+      configure(hd, cv_folds = 1),
+      "`cv_folds` must be a whole number larger than or equal to 2", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -226,9 +229,9 @@ describe("configure() validation", {
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, grid_size = 0)),
-      "grid_size",
-      class = "horizons_configure_error"
+      configure(hd, grid_size = 0),
+      "`grid_size` must be a whole number larger than or equal to 1", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -238,9 +241,9 @@ describe("configure() validation", {
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, bayesian_iter = -1)),
-      "bayesian_iter",
-      class = "horizons_configure_error"
+      configure(hd, bayesian_iter = -1),
+      "`bayesian_iter` must be a whole number larger than or equal to 0", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -250,9 +253,9 @@ describe("configure() validation", {
     hd <- make_single_response_hd()
 
     expect_error(
-      capture.output(configure(hd, final_bayesian_iter = -1)),
-      "`final_bayesian_iter` must be a non-negative integer", fixed = TRUE,
-      class = "horizons_configure_error"
+      configure(hd, final_bayesian_iter = -1),
+      "`final_bayesian_iter` must be a whole number larger than or equal to 0", fixed = TRUE,
+      class = "horizons_error_input"
     )
 
   })
@@ -264,14 +267,14 @@ describe("configure() validation", {
     expect_error(
       capture.output(configure(hd, grid_size = 1, bayesian_iter = 5, final_bayesian_iter = 0)),
       "`grid_size` must be at least 2 when a Bayesian search runs", fixed = TRUE,
-      class = "horizons_configure_error"
+      class = "horizons_error_input"
     )
 
     ## fit()'s warm start caps its grid at grid_size too
     expect_error(
       capture.output(configure(hd, grid_size = 1, bayesian_iter = 0, final_bayesian_iter = 25)),
       "`grid_size` must be at least 2 when a Bayesian search runs", fixed = TRUE,
-      class = "horizons_configure_error"
+      class = "horizons_error_input"
     )
 
     ## With no Bayesian search at either stage, a grid of one is still valid.
@@ -290,8 +293,8 @@ describe("configure() validation", {
 
       expect_error(
         capture.output(configure(hd, sg_window = bad)),
-        "`sg_window` must be an odd integer >= 5",
-        class = "horizons_configure_error",
+        "`sg_window` must be an odd whole number of at least 5.", fixed = TRUE,
+        class = "horizons_error_input",
         info  = paste("sg_window =", deparse(bad))
       )
 
@@ -308,7 +311,7 @@ describe("configure() validation", {
       expect_error(
         capture.output(configure(hd, pca_threshold = bad)),
         "`pca_threshold` must be a single number in \\(0, 1\\]",
-        class = "horizons_configure_error",
+        class = "horizons_error_input",
         info  = paste("pca_threshold =", deparse(bad))
       )
 
@@ -704,15 +707,31 @@ describe("configure() reconfiguration", {
 
   })
 
-  test_that("warning issued on reconfiguration", {
+  test_that("re-configuring reports a replaced configuration, and warns only when it discards an evaluation or a fit", {
 
     hd <- make_single_response_hd()
     r1 <- quiet_configure(hd)
 
-    expect_warning(
-      capture.output(configure(r1)),
-      "Overwriting"
-    )
+    ## A configuration alone: what was asked for, so a note and a tree line
+    expect_no_warning(r2 <- configure(r1))
+    row <- r2$log[r2$log$verb == "configure", ]
+    expect_identical(row$type, "note")
+    expect_identical(row$message, "Replaced the previous configuration.")
+    expect_output(configure(r1, verbose = TRUE), "Replaced the previous configuration", fixed = TRUE)
+
+    ## An evaluation and a fit are runs the user loses, so they are warned,
+    ## by name, after being written to the log
+    ev <- r1
+    ev$evaluation$results <- tibble::tibble(config_id = "cfg_a")
+    ev$models$workflows   <- list(cfg_a = "a fitted workflow")
+
+    w <- expect_warning(r3 <- configure(ev),
+                        "Re-configuring discarded evaluation results and fitted models", fixed = TRUE,
+                        class = "horizons_warning_input")
+    row <- r3$log[r3$log$verb == "configure", ]
+    expect_identical(row$topic, "input")
+    expect_identical(w$log, row)
+    expect_null(r3$evaluation$results)
 
   })
 
@@ -1014,11 +1033,15 @@ describe("configure() and the object contract", {
 
     ## Re-configured, the fit is the plain object configured the same way,
     ## so nothing is left for the evaluation to read, but the log, which
-    ## keeps what the fit reported, as a reset keeps it
+    ## keeps what the fit reported, as a reset keeps it, and gains
+    ## configure()'s warning naming what it discarded
     reconfigured <- run_configure(fit_clay, "oc")
     fresh        <- run_configure(plain, "oc")
 
-    expect_identical(reconfigured$log, fit_clay$log)
+    expect_identical(reconfigured$log[seq_len(nrow(fit_clay$log)), ], fit_clay$log)
+    added <- reconfigured$log[-seq_len(nrow(fit_clay$log)), ]
+    expect_identical(added$verb, "configure")
+    expect_identical(added$topic, "input")
 
     reconfigured$log <- fresh$log
     expect_identical(reconfigured, fresh)
@@ -1052,7 +1075,13 @@ describe("configure() and the object contract", {
     global_oc <- testthat::capture_warnings(utils::capture.output(configure(global, outcome = "oc")))
 
     ## Assert — a global draw takes the whole pool, so there is nothing to lose
-    expect_true(any(grepl("drawn by select_training\\(\\) for 'clay'; 'oc' is not one of them", to_oc)))
+    expect_true(any(grepl("drawn by `select_training()` for clay, and oc is not one of them", to_oc,
+                          fixed = TRUE)))
+    expect_true(any(grepl("Re-run `select_training()` with oc among `properties`", to_oc, fixed = TRUE)))
+
+    ## Raised once, after it was written to the object's log
+    w <- expect_warning(res <- configure(obj, outcome = "oc"), class = "horizons_warning_input")
+    expect_identical(w$log, res$log[res$log$verb == "configure", ])
     expect_false(any(grepl("select_training", to_clay)))
     expect_false(any(grepl("select_training", global_oc)))
 

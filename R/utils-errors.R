@@ -231,7 +231,8 @@ check_arg <- function(check,
 #'   \item{`horizons_warning_applicability`}{Predictions outside the
 #'     applicability domain.}
 #'   \item{`horizons_warning_input`}{A request that is legal but risky enough
-#'     to say so.}
+#'     to say so, such as [configure()] discarding an evaluation or a fit, or
+#'     configuring an outcome a [select_training()] draw was not made for.}
 #' }
 #'
 #' @section Where the record lives:

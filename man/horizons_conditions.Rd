@@ -115,7 +115,8 @@ matching fewer than half the samples.}
 \item{\code{horizons_warning_applicability}}{Predictions outside the
 applicability domain.}
 \item{\code{horizons_warning_input}}{A request that is legal but risky enough
-to say so.}
+to say so, such as \code{\link[=configure]{configure()}} discarding an evaluation or a fit, or
+configuring an outcome a \code{\link[=select_training]{select_training()}} draw was not made for.}
 }
 }
 

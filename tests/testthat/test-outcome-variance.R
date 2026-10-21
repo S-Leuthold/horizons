@@ -129,7 +129,7 @@ describe("check_training_outcome_variance()", {
                            "trimmed as response outliers" = NULL)
 
     expect_error(check_training_outcome_variance(rep(0, 12), to_calibration, "SOC", "fit"),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
     expect_snapshot(check_training_outcome_variance(rep(0, 12), to_calibration, "SOC", "fit"),
                     error = TRUE)
 
@@ -141,14 +141,14 @@ describe("check_training_outcome_variance()", {
                     "trimmed as response outliers" = c(9))
 
     expect_error(check_training_outcome_variance(rep(0, 12), to_trim, "SOC", "evaluate"),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
     expect_snapshot(check_training_outcome_variance(rep(0, 12), to_trim, "SOC", "evaluate"),
                     error = TRUE)
 
     to_test_set <- list("in the test set" = c(0, 4))
 
     expect_error(check_training_outcome_variance(rep(0, 12), to_test_set, "SOC", "evaluate"),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
     expect_snapshot(check_training_outcome_variance(rep(0, 12), to_test_set, "SOC", "evaluate"),
                     error = TRUE)
 
@@ -171,7 +171,7 @@ describe("an outcome with zero variance on the modelled rows", {
 
     reached <- mock_expensive_steps()
 
-    err <- expect_error(evaluate(obj), class = "horizons_input_error")
+    err <- expect_error(evaluate(obj), class = "horizons_error_input")
 
     msg <- one_line(err)
     expect_match(msg, "evaluate() cannot model SOC: it has zero variance", fixed = TRUE)
@@ -184,7 +184,7 @@ describe("an outcome with zero variance on the modelled rows", {
 
     reached <- mock_expensive_steps()
 
-    err <- expect_error(fit(obj), class = "horizons_input_error")
+    err <- expect_error(fit(obj), class = "horizons_error_input")
 
     expect_match(one_line(err), "fit() cannot model SOC: it has zero variance", fixed = TRUE)
     expect_match(one_line(err), "All 37 rows", fixed = TRUE)
@@ -203,7 +203,7 @@ describe("an outcome with zero variance on the modelled rows", {
     reached <- mock_expensive_steps()
 
     err <- expect_error(fit(fx, n_best = 1L),
-                        class = "horizons_input_error")
+                        class = "horizons_error_input")
 
     expect_false(isFALSE(fx$evaluation$screened))
     expect_match(one_line(err), "fit() cannot model", fixed = TRUE)
@@ -255,7 +255,7 @@ describe("an outcome whose only other value falls in the test set", {
     reached <- mock_expensive_steps(split = FALSE)
 
     err <- expect_error(suppressWarnings(evaluate(obj, seed = seed)),
-                        class = "horizons_input_error")
+                        class = "horizons_error_input")
 
     msg <- one_line(err)
     expect_match(msg, "evaluate() cannot fit SOC: all 32 training rows have the value 0", fixed = TRUE)
@@ -270,7 +270,7 @@ describe("an outcome whose only other value falls in the test set", {
 
     err <- expect_error(
       suppressWarnings(fit(obj, seed = seed, compute_uq = FALSE, compute_ad = FALSE)),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     expect_match(one_line(err), "fit() cannot fit SOC: all 32 training rows have the value 0", fixed = TRUE)
@@ -299,7 +299,7 @@ describe("an outcome whose only other value is drawn into the calibration set", 
 
       err <- tryCatch(
         suppressWarnings(fit(obj, seed = seed, compute_uq = TRUE, compute_ad = FALSE)),
-        horizons_input_error = function(e) e,
+        horizons_error_input = function(e) e,
         error                = function(e) NULL
       )
 
@@ -331,7 +331,7 @@ describe("an outcome whose only other value is drawn into the calibration set", 
 
     err <- expect_error(
       suppressWarnings(fit(obj, seed = 307L)),
-      class = "horizons_input_error"
+      class = "horizons_error_input"
     )
 
     msg <- one_line(err)
