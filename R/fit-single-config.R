@@ -625,11 +625,29 @@ test_interval_coverage <- function(uq, test_preds, test_data, test_truth,
                                  config_id     = config_id,
                                  outcome_range = outcome_range)
 
-  scored  <- !is.na(test_truth) & !is.na(intervals$.pred_lower) &
+  interval_coverage(test_truth, intervals)
+
+}
+
+#' The measured coverage of a set of intervals
+#'
+#' The one scorer behind a member's and an ensemble's measured coverage:
+#' rows with an outcome and both bounds are scored, and the rest are not
+#' counted.
+#'
+#' @param truth Numeric. The outcomes, aligned to `intervals`' rows.
+#' @param intervals Tibble with `.pred_lower`, `.pred_upper` and
+#'   `.interval_width`.
+#' @return List with `test_coverage`, `test_mean_width` and `n_test`.
+#' @keywords internal
+#' @noRd
+interval_coverage <- function(truth, intervals) {
+
+  scored  <- !is.na(truth) & !is.na(intervals$.pred_lower) &
     !is.na(intervals$.pred_upper)
 
-  covered <- test_truth[scored] >= intervals$.pred_lower[scored] &
-    test_truth[scored] <= intervals$.pred_upper[scored]
+  covered <- truth[scored] >= intervals$.pred_lower[scored] &
+    truth[scored] <= intervals$.pred_upper[scored]
 
   list(
     test_coverage   = if (any(scored)) mean(covered) else NA_real_,

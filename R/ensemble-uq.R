@@ -729,7 +729,9 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
-#' @return `x` with `$ensemble$uq` populated. The bundle carries: `method`
+#' @return `x` with `$ensemble$uq` populated. [ensemble()] then adds the
+#'   measured coverage on the test rows, `test_coverage`, `test_mean_width`
+#'   and `n_test` (`ensemble_test_coverage()`). The bundle carries: `method`
 #'   (`"cv_plus"`), `ensemble_method`, `members`, `fold_models`, `calib`
 #'   (`.row`, `sample_id`, `fold`, `.pred_oof`, `truth`, `residual`; `.row`
 #'   is `NA` for a trimmed row), `n_calib`,
@@ -788,6 +790,46 @@ fit_ensemble_uq <- function(x,
   x$ensemble$uq <- bundle
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## ensemble_test_coverage()
+## ---------------------------------------------------------------------------
+
+#' Measure the ensemble's interval coverage on the held-out test rows
+#'
+#' @description
+#' The members predict the test rows `fit()` held out ([predict_members_on_test()]),
+#' and [predict_ensemble_intervals()], the function `predict()` serves an
+#' ensemble's intervals with, builds the CV+ bounds over the rows every member
+#' could use. The share of the test outcomes inside them is the coverage a
+#' user of the ensemble gets on data it never saw: no test row took part in
+#' the members' fits, the meta-learner or the calibration. Scored as a
+#' member's coverage is ([interval_coverage()]).
+#'
+#' Run by [ensemble()] as a unit of its own, after the CV+ unit and only when
+#' it succeeded, as `fit()`'s coverage unit follows its UQ unit: a failure
+#' leaves the figures `NA` and is named in a `skipped` warning.
+#'
+#' @param x A `horizons_ensemble` whose `ensemble$uq` holds a CV+ bundle.
+#' @param call The frame a member's failure to predict the test rows reports.
+#' @return List with `test_coverage`, `test_mean_width` and `n_test`.
+#' @keywords internal
+#' @noRd
+ensemble_test_coverage <- function(x, call = rlang::caller_env()) {
+
+  uq <- x$ensemble$uq
+
+  member_pred <- unit_step("test_predict", predict_members_on_test(x, uq$members, call = call))
+
+  ## The rows every member could use, as predict() combines them
+  bad    <- unique(unlist(attr(member_pred, "flagged")))
+  usable <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+
+  intervals <- predict_ensemble_intervals(uq, usable, outcome_range_setting(x))
+
+  interval_coverage(usable$truth[match(intervals$sample_id, usable$sample_id)], intervals)
 
 }
 

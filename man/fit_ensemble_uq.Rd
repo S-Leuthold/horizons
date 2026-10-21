@@ -25,7 +25,9 @@ recorded on the ensemble contract.}
 \code{control_horizons(min_calib_rows = )}. Default \code{N_CALIB_MIN}.}
 }
 \value{
-\code{x} with \verb{$ensemble$uq} populated. The bundle carries: \code{method}
+\code{x} with \verb{$ensemble$uq} populated. \code{\link[=ensemble]{ensemble()}} then adds the
+measured coverage on the test rows, \code{test_coverage}, \code{test_mean_width}
+and \code{n_test} (\code{ensemble_test_coverage()}). The bundle carries: \code{method}
 (\code{"cv_plus"}), \code{ensemble_method}, \code{members}, \code{fold_models}, \code{calib}
 (\code{.row}, \code{sample_id}, \code{fold}, \code{.pred_oof}, \code{truth}, \code{residual}; \code{.row}
 is \code{NA} for a trimmed row), \code{n_calib},

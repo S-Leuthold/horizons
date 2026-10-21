@@ -116,7 +116,7 @@ describe("fit_ensemble_uq() - bundle contract", {
       names(uq),
       c("method", "ensemble_method", "members", "fold_models", "calib",
         "n_calib", "level_default", "seed", "oof_coverage", "mean_width",
-        "timestamp")
+        "timestamp", "test_coverage", "test_mean_width", "n_test")
     )
 
   })
@@ -400,6 +400,34 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
 ## ---------------------------------------------------------------------------
 ## Coverage
 ## ---------------------------------------------------------------------------
+
+describe("ensemble() - measured coverage on the held-out test rows", {
+
+  it("is the share of the test outcomes inside the intervals predict() serves, for each method", {
+
+    test_set    <- ens_test_set()
+    outcome_col <- ens_fitted()$data$role_map$variable[ens_fitted()$data$role_map$role == "outcome"]
+
+    for (method in c("weighted", "penalized", "xgb")) {
+
+      ens <- ens_built(method)
+      uq  <- ens$ensemble$uq
+
+      served <- predict(ens, test_set, interval = TRUE)
+      truth  <- test_set[[outcome_col]][match(served$sample_id, test_set$sample_id)]
+      inside <- truth >= served$.pred_lower & truth <= served$.pred_upper
+
+      ## The fixture's 12 test rows, every one with both bounds
+      expect_identical(uq$n_test, 12L, info = method)
+      expect_identical(uq$n_test, sum(!is.na(inside)), info = method)
+      expect_equal(uq$test_coverage, mean(inside), info = method)
+      expect_equal(uq$test_mean_width, mean(served$.interval_width), info = method)
+
+    }
+
+  })
+
+})
 
 describe("fit_ensemble_uq() - coverage", {
 
@@ -850,6 +878,38 @@ describe("ensemble UQ - degradation and gates", {
     expect_true(out$failed)
     expect_identical(unit_failure_message(out$records, outside = NULL),
                      "CV+ fold models failed: a fold refit failed")
+
+  })
+
+  it("leaves the measured coverage NA and says why once when it cannot be measured, keeping the intervals", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(ensemble_test_coverage = function(...) stop("the test rows broke"))
+
+    run <- collect_warnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE),
+      "Measured test coverage was not computed"
+    )
+
+    ens <- run$value
+    uq  <- ens$ensemble$uq
+
+    expect_identical(uq$method, "cv_plus")
+    expect_identical(uq$test_coverage, NA_real_)
+    expect_identical(uq$test_mean_width, NA_real_)
+    expect_identical(uq$n_test, 0L)
+
+    expect_length(run$warnings, 1L)
+    expect_s3_class(run$warnings[[1]], "horizons_warning_skipped")
+    expect_match(conditionMessage(run$warnings[[1]]),
+                 "Measured test coverage was not computed: the test rows broke", fixed = TRUE)
+
+    skipped <- ens$log[ens$log$verb == "ensemble" & ens$log$topic %in% "skipped", , drop = FALSE]
+    expect_identical(nrow(skipped), 1L)
+    expect_identical(
+      sum(grepl("Measured test coverage was not computed: ", ens$ensemble$warnings, fixed = TRUE)), 1L
+    )
 
   })
 

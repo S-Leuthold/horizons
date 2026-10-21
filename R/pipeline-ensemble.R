@@ -72,7 +72,11 @@
 #'   `min_calib_rows` rows, too few finite residuals for CV+ at its level, or
 #'   a fold refit that fails), the ensemble is returned point-only with one
 #'   warning of class `horizons_warning_skipped` saying why, whatever
-#'   `verbose` is (#145). Mirrors the `compute_uq`
+#'   `verbose` is (#145). Their coverage is then measured on the test rows
+#'   `fit()` held out and stored on the bundle as `test_coverage`,
+#'   `test_mean_width` and `n_test`, as a member's is; when it cannot be
+#'   measured they are `NA` (`n_test` 0), with one `skipped` warning saying
+#'   why. Mirrors the `compute_uq`
 #'   argument of [fit()]. Placed after `seed` so pre-existing positional
 #'   callers (`method`, `optimize`, `seed`) are unaffected. Default `TRUE`.
 #' @param control A [control_horizons()] object: how the run goes, not what
@@ -313,6 +317,33 @@ ensemble <- function(x,
       x <- cv_plus$value
 
     }
+
+  }
+
+  ## Measured coverage on the held-out test rows, a unit of its own after the
+  ## intervals', run when they were calibrated, as fit()'s follows a member's
+  ## UQ (#118): the intervals predict() serves, scored on rows that took no
+  ## part in the fit. A failure leaves the figures NA and says why.
+  if (!is.null(x$ensemble$uq)) {
+
+    coverage <- run_unit(
+      ensemble_test_coverage(x),
+      unit = "coverage", id = "ensemble", debug = debug
+    )
+
+    records <- dplyr::bind_rows(records, coverage$records[coverage$records$type != "failure", , drop = FALSE])
+
+    if (coverage$failed) {
+
+      cause <- unit_failure_message(coverage$records, outside = NULL)
+      line  <- paste0("Measured test coverage was not computed: ", cause)
+
+      log_warning(collector, "skipped", "{line}")
+      warning_log <- dplyr::bind_rows(warning_log, text_records(line, pinned = TRUE))
+
+    }
+
+    x$ensemble$uq <- c(x$ensemble$uq, coverage$value %||% test_interval_coverage_missing())
 
   }
 

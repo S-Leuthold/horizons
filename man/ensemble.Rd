@@ -36,7 +36,11 @@ consumed by \code{predict()}. When they cannot be calibrated (fewer than
 \code{min_calib_rows} rows, too few finite residuals for CV+ at its level, or
 a fold refit that fails), the ensemble is returned point-only with one
 warning of class \code{horizons_warning_skipped} saying why, whatever
-\code{verbose} is (#145). Mirrors the \code{compute_uq}
+\code{verbose} is (#145). Their coverage is then measured on the test rows
+\code{fit()} held out and stored on the bundle as \code{test_coverage},
+\code{test_mean_width} and \code{n_test}, as a member's is; when it cannot be
+measured they are \code{NA} (\code{n_test} 0), with one \code{skipped} warning saying
+why. Mirrors the \code{compute_uq}
 argument of \code{\link[=fit]{fit()}}. Placed after \code{seed} so pre-existing positional
 callers (\code{method}, \code{optimize}, \code{seed}) are unaffected. Default \code{TRUE}.}
 
