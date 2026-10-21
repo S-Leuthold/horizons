@@ -51,8 +51,8 @@ values are the ids of the averaged rows and the \code{by} column itself is
 not in the output.
 \item Predictor columns: Mean of replicate values
 \item Response and outcome columns: Mean of replicate values when numeric,
-the shared value when not; a group whose non-numeric response values
-disagree is an error, not a silent pick
+the shared value when not; samples whose non-numeric response values
+disagree are refused together, not a silent pick
 \item Metadata columns: Uniform values preserved, non-uniform dropped
 \item \code{data$role_map}: Updated to remove dropped columns and to point the
 \code{id} role at the new \code{sample_id}
@@ -88,7 +88,8 @@ offsets can correlate ~1.0 but shouldn't be averaged without correction.
 \strong{Handling All-Outlier Groups:}
 If QC flags all replicates as outliers:
 \itemize{
-\item \code{"warn"} (default): Keep all replicates and average, emit warning
+\item \code{"warn"} (default): Keep all replicates and average, with one
+\code{horizons_warning_quality} naming the samples
 \item \code{"drop"}: Remove the entire sample from results
 \item \code{"keep_best"}: Keep only the replicate with highest mean correlation
 }

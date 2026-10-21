@@ -283,10 +283,17 @@ test_that("average() on_all_outliers='warn' keeps all and warns", {
 
   ## Act -------------------------------------------------------------------
 
-  expect_warning(
+  w <- expect_warning(
     result <- average(hd, quality_check = TRUE, on_all_outliers = "warn", verbose = FALSE),
-    "All replicates failed"
+    "All replicates failed QC for 1 sample, averaged anyway.", fixed = TRUE,
+    class = "horizons_warning_quality"
   )
+
+  ## Recorded on the object before it was raised, naming the sample
+  row <- result$log[result$log$verb == "average", ]
+  expect_identical(row$topic, "quality")
+  expect_identical(row$ids[[1]], "S1")
+  expect_identical(w$log, row)
 
   ## Assert ----------------------------------------------------------------
 
@@ -349,10 +356,19 @@ test_that("average() errors when all samples dropped", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
+  err <- expect_error(
     average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE),
-    "All samples dropped"
+    "Every sample failed quality control on every replicate", fixed = TRUE,
+    class = "horizons_error_qc"
   )
+  expect_s3_class(err, "horizons_error_run")
+
+  ## Nothing printed beside it, and the samples travel on it
+  expect_silent(tryCatch(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE),
+                         error = function(e) NULL))
+  expect_identical(err$results, tibble::tibble(sample_id = "S1", n_replicates = 3L))
+  expect_snapshot(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE),
+                  error = TRUE, cnd_class = TRUE)
 
 })
 
@@ -714,7 +730,8 @@ test_that("average() errors on non-horizons_data input", {
 
   expect_error(
     average(data.frame(x = 1)),
-    "must be a horizons_data"
+    "`x` must be a horizons_data object, not a data frame.", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -725,8 +742,12 @@ test_that("average() errors when by column doesn't exist", {
 
   expect_error(
     average(hd, by = "nonexistent"),
-    "not found"
+    "`by` must name a column of the data, and \"nonexistent\" is not one.", fixed = TRUE,
+    class = "horizons_error_input"
   )
+  expect_error(average(hd, by = c("sample_id", "filename")),
+               "`by` must be a single string", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -736,8 +757,12 @@ test_that("average() errors on invalid quality_check", {
 
   expect_error(
     average(hd, quality_check = "yes"),
-    "must be TRUE or FALSE"
+    "`quality_check` must be `TRUE` or `FALSE`", fixed = TRUE,
+    class = "horizons_error_input"
   )
+  expect_error(average(hd, verbose = NA),
+               "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -747,13 +772,44 @@ test_that("average() errors on invalid correlation_threshold", {
 
   expect_error(
     average(hd, correlation_threshold = 1.5),
-    "between 0 and 1"
+    "`correlation_threshold` must be a number between 0 and 1", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
   expect_error(
     average(hd, correlation_threshold = -0.1),
-    "between 0 and 1"
+    "`correlation_threshold` must be a number between 0 and 1", fixed = TRUE,
+    class = "horizons_error_input"
   )
+
+})
+
+test_that("average() refuses an on_all_outliers it does not know, and takes the first by default", {
+
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
+
+  expect_error(average(hd, on_all_outliers = "keep_all"),
+               "`on_all_outliers` must be one of \"warn\", \"drop\", and \"keep_best\".", fixed = TRUE,
+               class = "horizons_error_input")
+
+  ## The default is "warn"
+  expect_warning(average(hd, verbose = FALSE), class = "horizons_warning_quality")
+
+})
+
+test_that("average() refuses an object with no spectra", {
+
+  ## Arrange — the predictor columns and their roles gone
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+  wn <- hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+  hd$data$analysis <- hd$data$analysis[, setdiff(names(hd$data$analysis), wn)]
+  hd$data$role_map <- hd$data$role_map[!hd$data$role_map$variable %in% wn, ]
+  hd$data$n_predictors <- 0L
+
+  ## Act & Assert
+  expect_error(average(hd, verbose = FALSE),
+               "Average an object with spectra, from `spectra()`.", fixed = TRUE,
+               class = "horizons_error_input")
 
 })
 
@@ -766,8 +822,8 @@ test_that("average() refuses a grouping column with NA values", {
   ## Act & Assert
   expect_error(
     average(hd, quality_check = FALSE, verbose = FALSE),
-    "Grouping column 'sample_id' contains NA values", fixed = TRUE,
-    class = "horizons_data_error"
+    "The grouping column sample_id has 1 `NA` value", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
@@ -940,8 +996,25 @@ test_that("average() aborts on a non-numeric response that disagrees within a gr
 
   ## Act & Assert
   expect_error(average(hd, quality_check = FALSE, verbose = FALSE),
-               regexp = "texture",
-               class  = "horizons_data_error")
+               "texture in S1: sand, silt", fixed = TRUE,
+               class = "horizons_error_input")
+
+})
+
+
+test_that("average() names every sample whose non-numeric response disagrees, in one refusal", {
+
+  ## Arrange — S1 and S2 each have a replicate called something else
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3,
+                             add_responses = TRUE, conflict_texture = TRUE)
+  hd$data$analysis$texture[4] <- "clay"
+
+  ## Act & Assert — both, rather than the first alone
+  err <- expect_error(average(hd, quality_check = FALSE, verbose = FALSE),
+                      "2 samples have response values that disagree between replicates.", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_match(conditionMessage(err), "texture in S1: sand, silt", fixed = TRUE)
+  expect_match(conditionMessage(err), "texture in S2: clay, loam", fixed = TRUE)
 
 })
 
@@ -1001,10 +1074,14 @@ test_that("average() aborts when promoting `by` would produce duplicate ids", {
     tibble::tibble(variable = "plot_number", role = "meta")
   )
 
-  ## Act & Assert
+  ## Act & Assert — refused before any group is averaged, with the remedy
+  local_mocked_bindings(average_group = function(...) stop("averaged a group"))
   expect_error(average(hd, by = "plot_number", quality_check = FALSE, verbose = FALSE),
-               regexp = "duplicate",
-               class  = "horizons_data_error")
+               "Repeated as text: \"0.3\".", fixed = TRUE,
+               class  = "horizons_error_input")
+  expect_error(average(hd, by = "plot_number", quality_check = FALSE, verbose = FALSE),
+               "Make plot_number character, or round it, before averaging.", fixed = TRUE,
+               class  = "horizons_error_input")
 
 })
 
@@ -1123,8 +1200,8 @@ test_that("average() refuses a custom by on an object carrying a record", {
 
   ## Act & Assert
   expect_error(average(hd, by = "project", quality_check = FALSE, verbose = FALSE),
-               regexp = "selection record",
-               class  = "horizons_validation_error")
+               "Average first, then run `select_training()`.", fixed = TRUE,
+               class  = "horizons_error_input")
 
 })
 

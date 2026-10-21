@@ -195,8 +195,10 @@ check_arg <- function(check,
 #'     downloaded.}
 #'   \item{`horizons_error_boruta`}{(run) [step_select_boruta()]'s Boruta run
 #'     failed; Boruta's error is in its message.}
-#'   \item{`horizons_error_qc`}{(run) A quality check failed once it had been
-#'     computed.}
+#'   \item{`horizons_error_qc`}{(run) [average()] had nothing to return:
+#'     every sample failed quality control on every replicate and
+#'     `on_all_outliers = "drop"` dropped it. One row per sample travels as
+#'     `results`: its `sample_id` and `n_replicates`.}
 #'   \item{`horizons_error_consent`}{(input) A library download was declined.}
 #'   \item{`horizons_error_missing_predict_package`}{(dependency) `predict()`
 #'     needs a model package that is not installed.}
@@ -211,7 +213,9 @@ check_arg <- function(check,
 #'     prune threshold). `predict()` raises each distinct warning another
 #'     package raised while predicting under this topic, naming the
 #'     configurations (or an ensemble's units) that raised it, and
-#'     [spectra()] each one raised while reading, naming the files.}
+#'     [spectra()] each one raised while reading, naming the files.
+#'     [average()] names the samples it averaged though every replicate
+#'     failed quality control.}
 #'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
 #'     as a member's prediction intervals, a response [select_training()]
 #'     could not draw for under `properties = NULL`, or a [validate()] check

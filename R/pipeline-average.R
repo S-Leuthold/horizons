@@ -36,7 +36,8 @@
 #'
 #' **Handling All-Outlier Groups:**
 #' If QC flags all replicates as outliers:
-#' * `"warn"` (default): Keep all replicates and average, emit warning
+#' * `"warn"` (default): Keep all replicates and average, with one
+#'   `horizons_warning_quality` naming the samples
 #' * `"drop"`: Remove the entire sample from results
 #' * `"keep_best"`: Keep only the replicate with highest mean correlation
 #'
@@ -74,8 +75,8 @@
 #'     not in the output.
 #'   * Predictor columns: Mean of replicate values
 #'   * Response and outcome columns: Mean of replicate values when numeric,
-#'     the shared value when not; a group whose non-numeric response values
-#'     disagree is an error, not a silent pick
+#'     the shared value when not; samples whose non-numeric response values
+#'     disagree are refused together, not a silent pick
 #'   * Metadata columns: Uniform values preserved, non-uniform dropped
 #'   * `data$role_map`: Updated to remove dropped columns and to point the
 #'     `id` role at the new `sample_id`
@@ -112,89 +113,18 @@ average <- function(x,
   ## Step 1: Input validation
   ## -------------------------------------------------------------------------
 
-  errors <- character()
-
   ## Validate horizons_data object -------------------------------------------
 
   if (!inherits(x, "horizons_data")) {
 
-    errors <- c(errors,
-                cli::format_inline("{.arg x} must be a horizons_data object, got {.cls {class(x)}}"))
+    abort_horizons(
+      "{.arg x} must be a horizons_data object, not {.obj_type_friendly {x}}.",
+      kind = "input"
+    )
 
   }
 
- ## Validate by column exists -----------------------------------------------
-
-  if (inherits(x, "horizons_data") && !by %in% names(x$data$analysis)) {
-
-    errors <- c(errors,
-                cli::format_inline("Grouping column {.val {by}} not found in data"))
-
-  }
-
-  ## A custom `by` renames the rows, and a selection record is keyed to the
-  ## ids it drew. Refiltering the record needs the survivors to be a subset
-  ## of the ids the draw named; new ids are not a subset of anything, so the
-  ## record cannot be maintained and the object must be averaged first.
-
-  if (inherits(x, "horizons_data") && !is.null(x$selection) && by != "sample_id") {
-
-    errors <- c(errors,
-                cli::format_inline("{.fn average} cannot use a custom {.arg by} on an object carrying a selection record: promoting {.val {by}} to {.field sample_id} renames rows the draw is keyed to"))
-
-  }
-
-  ## Validate parameters -----------------------------------------------------
-
-  if (!is.logical(quality_check) || length(quality_check) != 1) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg quality_check} must be TRUE or FALSE"))
-
-  }
-
-  if (!is.numeric(correlation_threshold) || length(correlation_threshold) != 1 ||
-      correlation_threshold < 0 || correlation_threshold > 1) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg correlation_threshold} must be a number between 0 and 1"))
-
-  }
-
-  if (!is.character(on_all_outliers) || length(on_all_outliers) == 0) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg on_all_outliers} must be one of 'warn', 'drop', or 'keep_best'"))
-
-  }
-
-  ## Report validation errors with tree style --------------------------------
-
-  if (length(errors) > 0) {
-
-    cat(cli::col_red(cli::style_bold("! Input validation failed:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(paste(c("Input validation failed:", errors), collapse = "\n"),
-                 class = "horizons_validation_error")
-
-  }
-
-  on_all_outliers <- match.arg(on_all_outliers)
-
-  ## Averaging rebuilds the rows that a promotion's splits are keyed to.
-  check_unpromoted(x)
-
-  ## -------------------------------------------------------------------------
-  ## Step 1b: Structural validation before the rebuild
-  ## -------------------------------------------------------------------------
+  ## Structural validation before the rebuild --------------------------------
   ## Step 8 below rebuilds the averaged table from role_map's predictor,
   ## meta and response columns; a column present in analysis but missing
   ## from role_map is referenced by none of them and would be silently
@@ -203,6 +133,60 @@ average <- function(x,
   ## exactly the input average() exists to collapse.
 
   x <- validate_horizons_data(x, stage = "raw")
+
+  ## Averaging rebuilds the rows that a promotion's splits are keyed to.
+  check_unpromoted(x)
+
+  ## Validate by column exists -----------------------------------------------
+
+  check_arg(rlang::check_string, by)
+
+  if (!by %in% names(x$data$analysis)) {
+
+    abort_horizons(c(
+      "{.arg by} must name a column of the data, and {.val {by}} is not one.",
+      "i" = "Columns: {.field {names(x$data$analysis)}}."
+    ), kind = "input")
+
+  }
+
+  ## A custom `by` renames the rows, and a selection record is keyed to the
+  ## ids it drew. Refiltering the record needs the survivors to be a subset
+  ## of the ids the draw named; new ids are not a subset of anything, so the
+  ## record cannot be maintained and the object must be averaged first.
+
+  if (!is.null(x$selection) && by != "sample_id") {
+
+    abort_horizons(c(
+      "{.arg by} cannot be a custom column on an object carrying a {.fn select_training} record.",
+      "x" = "Promoting {.val {by}} to {.field sample_id} renames the rows the draw is keyed to.",
+      "i" = "Average first, then run {.fn select_training}."
+    ), kind = "input")
+
+  }
+
+  ## Validate parameters -----------------------------------------------------
+
+  check_arg(rlang::check_bool, quality_check)
+  check_arg(rlang::check_number_decimal, correlation_threshold, min = 0, max = 1)
+
+  outlier_modes <- c("warn", "drop", "keep_best")
+
+  ### The default is the vector of modes, as match.arg() reads it.
+  if (identical(on_all_outliers, outlier_modes)) on_all_outliers <- outlier_modes[1]
+
+  if (!rlang::is_string(on_all_outliers) || !on_all_outliers %in% outlier_modes) {
+
+    abort_horizons(c(
+      "{.arg on_all_outliers} must be one of {.val {outlier_modes}}.",
+      "x" = "Got {.code {paste(deparse(on_all_outliers), collapse = ' ')}}."
+    ), kind = "input")
+
+  }
+
+  check_arg(rlang::check_bool, verbose)
+
+  collector <- log_open("average")
 
   ## -------------------------------------------------------------------------
   ## Step 2: Identify column roles
@@ -216,8 +200,10 @@ average <- function(x,
 
   if (length(predictor_cols) == 0) {
 
-    rlang::abort("No predictor columns found in role_map",
-                 class = "horizons_data_error")
+    abort_horizons(c(
+      "{.arg x} has no spectra to average.",
+      "i" = "Average an object with spectra, from {.fn spectra}."
+    ), kind = "input")
 
   }
 
@@ -246,15 +232,40 @@ average <- function(x,
 
   if (anyNA(group_values)) {
 
-    rlang::abort(
-      paste0("Grouping column '", by, "' contains NA values; resolve before averaging"),
-      class = "horizons_data_error"
-    )
+    n_na <- sum(is.na(group_values))
+
+    abort_horizons(c(
+      "The grouping column {.field {by}} has {n_na} {.code NA} value{?s}, which group{?s/} no replicates.",
+      "i" = "Resolve the ids with {.fn parse_ids}, or drop the rows, before averaging."
+    ), kind = "input")
 
   }
 
   unique_groups <- unique(group_values)
   n_groups <- length(unique_groups)
+
+  ## A custom `by` becomes the character sample_id, so its values must stay
+  ## distinct as character: two doubles that print alike would merge two
+  ## samples' ids. Refused before any group is averaged.
+
+  if (by != "sample_id") {
+
+    as_ids  <- as.character(unique_groups)
+    dup_ids <- unique(as_ids[duplicated(as_ids)])
+
+    if (length(dup_ids) > 0) {
+
+      shown <- utils::head(dup_ids, 5)
+
+      abort_horizons(c(
+        "{.arg by} column {.field {by}} has values that become the same {.field sample_id} as text.",
+        "x" = "Repeated as text: {.val {shown}}.",
+        "i" = "Make {.field {by}} character, or round it, before averaging."
+      ), kind = "input")
+
+    }
+
+  }
 
   n_replicates <- nrow(analysis)
 
@@ -274,7 +285,7 @@ average <- function(x,
   n_dropped           <- 0
   all_outlier_samples <- character()
   dropped_samples     <- character()
-  qc_details          <- list()
+  conflicts           <- list()
 
   ## For the report: the groups that lost some replicates to QC and averaged
   ## the rest, and the groups whose every replicate failed, handled by
@@ -306,6 +317,8 @@ average <- function(x,
                   on_all_outliers     = on_all_outliers) -> group_result
 
     ## Handle results --------------------------------------------------------
+
+    conflicts <- c(conflicts, group_result$conflicts)
 
     if (is.null(group_result$averaged)) {
 
@@ -342,13 +355,27 @@ average <- function(x,
 
     }
 
-    ## Store QC details for provenance ---------------------------------------
+  }
 
-    if (quality_check && n_reps >= 2) {
+  ## Conflicting non-numeric responses: every group, refused once -------------
+  ## There is no defensible way to average two different lab classifications
+  ## of one sample, so the user resolves them; naming every group at once
+  ## spares them a run per group.
 
-      qc_details[[as.character(group_id)]] <- group_result$qc_info
+  if (length(conflicts) > 0) {
 
-    }
+    lines <- vapply(conflicts, function(cf) {
+      paste0(cf$column, " in ", cf$group, ": ", paste(cf$values, collapse = ", "))
+    }, character(1))
+    shown <- utils::head(lines, 5)
+    more  <- length(lines) - length(shown)
+
+    abort_horizons(c(
+      "{length(lines)} sample{?s} {?has/have} response values that disagree between replicates.",
+      stats::setNames(sprintf("{shown[%d]}", seq_along(shown)), rep("x", length(shown))),
+      "i" = if (more > 0) "And {more} more.",
+      "i" = "Resolve the values before averaging, or drop the column."
+    ), kind = "input")
 
   }
 
@@ -362,13 +389,13 @@ average <- function(x,
 
   if (length(results_list) == 0) {
 
-    cat(cli::col_red(cli::style_bold("! All samples dropped due to quality control:\n")))
-    cat(cli::col_red(paste0("   \u251C\u2500 ", n_groups, " samples had all replicates flagged as outliers\n")))
-    cat(cli::col_red(paste0("   \u2514\u2500 Consider on_all_outliers = 'warn' or lowering threshold\n")))
-    cat("\n")
-
-    rlang::abort("All samples dropped due to quality control",
-                 class = "horizons_qc_error")
+    abort_horizons(c(
+      "Every sample failed quality control on every replicate, and {.code on_all_outliers = \"drop\"} dropped them all.",
+      "i" = "Keep them with {.code on_all_outliers = \"warn\"} or {.code \"keep_best\"}, or lower {.arg correlation_threshold}.",
+      "i" = "The samples, one row each, are on this condition as {.field results}: {.code rlang::last_error()$results}."
+    ), kind = "run", class = "horizons_error_qc",
+       results = tibble::tibble(sample_id    = as.character(unique_groups),
+                                n_replicates = as.integer(reps_per_group[as.character(unique_groups)])))
 
   }
 
@@ -420,28 +447,9 @@ average <- function(x,
     ## I2 says sample_id is character. A numeric or factor `by` would pass
     ## the validator's presence and uniqueness checks and then break joins
     ## against models$cv_predictions and ensemble$predictions much later.
+    ### NA grouping values and values that coincide as text were refused
+    ### before grouping.
     averaged[[by]] <- as.character(averaged[[by]])
-
-    if (anyNA(averaged[[by]])) {
-
-      rlang::abort(
-        paste0("Promoting '", by, "' to sample_id produced NA ids"),
-        class = "horizons_data_error"
-      )
-
-    }
-
-    dup_ids <- unique(averaged[[by]][duplicated(averaged[[by]])])
-
-    if (length(dup_ids) > 0) {
-
-      rlang::abort(
-        paste0("Promoting '", by, "' to sample_id produced duplicate ids: ",
-               paste(utils::head(dup_ids, 5), collapse = ", ")),
-        class = "horizons_data_error"
-      )
-
-    }
 
     names(averaged)[names(averaged) == by] <- "sample_id"
     new_role_map <- new_role_map[new_role_map$variable != "sample_id", , drop = FALSE]
@@ -496,19 +504,24 @@ average <- function(x,
   x <- validate_horizons_data(x)
 
   ## -------------------------------------------------------------------------
-  ## Step 11: Emit warnings for all-outlier groups
+  ## Step 11: The samples averaged though every replicate failed
   ## -------------------------------------------------------------------------
+  ## Everything ran as asked, but these averages are weaker than the result
+  ## shows.
 
   if (length(all_outlier_samples) > 0 && on_all_outliers == "warn") {
 
-    cli::cli_warn(c(
-      "All replicates failed QC for {length(all_outlier_samples)} sample{?s}",
-      "i" = "Samples: {.val {head(all_outlier_samples, 5)}}",
-      if (length(all_outlier_samples) > 5) "i" = "... and {length(all_outlier_samples) - 5} more",
-      "i" = "Averaged anyway (consider {.code on_all_outliers = 'keep_best'})"
-    ))
+    shown <- utils::head(all_outlier_samples, 5)
+
+    log_warning(collector, "quality", c(
+      "All replicates failed QC for {length(all_outlier_samples)} sample{?s}, averaged anyway.",
+      "i" = "Samples: {.val {shown}}{if (length(all_outlier_samples) > 5) paste0(' and ', length(all_outlier_samples) - 5, ' more') else ''}.",
+      "i" = "Use {.code on_all_outliers = \"keep_best\"} to keep one replicate of each, or {.code \"drop\"} to drop them."
+    ), ids = all_outlier_samples)
 
   }
+
+  x$log <- log_close(collector, x$log)
 
   ## -------------------------------------------------------------------------
   ## Step 12: Verbose output
@@ -595,6 +608,8 @@ average <- function(x,
     cat("\u2502\n")
 
   }
+
+  signal_log(collector, x)
 
   x
 
@@ -754,7 +769,10 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #'   * `averaged`: Single-row tibble (or NULL if dropped)
 #'   * `n_dropped`: Number of replicates dropped
 #'   * `all_outliers`: Logical, TRUE if all replicates were outliers
-#'   * `qc_info`: QC details for provenance
+#'   * `qc_info`: QC details
+#'   * `conflicts`: One entry per non-numeric response whose replicates
+#'     disagree (`column`, `group`, `values`), for `average()` to refuse
+#'     together
 #'
 #' @noRd
 average_group <- function(group_data,
@@ -775,6 +793,7 @@ average_group <- function(group_data,
   all_outliers <- FALSE
   qc_info <- NULL
   rows_to_average <- seq_len(n_reps)
+  conflicts <- list()
 
   ## -------------------------------------------------------------------------
   ## Quality check (if enabled and n >= 2)
@@ -883,9 +902,20 @@ average_group <- function(group_data,
 
     for (col in response_cols) {
 
-      collapsed[[col]] <- collapse_response(values   = rows_to_use[[col]],
-                                            column   = col,
-                                            group_id = group_id)
+      collapsed[[col]] <- collapse_response(values = rows_to_use[[col]])
+
+      ### Kept as the first value so the group still binds; average()
+      ### refuses every conflict before the result is used.
+      if (inherits(collapsed[[col]], "conflict")) {
+
+        conflicts[[length(conflicts) + 1L]] <- list(
+          column = col,
+          group  = as.character(group_id),
+          values = unclass(collapsed[[col]])
+        )
+        collapsed[[col]] <- rows_to_use[[col]][1]
+
+      }
 
     }
 
@@ -933,7 +963,8 @@ average_group <- function(group_data,
     averaged     = result,
     n_dropped    = n_dropped,
     all_outliers = all_outliers,
-    qc_info      = qc_info
+    qc_info      = qc_info,
+    conflicts    = conflicts
   )
 
 }
@@ -948,19 +979,20 @@ average_group <- function(group_data,
 #' @description
 #' Numeric response values become their mean over the replicates being
 #' averaged. Non-numeric values must be uniform within the group; a group
-#' whose values disagree is an error rather than a silent first-value pick,
-#' because there is no defensible way to average two different lab
-#' classifications of one sample.
+#' whose values disagree is returned as a conflict rather than a silent
+#' first-value pick, because there is no defensible way to average two
+#' different lab classifications of one sample. `average()` refuses every
+#' conflicting group at once.
 #'
 #' @param values Vector of the column's values for the group's replicates.
-#' @param column Character. Column name, for the error message.
-#' @param group_id The group identifier, for the error message.
 #'
 #' @return Length-one vector of the same type as `values` (numeric columns
-#'   return `NA_real_` when every replicate is missing).
+#'   return `NA_real_` when every replicate is missing), or, for values
+#'   that disagree, their distinct non-missing values with class
+#'   `"conflict"`.
 #'
 #' @noRd
-collapse_response <- function(values, column, group_id) {
+collapse_response <- function(values) {
 
   if (is.numeric(values)) {
 
@@ -982,13 +1014,7 @@ collapse_response <- function(values, column, group_id) {
 
   }
 
-  rlang::abort(
-    paste0("Response column '", column, "' has conflicting values within group '",
-           as.character(group_id), "': ",
-           paste(unique(values[!is.na(values)]), collapse = ", "),
-           ". Resolve before averaging, or drop the column."),
-    class = "horizons_data_error"
-  )
+  structure(as.character(unique(values[!is.na(values)])), class = "conflict")
 
 }
 

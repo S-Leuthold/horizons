@@ -77,8 +77,10 @@ result as \code{object} and its warnings as \code{log}.}
 downloaded.}
 \item{\code{horizons_error_boruta}}{(run) \code{\link[=step_select_boruta]{step_select_boruta()}}'s Boruta run
 failed; Boruta's error is in its message.}
-\item{\code{horizons_error_qc}}{(run) A quality check failed once it had been
-computed.}
+\item{\code{horizons_error_qc}}{(run) \code{\link[=average]{average()}} had nothing to return:
+every sample failed quality control on every replicate and
+\code{on_all_outliers = "drop"} dropped it. One row per sample travels as
+\code{results}: its \code{sample_id} and \code{n_replicates}.}
 \item{\code{horizons_error_consent}}{(input) A library download was declined.}
 \item{\code{horizons_error_missing_predict_package}}{(dependency) \code{predict()}
 needs a model package that is not installed.}
@@ -95,7 +97,9 @@ is weaker than its output shows (small folds, every member below the
 prune threshold). \code{predict()} raises each distinct warning another
 package raised while predicting under this topic, naming the
 configurations (or an ensemble's units) that raised it, and
-\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.}
+\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.
+\code{\link[=average]{average()}} names the samples it averaged though every replicate
+failed quality control.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such
 as a member's prediction intervals, a response \code{\link[=select_training]{select_training()}}
 could not draw for under \code{properties = NULL}, or a \code{\link[=validate]{validate()}} check
