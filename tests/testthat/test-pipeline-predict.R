@@ -760,6 +760,24 @@ describe("predict.horizons_fit() - flagged rows", {
 
   })
 
+  it("returns a flat spectrum in a bare data frame as NA, naming it once, not twice", {
+
+    ## The transform step returns it NA and names it; predict() names it
+    ## too, by sample id, and the step's own warning is not raised again
+    flat <- new_df
+    flat[4, wn] <- 0.5
+
+    w <- collect_warnings(p <- predict(fitted_fixture, flat))$warnings
+
+    expect_length(w, 1L)
+    expect_true(inherits(w[[1]], "horizons_warning_flagged"))
+    expect_identical(w[[1]]$log$ids[[1]], flat$sample_id[4])
+    expect_false(grepl("step_transform_spectra", conditionMessage(w[[1]]), fixed = TRUE))
+    expect_true(is.na(p$.pred[p$sample_id == flat$sample_id[4]]))
+    expect_true(all(is.finite(p$.pred[p$sample_id != flat$sample_id[4]])))
+
+  })
+
   it("predicts nothing when every row is bad, and keeps every column", {
 
     flag <- rep("standardize", nrow(new_df))

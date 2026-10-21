@@ -397,6 +397,17 @@ SELECT_CHUNK_SIZE <- 500L
 # 2: the space is fit without the library's flagged rows (0.12.0).
 SELECT_SPACE_CACHE_VERSION <- 2L
 
+## spectra() -------------------------------------------------------------------
+
+# spectra(): how close, as a fraction of a file's own median step, a
+# wavenumber must lie to one already read for the two to be the same
+# column. Scans from different sessions on one instrument can carry axes
+# that differ in the last digits (0.00066 cm-1 at a 1.93 cm-1 step, #224),
+# which would otherwise bind into two column sets. A step apart is a
+# different point, so 1% leaves a wide margin either way. It only renames,
+# never refuses or skips, so it has no override.
+WN_SNAP_FRACTION <- 0.01
+
 ## validate() Heuristics --------------------------------------------------------
 
 # validate()'s P010 check: cubist without dimension reduction on a large

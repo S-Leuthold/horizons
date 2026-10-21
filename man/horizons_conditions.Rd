@@ -45,6 +45,11 @@ not predict, or an ensemble's member or its combination could not.
 One row per failure travels as \code{results}: its \code{unit} (\code{"configuration"}, or
 \code{"combination"} for an ensemble's), \code{config_id} (\code{NA} for the
 combination), \code{step}, \code{class} and \code{error_message}.}
+\item{\code{horizons_error_read_failed}}{(run) \code{\link[=spectra]{spectra()}} could read none
+of the files it was given. One row per file travels as \code{results}: its
+\code{file}, the \code{step} that failed (\code{"file_read"}, or \code{"file_block"} for
+a file with no absorbance block), the \code{class} of the root cause, and
+the \code{cause}.}
 \item{\code{horizons_error_selection_failed}}{(run) \code{\link[=select_training]{select_training()}} had
 nothing to return: the twin subtraction left no training rows for any
 property it drew for. One row per property travels as \code{results}: its
@@ -89,13 +94,17 @@ asked ran, under a documented fallback.}
 is weaker than its output shows (small folds, every member below the
 prune threshold). \code{predict()} raises each distinct warning another
 package raised while predicting under this topic, naming the
-configurations (or an ensemble's units) that raised it.}
+configurations (or an ensemble's units) that raised it, and
+\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such
 as a member's prediction intervals, or a response \code{\link[=select_training]{select_training()}}
 could not draw for under \code{properties = NULL}.}
 \item{\code{horizons_warning_flagged}}{A step kept samples it could not use;
-modelling leaves them out. From \code{predict()}, the rows it returned \code{NA}
-because they were flagged on arrival (\code{.flag}) or were not finite after
+modelling leaves them out. From \code{\link[=standardize]{standardize()}}, the spectra it
+flagged (\code{.flag}); from \code{step_transform_spectra()}, the spectra its
+bake returned \code{NA}, with the field \code{step}. From \code{predict()}, the
+rows it returned \code{NA} because they were flagged on arrival (\code{.flag})
+or were not finite after
 a configuration's recipe; from \code{\link[=select_training]{select_training()}}, the targets it drew
 no training set for because they were flagged on arrival.}
 \item{\code{horizons_warning_partial_failure}}{Some units failed and the rest

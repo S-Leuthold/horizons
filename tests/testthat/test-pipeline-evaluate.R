@@ -213,10 +213,10 @@ describe("evaluate() - gate checks", {
 
   })
 
-  it("refuses an axis whose bands are out of order before anything is drawn (#121)", {
+  it("refuses an axis whose names are not wavenumbers at its door, before anything is drawn (#121)", {
 
-    ## Names the door validator does not parse as wavenumbers, so only the
-    ## band-order check sees them
+    ## Names the door validator cannot read as wavenumbers, so it cannot
+    ## check their order either: refused as an invalid object
     local_mocked_bindings(
       draw_eval_split = function(...) stop("a split was drawn"),
       evaluate_single_config = function(...) stop("a configuration ran")
@@ -231,7 +231,8 @@ describe("evaluate() - gate checks", {
     ## The first two bands swapped
     obj$data$role_map$variable[pred] <- news[c(2, 1, 3:length(news))]
 
-    expect_error(evaluate(obj), "not monotonically ordered", class = "horizons_error_input")
+    err <- expect_error(evaluate(obj), class = "horizons_error_validation")
+    expect_true(any(grepl("do not parse as a wavenumber: wn_X", err$findings, fixed = TRUE)))
 
   })
 
@@ -546,6 +547,7 @@ describe("evaluate() - all configs fail", {
     msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
     expect_match(msg, "5 configurations were loaded from checkpoints in runs/soc rather than run (cfg_001, cfg_002, cfg_003 and 2 more).",
                  fixed = TRUE)
+    expect_match(msg, "To re-run them, delete their files, checkpoints/<config_id>.rds.", fixed = TRUE)
 
   })
 

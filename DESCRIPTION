@@ -40,7 +40,7 @@ Imports:
     opusreader2,
     parsnip,
     pls,
-    prospectr,
+    prospectr (>= 0.2.10),
     purrr,
     qs2,
     ranger,

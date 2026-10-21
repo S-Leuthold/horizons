@@ -1245,6 +1245,13 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 #' what `predict()` checks for non-finite rows, and what the applicability
 #' domain is measured in.
 #'
+#' A step that returns rows it cannot use as `NA` names them in a `flagged`
+#' warning carrying the field `step` (`step_transform_spectra()`). Those
+#' rows are not finite after the recipe, so `predict()` names them itself,
+#' by sample id, in its own `flagged` warning ([log_flagged()]); the step's
+#' is muffled here so a sample is not named twice, as
+#' [quiet_selection_warnings()] muffles what a verb reports itself.
+#'
 #' @param workflow A fitted (possibly butchered) workflow.
 #' @param new_data The rows to bake.
 #' @return Numeric matrix, one row per row of `new_data`.
@@ -1254,7 +1261,14 @@ bake_predictors <- function(workflow, new_data) {
 
   prepped <- workflows::extract_recipe(workflow, estimated = TRUE)
 
-  as.matrix(recipes::bake(prepped, new_data = new_data, recipes::all_predictors()))
+  baked <- withCallingHandlers(
+    recipes::bake(prepped, new_data = new_data, recipes::all_predictors()),
+    horizons_warning_flagged = function(w) {
+      if (!is.null(w[["step"]])) rlang::cnd_muffle(w)
+    }
+  )
+
+  as.matrix(baked)
 
 }
 
@@ -1489,19 +1503,22 @@ shown_ids <- function(ids, n_show = 5L) {
 
 }
 
-#' Collect the warnings another package raised inside a prediction unit
+#' Collect the warnings another package raised inside a unit with no row
 #'
 #' `evaluate()` and `fit()` keep such a warning on the unit's row. `predict()`
-#' returns predictions only, with no row to keep it on (decision 1), so each
-#' distinct one is collected as a `quality` warning naming the units that
-#' raised it, and raised once at the end of the call with the rest.
+#' returns predictions only, with no row to keep it on (decision 1), and
+#' `spectra()` keeps no table of the files it read, so each distinct one is
+#' collected as a `quality` warning naming the units that raised it, and
+#' raised once at the end of the call with the rest.
 #'
 #' @param collector The call's collector.
 #' @param records Unit records, shaped like [new_unit_records()]'s.
+#' @param while_doing Character(1). What the units were doing, for the
+#'   message: `"predicting"`, or `"reading"` in `spectra()`.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_foreign_warnings <- function(collector, records) {
+log_foreign_warnings <- function(collector, records, while_doing = "predicting") {
 
   foreign <- records[records$type == "warning" &
                        !startsWith(records$class, "horizons_warning_"), , drop = FALSE]
@@ -1515,7 +1532,7 @@ log_foreign_warnings <- function(collector, records) {
 
     ### The text is substituted, not inlined, so braces in it stay text.
     log_warning(collector, "quality", c(
-      "A warning arose while predicting: {text}",
+      "A warning arose while {while_doing}: {text}",
       "i" = unit_where(unit)
     ), ids = ids)
 

@@ -840,11 +840,12 @@ test_that("a library row with no defined distance is left out of the resemblance
   ## Under cosine a row on the pool's centroid has no angle, so no nearest
   ## other row. A library whose rows pair off around one of them puts that
   ## row exactly on the centroid: integer spectra, no SNV and no derivative,
-  ## so the centring is exact.
+  ## so the centring is exact. The centre has spread, as every spectrum a
+  ## verb takes must.
   fx <- select_fixture(n_pool = 60)
   p  <- length(fx$target_wn)
 
-  centre <- rep(10, p)
+  centre <- 10 + seq_len(p) %% 3
   d      <- withr::with_seed(9, matrix(sample(-3:3, 15 * p, replace = TRUE), 15))
   m      <- rbind(centre, sweep(d, 2, centre, "+"), sweep(-d, 2, centre, "+"))
   colnames(m) <- paste0("wn_", fx$target_wn)
@@ -2272,6 +2273,49 @@ test_that("hulls over different ranges name the range both reach, which a librar
   ## Following it from spectra() is accepted
   utils::capture.output(pool_both <- standardize(fx$pool, resample = 4, trim = c(604, 3996), baseline = TRUE))
   expect_s3_class(select_training(targets, pool_both, k = 10, properties = "clay"), "horizons_data")
+
+})
+
+
+test_that("a hull carried through standardize(force = TRUE) is compared over the range it was fitted (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    targets <- standardize(fx$targets, resample = 8, trim = c(1000, 3000), baseline = TRUE)
+    ## Trimmed further without a new hull: still the 1000 to 3000 hull
+    forced  <- standardize(targets, resample = 8, trim = c(1200, 2800), force = TRUE)
+    ## Hulled over the library's range, then trimmed: still the library's hull
+    same    <- standardize(fx$targets, resample = 8, baseline = TRUE)
+    same    <- standardize(same, resample = 8, trim = c(1000, 3000), force = TRUE)
+  })
+
+  err <- expect_error(select_training(forced, pool, k = 5), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "the library's hull over 600 to 4000 cm-1 and the targets' over 1000 to 3000 cm-1", fixed = TRUE)
+
+  expect_identical(same$provenance$standardization$wavelength_range, c(1000, 3000))
+  expect_s3_class(suppressWarnings(select_training(same, pool, k = 5)), "horizons_data")
+
+})
+
+
+test_that("a hull-corrected record written without its range is read by its axis, never passed unchecked (#107)", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  utils::capture.output({
+    pool    <- standardize(fx$pool,    resample = 4, baseline = TRUE)
+    targets <- standardize(fx$targets, resample = 8, trim = c(1000, 3000), baseline = TRUE)
+  })
+
+  ## As standardize() wrote a record before it kept the hull's range
+  pool$provenance$standardization$baseline_range    <- NULL
+  targets$provenance$standardization$baseline_range <- NULL
+
+  expect_error(select_training(targets, pool, k = 5), "hulls are pinned at different ends",
+               class = "horizons_error_input")
 
 })
 

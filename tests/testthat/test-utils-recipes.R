@@ -215,10 +215,11 @@ describe("build_recipe()", {
 
   })
 
-  it("refuses an axis out of order whose names the validator does not parse (#121)", {
+  it("is not reached by an axis whose names are not wavenumbers: the object holding it is invalid (#121)", {
 
-    ## The door validator checks the order of names like wn_4000; one named
-    ## wn_X4000 reaches the recipe unchecked until #121
+    ## build_recipe() reads the axis from the role map as given; every verb
+    ## that builds a recipe validates its object first, and an axis named
+    ## like wn_X4000 is refused there, whatever its order
     withr::local_seed(1)
     td   <- make_test_data(n_wn = 10)
     pred <- td$role_map$role == "predictor"
@@ -227,8 +228,10 @@ describe("build_recipe()", {
     names(td$data)[match(olds, names(td$data))] <- news
     td$role_map$variable[pred] <- sample(news)
 
-    expect_error(build_recipe(make_config_row(), td$data, td$role_map),
-                 "not monotonically ordered", class = "horizons_error_input")
+    obj <- new_horizons_data(analysis = td$data, role_map = td$role_map)
+
+    err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+    expect_true(any(grepl("do not parse as a wavenumber: wn_X", err$findings, fixed = TRUE)))
 
   })
 
@@ -503,28 +506,52 @@ describe("build_recipe() serialization footprint", {
 
 describe("step_transform_spectra() surfaces unusable spectra", {
 
-  it("warns, naming the rows, when a spectrum cannot be processed", {
+  it("returns a spectrum it cannot use as NA whatever the method, naming it by sample id", {
 
-    td     <- make_test_data(n = 30, n_wn = 40)
-    config <- make_config_row(preprocessing = "snv", feature_selection = "none")
+    td <- make_test_data(n = 30, n_wn = 40)
 
-    rec <- build_recipe(config, td$data, td$role_map)
-    prepped <- recipes::prep(rec)
-
-    ## A wholly non-finite spectrum is the case the length check is blind to:
-    ## the fallback row is built to the expected width, so lengths agree and
-    ## nothing downstream can tell it apart from a real result. Note a *single*
-    ## NA does not reach this path — prospectr's SNV tolerates it.
+    ## Row 3 is flat, row 11 carries one missing value. Under SNV the flat
+    ## row would otherwise come back as zeros, and under a derivative the
+    ## missing value would leave the row only partly NA.
     bad <- td$data
     wn  <- grep("^wn_", names(bad), value = TRUE)
-    bad[3,  wn] <- NA_real_
-    bad[11, wn] <- NA_real_
+    bad[3, wn]       <- 0.5
+    bad$wn_3990[11]  <- NA_real_
 
-    expect_warning(recipes::bake(prepped, new_data = bad),
-                   "produced no usable output")
+    for (pp in c("snv", "deriv1")) {
 
-    ## The message has to name the rows to be actionable.
-    expect_warning(recipes::bake(prepped, new_data = bad), "3, 11")
+      prepped <- recipes::prep(build_recipe(make_config_row(preprocessing = pp), td$data, td$role_map))
+
+      w <- expect_warning(baked <- recipes::bake(prepped, new_data = bad),
+                          class = "horizons_warning_flagged")
+      spec <- as.matrix(baked[, grep("^spec", names(baked))])
+
+      expect_true(all(is.na(spec[c(3, 11), ])), info = pp)
+      expect_false(anyNA(spec[-c(3, 11), ]), info = pp)
+
+      msg <- conditionMessage(w)
+      expect_match(msg, "2 spectra could not be used by `step_transform_spectra()`", fixed = TRUE, info = pp)
+      expect_match(msg, 'not finite: "S011"', fixed = TRUE, info = pp)
+      expect_match(msg, 'no spread (every value equal): "S003"', fixed = TRUE, info = pp)
+      expect_identical(w$step, "step_transform_spectra")
+
+    }
+
+  })
+
+  it("names the rows by position in a recipe with no id role", {
+
+    td  <- make_test_data(n = 10, n_wn = 20)
+    dat <- dplyr::select(td$data, -sample_id)
+
+    prepped <- recipes::recipe(SOC ~ ., data = dat) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "raw") |>
+      recipes::prep()
+
+    dat[4, grep("^wn_", names(dat))] <- NA_real_
+
+    expect_warning(recipes::bake(prepped, new_data = dat), '"row 4"', fixed = TRUE,
+                   class = "horizons_warning_flagged")
 
   })
 
@@ -542,6 +569,29 @@ describe("step_transform_spectra() surfaces unusable spectra", {
 
 })
 
+describe("tidy() on step_transform_spectra() (#109)", {
+
+  it("reports the selectors before prep, and each column with its method and window after", {
+
+    td  <- make_test_data(n = 10, n_wn = 20)
+    dat <- dplyr::select(td$data, -sample_id)
+    rec <- recipes::recipe(SOC ~ ., data = dat) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv1", window_size = 7)
+
+    before <- recipes::tidy(rec, number = 1)
+    expect_identical(names(before), c("terms", "preprocessing", "window_size", "id"))
+    expect_identical(before$terms, 'dplyr::starts_with("wn_")')
+
+    after <- recipes::tidy(recipes::prep(rec), number = 1)
+    expect_identical(after$terms, grep("^wn_", names(dat), value = TRUE))
+    expect_identical(unique(after$preprocessing), "deriv1")
+    expect_identical(unique(after$window_size), 7)
+    expect_identical(unique(after$id), rec$steps[[1]]$id)
+
+  })
+
+})
+
 ## =========================================================================
 ## transform_spectra_matrix: the matrix path equals the row-wise reference
 ## =========================================================================
@@ -554,15 +604,17 @@ describe("transform_spectra_matrix()", {
 
   methods <- c("raw", "sg", "snv", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
 
-  it("matches process_spectra_row() for every method", {
+  it("transforms each row as it transforms that row alone, for every method", {
 
+    ## Every method is row-wise: a spectrum's result does not depend on the
+    ## other rows of the matrix
     set.seed(11)
     X <- matrix(rnorm(25 * 41), nrow = 25)
 
     for (m in methods) {
 
       ref <- do.call(rbind, lapply(seq_len(nrow(X)), function(i) {
-        horizons:::process_spectra_row(X[i, ], preprocessing = m, window_size = 9)
+        horizons:::transform_spectra_matrix(X[i, , drop = FALSE], preprocessing = m, window_size = 9)
       }))
       got <- horizons:::transform_spectra_matrix(X, preprocessing = m, window_size = 9)
 
@@ -620,10 +672,13 @@ describe("transform_spectra_matrix()", {
 
   })
 
-  it("rejects an unknown method", {
+  it("is never given an unknown method, so one is a bug in its caller (#199)", {
 
+    ## The step refuses an unknown method when it is added
+    ## (test-step-transform-spectra.R); reaching here with one is internal
     expect_error(horizons:::transform_spectra_matrix(matrix(rnorm(41), 1), "nope"),
-                 "Unknown preprocessing type")
+                 'Unknown preprocessing method "nope"', fixed = TRUE,
+                 class = "horizons_error_internal")
 
   })
 
@@ -631,17 +686,15 @@ describe("transform_spectra_matrix()", {
 
 
 ## =========================================================================
-## process_spectra_row: each method equals its direct prospectr call
+## transform_spectra_matrix: each method equals its direct prospectr call
 ## =========================================================================
 ##
-## The row function is the reference transform_spectra_matrix() is tested
-## against, so it needs a reference of its own. Each method is written out
-## here as the prospectr call it is meant to be, derivative order and
-## polynomial degree spelled out, so a changed parameter fails here instead of
-## moving both paths together. The length invariant is the arithmetic prep()
-## uses to name the step's output. See #52.
+## Each method is written out here as the prospectr call it is meant to be,
+## derivative order and polynomial degree spelled out, so a changed parameter
+## fails here. The length invariant is the arithmetic prep() uses to name the
+## step's output. See #52.
 
-describe("process_spectra_row() against prospectr", {
+describe("transform_spectra_matrix() against prospectr", {
 
   sg <- function(x, m, p, w) {
     as.vector(prospectr::savitzkyGolay(matrix(x, nrow = 1), m = m, p = p, w = w))
@@ -677,7 +730,8 @@ describe("process_spectra_row() against prospectr", {
 
       for (m in names(reference)) {
 
-        out <- horizons:::process_spectra_row(x, preprocessing = m, window_size = w)
+        out <- as.vector(horizons:::transform_spectra_matrix(matrix(x, nrow = 1),
+                                                             preprocessing = m, window_size = w))
 
         expect_equal(length(out), length(x) - (w - 1), label = paste(m, w))
         expect_equal(out, reference[[m]](x, w), tolerance = 1e-12,
@@ -803,7 +857,10 @@ describe("step_transform_spectra() name collisions and window size", {
     rec <- build_recipe(config, td$data, td$role_map)
 
     expect_error(recipes::prep(rec), "spec01")
-    expect_error(recipes::prep(rec), class = "horizons_input_error")
+    err <- expect_error(recipes::prep(rec), class = "horizons_error_input")
+
+    ## Reported as the step's prep(), not the helper that found it
+    expect_identical(rlang::call_name(err$parent$call), "prep")
 
   })
 
@@ -845,7 +902,7 @@ describe("step_transform_spectra() name collisions and window size", {
         step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = pp,
                                window_size = 9)
 
-      expect_error(recipes::prep(rec), class = "horizons_input_error", label = pp)
+      expect_error(recipes::prep(rec), class = "horizons_error_input", label = pp)
       expect_error(recipes::prep(rec), "9 spectral columns", label = pp)
 
     }
@@ -872,7 +929,7 @@ describe("step_transform_spectra() name collisions and window size", {
         step_transform_spectra(base, dplyr::starts_with("wn_"),
                                preprocessing = "raw", window_size = bad),
         "odd whole number of at least 5",
-        class = "horizons_input_error",
+        class = "horizons_error_input",
         info  = paste("window_size =", deparse(bad))
       )
 
@@ -881,7 +938,7 @@ describe("step_transform_spectra() name collisions and window size", {
     ## build_recipe() builds the step, so a direct caller is held to the same
     ## rule configure() applies.
     expect_error(build_recipe(make_config_row(), td$data, td$role_map, sg_window = 8L),
-                 class = "horizons_input_error")
+                 class = "horizons_error_input")
 
     expect_no_error(step_transform_spectra(base, dplyr::starts_with("wn_"),
                                            preprocessing = "deriv2", window_size = 5))

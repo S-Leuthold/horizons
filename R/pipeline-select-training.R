@@ -1739,10 +1739,13 @@ check_pool_unpromoted <- function(pool) {
 #' is a wrong result, not a weak one, so it is refused before any work.
 #'
 #' @details
-#' `standardize()` fits the hull after it trims and resamples, and the only
-#' step after it, water-band removal, leaves a gap the axis door refuses, so
-#' the hull's ends are each record's `wavelength_range`. Those ranges are
-#' compared, not the `trim` arguments: data that stops short of a bound fits
+#' `standardize()` records the range each hull was fitted over as
+#' `baseline_range`, kept when a later `standardize(force = TRUE)` trims the
+#' axis further, so a hull's ends are its record's `baseline_range`; a
+#' record written before it was kept has its hull over its
+#' `wavelength_range`, which is read in its place ([prior_hull_range()]).
+#' Those ranges are compared, not the `trim` arguments: data that stops
+#' short of a bound fits
 #' a different hull under an equal trim, and `trim = NULL` on data spanning
 #' the bounds fits the same hull as the bounds. Two ranges agree when each
 #' end differs by less than the coarser of the two grids' steps, as close as
@@ -1778,8 +1781,10 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
 
   if (!pool_hull && !target_hull) return(invisible(NULL))
 
-  p_range <- pool_record$wavelength_range
-  t_range <- target_record$wavelength_range
+  ### The range each hull was fitted over (prior_hull_range()); a side
+  ### without one is read by its axis, which is where a hull would be fitted
+  p_range <- if (pool_hull) prior_hull_range(pool_record) else pool_record$wavelength_range
+  t_range <- if (target_hull) prior_hull_range(target_record) else target_record$wavelength_range
   t_step  <- signif(target_step, 4)
   l_step  <- signif(pool_step, 4)
   force   <- if (restandardize) ", force = TRUE" else ""

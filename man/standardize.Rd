@@ -10,7 +10,8 @@ standardize(
   trim = c(600, 4000),
   remove_water = FALSE,
   baseline = FALSE,
-  force = FALSE
+  force = FALSE,
+  verbose = getOption("horizons.verbose", TRUE)
 )
 }
 \arguments{
@@ -36,6 +37,9 @@ Default \code{FALSE}.}
 
 \item{force}{\code{logical.} Re-standardize even if already standardized?
 Default \code{FALSE}. Not recommended — may cause data quality issues.}
+
+\item{verbose}{\code{logical.} Print progress messages. Default
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 \code{horizons_data.} The input object with standardized spectra.
@@ -46,6 +50,10 @@ were actually re-interpolated (\code{resampled}), and the grid they sit on
 read that from \code{grid$step} or from the columns. A training set
 \code{select_training()} returns carries its library's record, with the axis
 fields describing the columns it returns (see \code{\link[=select_training]{select_training()}}).
+\code{baseline} says whether the spectra carry a convex-hull correction, from
+this call or, under \code{force = TRUE}, an earlier one, and \code{baseline_range}
+is the range that hull was fitted over (\code{NULL} without one), which
+\code{\link[=select_training]{select_training()}} compares between a library and its targets.
 }
 \description{
 Applies standardization operations to get spectra into a consistent format
@@ -90,7 +98,23 @@ gives clean, stable names (\code{wn_601.5}).
 
 The spectra are interpolated onto the grid by cubic spline and never
 extrapolated: grid points beyond the data's range are dropped with a
-warning that says how many and where. Nor is a hole in the input filled:
+warning that says how many and where. Each spectrum is resampled from its
+own finite points, and nothing is interpolated across a value it is
+missing: a spectrum missing a value (\code{NA}, \code{NaN} or \code{Inf}) anywhere
+between its first and last points is flagged (see Unusable spectra), on
+every path, and one whose points end before the grid's gets \code{NA} beyond
+them, never a value extrapolated. Fill or drop missing values before
+\code{spectra()} if a spectrum should be kept. A spectrum on a coarser grid of
+its own, as a file read beside finer ones is, is missing nothing, and is
+put on the grid from its own points. Its own spacing tells the two apart:
+a spacing wider than 1.5 times the median of the three on each side of it
+(the larger side), with an axis column the spectrum lacks inside it, is a
+missing value. So a run of more than three alternating missing points
+reads as a coarser grid; so do missing points within about a point of
+the place where one spectrum's resolution coarsens, on the fine side; and
+a file whose own axis skips one point is flagged when it is bound with a
+file that has a point there, though not when it is read alone.
+Nor is a hole in the input filled:
 where the data's own axis has a gap (a spacing over three times the median
 and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
 \code{remove_water = TRUE}), the grid points inside it are dropped with a
@@ -111,9 +135,34 @@ the trimmed native axis. Water bands are deleted last so that
 derivative taken later still runs across the hole they leave, which is a
 separate matter (see \code{select_training()}'s \code{mask}).
 
+\strong{Unusable spectra:} a spectrum \code{standardize()} cannot use, one with a
+value that is not finite among those it returns, or one with no spread
+(every value equal), is kept and flagged, never dropped: its
+\code{.flag} is \code{"standardize"} (a \code{meta} column, created when the first row
+is flagged), and one \code{horizons_warning_flagged} counts and names them,
+by reason. With resampling, a spectrum whose own points end before the
+grid does (as the scans of a narrower file bound with wider ones do) is
+flagged for that, and the warning gives the range such spectra cover,
+inside which a \code{trim} keeps them. A value missing only inside a water
+band the call removes flags nothing, unless the hull is fitted across it.
+\code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=predict]{predict()}} and \code{\link[=select_training]{select_training()}} leave flagged
+spectra out. The convex hull is fitted to the spectra not flagged, and a
+flagged spectrum keeps its values as they stood when it was flagged, so
+with \code{baseline = TRUE} a spectrum with a value missing anywhere the hull
+is fitted is flagged, a water band it then removes included. The rule
+holds with every operation off too. A row an earlier step flagged
+keeps its flag.
+
 \strong{Idempotence:} If the object has already been standardized, calling
-\code{standardize()} again will warn and return the object unchanged. Use
-\code{force = TRUE} to override (not recommended).
+\code{standardize()} again returns the object unchanged, with one
+\code{horizons_warning_skipped}. Use \code{force = TRUE} to override (not
+recommended); as you asked for it, that is reported in verbose output and
+in a note on the log rather than warned.
+
+\strong{Warnings} are collected as the call runs and raised once per topic at
+its end, each written to the object's \code{log} first: grid points dropped
+because the data does not reach them or they fall in a gap are one
+\code{horizons_warning_coverage}.
 }
 \examples{
 \dontrun{

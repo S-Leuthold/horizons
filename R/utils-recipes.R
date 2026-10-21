@@ -69,14 +69,6 @@ build_recipe <- function(config_row,
   )
 
   ## -----------------------------------------------------------------------
-  ## Column ordering invariant
-  ## -----------------------------------------------------------------------
-  ## Savitzky-Golay windows need the bands in order. evaluate() checks it at
-  ## its door; fit() reaches it here.
-
-  check_band_order(predictor_cols)
-
-  ## -----------------------------------------------------------------------
   ## Step 1: Initialize recipe with roles
   ## -----------------------------------------------------------------------
 
@@ -241,49 +233,6 @@ build_recipe <- function(config_row,
   ## worker. Passing environment() explicitly keeps that dependency visible.
 
   strip_selector_envs(rec, environment())
-
-}
-
-
-## ---------------------------------------------------------------------------
-## check_band_order
-## ---------------------------------------------------------------------------
-
-#' Refuse a spectral axis whose bands are out of order
-#'
-#' @description
-#' Savitzky-Golay windows need the bands in order. The door validator checks
-#' the order of names that parse as wavenumbers; this reads the digits of any
-#' name, so an axis named like `wn_X4000` (#121) is checked too until the
-#' validator requires every name to parse. A name whose digits do not make a
-#' number skips the check.
-#'
-#' @param predictor_cols Character. The predictor columns, in table order.
-#' @param call The frame the refusal reports: the verb's, or
-#'   `build_recipe()`'s.
-#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
-#' @keywords internal
-#' @noRd
-check_band_order <- function(predictor_cols, call = rlang::caller_env()) {
-
-  predictor_nums <- wn_values(gsub("[^0-9.\\-]", "", predictor_cols))
-
-  if (!any(is.na(predictor_nums)) && length(predictor_nums) > 1) {
-
-    diffs <- diff(predictor_nums)
-
-    if (!all(diffs < 0) && !all(diffs > 0)) {
-
-      abort_horizons(
-        "Predictor columns are not monotonically ordered. Spectral preprocessing requires ordered wavelengths.",
-        kind = "input", call = call
-      )
-
-    }
-
-  }
-
-  invisible(NULL)
 
 }
 

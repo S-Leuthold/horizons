@@ -147,7 +147,7 @@ test_that("parse_ids() too_few='keep_original' keeps filename as sample_id", {
   expect_warning(
     result <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}",
                         too_few = "keep_original"),
-    "did not match"
+    "did not match", class = "horizons_warning_substitution"
   )
 
   ## Assert ----------------------------------------------------------------
@@ -155,6 +155,12 @@ test_that("parse_ids() too_few='keep_original' keeps filename as sample_id", {
   expect_equal(result$data$analysis$sample_id[1], "S001")
   expect_equal(result$data$analysis$sample_id[2], "weird_format")  # kept original
   expect_equal(result$data$analysis$sample_id[3], "S002")
+
+  ## Recorded on the object, naming the file, whether or not it is seen
+  quiet <- suppressWarnings(parse_ids(hd, format = "{project}_{sampleid}_{fraction}"))
+  row   <- quiet$log[quiet$log$verb == "parse_ids", ]
+  expect_identical(row$topic, "substitution")
+  expect_identical(row$ids[[1]], "weird_format")
 
 })
 
@@ -167,20 +173,25 @@ test_that("parse_ids() too_few='na' sets sample_id to NA, with or without a samp
   hd <- make_test_hd(c("PROJ_S001", "nomatch"))
 
   ## Act -------------------------------------------------------------------
-  ## parse_ids() warns that a filename did not match. The NA id it leaves
-  ## passes the raw-stage validator silently: average() and the full stage
-  ## refuse it.
+  ## The NA ids are what the user asked for, so they are reported, not
+  ## warned: a note on the log and a line in the tree. The NA id passes the
+  ## raw-stage validator silently: average() and the full stage refuse it.
 
-  expect_warning(
-    result <- parse_ids(hd, format = "{project}_{sampleid}", too_few = "na"),
-    "did not match"
+  expect_no_warning(
+    result <- parse_ids(hd, format = "{project}_{sampleid}", too_few = "na")
   )
+
+  note <- result$log[result$log$verb == "parse_ids", ]
+  expect_identical(note$type, "note")
+  expect_identical(note$ids[[1]], "nomatch")
+  expect_match(note$message, "Pattern did not match 1 filename", fixed = TRUE)
+
+  ## Its tree line: the snapshot of "records and reports the unmatched count"
 
   ## Without a sampleid token the matched rows keep their ids and the
   ## unmatched one still loses its own
-  expect_warning(
-    no_token <- parse_ids(hd, format = "{project}_{plate}", too_few = "na"),
-    "did not match"
+  expect_no_warning(
+    no_token <- parse_ids(hd, format = "{project}_{plate}", too_few = "na")
   )
 
   ## Assert ----------------------------------------------------------------
@@ -202,10 +213,14 @@ test_that("parse_ids() too_few='error' aborts on non-match", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
+  err <- expect_error(
     parse_ids(hd, format = "{project}_{sampleid}", too_few = "error"),
-    "did not match"
+    "did not match", class = "horizons_error_input"
   )
+  expect_match(conditionMessage(err), "or set `too_few` to \"keep_original\" or \"na\"", fixed = TRUE)
+
+  expect_error(parse_ids(hd, format = "{project}_{sampleid}", too_few = "drop"),
+               "`too_few` must be one of", fixed = TRUE, class = "horizons_error_input")
 
 })
 
@@ -300,6 +315,17 @@ test_that("parse_ids() records provenance", {
 
 })
 
+test_that("parse_ids() prints nothing under verbose = FALSE, and refuses a verbose that is not TRUE or FALSE", {
+
+  hd <- make_test_hd(c("A_B", "C_D"))
+
+  expect_silent(parse_ids(hd, format = "{first}_{second}", verbose = FALSE))
+
+  expect_error(parse_ids(hd, format = "{first}_{second}", verbose = NA),
+               "`verbose` must be `TRUE` or `FALSE`", fixed = TRUE, class = "horizons_error_input")
+
+})
+
 test_that("parse_ids() records and reports the unmatched count", {
 
   ## Arrange ---------------------------------------------------------------
@@ -308,8 +334,12 @@ test_that("parse_ids() records and reports the unmatched count", {
 
   ## Act -------------------------------------------------------------------
 
-  ## The warning and the tree line both carry the count
-  expect_snapshot(result <- parse_ids(hd, format = "{first}_{second}"))
+  ## The warning and the tree line both carry the count; under too_few =
+  ## "na" the tree says the ids were set to NA, and nothing is warned
+  expect_snapshot({
+    result <- parse_ids(hd, format = "{first}_{second}", verbose = TRUE)
+    invisible(parse_ids(hd, format = "{first}_{second}", too_few = "na", verbose = TRUE))
+  })
 
   ## Assert ----------------------------------------------------------------
 
@@ -368,36 +398,20 @@ test_that("parse_ids() strips file extensions before parsing", {
 
 
 ## ---------------------------------------------------------------------------
-## parse_ids() — Warns on non-OPUS sources
+## parse_ids() — Any source with a filename column
 ## ---------------------------------------------------------------------------
 
-test_that("parse_ids() warns when used with a CSV or tibble source", {
+test_that("parse_ids() reads CSV, tibble and OPUS data alike, without a warning", {
 
-  for (type in c("csv", "tibble")) {
+  for (type in c("csv", "tibble", "opus")) {
 
     hd <- make_test_hd(c("A_B"), spectra_type = type)
 
-    expect_warning(
-      parse_ids(hd, format = "{first}_{second}"),
-      "designed for OPUS",
-      info = type
-    )
+    expect_no_warning(result <- parse_ids(hd, format = "{first}_{second}"))
+    expect_identical(result$data$analysis$first, "A", info = type)
+    expect_identical(nrow(result$log), 0L, info = type)
 
   }
-
-})
-
-test_that("parse_ids() does NOT warn for OPUS source", {
-
-  ## Arrange ---------------------------------------------------------------
-
-  hd <- make_test_hd(c("A_B"), spectra_type = "opus")
-
-  ## Act & Assert ----------------------------------------------------------
-
-  expect_no_warning(
-    parse_ids(hd, format = "{first}_{second}")
-  )
 
 })
 
@@ -410,7 +424,7 @@ test_that("parse_ids() errors on non-horizons_data input", {
 
   expect_error(
     parse_ids(data.frame(x = 1), format = "{a}"),
-    "must be a horizons_data"
+    "must be a horizons_data", class = "horizons_error_input"
   )
 
 })
@@ -421,7 +435,7 @@ test_that("parse_ids() errors when neither format nor patterns provided", {
 
   expect_error(
     parse_ids(hd),
-    "Must provide either"
+    "Must provide either", class = "horizons_error_input"
   )
 
 })
@@ -432,7 +446,7 @@ test_that("parse_ids() errors when both format and patterns provided", {
 
   expect_error(
     parse_ids(hd, format = "{a}", patterns = c(a = ".+")),
-    "Cannot provide both"
+    "Cannot provide both", class = "horizons_error_input"
   )
 
 })
@@ -442,34 +456,42 @@ test_that("parse_ids() refuses patterns that are not a character vector", {
   ## Arrange — a list where c() was meant
   hd <- make_test_hd(c("PROJ_S1-1_a", "PROJ_S2-1_b"))
 
-  ## Act & Assert. The abort carries no package class, so the message is
-  ## the check.
+  ## Act & Assert
   expect_error(
     parse_ids(hd, patterns = list(sampleid = "S\\d+-\\d+")),
-    "`patterns` must be a character vector", fixed = TRUE
+    "`patterns` must be a character vector", fixed = TRUE, class = "horizons_error_input"
   )
 
 })
 
-test_that("parse_ids() errors on empty format string", {
+test_that("parse_ids() refuses a format that is empty or not a single string", {
 
   hd <- make_test_hd(c("test"))
 
   expect_error(
     parse_ids(hd, format = ""),
-    "cannot be empty"
+    "`format` must be a single string, not the empty string", fixed = TRUE,
+    class = "horizons_error_input"
+  )
+
+  expect_error(
+    parse_ids(hd, format = c("{a}", "{b}")),
+    "`format` must be a single string, not a character vector", fixed = TRUE,
+    class = "horizons_error_input"
   )
 
 })
 
-test_that("parse_ids() errors when format has no tokens", {
+test_that("parse_ids() refuses a format with no token, naming parse_ids()", {
 
   hd <- make_test_hd(c("test"))
 
-  expect_error(
+  err <- expect_error(
     parse_ids(hd, format = "literal_only"),
-    "No tokens"
+    "`format` must hold at least one `{token}`", fixed = TRUE,
+    class = "horizons_error_input"
   )
+  expect_identical(rlang::call_name(err$call), "parse_ids")
 
 })
 
@@ -485,10 +507,11 @@ test_that("parse_ids() errors when filename column missing", {
 
   ## Act & Assert ----------------------------------------------------------
 
-  expect_error(
+  err <- expect_error(
     parse_ids(obj, format = "{a}"),
-    "filename"
+    "No filename column found in data", fixed = TRUE, class = "horizons_error_input"
   )
+  expect_match(conditionMessage(err), "`spectra()` creates it when it reads OPUS files", fixed = TRUE)
 
 })
 

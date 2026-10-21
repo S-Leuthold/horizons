@@ -28,9 +28,9 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #' encode project, sample ID, fraction, replicate, or position information.
 #'
 #' @details
-#' **Note:** This function is intended for OPUS file workflows. For CSV or tibble data,
-#' sample IDs and metadata are typically already in separate columns and do not require
-#' parsing. A warning is issued if `parse_ids()` is called on non-OPUS data.
+#' For CSV or tibble data, sample IDs and metadata are usually already in
+#' columns of their own; `parse_ids()` reads any data with a `filename`
+#' column.
 #'
 #' The function supports two modes:
 #'
@@ -58,16 +58,21 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #' @param patterns Named character vector. Regex patterns where names become
 #'   columns and unnamed elements are separators. Mutually exclusive with `format`.
 #' @param too_few Character. How to handle non-matching filenames:
-#'   * `"keep_original"` (default): Keep original filename as `sample_id`, warn.
+#'   * `"keep_original"` (default): Keep original filename as `sample_id`,
+#'     with one `horizons_warning_substitution` naming the files.
 #'   * `"error"`: Abort with list of non-matching files.
-#'   * `"na"`: Set `sample_id` to NA, warn.
+#'   * `"na"`: Set `sample_id` to NA. As you asked for it, it is not warned:
+#'     the files are counted in verbose output and named in a note on the
+#'     log.
+#' @param verbose Logical. Print progress messages. Default:
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @details
 #' **Duplicate or missing sample ids:** Several filenames parsing to the same
 #' `sampleid` token is normal here — that is what identifies replicate scans
 #' of one physical sample — and so is an `NA` `sample_id` left by `too_few =
 #' "na"`. `parse_ids()` passes either silently, as [spectra()] does (the
-#' filenames that did not match still warn, under `too_few = "na"`). Use
+#' filenames that did not match are reported, under `too_few = "na"`). Use
 #' [average()] to collapse the replicates before anything downstream that
 #' requires unique ids.
 #'
@@ -102,7 +107,8 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 parse_ids <- function(x,
                       format   = NULL,
                       patterns = NULL,
-                      too_few  = "keep_original") {
+                      too_few  = "keep_original",
+                      verbose  = getOption("horizons.verbose", TRUE)) {
 
   ## -------------------------------------------------------------------------
   ## Step 1: Input validation
@@ -112,10 +118,10 @@ parse_ids <- function(x,
 
   if (!inherits(x, "horizons_data")) {
 
-    cli::cli_abort(c(
-      "{.arg x} must be a horizons_data object",
-      "x" = "Got {.cls {class(x)}}"
-    ))
+    abort_horizons(
+      "{.arg x} must be a horizons_data object, not {.obj_type_friendly {x}}.",
+      kind = "input"
+    )
 
   }
 
@@ -124,26 +130,13 @@ parse_ids <- function(x,
 
   x <- validate_horizons_data(x, stage = "raw")
 
+  check_arg(rlang::check_bool, verbose)
+
   ## Refuse a promoted object ------------------------------------------------
   ## Rewriting sample_id is a row change: evaluation and model splits are
   ## keyed to the ids this would rewrite.
 
   check_unpromoted(x, "parse_ids")
-
-  ## Warn if not OPUS source -------------------------------------------------
-
-  source_type <- x$provenance$spectra_type
-
-  if (!is.null(source_type) && source_type %in% c("csv", "tibble")) {
-
-    cli::cli_warn(c(
-      "{.fn parse_ids} is designed for OPUS file workflows",
-      "i" = "Data source: {.val {source_type}}",
-      "i" = "For CSV/tibble data, sample IDs are typically already in separate columns",
-      "i" = "If you need to parse IDs, ensure a {.field filename} column exists"
-    ))
-
-  }
 
   ## Validate exactly one of format/patterns provided ------------------------
 
@@ -152,20 +145,20 @@ parse_ids <- function(x,
 
   if (!has_format && !has_patterns) {
 
-    cli::cli_abort(c(
-      "Must provide either {.arg format} or {.arg patterns}",
-      "i" = "Use {.arg format} for simple token-based parsing",
-      "i" = "Use {.arg patterns} for complex regex matching"
-    ))
+    abort_horizons(c(
+      "Must provide either {.arg format} or {.arg patterns}.",
+      "i" = "Use {.arg format} for simple token-based parsing.",
+      "i" = "Use {.arg patterns} for complex regex matching."
+    ), kind = "input")
 
   }
 
   if (has_format && has_patterns) {
 
-    cli::cli_abort(c(
-      "Cannot provide both {.arg format} and {.arg patterns}",
-      "i" = "Choose one parsing method"
-    ))
+    abort_horizons(c(
+      "Cannot provide both {.arg format} and {.arg patterns}.",
+      "i" = "Choose one parsing method."
+    ), kind = "input")
 
   }
 
@@ -173,15 +166,15 @@ parse_ids <- function(x,
 
   if (has_format) {
 
-    if (!is.character(format) || length(format) != 1) {
+    check_arg(rlang::check_string, format, allow_empty = FALSE)
 
-      cli::cli_abort("{.arg format} must be a single character string")
+    if (!grepl("\\{[^}]+\\}", format)) {
 
-    }
-
-    if (nchar(format) == 0) {
-
-      cli::cli_abort("{.arg format} cannot be empty")
+      abort_horizons(c(
+        "{.arg format} must hold at least one {.code {{token}}}.",
+        "i" = "Format: {.val {format}}.",
+        "i" = "Tokens are in curly brackets, e.g. {.code {{sampleid}}}."
+      ), kind = "input")
 
     }
 
@@ -189,19 +182,27 @@ parse_ids <- function(x,
 
   ## Validate patterns if provided -------------------------------------------
 
-  if (has_patterns) {
+  if (has_patterns && !is.character(patterns)) {
 
-    if (!is.character(patterns)) {
-
-      cli::cli_abort("{.arg patterns} must be a character vector")
-
-    }
+    abort_horizons(
+      "{.arg patterns} must be a character vector, not {.obj_type_friendly {patterns}}.",
+      kind = "input"
+    )
 
   }
 
   ## Validate too_few parameter ----------------------------------------------
 
-  too_few <- match.arg(too_few, c("keep_original", "error", "na"))
+  too_few_values <- c("keep_original", "error", "na")
+
+  if (!rlang::is_string(too_few) || !too_few %in% too_few_values) {
+
+    abort_horizons(c(
+      "{.arg too_few} must be one of {.val {too_few_values}}.",
+      "x" = "Got {.val {too_few}}."
+    ), kind = "input")
+
+  }
 
   ## -------------------------------------------------------------------------
   ## Step 2: Get filenames from analysis tibble
@@ -211,13 +212,15 @@ parse_ids <- function(x,
 
   if (!"filename" %in% names(x$data$analysis)) {
 
-    cli::cli_abort(c(
-      "No {.field filename} column found in data",
-      "i" = "The {.fn spectra} function should create this column",
-      "i" = "Check that you're using a horizons_data object from {.fn spectra}"
-    ))
+    abort_horizons(c(
+      "No {.field filename} column found in data.",
+      "i" = "{.fn spectra} creates it when it reads OPUS files.",
+      "i" = "Check that you're using a horizons_data object from {.fn spectra}."
+    ), kind = "input")
 
   }
+
+  collector <- log_open("parse_ids")
 
   filenames <- x$data$analysis$filename
 
@@ -252,34 +255,34 @@ parse_ids <- function(x,
   if (n_unmatched > 0) {
 
     non_match_names <- filenames[non_matches]
+    more_10 <- if (n_unmatched > 10) paste0(" and ", n_unmatched - 10, " more") else ""
+    more_5  <- if (n_unmatched > 5) paste0(" and ", n_unmatched - 5, " more") else ""
 
     if (too_few == "error") {
 
-      err <- c(
-        "Pattern did not match {n_unmatched} filename{?s}",
-        "i" = "Non-matching files:",
-        "i" = "{.val {head(non_match_names, 10)}}"
-      )
-      if (n_unmatched > 10) {
-        err <- c(err, "i" = "... and {n_unmatched - 10} more")
-      }
-      cli::cli_abort(err)
+      abort_horizons(c(
+        "Pattern did not match {n_unmatched} filename{?s}.",
+        "i" = "Non-matching files: {.val {head(non_match_names, 10)}}{more_10}.",
+        "i" = "Change {.arg format} or {.arg patterns} so they match, or set {.arg too_few} to {.val keep_original} or {.val na}."
+      ), kind = "input")
 
     } else if (too_few == "keep_original") {
 
-      cli::cli_warn(c(
-        "Pattern did not match {n_unmatched} filename{?s}",
-        "i" = "Keeping original filename as sample_id",
-        "i" = "Non-matching: {.val {head(non_match_names, 5)}}"
-      ))
+      ### Other than what was asked ran: these ids are filenames, which
+      ### average() will not collapse with their replicates
+      log_warning(collector, "substitution", c(
+        "Pattern did not match {n_unmatched} filename{?s}.",
+        "i" = "Keeping original filename as sample_id.",
+        "i" = "Non-matching: {.val {head(non_match_names, 5)}}{more_5}."
+      ), ids = non_match_names)
 
-    } else if (too_few == "na") {
+    } else {
 
-      cli::cli_warn(c(
-        "Pattern did not match {n_unmatched} filename{?s}",
-        "i" = "Setting sample_id to NA for non-matches",
-        "i" = "Non-matching: {.val {head(non_match_names, 5)}}"
-      ))
+      ### too_few = "na" is the user's explicit choice: reported, not warned
+      log_note(collector, c(
+        "Pattern did not match {n_unmatched} filename{?s}, so {?its/their} {.field sample_id} {?is/are} {.code NA}.",
+        "i" = "Non-matching: {.val {head(non_match_names, 5)}}{more_5}."
+      ), ids = non_match_names)
 
     }
 
@@ -396,21 +399,41 @@ parse_ids <- function(x,
 
   x <- validate_horizons_data(x, stage = "raw")
 
+  x$log <- log_close(collector, x$log)
+
   ## -------------------------------------------------------------------------
   ## Step 9: CLI output
   ## -------------------------------------------------------------------------
 
-  cat(paste0("\u251C\u2500 ", cli::style_bold("Parsing sample IDs"), "...\n"))
+  if (verbose) {
 
-  id_str <- paste0(n_matched, " IDs extracted")
-  if (n_unmatched > 0) {
+    cat(paste0("\u251C\u2500 ", cli::style_bold("Parsing sample IDs"), "...\n"))
 
-    id_str <- paste0(id_str, " (", n_unmatched, " unmatched)")
+    id_str <- paste0(n_matched, " IDs extracted")
+    if (n_unmatched > 0) {
+
+      id_str <- paste0(id_str, " (", n_unmatched, " unmatched)")
+
+    }
+
+    if (n_unmatched > 0 && too_few == "na") {
+
+      cat(paste0("\u2502  \u251C\u2500 ", id_str, "\n"))
+      cat(paste0("\u2502  \u2514\u2500 ", cli::format_inline(
+        "{n_unmatched} sample id{?s} set to {.code NA} ({.code too_few = \"na\"})"
+      ), "\n"))
+
+    } else {
+
+      cat(paste0("\u2502  \u2514\u2500 ", id_str, "\n"))
+
+    }
+
+    cat("\u2502\n")
 
   }
 
-  cat(paste0("\u2502  \u2514\u2500 ", id_str, "\n"))
-  cat("\u2502\n")
+  signal_log(collector, x)
 
   x
 
@@ -454,15 +477,7 @@ format_to_patterns <- function(format) {
   token_matches <- gregexpr(token_regex, format, perl = TRUE)
   token_starts  <- as.integer(token_matches[[1]])
 
-  if (token_starts[1] == -1) {
-
-    cli::cli_abort(c(
-      "No tokens found in format string",
-      "i" = "Format: {.val {format}}",
-      "i" = "Tokens should be in curly brackets, e.g., {{sampleid}}"
-    ))
-
-  }
+  ### parse_ids() has checked that the format holds a token.
 
   token_lengths <- attr(token_matches[[1]], "match.length")
   n_tokens      <- length(token_starts)

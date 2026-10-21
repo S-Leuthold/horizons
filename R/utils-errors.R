@@ -163,6 +163,11 @@ check_arg <- function(check,
 #'     One row per failure travels as `results`: its `unit` (`"configuration"`, or
 #'     `"combination"` for an ensemble's), `config_id` (`NA` for the
 #'     combination), `step`, `class` and `error_message`.}
+#'   \item{`horizons_error_read_failed`}{(run) [spectra()] could read none
+#'     of the files it was given. One row per file travels as `results`: its
+#'     `file`, the `step` that failed (`"file_read"`, or `"file_block"` for
+#'     a file with no absorbance block), the `class` of the root cause, and
+#'     the `cause`.}
 #'   \item{`horizons_error_selection_failed`}{(run) [select_training()] had
 #'     nothing to return: the twin subtraction left no training rows for any
 #'     property it drew for. One row per property travels as `results`: its
@@ -205,13 +210,17 @@ check_arg <- function(check,
 #'     is weaker than its output shows (small folds, every member below the
 #'     prune threshold). `predict()` raises each distinct warning another
 #'     package raised while predicting under this topic, naming the
-#'     configurations (or an ensemble's units) that raised it.}
+#'     configurations (or an ensemble's units) that raised it, and
+#'     [spectra()] each one raised while reading, naming the files.}
 #'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
 #'     as a member's prediction intervals, or a response [select_training()]
 #'     could not draw for under `properties = NULL`.}
 #'   \item{`horizons_warning_flagged`}{A step kept samples it could not use;
-#'     modelling leaves them out. From `predict()`, the rows it returned `NA`
-#'     because they were flagged on arrival (`.flag`) or were not finite after
+#'     modelling leaves them out. From [standardize()], the spectra it
+#'     flagged (`.flag`); from `step_transform_spectra()`, the spectra its
+#'     bake returned `NA`, with the field `step`. From `predict()`, the
+#'     rows it returned `NA` because they were flagged on arrival (`.flag`)
+#'     or were not finite after
 #'     a configuration's recipe; from [select_training()], the targets it drew
 #'     no training set for because they were flagged on arrival.}
 #'   \item{`horizons_warning_partial_failure`}{Some units failed and the rest

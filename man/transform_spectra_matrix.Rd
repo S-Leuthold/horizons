@@ -11,7 +11,7 @@ transform_spectra_matrix(X, preprocessing, window_size = 9)
 spectrum per row.}
 
 \item{preprocessing}{Character. One of the methods documented in
-\code{\link[=step_transform_spectra]{step_transform_spectra()}}.}
+\code{\link[=step_transform_spectra]{step_transform_spectra()}}, which checks it.}
 
 \item{window_size}{Odd integer. Savitzky-Golay window size. Default 9.}
 }
@@ -19,7 +19,8 @@ spectrum per row.}
 A numeric matrix with \code{nrow(X)} rows and
 \code{ncol(X) - (window_size - 1)} columns, without dimnames. Rows whose input
 is entirely non-finite come back entirely \code{NA}; no error is raised for
-them, so callers that need to surface such rows must check.
+them, and a flat row comes back as whatever the method makes of it, so
+the step's \code{bake()} applies \code{\link[=standardize]{standardize()}}'s rule to the rows itself.
 }
 \description{
 Applies one of the supported preprocessing methods to a whole spectral

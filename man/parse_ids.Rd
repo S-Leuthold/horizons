@@ -4,7 +4,13 @@
 \alias{parse_ids}
 \title{Parse sample IDs and metadata from filenames}
 \usage{
-parse_ids(x, format = NULL, patterns = NULL, too_few = "keep_original")
+parse_ids(
+  x,
+  format = NULL,
+  patterns = NULL,
+  too_few = "keep_original",
+  verbose = getOption("horizons.verbose", TRUE)
+)
 }
 \arguments{
 \item{x}{A \code{horizons_data} object from \code{spectra()}.}
@@ -17,10 +23,16 @@ columns and unnamed elements are separators. Mutually exclusive with \code{forma
 
 \item{too_few}{Character. How to handle non-matching filenames:
 \itemize{
-\item \code{"keep_original"} (default): Keep original filename as \code{sample_id}, warn.
+\item \code{"keep_original"} (default): Keep original filename as \code{sample_id},
+with one \code{horizons_warning_substitution} naming the files.
 \item \code{"error"}: Abort with list of non-matching files.
-\item \code{"na"}: Set \code{sample_id} to NA, warn.
+\item \code{"na"}: Set \code{sample_id} to NA. As you asked for it, it is not warned:
+the files are counted in verbose output and named in a note on the
+log.
 }}
+
+\item{verbose}{Logical. Print progress messages. Default:
+\code{getOption("horizons.verbose", TRUE)}, as every verb's.}
 }
 \value{
 The input \code{horizons_data} object with:
@@ -37,9 +49,9 @@ This function is designed for OPUS file workflows where instrument-generated fil
 encode project, sample ID, fraction, replicate, or position information.
 }
 \details{
-\strong{Note:} This function is intended for OPUS file workflows. For CSV or tibble data,
-sample IDs and metadata are typically already in separate columns and do not require
-parsing. A warning is issued if \code{parse_ids()} is called on non-OPUS data.
+For CSV or tibble data, sample IDs and metadata are usually already in
+columns of their own; \code{parse_ids()} reads any data with a \code{filename}
+column.
 
 The function supports two modes:
 
@@ -64,7 +76,7 @@ column. All other tokens create new metadata columns.
 \strong{Duplicate or missing sample ids:} Several filenames parsing to the same
 \code{sampleid} token is normal here — that is what identifies replicate scans
 of one physical sample — and so is an \code{NA} \code{sample_id} left by \code{too_few = "na"}. \code{parse_ids()} passes either silently, as \code{\link[=spectra]{spectra()}} does (the
-filenames that did not match still warn, under \code{too_few = "na"}). Use
+filenames that did not match are reported, under \code{too_few = "na"}). Use
 \code{\link[=average]{average()}} to collapse the replicates before anything downstream that
 requires unique ids.
 

@@ -27,6 +27,15 @@ GRID_DIGITS <- 6L
 #' @noRd
 GRID_TOL <- 1e-6
 
+#' How much wider than the spacings beside it a spectrum's own spacing must
+#' be to be a hole in it ([spectrum_holes()])
+#' @noRd
+HOLE_RATIO <- 1.5
+
+#' How many of a spectrum's own spacings on each side a hole is judged against
+#' @noRd
+HOLE_SIDE <- 3L
+
 
 ## =============================================================================
 ## Helper: canonical_grid()
@@ -70,7 +79,7 @@ canonical_grid <- function(lo, hi, step) {
 ## Helper: resample_spectra()
 ## =============================================================================
 
-#' Resample spectral matrix to target resolution
+#' Resample spectral matrix onto a wavenumber grid
 #'
 #' @description
 #' Resamples spectra to a new wavenumber grid using spline interpolation.
@@ -79,15 +88,12 @@ canonical_grid <- function(lo, hi, step) {
 #' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
 #' @param current_wav `numeric.` Current wavenumber positions (column names).
-#' @param target_resolution `numeric.` Target resolution in cm⁻¹ (e.g., 2).
-#'   The grid is the multiples of this resolution inside the data's range
-#'   (`canonical_grid()`), not a sequence stepped from the data's own
-#'   maximum. Exactly one of `target_resolution` and `new_wav` must be given.
-#' @param new_wav `numeric.` An explicit target grid, in any order. Used by
+#' @param new_wav `numeric.` The target grid, in any order. Used by
 #'   `standardize()` for each contiguous run of the data, and by
 #'   `select_training()` to put the targets on the library's grid for its
-#'   search, so the package has one resampling routine. Must lie within the range of
-#'   `current_wav`; this function never extrapolates. Default: `NULL`.
+#'   search, so the package has one resampling routine. Every caller builds
+#'   it inside the range of `current_wav`, since this function never
+#'   extrapolates; one outside it is a bug, refused as an internal error.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Resampled spectral matrix
@@ -96,53 +102,22 @@ canonical_grid <- function(lo, hi, step) {
 #'   - `n_after`: Number of wavelengths after resampling
 #'
 #' @noRd
-resample_spectra <- function(spectra_matrix,
-                             current_wav,
-                             target_resolution = NULL,
-                             new_wav           = NULL) {
+resample_spectra <- function(spectra_matrix, current_wav, new_wav) {
 
   ## ---------------------------------------------------------------------------
-  ## Step 1: Resolve the target wavenumber grid
+  ## Step 1: The grid sits inside the data's range
   ## ---------------------------------------------------------------------------
-
-  if (is.null(target_resolution) == is.null(new_wav)) {
-
-    cli::cli_abort("Give exactly one of {.arg target_resolution} and {.arg new_wav}",
-                   class = "horizons_input_error")
-
-  }
 
   wn_min <- min(current_wav)
   wn_max <- max(current_wav)
 
-  if (is.null(new_wav)) {
+  ### Without this the spline would extrapolate silently: a wrong value.
+  if (min(new_wav) < wn_min || max(new_wav) > wn_max) {
 
-    ## Canonical grid inside the data's range (decreasing) ----------------------
-
-    new_wav <- canonical_grid(wn_min, wn_max, target_resolution)
-
-    if (length(new_wav) == 0) {
-
-      cli::cli_abort(c(
-        "No multiple of {target_resolution} cm-1 falls inside the data's range",
-        "x" = "The data covers {wn_min} to {wn_max} cm-1"
-      ), class = "horizons_input_error")
-
-    }
-
-  } else {
-
-    ## Explicit grid: must sit inside the data's range --------------------------
-
-    if (min(new_wav) < wn_min || max(new_wav) > wn_max) {
-
-      cli::cli_abort(c(
-        "{.arg new_wav} extends beyond the data's wavenumber range",
-        "x" = "Requested {min(new_wav)} to {max(new_wav)}, data covers {wn_min} to {wn_max}",
-        "i" = "Resampling never extrapolates; trim the target grid to the data"
-      ), class = "horizons_input_error")
-
-    }
+    abort_horizons(c(
+      "{.arg new_wav} extends beyond the data's wavenumber range.",
+      "x" = "Requested {min(new_wav)} to {max(new_wav)}, data covers {wn_min} to {wn_max}."
+    ), kind = "internal")
 
   }
 
@@ -190,6 +165,181 @@ resample_spectra <- function(spectra_matrix,
 
 
 ## =============================================================================
+## Helper: spectrum_holes()
+## =============================================================================
+
+#' Where a spectrum's own points have a hole
+#'
+#' @description
+#' A spectrum missing a value inside its own range is flagged, never
+#' interpolated across (DECISIONS 2026-10-20), but a spectrum read on a
+#' coarser grid of its own, beside finer ones, lacks the finer grid's columns
+#' and is missing nothing. A spacing between two of its consecutive finite
+#' points is a hole when both hold:
+#'
+#' * an axis column it lacks lies between them, so a spacing every spectrum
+#'   shares (a gap in the axis itself, which `grid_summary()`'s rule
+#'   handles) is never one spectrum's hole; and
+#' * it is wider than `HOLE_RATIO` times the larger of the median spacings
+#'   on each side of it, over `HOLE_SIDE` of the spectrum's own spacings
+#'   each, so a grid that is coarse throughout, or changes resolution, or
+#'   changes spacing gradually (evenly spaced in nm) is read as it is.
+#'
+#' A value that is not finite (`NA`, `NaN`, `Inf`) is a point the spectrum
+#' lacks. A spacing at either end is judged against its one side.
+#'
+#' @details
+#' What the rule cannot tell from a coarser grid: alternating missing points
+#' more than `HOLE_SIDE` in a row (and every other point missing throughout
+#' is a grid at twice the step); and, where one spectrum changes from a fine
+#' to a coarse resolution, missing points on the fine side within about a
+#' point of the change, whose spacing is no wider than the coarse one's. A
+#' file whose own axis skips one point is read as having a hole when it is
+#' bound with a file that has a point there, and not when it is read alone.
+#'
+#' @param cols Integer, increasing. The positions on the axis of the
+#'   spectrum's finite points.
+#' @param wavelengths Numeric. The axis.
+#' @return Integer. Each `p` for which the spacing from `cols[p]` to
+#'   `cols[p + 1]` is a hole; empty when there is none.
+#' @keywords internal
+#' @noRd
+spectrum_holes <- function(cols, wavelengths) {
+
+  skips <- which(diff(cols) > 1L)
+
+  if (length(skips) == 0 || length(cols) < 3) return(integer(0))
+
+  d <- abs(diff(wavelengths[cols]))
+  n <- length(d)
+
+  side <- function(at) if (length(at)) stats::median(d[at]) else -Inf
+
+  wide <- vapply(skips, function(p) {
+
+    left  <- if (p > 1) max(1L, p - HOLE_SIDE):(p - 1L) else integer(0)
+    right <- if (p < n) (p + 1L):min(n, p + HOLE_SIDE) else integer(0)
+    ref   <- max(side(left), side(right))
+
+    d[p] > HOLE_RATIO * ref
+
+  }, logical(1))
+
+  skips[wide]
+
+}
+
+
+## =============================================================================
+## Helper: resample_onto_grid()
+## =============================================================================
+
+#' Resample each spectrum onto the grid from its own points
+#'
+#' @description
+#' Each spectrum is resampled from its own finite points: a grid point
+#' beyond the points it has, or inside a hole in them, is `NA` for it, never
+#' extrapolated or filled, and each contiguous run of its points is
+#' interpolated on its own, so no spline crosses a hole. Its runs are split
+#' at the axis's gaps (`grid_summary()`'s rule, which every spectrum shares)
+#' and at its own holes ([spectrum_holes()]), a missing value included.
+#' `prospectr::resample()` would otherwise drop a spectrum's missing values
+#' silently and fit through or past them.
+#'
+#' Spectra that share a pattern of finite values are resampled together, so
+#' a batch with no missing value is one call per run, the same call the
+#' whole batch always had.
+#'
+#' @param M `matrix.` Spectra as rows, on `wavelengths`.
+#' @param wavelengths `numeric.` The data's axis.
+#' @param grid `numeric.` The grid, already inside the data's range and
+#'   clear of the data's gaps.
+#'
+#' @return `matrix.` `nrow(M)` by `length(grid)`, `NA` where a spectrum's own
+#'   points do not reach.
+#'
+#' @noRd
+resample_onto_grid <- function(M, wavelengths, grid) {
+
+  out    <- matrix(NA_real_, nrow = nrow(M), ncol = length(grid))
+  finite <- is.finite(M)
+
+  ## Rows sharing a pattern of finite values ----------------------------------
+
+  complete <- rowSums(!finite) == 0
+  key      <- rep("complete", nrow(M))
+
+  if (!all(complete)) {
+
+    key[!complete] <- apply(finite[!complete, , drop = FALSE], 1, function(r) paste(which(r), collapse = ","))
+
+  }
+
+  for (pattern in unique(key)) {
+
+    rows <- which(key == pattern)
+    cols <- which(finite[rows[1], ])
+
+    ### A spline needs two points
+    if (length(cols) < 2) next
+
+    wn <- wavelengths[cols]
+
+    ## The grid points these spectra's own points reach ------------------------
+
+    holes <- spectrum_holes(cols, wavelengths)
+    gaps  <- rbind(grid_summary(wn)$gaps,
+                   if (length(holes)) cbind(low  = pmin(wn[holes], wn[holes + 1L]),
+                                            high = pmax(wn[holes], wn[holes + 1L])))
+    if (!is.null(gaps)) gaps <- unique(gaps)
+    reach <- grid >= min(wn) - GRID_TOL & grid <= max(wn) + GRID_TOL
+
+    for (i in seq_len(if (is.null(gaps)) 0L else nrow(gaps))) {
+
+      reach <- reach & !(grid > gaps[i, "low"] + GRID_TOL & grid < gaps[i, "high"] - GRID_TOL)
+
+    }
+
+    ## One contiguous run at a time; a point's run is the number of gaps below it
+
+    gap_highs <- if (is.null(gaps)) numeric(0) else gaps[, "high"]
+    run_of    <- function(w) vapply(w, function(v) sum(gap_highs <= v + GRID_TOL), integer(1))
+
+    data_run <- run_of(wn)
+    grid_run <- run_of(grid)
+
+    for (run in unique(grid_run[reach])) {
+
+      in_run <- which(data_run == run)
+      at     <- which(reach & grid_run == run)
+
+      if (length(in_run) == 1) {
+
+        ### A lone knot between two gaps: the only grid point it can carry is
+        ### the knot itself.
+        out[rows, at] <- M[rows, cols[in_run]]
+        next
+
+      }
+
+      ### A grid point inside GRID_TOL of the run's end is evaluated at that
+      ### end, so resample_spectra()'s strict no-extrapolation check holds.
+      run_wn <- wn[in_run]
+      piece  <- resample_spectra(M[rows, cols[in_run], drop = FALSE], run_wn,
+                                 new_wav = pmin(pmax(grid[at], min(run_wn)), max(run_wn)))
+
+      out[rows, at] <- piece$matrix
+
+    }
+
+  }
+
+  out
+
+}
+
+
+## =============================================================================
 ## Helper: trim_spectra()
 ## =============================================================================
 
@@ -205,8 +355,10 @@ resample_spectra <- function(spectra_matrix,
 #' @param margin `logical.` Also keep the nearest wavenumber beyond each bound,
 #'   where the data has one? `standardize()` sets this when it resamples next:
 #'   a grid point on the bound usually falls between two of the data's points
-#'   (600 between 599.74 and 601.67), and interpolating it needs both.
-#'   Default `FALSE`.
+#'   (600 between 599.74 and 601.67), and interpolating it needs both. It is
+#'   each spectrum's nearest point with a value, so spectra read on different
+#'   grids each keep their own, and each spectrum holds only its own: a
+#'   margin point another spectrum keeps is `NA` in it. Default `FALSE`.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Trimmed spectral matrix
@@ -225,32 +377,43 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
   wn_min <- min(range)
   wn_max <- max(range)
 
+  ### standardize() has checked that the range holds a wavelength.
   keep_idx <- which(wavelengths >= wn_min & wavelengths <= wn_max)
-
-  ## Validate result --------------------------------------------------------------
-
-  if (length(keep_idx) == 0) {
-
-    cli::cli_abort(c(
-      "Trim range does not overlap with wavelength data",
-      "i" = "Requested: {wn_min}-{wn_max} cm^-1",
-      "i" = "Available: {min(wavelengths)}-{max(wavelengths)} cm^-1"
-    ))
-
-  }
 
   ## One point beyond each bound, for the interpolation that follows ----------
 
   if (margin) {
 
+    ### Each spectrum's own nearest point with a value, nearest first: a
+    ### spectrum missing the axis's nearest point (one read on another grid)
+    ### keeps its own, so it is resampled from its own points. With no value
+    ### missing, every spectrum's is the axis's nearest point.
+    own_nearest <- function(idx) {
+      if (length(idx) == 0) return(rep(NA_integer_, nrow(spectra_matrix)))
+      has     <- is.finite(spectra_matrix[, idx, drop = FALSE])
+      pick    <- idx[max.col(has, ties.method = "first")]
+      pick[rowSums(has) == 0] <- NA_integer_
+      pick
+    }
+
     below <- which(wavelengths < wn_min)
     above <- which(wavelengths > wn_max)
 
-    if (length(below) > 0) keep_idx <- c(keep_idx, below[which.max(wavelengths[below])])
-    if (length(above) > 0) keep_idx <- c(keep_idx, above[which.min(wavelengths[above])])
+    pick_below <- own_nearest(below[order(wavelengths[below], decreasing = TRUE)])
+    pick_above <- own_nearest(above[order(wavelengths[above])])
+    margin_idx <- unique(c(pick_below[!is.na(pick_below)], pick_above[!is.na(pick_above)]))
+
+    ### A margin point is kept only by the spectra whose own nearest it is,
+    ### so no spectrum is resampled through another's: its values never
+    ### depend on which points another spectrum is missing
+    for (j in margin_idx) {
+
+      spectra_matrix[!(pick_below %in% j | pick_above %in% j), j] <- NA_real_
+
+    }
 
     ### Back into the input's column order.
-    keep_idx <- sort(keep_idx)
+    keep_idx <- sort(c(keep_idx, margin_idx))
 
   }
 
@@ -279,6 +442,27 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 ## =============================================================================
 ## Helper: remove_water_bands()
 ## =============================================================================
+
+#' Which wavenumbers lie in a water band
+#'
+#' @param wavelengths `numeric.` Wavenumbers.
+#' @return `logical`, one per wavenumber: inside a `WATER_BANDS` range,
+#'   bounds included.
+#' @noRd
+in_water_bands <- function(wavelengths) {
+
+  in_band <- rep(FALSE, length(wavelengths))
+
+  for (band in WATER_BANDS) {
+
+    in_band <- in_band | (wavelengths >= band[1] & wavelengths <= band[2])
+
+  }
+
+  in_band
+
+}
+
 #' Remove water absorption bands from spectra
 #'
 #' @description
@@ -288,6 +472,7 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 #' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
 #' @param wavelengths `numeric.` Current wavenumber positions (column names).
+#' @param call The frame a refusal reports: `standardize()`'s.
 #'
 #' @return `list.` With elements:
 #'   - `matrix`: Spectral matrix with water bands removed
@@ -297,20 +482,13 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 #'   - `n_removed`: Number of wavelengths removed
 #'
 #' @noRd
-remove_water_bands <- function(spectra_matrix, wavelengths) {
+remove_water_bands <- function(spectra_matrix, wavelengths, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Identify columns in water band regions
   ## ---------------------------------------------------------------------------
 
-  in_water_band <- rep(FALSE, length(wavelengths))
-
-  for (band in WATER_BANDS) {
-
-    in_water_band <- in_water_band |
-                     (wavelengths >= band[1] & wavelengths <= band[2])
-
-  }
+  in_water_band <- in_water_bands(wavelengths)
 
   ## ---------------------------------------------------------------------------
   ## Step 2: Keep only non-water columns
@@ -322,10 +500,13 @@ remove_water_bands <- function(spectra_matrix, wavelengths) {
 
   if (length(keep_idx) == 0) {
 
-    cli::cli_abort(c(
-      "Water band removal would delete all wavelength data",
-      "i" = "Data range falls entirely within water absorption regions"
-    ))
+    water_text <- paste(vapply(WATER_BANDS, paste, character(1), collapse = " to "), collapse = " and ")
+
+    abort_horizons(c(
+      "Water band removal would delete all wavelength data.",
+      "i" = "The axis left by the trim and the resampling lies wholly inside the water bands ({water_text} cm-1).",
+      "i" = "Use {.code remove_water = FALSE}, or a wider {.arg trim}."
+    ), kind = "input", call = call)
 
   }
 
@@ -360,12 +541,19 @@ remove_water_bands <- function(spectra_matrix, wavelengths) {
 #' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
 #'   wavelengths as columns.
 #' @param wavelengths `numeric.` Wavenumber positions (column names).
+#' @param call The frame a failure reports: `standardize()`'s.
+#'
+#' @details
+#' `prospectr::baseline()` fits every row in one call and fails the whole
+#' call on a single non-finite value, so `standardize()` passes only the
+#' rows it has not flagged. A failure on those rows hits every one of them
+#' alike, so it stops the call, with prospectr's error as its parent.
 #'
 #' @return `matrix.` Baseline-corrected spectral matrix, the input's shape,
 #'   a single spectrum included.
 #'
 #' @noRd
-apply_baseline_correction <- function(spectra_matrix, wavelengths) {
+apply_baseline_correction <- function(spectra_matrix, wavelengths, call = rlang::caller_env()) {
 
   ## ---------------------------------------------------------------------------
   ## Apply prospectr baseline correction
@@ -376,18 +564,17 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
   wav_sorted     <- sort(wavelengths)
   spectra_sorted <- spectra_matrix[, order(wavelengths), drop = FALSE]
 
-  corrected <- tryCatch(
+  corrected <- rlang::try_fetch(
     prospectr::baseline(
       X   = spectra_sorted,
       wav = wav_sorted
     ),
     error = function(e) {
 
-      cli::cli_abort(c(
-        "Baseline correction failed",
-        "i" = "This can happen with constant or near-constant spectra",
-        "x" = "Original error: {condition_summary(e)}"
-      ))
+      abort_horizons(c(
+        "Baseline correction failed on the {nrow(spectra_sorted)} spectr{?um/a} it was given.",
+        "i" = "The convex hull is fitted to every spectrum in one call, so a failure there stops the call."
+      ), kind = "run", parent = e, call = call)
 
     }
   )
@@ -413,6 +600,241 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths) {
   corrected <- corrected[, order(order(wavelengths)), drop = FALSE]
 
   corrected
+
+}
+
+
+## =============================================================================
+## Helper: unusable_spectra() and flag_unusable()
+## =============================================================================
+
+#' Which spectra cannot be used, and why
+#'
+#' @description
+#' The one rule `standardize()`, `step_transform_spectra()`'s bake and the
+#' object's validator share (decision 5), so a spectrum gets the same answer
+#' whichever way it comes. A spectrum is unusable when any value is not
+#' finite, or when it has no spread: two or more values, every one equal, as
+#' `prospectr`'s own SNV check reads it. Under prospectr 0.2.10 SNV turns
+#' such a spectrum into zeros rather than `NaN`, so the second test cannot be
+#' left to a non-finite value appearing later.
+#'
+#' @details
+#' A spectrum of one value has no spread to judge, so the second test needs
+#' two columns; an axis of one wavenumber is refused where it cannot be
+#' used, by the verb that needs more (`select_training()`, the transform
+#' step's window), with that verb's reason.
+#'
+#' The rule runs one column at a time, over a matrix or a data frame alike,
+#' so the validator applies it to a library's table at its door without
+#' copying it into a matrix.
+#'
+#' @param M Numeric matrix or data frame, one spectrum per row.
+#' @return Character, one per row: `NA` for a usable spectrum,
+#'   `"non-finite"` or `"no spread"`; `NA` for every row when there are no
+#'   columns.
+#' @keywords internal
+#' @noRd
+unusable_spectra <- function(M) {
+
+  n      <- NROW(M)
+  p      <- NCOL(M)
+  reason <- rep(NA_character_, n)
+
+  if (p == 0) return(reason)
+
+  column <- if (is.data.frame(M)) function(j) M[[j]] else function(j) M[, j]
+  first  <- column(1)
+
+  non_finite <- rep(FALSE, n)
+  flat       <- rep(TRUE, n)
+
+  for (j in seq_len(p)) {
+
+    v          <- column(j)
+    non_finite <- non_finite | !is.finite(v)
+    flat       <- flat & v == first
+
+  }
+
+  ### A missing value leaves flat NA, which the non-finite reason covers
+  reason[non_finite]                             <- "non-finite"
+  reason[!non_finite & flat %in% TRUE & p >= 2]  <- "no spread"
+
+  reason
+
+}
+
+#' What each spectrum's own points cover, and what they lack
+#'
+#' @description
+#' Read before the resample, so a spectrum missing a value inside its own
+#' range can be told from one the grid outruns at an end, and its flag can
+#' say which. With every value finite it returns `NULL` without reading the
+#' matrix further.
+#'
+#' @param M `matrix.` Spectra as rows, on `wavelengths`.
+#' @param wavelengths `numeric.` The axis.
+#' @return `NULL`, or a list, one element per row in each: `has` (logical,
+#'   the spectrum has a finite value), `lo` and `hi` (numeric, the range of
+#'   its finite points), `lost` (a list of numeric: the wavenumbers of the
+#'   axis columns inside its holes, [spectrum_holes()], and of any value
+#'   that is infinite) and `coarse` (logical: it lacks an axis column inside
+#'   its range that is no hole, as a spectrum on a coarser grid of its own
+#'   does).
+#' @keywords internal
+#' @noRd
+own_points <- function(M, wavelengths) {
+
+  finite <- is.finite(M)
+
+  if (all(finite)) return(NULL)
+
+  n      <- nrow(M)
+  lo     <- rep(Inf, n)
+  hi     <- rep(-Inf, n)
+  lost   <- rep(list(numeric(0)), n)
+  coarse <- rep(FALSE, n)
+
+  ## Spectra sharing a pattern of finite values share their holes ------------
+
+  rows_with <- which(rowSums(!finite) > 0)
+  key       <- apply(finite[rows_with, , drop = FALSE], 1, function(r) paste(which(r), collapse = ","))
+
+  for (pattern in unique(key)) {
+
+    rows <- rows_with[key == pattern]
+    cols <- which(finite[rows[1], ])
+
+    if (length(cols) == 0) next
+
+    lo[rows] <- min(wavelengths[cols])
+    hi[rows] <- max(wavelengths[cols])
+
+    holes  <- spectrum_holes(cols, wavelengths)
+    inside <- unlist(lapply(holes, function(p) seq(cols[p] + 1L, cols[p + 1L] - 1L)))
+
+    lost[rows]   <- list(wavelengths[inside])
+    coarse[rows] <- any(diff(cols) > 1L) && length(holes) < sum(diff(cols) > 1L)
+
+  }
+
+  ## Every spectrum's infinite values are lost, wherever they are -------------
+
+  for (i in which(rowSums(is.infinite(M)) > 0)) {
+
+    lost[[i]] <- sort(unique(c(lost[[i]], wavelengths[is.infinite(M[i, ])])))
+
+  }
+
+  ### A complete row keeps lo and hi of the whole axis
+  lo[-rows_with] <- min(wavelengths)
+  hi[-rows_with] <- max(wavelengths)
+
+  list(has = is.finite(lo), lo = lo, hi = hi, lost = lost, coarse = coarse)
+
+}
+
+#' Flag the spectra standardize() could not use
+#'
+#' @description
+#' Keeps every row: a spectrum that cannot be used is marked in `.flag`
+#' (`"standardize"`), the column the modelling verbs read through
+#' [flagged_rows()], created only when a row is flagged, and placed ahead
+#' of the predictors. A row an earlier step flagged keeps its flag; the
+#' caller leaves it out of `reason`. One `flagged` warning counts the rows
+#' by reason and names the first of them.
+#'
+#' @param analysis,role_map The table and its roles.
+#' @param reason Character, one per row, from [unusable_spectra()]: `NA` for
+#'   a row left as it is. `standardize()` adds `"short of the grid"` for a
+#'   spectrum whose own points end before the grid does, which only it,
+#'   knowing the grid, can tell from a value that is not finite or missing
+#'   inside a spectrum's own range.
+#' @param collector `standardize()`'s collector, from [log_open()].
+#' @param short_range `numeric(2)` or `NULL`. The range every spectrum short
+#'   of the grid covers, which a `trim` inside keeps them.
+#' @return List: `analysis` and `role_map`.
+#' @keywords internal
+#' @noRd
+flag_unusable <- function(analysis, role_map, reason, collector, short_range = NULL) {
+
+  flag <- !is.na(reason)
+
+  if (!any(flag)) return(list(analysis = analysis, role_map = role_map))
+
+  ## The column, ahead of the predictors, when no step has flagged a row yet --
+
+  if (!".flag" %in% names(analysis)) {
+
+    preds <- role_map$variable[role_map$role == "predictor"]
+    at    <- match(TRUE, names(analysis) %in% preds, nomatch = ncol(analysis) + 1L)
+    at_rm <- match(TRUE, role_map$variable %in% preds, nomatch = nrow(role_map) + 1L)
+
+    analysis <- dplyr::bind_cols(
+      analysis[, seq_len(at - 1L), drop = FALSE],
+      tibble::tibble(.flag = rep(NA_character_, nrow(analysis))),
+      analysis[, setdiff(seq_len(ncol(analysis)), seq_len(at - 1L)), drop = FALSE]
+    )
+
+    role_map <- dplyr::bind_rows(
+      role_map[seq_len(at_rm - 1L), , drop = FALSE],
+      tibble::tibble(variable = ".flag", role = "meta"),
+      role_map[setdiff(seq_len(nrow(role_map)), seq_len(at_rm - 1L)), , drop = FALSE]
+    )
+
+  }
+
+  analysis$.flag[flag] <- "standardize"
+
+  ## One warning, counting by reason ------------------------------------------
+
+  ids        <- analysis$sample_id
+  n          <- sum(flag)
+  non_finite <- ids[flag & reason %in% "non-finite"]
+  flat       <- ids[flag & reason %in% "no spread"]
+  short      <- ids[flag & reason %in% "short of the grid"]
+  n_nf       <- sum(flag & reason %in% "non-finite")
+  n_flat     <- sum(flag & reason %in% "no spread")
+  n_short    <- sum(flag & reason %in% "short of the grid")
+
+  ### A trim inside the range they all cover keeps them, when they share one
+  trim_hint <- n_short > 0 && short_range[1] < short_range[2]
+
+  log_warning(collector, "flagged", c(
+    "{n} spectr{?um/a} could not be used and {?is/are} flagged ({.field .flag}); the modelling verbs leave {?it/them} out.",
+    "i" = if (n_nf > 0) "{n_nf} {?has/have} a value missing inside {?its/their} own range, or not finite: {shown_ids(non_finite)}. Fill or drop such values before {.fn spectra} reads them.",
+    "i" = if (n_flat > 0) "{n_flat} {?has/have} no spread (every value equal): {shown_ids(flat)}.",
+    "i" = if (n_short > 0) "{n_short} {?is/are} short of the grid at an end, {?its/their} own points ending before it does: {shown_ids(short)}.",
+    "i" = if (trim_hint) "The range {cli::qty(n_short)}{?it covers/they all cover} is {short_range[1]} to {short_range[2]} cm-1; a {.arg trim} inside it keeps {cli::qty(n_short)}{?it/them}."
+  ), ids = ids[flag], n = n)
+
+  list(analysis = analysis, role_map = role_map)
+
+}
+
+
+## =============================================================================
+## Helper: prior_hull_range()
+## =============================================================================
+
+#' The range a standardization record's hull was fitted over
+#'
+#' @description
+#' `baseline_range` when the record has it. A record written before it was
+#' kept was written by one call, whose hull was fitted over the axis it
+#' records, so its `wavelength_range` is read in its place; reading it as
+#' missing would let a hull pass a comparison it fails (#107).
+#'
+#' @param record A `provenance$standardization` record, or `NULL`.
+#' @return `numeric(2)`, or `NULL` when the record carries no hull.
+#' @keywords internal
+#' @noRd
+prior_hull_range <- function(record) {
+
+  if (!isTRUE(record$baseline)) return(NULL)
+
+  record$baseline_range %||% record$wavelength_range
 
 }
 
@@ -445,7 +867,11 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
     op_name <- op_names[i]
     op      <- operations[[op_name]]
 
-    if (op_name == "sort") {
+    if (op_name == "restandardize") {
+
+      msg <- "Re-standardizing (force = TRUE): a new record, keeping any hull an earlier call fitted"
+
+    } else if (op_name == "sort") {
 
       msg <- "Sorting: wavenumber columns put in decreasing order"
 
@@ -534,7 +960,23 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'
 #' The spectra are interpolated onto the grid by cubic spline and never
 #' extrapolated: grid points beyond the data's range are dropped with a
-#' warning that says how many and where. Nor is a hole in the input filled:
+#' warning that says how many and where. Each spectrum is resampled from its
+#' own finite points, and nothing is interpolated across a value it is
+#' missing: a spectrum missing a value (`NA`, `NaN` or `Inf`) anywhere
+#' between its first and last points is flagged (see Unusable spectra), on
+#' every path, and one whose points end before the grid's gets `NA` beyond
+#' them, never a value extrapolated. Fill or drop missing values before
+#' `spectra()` if a spectrum should be kept. A spectrum on a coarser grid of
+#' its own, as a file read beside finer ones is, is missing nothing, and is
+#' put on the grid from its own points. Its own spacing tells the two apart:
+#' a spacing wider than 1.5 times the median of the three on each side of it
+#' (the larger side), with an axis column the spectrum lacks inside it, is a
+#' missing value. So a run of more than three alternating missing points
+#' reads as a coarser grid; so do missing points within about a point of
+#' the place where one spectrum's resolution coarsens, on the fine side; and
+#' a file whose own axis skips one point is flagged when it is bound with a
+#' file that has a point there, though not when it is read alone.
+#' Nor is a hole in the input filled:
 #' where the data's own axis has a gap (a spacing over three times the median
 #' and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
 #' `remove_water = TRUE`), the grid points inside it are dropped with a
@@ -555,9 +997,34 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' derivative taken later still runs across the hole they leave, which is a
 #' separate matter (see `select_training()`'s `mask`).
 #'
+#' **Unusable spectra:** a spectrum `standardize()` cannot use, one with a
+#' value that is not finite among those it returns, or one with no spread
+#' (every value equal), is kept and flagged, never dropped: its
+#' `.flag` is `"standardize"` (a `meta` column, created when the first row
+#' is flagged), and one `horizons_warning_flagged` counts and names them,
+#' by reason. With resampling, a spectrum whose own points end before the
+#' grid does (as the scans of a narrower file bound with wider ones do) is
+#' flagged for that, and the warning gives the range such spectra cover,
+#' inside which a `trim` keeps them. A value missing only inside a water
+#' band the call removes flags nothing, unless the hull is fitted across it.
+#' [evaluate()], [fit()], [predict()] and [select_training()] leave flagged
+#' spectra out. The convex hull is fitted to the spectra not flagged, and a
+#' flagged spectrum keeps its values as they stood when it was flagged, so
+#' with `baseline = TRUE` a spectrum with a value missing anywhere the hull
+#' is fitted is flagged, a water band it then removes included. The rule
+#' holds with every operation off too. A row an earlier step flagged
+#' keeps its flag.
+#'
 #' **Idempotence:** If the object has already been standardized, calling
-#' `standardize()` again will warn and return the object unchanged. Use
-#' `force = TRUE` to override (not recommended).
+#' `standardize()` again returns the object unchanged, with one
+#' `horizons_warning_skipped`. Use `force = TRUE` to override (not
+#' recommended); as you asked for it, that is reported in verbose output and
+#' in a note on the log rather than warned.
+#'
+#' **Warnings** are collected as the call runs and raised once per topic at
+#' its end, each written to the object's `log` first: grid points dropped
+#' because the data does not reach them or they fall in a gap are one
+#' `horizons_warning_coverage`.
 #'
 #' @param x `horizons_data.` Object from `spectra()`.
 #' @param resample `numeric or NULL.` Target resolution in cm⁻¹. Default `2`
@@ -576,6 +1043,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   Default `FALSE`.
 #' @param force `logical.` Re-standardize even if already standardized?
 #'   Default `FALSE`. Not recommended — may cause data quality issues.
+#' @param verbose `logical.` Print progress messages. Default
+#'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return `horizons_data.` The input object with standardized spectra.
 #'   `provenance$standardization` records the arguments, whether the spectra
@@ -585,6 +1054,10 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   read that from `grid$step` or from the columns. A training set
 #'   `select_training()` returns carries its library's record, with the axis
 #'   fields describing the columns it returns (see [select_training()]).
+#'   `baseline` says whether the spectra carry a convex-hull correction, from
+#'   this call or, under `force = TRUE`, an earlier one, and `baseline_range`
+#'   is the range that hull was fitted over (`NULL` without one), which
+#'   [select_training()] compares between a library and its targets.
 #'
 #' @examples
 #' \dontrun{
@@ -604,97 +1077,66 @@ standardize <- function(x,
                         trim         = c(600, 4000),
                         remove_water = FALSE,
                         baseline     = FALSE,
-                        force        = FALSE) {
+                        force        = FALSE,
+                        verbose      = getOption("horizons.verbose", TRUE)) {
 
   ## ---------------------------------------------------------------------------
   ## Step 0: Input validation
   ## ---------------------------------------------------------------------------
+  ## One argument at a time, as every verb's door checks them.
 
-  errors <- character()
+  if (!inherits(x, "horizons_data")) {
 
-  ## Check x is horizons_data --------------------------------------------------
-
- if (!inherits(x, "horizons_data")) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg x} must be a horizons_data object"))
-
-  }
-
-  ## Check resample ------------------------------------------------------------
-
-  if (!is.null(resample)) {
-
-    if (!is.numeric(resample) || length(resample) != 1 || resample <= 0) {
-
-      errors <- c(errors,
-                  cli::format_inline("{.arg resample} must be a positive number or NULL"))
-
-    }
-
-  }
-
-  ## Check trim ----------------------------------------------------------------
-
-  if (!is.null(trim)) {
-
-    if (!is.numeric(trim) || length(trim) != 2) {
-
-      errors <- c(errors,
-                  cli::format_inline("{.arg trim} must be numeric(2) or NULL"))
-
-    } else if (trim[1] >= trim[2]) {
-
-      errors <- c(errors,
-                  cli::format_inline("{.arg trim} range must be (min, max) with min < max"))
-
-    }
-
-  }
-
-  ## Check logicals ------------------------------------------------------------
-
-  if (!is.logical(remove_water) || length(remove_water) != 1 || is.na(remove_water)) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg remove_water} must be TRUE or FALSE"))
-
-  }
-
-  if (!is.logical(baseline) || length(baseline) != 1 || is.na(baseline)) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg baseline} must be TRUE or FALSE"))
-
-  }
-
-  if (!is.logical(force) || length(force) != 1 || is.na(force)) {
-
-    errors <- c(errors,
-                cli::format_inline("{.arg force} must be TRUE or FALSE"))
-
-  }
-
-  ## Report errors -------------------------------------------------------------
-
-  if (length(errors) > 0) {
-
-    cat(cli::col_red(cli::style_bold("! Input validation failed:\n")))
-
-    for (i in seq_along(errors)) {
-
-      branch <- if (i < length(errors)) "\u251C\u2500" else "\u2514\u2500"
-      cat(cli::col_red(paste0("   ", branch, " ", errors[i], "\n")))
-
-    }
-
-    cat("\n")
-    rlang::abort(
-      paste(c("Input validation failed:", errors), collapse = "\n"),
-      class = "horizons_input_error"
+    abort_horizons(
+      "{.arg x} must be a horizons_data object, not {.obj_type_friendly {x}}.",
+      kind = "input"
     )
 
   }
+
+  check_arg(rlang::check_number_decimal, resample, allow_infinite = FALSE, allow_null = TRUE)
+
+  if (!is.null(resample) && resample <= 0) {
+
+    abort_horizons("{.arg resample} must be a positive number or {.code NULL}, not {resample}.",
+                   kind = "input")
+
+  }
+
+  if (!is.null(trim) && (!is.numeric(trim) || length(trim) != 2)) {
+
+    abort_horizons(
+      "{.arg trim} must be numeric(2) or {.code NULL}, not {.obj_type_friendly {trim}}.",
+      kind = "input"
+    )
+
+  }
+
+  if (!is.null(trim) && !all(is.finite(trim))) {
+
+    abort_horizons(c(
+      "{.arg trim} must be two finite wavenumbers.",
+      "x" = "Got {trim[1]} and {trim[2]}."
+    ), kind = "input")
+
+  }
+
+  if (!is.null(trim) && trim[1] >= trim[2]) {
+
+    abort_horizons(c(
+      "{.arg trim} range must be (min, max) with min < max.",
+      "x" = "Got {trim[1]} and {trim[2]}."
+    ), kind = "input")
+
+  }
+
+  check_arg(rlang::check_bool, remove_water)
+  check_arg(rlang::check_bool, baseline)
+  check_arg(rlang::check_bool, force)
+  check_arg(rlang::check_bool, verbose)
+
+  call      <- rlang::current_env()
+  collector <- log_open("standardize")
 
   ## ---------------------------------------------------------------------------
   ## Step 1: Check idempotence
@@ -706,18 +1148,27 @@ standardize <- function(x,
     ## standardized object is already on a decreasing axis.
     x <- validate_horizons_data(x, stage = "raw")
 
-    cli::cli_warn(c(
-      "Spectra already standardized",
-      "i" = "Returning unchanged. Use {.arg force = TRUE} to re-standardize."
+    ### Nothing ran that was asked for, which the returned object does not
+    ### show
+    log_warning(collector, "skipped", c(
+      "Spectra already standardized, so nothing was done.",
+      "i" = "Returning unchanged. Use {.code force = TRUE} to re-standardize."
     ))
+
+    x$log <- log_close(collector, x$log)
+    signal_log(collector, x)
 
     return(x)
 
   }
 
+  operations <- list()
+
   if (!is.null(x$provenance$standardization) && force) {
 
-    cli::cli_warn("Re-standardizing previously standardized data (force = TRUE)")
+    ### force = TRUE is the user's explicit choice: reported, not warned
+    log_note(collector, "Re-standardizing previously standardized data ({.code force = TRUE}).")
+    operations$restandardize <- list()
 
   }
 
@@ -732,8 +1183,6 @@ standardize <- function(x,
 
   sorted <- sort_axis_decreasing(x)
   x      <- sorted$x
-
-  operations <- list()
 
   if (sorted$sorted) {
 
@@ -754,6 +1203,16 @@ standardize <- function(x,
 
     x <- validate_horizons_data(x, stage = "raw")
 
+    ## A spectrum it cannot use is flagged here too, on the axis as it is ----
+
+    axis_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+    reason    <- unusable_spectra(x$data$analysis[, axis_vars, drop = FALSE])
+    reason[flagged_rows(x$data$analysis)] <- NA_character_
+
+    flagged <- flag_unusable(x$data$analysis, x$data$role_map, reason, collector)
+
+    if (any(!is.na(reason))) x <- set_analysis(x, flagged$analysis, flagged$role_map)
+
     ## Still mark as standardized so downstream steps know it was evaluated -----
 
     ### Under force = TRUE the object may already sit on a grid an earlier
@@ -762,36 +1221,41 @@ standardize <- function(x,
     keep_prior <- !is.null(prior) && !sorted$sorted
 
     ### The axis as it stands, recorded as the full path records it.
-    axis_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
-    axis_wn   <- suppressWarnings(as.numeric(gsub("^wn_", "", axis_vars)))
+    axis_wn <- wn_values(axis_vars)
 
+    ### A hull an earlier call fitted is still in the values, sorted or not
     x$provenance$standardization <- list(
       resample         = NULL,
       trim             = NULL,
       remove_water     = FALSE,
-      baseline         = FALSE,
+      baseline         = isTRUE(prior$baseline),
       resampled        = keep_prior && isTRUE(prior$resampled),
       grid             = if (keep_prior) prior$grid else NULL,
       applied_at       = Sys.time(),
       n_wavelengths    = length(axis_vars),
-      wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_)
+      wavelength_range = if (any(is.finite(axis_wn))) range(axis_wn, na.rm = TRUE) else c(NA_real_, NA_real_),
+      baseline_range   = prior_hull_range(prior)
     )
 
-    if (length(operations) > 0) {
+    x$log <- log_close(collector, x$log)
+
+    if (verbose && length(operations) > 0) {
 
       report_standardize_summary(
         operations          = operations,
         n_samples           = nrow(x$data$analysis),
-        final_n_wavelengths = operations$sort$n
+        final_n_wavelengths = length(axis_vars)
       )
 
-    } else {
+    } else if (verbose) {
 
       cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
       cat(paste0("\u2502  \u2514\u2500 No operations applied\n"))
       cat("\u2502\n")
 
     }
+
+    signal_log(collector, x)
 
     return(x)
 
@@ -820,9 +1284,27 @@ standardize <- function(x,
   predictor_vars <- role_map$variable[role_map$role == "predictor"]
   spectra_matrix <- as.matrix(analysis[, predictor_vars, drop = FALSE])
 
+  ## A row an earlier step flagged stays flagged and is not counted again;
+  ## reason[] holds why this call flags a row
+  prior  <- flagged_rows(analysis)
+  reason <- rep(NA_character_, nrow(analysis))
+
   ## Extract wavenumbers from column names -------------------------------------
 
-  wavelengths <- as.numeric(gsub("^wn_", "", predictor_vars))
+  wavelengths <- wn_values(predictor_vars)
+
+  ## The trim window has to meet the data -----------------------------------
+
+  if (!is.null(trim) && !any(wavelengths >= min(trim) & wavelengths <= max(trim))) {
+
+    abort_horizons(c(
+      "{.arg trim} does not overlap the data's axis.",
+      "x" = "{.arg trim} is {min(trim)} to {max(trim)} cm-1; the data covers {min(wavelengths)} to {max(wavelengths)} cm-1."
+    ), kind = "input")
+
+  }
+
+  data_range <- range(wavelengths)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Apply trim (if requested)
@@ -864,12 +1346,17 @@ standardize <- function(x,
   ## dropped, and each contiguous run is interpolated on its own.
 
   grid_record <- NULL
+  own         <- NULL
 
   if (!is.null(resample)) {
 
     if (length(wavelengths) < 2) {
 
-      cli::cli_abort("Resampling requires at least two wavelength columns")
+      abort_horizons(c(
+        "Resampling requires at least two wavelength columns.",
+        "x" = "{length(wavelengths)} column{?s} {?is/are} left to resample.",
+        "i" = "Use {.code resample = NULL}, or a wider {.arg trim}."
+      ), kind = "input")
 
     }
 
@@ -905,10 +1392,10 @@ standardize <- function(x,
         }
       )
 
-      cli::cli_warn(c(
-        "The data does not cover the {resample} cm-1 grid from {bounds[1]} to {bounds[2]} cm-1",
-        "i" = "Dropped {length(below) + length(above)} grid point{?s} rather than extrapolate: {paste(where, collapse = '; ')}"
-      ), class = "horizons_standardize_warning")
+      log_warning(collector, "coverage", c(
+        "The data does not cover the {resample} cm-1 grid from {bounds[1]} to {bounds[2]} cm-1.",
+        "i" = "Dropped {length(below) + length(above)} grid point{?s} rather than extrapolate: {paste(where, collapse = '; ')}."
+      ))
 
       grid <- grid[grid >= data_lo - GRID_TOL & grid <= data_hi + GRID_TOL]
 
@@ -931,10 +1418,10 @@ standardize <- function(x,
 
         gap_text <- sprintf("%g to %g", gaps[, "low"], gaps[, "high"])
 
-        cli::cli_warn(c(
-          "The data's axis has {nrow(gaps)} gap{?s} in it: {paste(gap_text, collapse = ', ')} cm-1",
-          "i" = "Dropped {sum(in_gap)} grid point{?s} that fall in a gap rather than interpolate across it; each side of a gap is resampled on its own"
-        ), class = "horizons_standardize_warning")
+        log_warning(collector, "coverage", c(
+          "The data's axis has {nrow(gaps)} gap{?s} in it: {paste(gap_text, collapse = ', ')} cm-1.",
+          "i" = "Dropped {sum(in_gap)} grid point{?s} that fall in a gap rather than interpolate across it; each side of a gap is resampled on its own."
+        ))
 
         grid <- grid[!in_gap]
 
@@ -944,10 +1431,11 @@ standardize <- function(x,
 
     if (length(grid) == 0) {
 
-      cli::cli_abort(c(
-        "No multiple of {resample} cm-1 between {bounds[1]} and {bounds[2]} cm-1 falls inside the data",
-        "x" = "The data covers {data_lo} to {data_hi} cm-1"
-      ), class = "horizons_input_error")
+      abort_horizons(c(
+        "No multiple of {resample} cm-1 between {bounds[1]} and {bounds[2]} cm-1 falls inside the data.",
+        "x" = "The data covers {data_range[1]} to {data_range[2]} cm-1.",
+        "i" = if (diff(bounds) < resample) "The {.arg trim} window is narrower than one {resample} cm-1 step: widen {.arg trim} or reduce {.arg resample}."
+      ), kind = "input")
 
     }
 
@@ -962,8 +1450,17 @@ standardize <- function(x,
 
     if (on_grid) {
 
+      ### A spectrum on a coarser grid of its own, read beside this one, lacks
+      ### grid points it has no hole at: it is put on the grid from its own
+      ### points, the margin beyond the bounds included, as off the grid
+      own   <- own_points(spectra_matrix[, in_bounds, drop = FALSE], grid)
+      redo  <- if (!is.null(own)) which(own$coarse) else integer(0)
+      moved <- if (length(redo)) resample_onto_grid(spectra_matrix[redo, , drop = FALSE], wavelengths, grid)
+
       spectra_matrix <- spectra_matrix[, in_bounds, drop = FALSE]
       wavelengths    <- grid
+
+      if (length(redo)) spectra_matrix[redo, ] <- moved
 
       operations$resample <- list(
         status            = "skipped",
@@ -974,41 +1471,10 @@ standardize <- function(x,
 
     } else {
 
-      ### One contiguous run of the data at a time, so no spline is fitted
-      ### across a gap. A point's run is the number of gaps below it.
-
-      gap_highs <- if (is.null(gaps)) numeric(0) else gaps[, "high"]
-      run_of    <- function(wn) vapply(wn, function(w) sum(gap_highs <= w + GRID_TOL), integer(1))
-
-      data_run <- run_of(wavelengths)
-      grid_run <- run_of(grid)
-
-      resampled <- matrix(NA_real_, nrow = nrow(spectra_matrix), ncol = length(grid))
-
-      for (run in unique(grid_run)) {
-
-        cols <- which(data_run == run)
-        at   <- which(grid_run == run)
-
-        if (length(cols) == 1) {
-
-          ### A lone knot between two gaps: the only grid point it can carry
-          ### is the knot itself.
-          resampled[, at] <- spectra_matrix[, cols]
-          next
-
-        }
-
-        ### A grid point inside GRID_TOL of the run's end is evaluated at
-        ### that end, so resample_spectra()'s strict no-extrapolation check
-        ### holds.
-        run_wn <- wavelengths[cols]
-        piece  <- resample_spectra(spectra_matrix[, cols, drop = FALSE], run_wn,
-                                   new_wav = pmin(pmax(grid[at], min(run_wn)), max(run_wn)))
-
-        resampled[, at] <- piece$matrix
-
-      }
+      ### Each spectrum from its own points: one with missing values is never
+      ### extrapolated or filled, the grid points it cannot reach left NA
+      own       <- own_points(spectra_matrix, wavelengths)
+      resampled <- resample_onto_grid(spectra_matrix, wavelengths, grid)
 
       operations$resample <- list(
         status            = "resampled",
@@ -1042,9 +1508,64 @@ standardize <- function(x,
   ## trimmed native axis. Before water removal: the hull needs a continuous
   ## range.
 
+  ## Why a spectrum cannot be used. With resampling, a value missing inside a
+  ## spectrum's own range is lost data, whose remedy is the source, and a
+  ## grid point beyond its own points at an end is a reason of its own, whose
+  ## remedy is the trim. M's columns are on `at`; `removed`, when given,
+  ## says which lost points lie in columns the call removes before it
+  ## returns, which then judge nothing.
+
+  judge <- function(M, at, removed = NULL) {
+
+    r <- unusable_spectra(M)
+
+    if (!is.null(own)) {
+
+      lost    <- vapply(own$lost, function(w) {
+        if (!is.null(removed)) w <- w[!removed(w)]
+        length(w) > 0
+      }, logical(1))
+      r[lost] <- "non-finite"
+
+      ### Short only where its own points end: every value it lacks on the
+      ### grid lies beyond them
+      beyond <- function(i) {
+        miss <- at[!is.finite(M[i, ])]
+        all(miss < own$lo[i] - GRID_TOL | miss > own$hi[i] + GRID_TOL)
+      }
+
+      cand     <- which(r %in% "non-finite" & !lost & own$has)
+      short    <- cand[vapply(cand, beyond, logical(1))]
+      r[short] <- "short of the grid"
+
+    }
+
+    r
+
+  }
+
+  hull_range <- NULL
+
   if (baseline) {
 
-    spectra_matrix <- apply_baseline_correction(spectra_matrix, wavelengths)
+    ## A spectrum the hull cannot take is flagged before it, since it would
+    ## fail the whole batch, and keeps its values as they stand here. The
+    ## hull is fitted over every column, water bands included, so they are
+    ## all judged; without a hull only the values returned are (Step 6b).
+
+    before      <- judge(spectra_matrix, wavelengths)
+    now         <- !prior & is.na(reason) & !is.na(before)
+    reason[now] <- before[now]
+
+    hull_range <- range(wavelengths)
+    hull       <- !prior & is.na(reason)
+
+    if (any(hull)) {
+
+      spectra_matrix[hull, ] <- apply_baseline_correction(spectra_matrix[hull, , drop = FALSE],
+                                                          wavelengths, call = call)
+
+    }
 
     operations$baseline <- list(applied = TRUE)
 
@@ -1057,7 +1578,7 @@ standardize <- function(x,
 
   if (remove_water) {
 
-    result <- remove_water_bands(spectra_matrix, wavelengths)
+    result <- remove_water_bands(spectra_matrix, wavelengths, call = call)
 
     spectra_matrix <- result$matrix
     wavelengths    <- result$wavelengths
@@ -1071,15 +1592,15 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 6b: Sanity check for non-finite values
+  ## Step 6b: The spectra it cannot use, once more after the hull
   ## ---------------------------------------------------------------------------
+  ## Kept and flagged, never dropped: rows are removed only where modelling
+  ## happens.
 
-  if (any(!is.finite(spectra_matrix))) {
-
-    n_bad <- sum(!is.finite(spectra_matrix))
-    cli::cli_abort("Standardization produced {n_bad} non-finite values")
-
-  }
+  after       <- judge(spectra_matrix, wavelengths,
+                       removed = if (remove_water) in_water_bands)
+  now         <- !prior & is.na(reason) & !is.na(after)
+  reason[now] <- after[now]
 
   ## ---------------------------------------------------------------------------
   ## Step 7: Rebuild analysis tibble
@@ -1119,32 +1640,47 @@ standardize <- function(x,
   ## set_analysis() is the one place that recomputes the stored counts, so
   ## the predictor count is never written by hand here.
 
+  short       <- reason %in% "short of the grid"
+  short_range <- if (any(short)) {
+    c(max(own$lo[short], grid_record$min), min(own$hi[short], grid_record$max))
+  }
+
+  flagged      <- flag_unusable(new_analysis, new_role_map, reason, collector,
+                                short_range = short_range)
+  new_analysis <- flagged$analysis
+  new_role_map <- flagged$role_map
+
   x <- set_analysis(x, new_analysis, new_role_map)
 
   ## Update provenance ---------------------------------------------------------
+
+  ### Under force = TRUE the spectra may carry a hull an earlier call fitted,
+  ### which this call's record keeps: the values still hold it
+  earlier <- x$provenance$standardization
 
   x$provenance$standardization <- list(
     resample         = resample,
     trim             = trim,
     remove_water     = remove_water,
-    baseline         = baseline,
+    baseline         = baseline || isTRUE(earlier$baseline),
     resampled        = identical(operations$resample$status, "resampled"),
     grid             = grid_record,
     applied_at       = Sys.time(),
     n_wavelengths    = length(new_predictor_names),
-    wavelength_range = c(min(wavelengths), max(wavelengths))
+    wavelength_range = c(min(wavelengths), max(wavelengths)),
+    baseline_range   = hull_range %||% prior_hull_range(earlier)
   )
 
   ## ---------------------------------------------------------------------------
   ## Step 10: Re-validate
   ## ---------------------------------------------------------------------------
   ## Raw stage: standardize() runs before average() collapses replicates, so
-  ## a duplicate sample_id is still legitimate here. The Inf/NA-after-trim
-  ## check above (Step 6b) already aborts on anything non-finite, so
-  ## full-mode predictor-NA checking would never fire differently at this
-  ## point.
+  ## a duplicate sample_id is still legitimate here. A non-finite value left
+  ## is in a flagged row (Step 6b), which the full stage admits.
 
   x <- validate_horizons_data(x, stage = "raw")
+
+  x$log <- log_close(collector, x$log)
 
   ## ---------------------------------------------------------------------------
   ## Step 11: Report
@@ -1153,15 +1689,21 @@ standardize <- function(x,
   ### Every operation requested on this path records itself, and the no-op
   ### call returned at Step 1c, so there is always something to report.
 
-  report_standardize_summary(
-    operations          = operations,
-    n_samples           = nrow(new_analysis),
-    final_n_wavelengths = length(new_predictor_names)
-  )
+  if (verbose) {
+
+    report_standardize_summary(
+      operations          = operations,
+      n_samples           = nrow(new_analysis),
+      final_n_wavelengths = length(new_predictor_names)
+    )
+
+  }
 
   ## ---------------------------------------------------------------------------
-  ## Step 12: Return
+  ## Step 12: Raise what was recorded, and return
   ## ---------------------------------------------------------------------------
+
+  signal_log(collector, x)
 
   x
 

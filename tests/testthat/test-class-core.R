@@ -446,6 +446,40 @@ test_that("validate_horizons_data errors when wavelength columns not decreasing"
 
 })
 
+test_that("validate_horizons_data refuses a predictor whose name is not a wavenumber, naming the first five (#121)", {
+
+  ## Arrange — one predictor named like a wavenumber with a letter in it
+  test_analysis <- tibble::tibble(sample_id = c("A", "B"), wn_4000 = c(0.1, 0.2),
+                                  wn_X3998 = c(0.3, 0.4))
+  test_role_map <- tibble::tibble(variable = names(test_analysis),
+                                  role     = c("id", "predictor", "predictor"))
+
+  obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
+
+  ## Act & Assert — at both stages
+  for (stage in c("raw", "full")) {
+
+    err <- expect_error(validate_horizons_data(obj, stage = stage), class = "horizons_error_validation")
+    expect_true(any(grepl("does not parse as a wavenumber: wn_X3998", err$findings, fixed = TRUE)),
+                info = stage)
+
+  }
+
+  ## A single such predictor is checked too, and a long list is counted
+  one <- new_horizons_data(analysis = test_analysis[, c("sample_id", "wn_X3998")],
+                           role_map = test_role_map[c(1, 3), ])
+  err <- expect_error(validate_horizons_data(one), class = "horizons_error_validation")
+  expect_true(any(grepl("does not parse as a wavenumber: wn_X3998", err$findings, fixed = TRUE)))
+
+  wide     <- tibble::as_tibble(stats::setNames(as.list(1:7), paste0("band", 1:7)))
+  wide_obj <- new_horizons_data(analysis = dplyr::bind_cols(tibble::tibble(sample_id = "A"), wide),
+                                role_map = tibble::tibble(variable = c("sample_id", names(wide)),
+                                                          role     = c("id", rep("predictor", 7))))
+  err <- expect_error(validate_horizons_data(wide_obj), class = "horizons_error_validation")
+  expect_true(any(grepl("band1, band2, band3, band4, band5, and 2 more", err$findings, fixed = TRUE)))
+
+})
+
 test_that("validate_horizons_data names duplicate wavenumber columns rather than a generic order failure (#24)", {
 
   ## Arrange — "600" and "600.0" both parse to the same wavenumber; sorted,
@@ -2707,6 +2741,10 @@ test_that("print.horizons_data shows the selection section", {
 
   obj <- make_selected_object()
 
+  ## Read from many files: the source line shows the first and counts the rest
+  obj$provenance$spectra_source <- c("scans/T01.0", "scans/T02.0", "scans/T03.0")
+  obj$provenance$spectra_type   <- "opus"
+
   expect_snapshot(print(obj))
 
 })
@@ -2731,6 +2769,13 @@ test_that("print.horizons_data survives a partially-formed selection record", {
 test_that("summary.horizons_data mirrors the selection block and names it in the pipeline status", {
 
   obj <- make_selected_object()
+
+  ## Targets read from many files: the source and the targets lines both show
+  ## the first and count the rest
+  paths <- c("scans/T01.0", "scans/T02.0", "scans/T03.0")
+  obj$provenance$spectra_source <- paths
+  obj$provenance$spectra_type   <- "opus"
+  obj$selection$targets$source  <- paths
 
   expect_snapshot(summary(obj), transform = scrub_summary)
 
@@ -3193,6 +3238,29 @@ describe("the log and flagged rows in the base validator", {
     not_meta$data$role_map$role[not_meta$data$role_map$variable == ".flag"] <- "response"
     expect_true(any(grepl(".flag must be a character column with the meta role",
                           finding_of(validate_horizons_data(not_meta)), fixed = TRUE)))
+
+  })
+
+  it("refuses a spectrum with no spread unless it is flagged, by the rule standardize() flags by", {
+
+    obj <- spectra(tibble::tibble(Sample_ID = c("A", "B"), `4000` = c(0.5, 0.1), `3998` = c(0.5, 0.3)),
+                   verbose = FALSE)
+
+    finding <- finding_of(validate_horizons_data(obj))
+    expect_true(any(grepl('1 spectrum with no spread (every value equal): "A"; `standardize()` flags it',
+                          finding, fixed = TRUE)))
+
+    ## One wavenumber has no spread to judge: the verbs that need more say so
+    one <- spectra(tibble::tibble(Sample_ID = c("A", "B"), `4000` = c(0.5, 0.1)), verbose = FALSE)
+    expect_identical(validate_horizons_data(one), one)
+
+    ## Not at the raw stage, where standardize() has yet to run
+    expect_identical(validate_horizons_data(obj, stage = "raw"), obj)
+
+    ## Flagged, it passes, as a non-finite one does
+    obj$data$analysis$.flag <- c("standardize", NA)
+    obj$data$role_map <- rbind(obj$data$role_map, tibble::tibble(variable = ".flag", role = "meta"))
+    expect_identical(validate_horizons_data(obj), obj)
 
   })
 

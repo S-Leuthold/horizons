@@ -314,21 +314,24 @@ new_horizons_data <- function(analysis       = NULL,
 #'    see check 3). An error at `stage = "full"`, naming the duplicates and
 #'    pointing at [average()]; not checked at `stage = "raw"`.
 #'
-#' 5. **Predictor columns**: Wavelength/predictor columns (role = "predictor")
-#'    must not contain `NA` or `Inf` values. Checked only at `stage =
-#'    "full"`: a non-finite value outside `standardize()`'s eventual trim
-#'    range is legitimately still there before the trim runs, and
-#'    `standardize()` itself aborts on any non-finite value that survives
-#'    trimming and resampling, so this is only enforced from `average()` on.
-#'    First 3 problematic columns are named.
+#' 5. **Predictor columns**: In a row not flagged (`.flag`), the
+#'    wavelength/predictor columns (role = "predictor") must not contain
+#'    `NA` or `Inf` values, and the spectrum must have spread: one whose
+#'    every value is equal is refused, by the rule `standardize()` flags by
+#'    ([unusable_spectra()]). Checked only at `stage = "full"`: a non-finite
+#'    value outside `standardize()`'s eventual trim range is legitimately
+#'    still there before the trim runs, and `standardize()` itself flags a
+#'    spectrum with a non-finite value left after trimming and resampling,
+#'    or with no spread, so this is only enforced from `average()` on. The
+#'    first 3 problematic columns, or the first 5 flat spectra, are named.
 #'
-#' 6. **Wavelength naming and order**: Predictor names that look like
-#'    wavenumbers (`wn_<number>` or a bare number) must parse to distinct
-#'    numeric values in strictly decreasing order (e.g., 4000, 3998,
-#'    3996...). A name that does not parse (e.g. two decimal points) or a
-#'    value that repeats (`600` and `600.0`) is named directly rather than
-#'    folded into a generic "must be strictly decreasing" message. Always
-#'    checked, in both stages.
+#' 6. **Wavelength naming and order**: Every predictor name must be a
+#'    wavenumber (`wn_<number>` or a bare number, #121) and parse to a
+#'    distinct numeric value, in strictly decreasing order (e.g., 4000,
+#'    3998, 3996...). A name that does not parse (`wn_X4000`, two decimal
+#'    points) or a value that repeats (`600` and `600.0`) is named directly
+#'    rather than folded into a generic "must be strictly decreasing"
+#'    message. Always checked, in both stages.
 #'
 #' 7. **role_map completeness**: Every column in `analysis` must appear in
 #'    `role_map`, and every `role_map` row must name a real column
@@ -554,11 +557,11 @@ validate_horizons_data <- function(x,
   ### Flagged rows are left out of the non-finite check below.
   predictor_cols <- analysis[!flagged, predictor_vars, drop = FALSE]
 
-  # Check for NA and Inf — full stage only --------------------------------------
+  # Check for NA, Inf and no spread — full stage only ------------------------
   # A non-finite value outside standardize()'s trim range is legitimately
-  # there before the trim runs (Inf no less than NA); standardize() aborts on
-  # any non-finite value that survives trimming and resampling, so this is
-  # only enforced from average() on.
+  # there before the trim runs (Inf no less than NA); standardize() flags a
+  # row with a non-finite value that survives trimming and resampling, or
+  # with no spread, so this is only enforced from average() on.
 
   if (stage != "raw") {
 
@@ -582,42 +585,58 @@ validate_horizons_data <- function(x,
 
     }
 
+    ### The rule standardize() flags by; the non-finite rows are named above
+    flat <- unusable_spectra(predictor_cols) %in% "no spread"
+
+    if (any(flat)) {
+
+      n_flat   <- sum(flat)
+      flat_ids <- analysis$sample_id[!flagged][flat]
+      errors   <- c(errors, cli::format_inline(
+        "{n_flat} spectr{?um/a} with no spread (every value equal): {shown_ids(flat_ids)}; {.fn standardize} flags {cli::qty(n_flat)}{?it/them}, or fix the source spectra"
+      ))
+
+    }
+
   }
 
-  # Check wavelength naming and order (numeric column names should be
-  # decreasing) ------------------------------------------------------------
-  # Predictors are minted as wn_<wavenumber> everywhere in the package, so the
-  # pattern has to admit the prefix; without it this check matched nothing and
-  # invariant I2 went unenforced.
+  # Check wavelength naming and order ---------------------------------------
+  # Every predictor is a wavenumber, named wn_<number> or a bare number (#121):
+  # the spectral steps and the grid comparisons read the axis from the names,
+  # so a name that does not parse would leave its band's place unchecked.
 
-  numeric_predictors <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
+  if (length(predictor_vars) > 0) {
 
-  if (length(numeric_predictors) > 1) {
+    wn_num <- wn_values(predictor_vars)
 
-    wn_num <- wn_values(numeric_predictors)
+    ## A name that does not parse is named directly, rather than reaching
+    ## `diff()` as NA or disappearing into a generic message. The first 5 are
+    ## named: an axis of 1,700 such names is unreadable in full.
 
-    ## A name that matches the wn_<digits> pattern but does not parse (e.g.
-    ## two decimal points) would otherwise reach `diff()`/`all()` as NA and
-    ## either crash ("missing value where TRUE/FALSE needed") or disappear
-    ## into a generic message; name it directly instead.
-
-    unparseable <- numeric_predictors[is.na(wn_num)]
+    unparseable <- predictor_vars[is.na(wn_num)]
 
     if (length(unparseable) > 0) {
 
-      col_list <- paste(unparseable, collapse = ", ")
-      errors   <- c(errors, cli::format_inline(
+      col_list <- paste(utils::head(unparseable, 5), collapse = ", ")
+
+      if (length(unparseable) > 5) {
+
+        col_list <- paste0(col_list, ", and ", length(unparseable) - 5, " more")
+
+      }
+
+      errors <- c(errors, cli::format_inline(
         "{cli::qty(length(unparseable))}Predictor column name{?s} that {?does/do} not parse as a wavenumber: {col_list}"
       ))
 
-    } else {
+    } else if (length(wn_num) > 1) {
 
       ## Two columns naming the same wavenumber (e.g. "600" and "600.0")
       ## trivially fail strict decrease once sorted; name every column in
       ## the pair (not just the later occurrence duplicated() flags) rather
       ## than reporting the generic order failure.
 
-      dup_wn <- numeric_predictors[wn_num %in% wn_num[duplicated(wn_num)]]
+      dup_wn <- predictor_vars[wn_num %in% wn_num[duplicated(wn_num)]]
 
       if (length(dup_wn) > 0) {
 
@@ -631,6 +650,7 @@ validate_horizons_data <- function(x,
       }
 
     }
+
   }
 
   ## role_map completeness checks ----------------------------------------------
@@ -1219,7 +1239,7 @@ describe_selection <- function(selection) {
     groups         = groups,
     k              = k_str,
     target_rows    = or_unknown(selection$targets$n_rows),
-    target_source  = or_unknown(selection$targets$source),
+    target_source  = or_unknown(source_label(selection$targets$source)),
     pool_rows      = or_unknown(selection$pool$n_rows),
     drawn          = drawn,
     space          = space,
@@ -2814,6 +2834,24 @@ selected_member <- function(x) {
 }
 
 
+#' The source an object was read from, on one line
+#'
+#' @description
+#' `spectra()` records the paths it was given, which can be thousands of
+#' files, so `print()` and `summary()` show the first and count the rest.
+#'
+#' @param source `provenance$spectra_source`: character.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+source_label <- function(source) {
+
+  if (length(source) <= 1) return(as.character(source))
+
+  paste0(source[1], " and ", length(source) - 1, " more")
+
+}
+
 #' Print method for horizons_data objects
 #'
 #' @description
@@ -2943,7 +2981,7 @@ print.horizons_data <- function(x, ...) {
 
       has_type <- !is.null(x$provenance$spectra_type)
       branch   <- if (has_type) "\u251C\u2500" else "\u2514\u2500"
-      cat(paste0("   ", branch, " Source: ", x$provenance$spectra_source, "\n"))
+      cat(paste0("   ", branch, " Source: ", source_label(x$provenance$spectra_source), "\n"))
 
     }
 
@@ -3257,7 +3295,7 @@ summary.horizons_data <- function(object, ...) {
   }
 
   if (!is.null(x$provenance$spectra_source)) {
-    cat(paste0("   ", get_branch(), " Spectra source: ", x$provenance$spectra_source, "\n"))
+    cat(paste0("   ", get_branch(), " Spectra source: ", source_label(x$provenance$spectra_source), "\n"))
   }
 
   if (!is.null(x$provenance$spectra_type)) {
