@@ -361,9 +361,7 @@ fit_tuned_meta_learner <- function(object,
   ## scores the clamped combination too, so the candidate chosen is the one
   ## best on what is served (#104).
   outcome_range <- outcome_range_setting(object)
-  meta_metrics  <- tuning_metric_set("none",
-                                     metrics       = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"),
-                                     outcome_range = outcome_range)
+  meta_metrics  <- tuning_metric_set("none", outcome_range = outcome_range)
 
   ## The warnings tune keeps as notes: the chosen candidate's (#109) and the
   ## out-of-fold pass's. They are the ensemble's own, for its `warnings`.
