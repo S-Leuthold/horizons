@@ -1594,6 +1594,9 @@ describe("checkpoint scoring schema", {
     candidates <- list(
       variant("keep",        identity),
       variant("schema_1",    function(r) { r$scoring_schema <- 1L; r }),
+      ## Schema 4 scored a "none" configuration's cv_* on unclamped
+      ## predictions, so its rows are not ranked beside clamped ones (#104)
+      variant("schema_4",    function(r) { r$scoring_schema <- 4L; r }),
       variant("schema_na",   function(r) { r$scoring_schema <- NA_integer_; r }),
       variant("schema_none", function(r) { r$scoring_schema <- NULL; r }),
       variant("no_hash",     function(r) { r$data_hash <- NULL; r }),
@@ -1606,7 +1609,7 @@ describe("checkpoint scoring schema", {
     gated <- gate_checkpoint_rows(candidates, run_fp, settings)
 
     expect_named(gated$kept, "keep")
-    expect_equal(gated$n_foreign, 8L)
+    expect_equal(gated$n_foreign, 9L)
     expect_length(gated$refused, 0)
 
     ## A run with no fingerprint of its own resumes nothing
@@ -1615,24 +1618,6 @@ describe("checkpoint scoring schema", {
 
     expect_length(unverifiable$kept, 0)
     expect_equal(unverifiable$n_foreign, 1L)
-
-  })
-
-  it("drops a row scored before untransformed tuning metrics were clamped (#104)", {
-
-    run_fp   <- list(data_hash = "h", data_n_rows = 10L,
-                     data_fields = list(ids = "i", outcome = "SOC"))
-    settings <- eval_settings(cv_folds = 3L, seed = 42L)
-
-    ## Schema 4 scored a "none" configuration's cv_* on unclamped predictions,
-    ## so its rows are not ranked beside rows scored on clamped ones
-    row <- tibble::tibble(config_id = "a", scoring_schema = 4L)
-    row <- stamp_eval_settings(stamp_data_fingerprint(row, run_fp), settings)
-
-    expect_identical(checkpoint_row_verdict(row, run_fp, settings)$verdict, "foreign_schema")
-
-    row$scoring_schema <- SCORING_SCHEMA
-    expect_identical(checkpoint_row_verdict(row, run_fp, settings)$verdict, "keep")
 
   })
 
