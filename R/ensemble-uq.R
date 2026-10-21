@@ -377,7 +377,11 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 #' **The rows a response trim set aside** calibrate too, as they calibrate a
 #' single fit's intervals (#99): without them the calibration set holds only
 #' rows inside the training fences, while the test set and new data keep
-#' their extremes, and the intervals undercover those (#103). Their member
+#' their extremes, and coverage over new data falls below the level (#103).
+#' With them the calibration rows are exchangeable with new data, extremes
+#' included, and coverage over new data as a whole is at the level. The
+#' coverage is marginal: a sample whose outcome lies far outside the fences
+#' is rarely inside its interval. Their member
 #' predictions come from the final members, which never trained on them, and
 #' each is given a fold at random, balanced across the folds, whose model
 #' scores it. No fold model trained on any of them, so each residual is out

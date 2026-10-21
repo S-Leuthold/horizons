@@ -24,8 +24,10 @@ does not. \code{TRUE}: intervals asked for; without a bundle the bounds are
 none. The intervals are at the level they were calibrated at in
 \code{\link[=ensemble]{ensemble()}}, 0.90 by default (see Details). When the members were fit
 on a response-trimmed training partition (\code{validate(remove_outliers = "response")}, #77), the training rows the trim set aside calibrate the
-intervals too, so they cover samples outside the training fences as
-well as inside (#103).}
+intervals too (#103), so the calibration rows are exchangeable with new
+data, extremes included, and coverage over new data as a whole is at the
+level. The coverage is marginal: a sample whose outcome lies far outside
+the training fences is rarely inside its interval.}
 
 \item{...}{Not used; present for S3 method consistency. A \code{level} passed
 here is ignored with a warning (see Details), and any other argument is
