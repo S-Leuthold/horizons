@@ -1145,19 +1145,23 @@ console_object <- function() {
     message = c("Read 1 OPUS file from 1 path: 4 scans and 3 predictors, with horizons 0.12.0.",
                 "2 of 4 samples matched the source, so 2 have no response values."),
     ids     = list("/path/to/spectra", c("SAMPLE_003", "SAMPLE_004")),
-    n       = c(1L, 2L)
+    n       = c(1L, 2L),
+    time    = as.POSIXct(c("2026-10-21 08:00:00", "2026-10-21 08:00:05"))
   )
 
   validate_horizons_data(obj)
 
 }
 
-## summary() prints the package version spectra()'s note names and the
-## table's size in memory, which change between releases and R versions. The
-## snapshots keep each line and replace its value. Each pattern matches the
-## value's own form, so a value printed in some other form fails the snapshot.
+## summary() prints the time each log row's call ran, the package version
+## spectra()'s note names and the table's size in memory, which change
+## between runs, releases and R versions. The snapshots keep each line and
+## replace its value. Each pattern matches the value's own form, so a value
+## printed in some other form fails the snapshot.
 scrub_summary <- function(lines) {
 
+  lines <- sub("^(\\s+(\u251c|\u2514)\u2500 )[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} ",
+               "\\1<time> ", lines)
   lines <- sub("(with horizons) [0-9]+(\\.[0-9]+)+\\.$", "\\1 <version>.", lines)
   sub("(Memory:) [0-9.]+ (bytes|Kb|Mb|Gb)$", "\\1 <size>", lines)
 
@@ -1197,6 +1201,18 @@ test_that("print() and summary() of an object without a log show no Log section,
   expect_false(any(grepl("^Log", printed)))
   expect_true(any(grepl("^Pipeline Status", summed)))
   expect_false(any(grepl("^Log", summed)))
+
+})
+
+test_that("summary.horizons_data shows no time for a log row without one, as on a log saved before the column", {
+
+  obj <- console_object()
+  obj$log$time <- NULL
+
+  out <- capture.output(summary(obj))
+
+  expect_true(any(out == "   \u251c\u2500 spectra(): Read 1 OPUS file from 1 path: 4 scans and 3 predictors, with horizons 0.12.0."))
+  expect_false(any(grepl("2026-10-21", out, fixed = TRUE)))
 
 })
 
@@ -2733,6 +2749,8 @@ test_that("the committed ensemble fixture carries the current contract and valid
   expect_false("row_index" %in% names(fx$models))
   expect_false("artifacts" %in% names(fx))
   expect_false("schema_version" %in% names(fx))
+  expect_false("provenance" %in% names(fx))
+  expect_true("time" %in% names(fx$log))
   expect_true("sample_id" %in% names(fx$models$cv_predictions))
 
   expect_identical(validate_horizons_eval(fx), fx)

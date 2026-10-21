@@ -299,6 +299,7 @@ test_that("spectra() records a data frame source in its note, and the object car
 
   expect_identical(read_note(result)$ids[[1]], character(0))
   expect_match(read_note(result)$message, "^Read a data frame")
+  expect_s3_class(read_note(result)$time, "POSIXct")
   expect_false("provenance" %in% names(result))
   expect_false("schema_version" %in% names(result))
   expect_false("artifacts" %in% names(result))

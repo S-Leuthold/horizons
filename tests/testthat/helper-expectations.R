@@ -51,3 +51,17 @@ log_events_added <- function(before, after) {
   rows[setdiff(seq_len(nrow(rows)), nrow(rows)), , drop = FALSE]
 
 }
+
+#' A log without its time column
+#'
+#' Two calls that write the same rows are stamped at different times, so logs
+#' from separate calls are compared on everything else.
+#'
+#' @param log A log, shaped like `new_log()`'s.
+#'
+#' @return `log` less `time`.
+without_time <- function(log) {
+
+  log[, setdiff(names(log), "time"), drop = FALSE]
+
+}

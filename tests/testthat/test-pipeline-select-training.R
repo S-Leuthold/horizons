@@ -373,7 +373,7 @@ test_that("select_training() writes its coverage warning to the log before raisi
 
   ## The record does not depend on the signal
   quiet <- suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay"))
-  expect_identical(quiet$log, out$log)
+  expect_identical(without_time(quiet$log), without_time(out$log))
 
 })
 

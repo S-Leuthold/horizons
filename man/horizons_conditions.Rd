@@ -134,8 +134,9 @@ without warning, such as samples dropped as the user asked, and the note
 each of \code{\link[=spectra]{spectra()}}, \code{\link[=parse_ids]{parse_ids()}}, \code{\link[=standardize]{standardize()}}, \code{\link[=average]{average()}} and
 \code{\link[=add_response]{add_response()}} writes as the last row of every call, recording its
 source and settings, so a pipeline's history is in one place. Notes are
-never raised. \code{predict()}, which changes no object, carries each
-warning's record as the field \code{log}.
+never raised. Every row carries the \code{time} its call ended, so the first
+row's is when the object was made. \code{predict()}, which changes no object,
+carries each warning's record as the field \code{log}.
 
 Under \code{options(warn = 2)}, a warning that no handler takes ends the call
 with \code{horizons_error_promoted_warnings}, which carries the finished result

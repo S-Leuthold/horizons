@@ -90,8 +90,8 @@
          └─ Status: not run
       
       Log
-         ├─ spectra(): Read 1 OPUS file from 1 path: 4 scans and 3 predictors, with horizons <version>.
-         └─ add_response() warning (coverage): 2 of 4 samples matched the source, so 2 have no response values.
+         ├─ <time> spectra(): Read 1 OPUS file from 1 path: 4 scans and 3 predictors, with horizons <version>.
+         └─ <time> add_response() warning (coverage): 2 of 4 samples matched the source, so 2 have no response values.
       
       Pipeline Status
          └─ Next step: configure()
@@ -209,8 +209,8 @@
          └─ Status: not run
       
       Log
-         ├─ spectra(): Read a data frame: 40 rows and 851 predictors, with horizons <version>.
-         └─ add_response(): Joined clay and oc from a data frame on sample_id: 40 of 40 samples matched, with measured values per variable: clay 40, oc 20.
+         ├─ <time> spectra(): Read a data frame: 40 rows and 851 predictors, with horizons <version>.
+         └─ <time> add_response(): Joined clay and oc from a data frame on sample_id: 40 of 40 samples matched, with measured values per variable: clay 40, oc 20.
       
       Pipeline Status
          ├─ Rows: drawn from a pool by select_training() (scope: batch)

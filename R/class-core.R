@@ -2878,10 +2878,12 @@ print_log_count <- function(log) {
 #' summary()'s section for the log: every row, in order
 #'
 #' @description
-#' One line per row: the verb, for a warning its topic, and the message, in
-#' the order the verbs wrote them. The data verbs' notes record how the
-#' object was made, so the section reads as its history. Like
-#' [print_log_count()], it reads the log as a table.
+#' One line per row: when its call ran, the verb, for a warning its topic,
+#' and the message, in the order the verbs wrote them. The data verbs' notes
+#' record how the object was made, so the section reads as its history, and
+#' its first time is when the object was made. Like [print_log_count()], it
+#' reads the log as a table. A row without a time (a log built by hand)
+#' shows none.
 #'
 #' @inheritParams print_log_count
 #' @return `NULL`, invisibly; prints the section.
@@ -2902,7 +2904,9 @@ summary_log <- function(log) {
 
   }
 
-  lines <- paste0(log$verb, "()",
+  time  <- if ("time" %in% names(log)) format(log$time, "%Y-%m-%d %H:%M:%S") else rep(NA, n)
+  when  <- ifelse(is.na(time), "", paste0(time, " "))
+  lines <- paste0(when, log$verb, "()",
                   ifelse(log$type == "warning", paste0(" warning (", log$topic, ")"), ""),
                   ": ", log$message)
 
@@ -3193,9 +3197,9 @@ print.horizons_data <- function(x, ...) {
 #' - **Configuration section**: Tuning parameter defaults, config count, and
 #'   the outcome range when it is not the default `c(0, Inf)`
 #' - **Validation section**: Whether validation has run, pass/fail status
-#' - **Log section**: Every row of the log, in order: the verb, the message,
-#'   and for a warning its topic. The data verbs' notes record how the object
-#'   was made, from the source onward
+#' - **Log section**: Every row of the log, in order: when its call ran, the
+#'   verb, for a warning its topic, and the message. The data verbs' notes
+#'   record how the object was made, from the source onward
 #' - **Pipeline status**: Current stage and next step guidance, noting when
 #'   the rows were drawn from a pool
 #'

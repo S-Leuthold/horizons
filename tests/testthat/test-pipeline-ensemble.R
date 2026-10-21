@@ -247,11 +247,11 @@ describe("ensemble() - preflight validation", {
     ## ensemble() used to check only the class and the outcome range, so
     ## each of these reached the meta-learner.
 
-    ## The base contract: the id role moved off sample_id
-    off_id <- fitted
+    ## The base contract: the id role moved off sample_id, onto a meta column
+    off_id <- add_columns(fitted, tibble::tibble(site = rep("a", fitted$data$n_rows)), role = "meta")
     rm     <- off_id$data$role_map
     rm$role[rm$variable == "sample_id"] <- "meta"
-    rm$role[rm$variable == "project"]   <- "id"
+    rm$role[rm$variable == "site"]      <- "id"
     off_id$data$role_map <- rm
 
     expect_error(
@@ -1511,9 +1511,10 @@ describe("ensemble() - allow_par", {
     expect_s3_class(w, "horizons_warning_substitution")
     expect_match(conditionMessage(w), "ensemble\\(\\).*offers 1 worker")
     expect_true(inherits(ens, "horizons_ensemble"))
-    expect_identical(ens$log$verb, "ensemble")
-    expect_identical(ens$log$topic, "substitution")
-    expect_identical(w$log, ens$log)
+    added <- log_rows_added(fitted, ens)
+    expect_identical(added$verb, "ensemble")
+    expect_identical(added$topic, "substitution")
+    expect_identical(w$log, added)
 
   })
 
