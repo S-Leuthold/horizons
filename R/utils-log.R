@@ -137,7 +137,8 @@ check_log_topic <- function(topic) {
 #' cache rebuilt). The verb shows it in its verbose output; the log keeps it
 #' with the warnings, so a pipeline's history is in one place. The data
 #' verbs also record each call as a note, its source and settings, as the
-#' call's last row. A note is never raised.
+#' call's last row, every call but `standardize()`'s early return. A note is
+#' never raised.
 #'
 #' @inheritParams log_warning
 #' @return `collector`, invisibly.

@@ -247,9 +247,12 @@ check_arg <- function(check,
 #' without warning, such as samples dropped as the user asked, and the note
 #' each of [spectra()], [parse_ids()], [standardize()], [average()] and
 #' [add_response()] writes as the last row of every call, recording its
-#' source and settings, so a pipeline's history is in one place. Notes are
-#' never raised. Every row carries the `time` its call ended, so the first
-#' row's is when the object was made. `predict()`, which changes no object,
+#' source and settings, so a pipeline's history is in one place. The one
+#' call that writes none is `standardize()`'s early return on spectra
+#' already standardized, whose `skipped` warning is its row. Notes are never
+#' raised. Every row carries the `time` its call ended, so the first row's
+#' is when the spectra were read (on a training set, the library's).
+#' `predict()`, which changes no object,
 #' carries each warning's record as the field `log`.
 #'
 #' Under `options(warn = 2)`, a warning that no handler takes ends the call
