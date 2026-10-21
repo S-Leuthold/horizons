@@ -786,6 +786,41 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
+  it("compute_ensemble_uq counts the trimmed rows among the rows that calibrate (#103)", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+
+    ## 25 meta rows, under the 30 the gate asks for, and rows outside the
+    ## meta frame standing in for the training rows a trim set aside
+    keep  <- seq_len(N_CALIB_MIN - 5L)
+    small <- list(predictors = oof$predictors[keep, , drop = FALSE], truth = oof$truth[keep],
+                  row = oof$row[keep], sample_id = oof$sample_id[keep], members = oof$members)
+    aside <- function(at) list(predictors = oof$predictors[at, , drop = FALSE],
+                               truth = oof$truth[at], sample_id = oof$sample_id[at])
+
+    run <- function(trimmed) {
+      ## suppressWarnings(): rsample's note that 25 rows are too few for its
+      ## default strata breaks
+      suppressWarnings(compute_ensemble_uq(oof = small, contract = ens_ref$ensemble,
+                                           optimize = FALSE, conformal_seed = 1307L,
+                                           trimmed = trimmed))
+    }
+
+    ## Eight of them make 33 rows that calibrate, enough
+    uq <- run(aside(26:33))
+    expect_identical(uq$n_calib, 33L)
+    expect_identical(sum(is.na(uq$calib$.row)), 8L)
+
+    ## Three make 28, and the refusal names both counts
+    err <- expect_error(run(aside(26:28)), class = "horizons_error_run")
+    expect_match(conditionMessage(err),
+                 "The meta frame's 25 rows and the 3 training rows the response trim set aside give 28 to calibrate on, fewer than `min_calib_rows` (30).",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "lower `control_horizons(min_calib_rows = )` to 28 or fewer", fixed = TRUE)
+
+  })
+
   it("compute_ensemble_uq drops non-finite residuals, and refuses when too few are left", {
 
     ens_ref <- ens_built("weighted")

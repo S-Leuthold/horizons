@@ -431,16 +431,25 @@ compute_ensemble_uq <- function(oof,
 
   }
 
-  ## Gate 1: enough rows to calibrate at all.
-  if (nrow(meta_frame) < min_calib_rows) {
+  ## Gate 1: enough rows to calibrate at all. The rows that calibrate are the
+  ## meta frame's and the trimmed rows, as fit()'s gate counts its
+  ## calibration rows, trimmed rows included, and as the gate after the drop
+  ## below counts them.
+  n_meta    <- nrow(meta_frame)
+  n_trimmed <- if (is.null(trimmed)) 0L else length(trimmed$truth)
+  n_rows    <- n_meta + n_trimmed
 
-    n_rows <- nrow(meta_frame)
+  if (n_rows < min_calib_rows) {
+
     n_have <- n_rows
 
-    abort_horizons(c(
-      "The meta frame has {n_rows} row{?s} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows}).",
-      "i" = remedy(n_rows)
-    ), kind = "run")
+    what <- if (n_trimmed > 0) {
+      "The meta frame's {n_meta} row{?s} and the {n_trimmed} training row{?s} the response trim set aside give {n_rows} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows})."
+    } else {
+      "The meta frame has {n_rows} row{?s} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows})."
+    }
+
+    abort_horizons(c(what, "i" = remedy(n_rows)), kind = "run")
 
   }
 
