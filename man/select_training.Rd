@@ -361,7 +361,9 @@ library was drawn from, and its \code{build}.
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 columns returned, the pool's identity, the targets' identity (their source,
-row count and a hash of their ids), the membership table (target by
+row count and a hash of their ids; the source is the paths their
+\code{\link[=spectra]{spectra()}} note names, \code{"data frame"} when they were read from one, and
+\code{NULL} when they were not made by \code{spectra()}), the membership table (target by
 property by pool row, with the space it was measured in, distance, rank,
 and whether the row was \code{retained} in the object after the twin
 subtraction), the groups, pool sizes per property against those available, every

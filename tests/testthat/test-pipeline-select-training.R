@@ -1781,10 +1781,31 @@ test_that("the record carries settings, reconciliation, pool identity and distan
 })
 
 
-test_that("the record carries the targets' source, size and id hash", {
+test_that("targets read from a data frame are recorded as one, and targets no spectra() call made have no source", {
 
   fx <- select_fixture(n_pool = 60)
-  fx$targets$provenance$spectra_source <- "batch_07.csv"
+
+  ## The fixture reads both from data frames: the note names no path
+  expect_identical(fx$targets$log$ids[[1]], character(0))
+  expect_identical(quiet_select(fx, k = 5)$selection$targets$source, "data frame")
+
+  ## A log without a spectra() note gives none, which summary() reads as
+  ## unknown
+  fx$targets$log <- new_log()
+  out <- quiet_select(fx, k = 5)
+  expect_null(out$selection$targets$source)
+  expect_identical(describe_selection(out$selection)$target_source, "unknown")
+
+})
+
+
+test_that("the record carries the targets' source, size and id hash", {
+
+  ## The source is the paths the targets' spectra() note names, not the
+  ## library's, whose log the training set carries
+  fx <- select_fixture(n_pool = 60)
+  fx$targets$log$ids[[1]] <- "batch_07.csv"
+  fx$pool$log$ids[[1]]    <- "library.csv"
 
   out <- quiet_select(fx, k = 5)
 
@@ -1795,6 +1816,7 @@ test_that("the record carries the targets' source, size and id hash", {
 
   expect_named(rec, c("source", "n_rows", "id_hash"))
   expect_identical(rec$source,  "batch_07.csv")
+  expect_identical(out$log$ids[[1]], "library.csv")
   expect_identical(rec$n_rows,  8L)
   expect_identical(rec$id_hash, digest::digest(sort(ids, method = "radix")))
 

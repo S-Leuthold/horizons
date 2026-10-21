@@ -197,7 +197,9 @@
 #'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
 #' columns returned, the pool's identity, the targets' identity (their source,
-#' row count and a hash of their ids), the membership table (target by
+#' row count and a hash of their ids; the source is the paths their
+#' [spectra()] note names, `"data frame"` when they were read from one, and
+#' `NULL` when they were not made by `spectra()`), the membership table (target by
 #' property by pool row, with the space it was measured in, distance, rank,
 #' and whether the row was `retained` in the object after the twin
 #' subtraction), the groups, pool sizes per property against those available, every
@@ -1471,7 +1473,7 @@ select_training <- function(x, library,
     search           = c(sa$record, list(cache = cache)),
     pool             = list(n_rows = nrow(pool$data$analysis),
                             id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix"))),
-    targets          = list(source  = x$provenance$spectra_source,
+    targets          = list(source  = targets_source(x$log),
                             n_rows  = nrow(x$data$analysis),
                             id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),
     library          = resolved$record,
@@ -1560,6 +1562,37 @@ select_training <- function(x, library,
 ## =============================================================================
 ## Internal helpers
 ## =============================================================================
+
+
+## ---------------------------------------------------------------------------
+## targets_source() — where the targets were read from, from their log
+## ---------------------------------------------------------------------------
+
+#' The source the targets were read from
+#'
+#' @description
+#' The `ids` of the targets' [spectra()] note, which are the paths it was
+#' given. The training set carries the pool's log, not the targets', so the
+#' selection record keeps the targets' source itself, beside their size and
+#' id hash. This is the one place a verb reads a log row's content, so
+#' `spectra()`'s note promises its `ids`.
+#'
+#' @param log [Tibble.] The targets' log.
+#'
+#' @return [Character or NULL.] The paths, `"data frame"` when the note names
+#'   none, or `NULL` when the log holds no `spectra()` note.
+#' @noRd
+targets_source <- function(log) {
+
+  read <- log[log$verb %in% "spectra" & log$type %in% "note", , drop = FALSE]
+
+  if (nrow(read) == 0) return(NULL)
+
+  paths <- read$ids[[1]]
+
+  if (length(paths) == 0) "data frame" else paths
+
+}
 
 
 ## ---------------------------------------------------------------------------
