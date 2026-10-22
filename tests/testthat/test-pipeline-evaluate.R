@@ -3237,7 +3237,9 @@ describe("evaluate() - a package missing where a configuration ran", {
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "A package `evaluate()` needs is not installed where its work ran", fixed = TRUE)
     expect_match(msg, "horizonsFakePkgXYZ123", fixed = TRUE)
-    expect_match(msg, "a parallel worker's library lacks it", fixed = TRUE)
+    ## A sequential run: the hint covers it as well as a parallel one
+    expect_match(msg, "If the run was parallel, a worker's library lacks this one: install it there.", fixed = TRUE)
+    expect_match(msg, "If not, `evaluate()` does not check for it, which is a bug in horizons", fixed = TRUE)
     expect_length(gregexpr("is not installed where its work ran", msg, fixed = TRUE)[[1]], 1L)
 
   })

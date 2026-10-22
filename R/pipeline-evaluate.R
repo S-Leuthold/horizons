@@ -1973,8 +1973,9 @@ stop_on_worker_death <- function(expr, results, output_dir = NULL, verb = "evalu
         "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on."
       },
       "x" = if (missing) "{cause}",
+      ### Either the run was parallel, or the door's lists missed the package
       "i" = if (missing) {
-        "{.fn {verb}} found every package it needs in this session before the run, so a parallel worker's library lacks it. Install it there."
+        "{.fn {verb}} checked this session for the packages it knows of before the run. If the run was parallel, a worker's library lacks this one: install it there. If not, {.fn {verb}} does not check for it, which is a bug in horizons: install it, and please report it."
       },
       "i" = if (!is.null(output_dir)) {
         "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
