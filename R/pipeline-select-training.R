@@ -1778,9 +1778,8 @@ check_pool_unpromoted <- function(pool) {
 #' @details
 #' `standardize()` records the range each hull was fitted over as
 #' `baseline_range`, kept when a later `standardize(force = TRUE)` trims the
-#' axis further, so a hull's ends are its record's `baseline_range`; a
-#' record written before it was kept has its hull over its
-#' `wavelength_range`, which is read in its place ([prior_hull_range()]).
+#' axis further, so a hull's ends are its record's `baseline_range`
+#' ([prior_hull_range()]).
 #' Those ranges are compared, not the `trim` arguments: data that stops
 #' short of a bound fits
 #' a different hull under an equal trim, and `trim = NULL` on data spanning

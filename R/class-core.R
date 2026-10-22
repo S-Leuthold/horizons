@@ -373,6 +373,11 @@ new_horizons_data <- function(analysis = NULL,
 #'     `data$standardization` and the history from the log, so its record
 #'     would go unread.
 #'
+#' 16. **Standardization record**: a `data$standardization` that records a
+#'     convex-hull baseline carries its `baseline_range`, two numbers, the
+#'     range the hull was fitted over, which `select_training()` compares
+#'     (#107).
+#'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction. The selection record is
 #' checked even on an otherwise empty object.
@@ -475,6 +480,27 @@ validate_horizons_data <- function(x,
     errors <- c(errors, cli::format_inline(
       "The object carries a {.field provenance} slot, which horizons no longer writes: it was made by an earlier version. Re-run the pipeline from {.fn spectra}."
     ))
+
+  }
+
+  ## The standardization record ----
+  ## A record that says the spectra carry a convex-hull baseline holds the
+  ## range the hull was fitted over, which select_training() compares between
+  ## a library and its targets (#107); standardize() always writes it.
+
+  std <- x$data$standardization
+
+  if (is.list(std) && isTRUE(std$baseline)) {
+
+    hull <- std$baseline_range
+
+    if (!(is.numeric(hull) && length(hull) == 2 && !anyNA(hull))) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field data$standardization} records a convex-hull baseline but no {.field baseline_range} (two numbers), the range the hull was fitted over"
+      ))
+
+    }
 
   }
 

@@ -2341,7 +2341,7 @@ test_that("a hull carried through standardize(force = TRUE) is compared over the
 })
 
 
-test_that("a hull-corrected record written without its range is read by its axis, never passed unchecked (#107)", {
+test_that("a hull-corrected record without its range is refused at the door, never passed unchecked (#107, #212)", {
 
   fx <- select_fixture(n_pool = 60)
 
@@ -2350,12 +2350,20 @@ test_that("a hull-corrected record written without its range is read by its axis
     targets <- standardize(fx$targets, resample = 8, trim = c(1000, 3000), baseline = TRUE)
   })
 
-  ## As standardize() wrote a record before it kept the hull's range
-  pool$data$standardization$baseline_range    <- NULL
-  targets$data$standardization$baseline_range <- NULL
+  finding <- "data$standardization records a convex-hull baseline but no baseline_range (two numbers)"
 
-  expect_error(select_training(targets, pool, k = 5), "hulls are pinned at different ends",
-               class = "horizons_error_input")
+  ## The record edited by hand, on either side
+  no_range <- targets
+  no_range$data$standardization$baseline_range <- NULL
+  err <- expect_error(select_training(no_range, pool, k = 5), class = "horizons_error_validation")
+  expect_true(any(grepl(finding, err$findings, fixed = TRUE)))
+  expect_match(gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err))),
+               "rebuild it with the verbs that wrote it", fixed = TRUE)
+
+  no_range <- pool
+  no_range$data$standardization$baseline_range <- NULL
+  err <- expect_error(select_training(targets, no_range, k = 5), class = "horizons_error_validation")
+  expect_true(any(grepl(finding, err$findings, fixed = TRUE)))
 
 })
 
