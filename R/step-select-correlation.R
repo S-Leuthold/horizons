@@ -26,18 +26,22 @@
 #' the spectrum, computes the mean absolute Spearman correlation between each window and
 #' the outcome, and retains all wavenumbers from windows where the score exceeds
 #' `mean + 1 SD`. Duplicate selections are collapsed. If no window meets the
-#' threshold, every input wavenumber is retained, the trained step records
+#' threshold, every band it scored is retained, the trained step records
 #' `retained_all = TRUE`, and the step warns with class
 #' `horizons_warning_substitution` (#105).
 #'
-#' With fewer than five bands there are fewer than three windows, and the
+#' A near-constant band (a variance not finite, zero, or at most a
+#' hundred-millionth of the median band's) has no rank correlation with the
+#' outcome, so it is dropped before the windows are scored, as
+#' `step_select_cars()` and `step_select_boruta()` drop it. With fewer than
+#' five bands left there are fewer than three windows, and the
 #' threshold cannot select among them (one window has no standard deviation,
 #' and two windows' mean plus one standard deviation lies above the higher):
 #' the step keeps the bands and warns with class `horizons_warning_skipped`,
 #' rather than report a substitution it could not have avoided. The
 #' trained step records what it did in its `correlation` element: the bands
-#' it scored, the threshold, the windows scored and kept, `retained_all` and
-#' `skipped`.
+#' it scored (`n_bands`), the near-constant bands it dropped (`n_constant`),
+#' the threshold, the windows scored and kept, `retained_all` and `skipped`.
 #'
 #' This step is designed to operate on spectra that have already been preprocessed
 #' (e.g., SNV + derivative). It should be applied after spectral transformation but
@@ -150,6 +154,15 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   outcome_vec <- training[[x$outcome]]
   spectra_mat <- as.matrix(training[, col_names])
 
+  ## A band with no spread, relative to the spectrum's, has no rank
+  ## correlation with the outcome, so it is dropped before scoring, as
+  ## step_select_cars() and step_select_boruta() drop it, and counted on the
+  ## record. The windows run over the bands that are left.
+  filtered    <- drop_constant_bands(spectra_mat)
+  spectra_mat <- filtered$spectra
+  n_constant  <- filtered$n_constant
+  bands       <- colnames(spectra_mat)
+
   window_size <- 3
 
 
@@ -171,14 +184,15 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   ## one sd, selects nothing from fewer (one window has no sd, and the mean
   ## plus one sd of two lies above the higher), so the bands are kept and the
   ## step says the selection did not run
-  if (length(col_names) < SELECTION_MIN_BANDS[["step_select_correlation"]]) {
+  if (length(bands) < SELECTION_MIN_BANDS[["step_select_correlation"]]) {
 
-    return(trained_step(col_names, list(n_bands        = length(col_names),
-                                        threshold      = NA_real_,
-                                        n_windows      = 0L,
-                                        n_windows_kept = 0L,
-                                        retained_all   = FALSE,
-                                        skipped        = TRUE)))
+    return(trained_step(bands, list(n_bands        = length(bands),
+                                    n_constant     = n_constant,
+                                    threshold      = NA_real_,
+                                    n_windows      = 0L,
+                                    n_windows_kept = 0L,
+                                    retained_all   = FALSE,
+                                    skipped        = TRUE)))
 
   }
 
@@ -199,17 +213,18 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   ## fallback, and the trained step says so (retained_all); the warning is
   ## built from that record (#105)
   if (length(keep_indices) == 0) {
-    kept_wavenumbers <- col_names
+    kept_wavenumbers <- bands
   } else {
     ## Stage 4: Extract the wavenumbers that should be retained
     kept_wavenumbers <- unique(
       unlist(
-        purrr::map(keep_indices, ~ col_names[.x:(.x + window_size - 1)])
+        purrr::map(keep_indices, ~ bands[.x:(.x + window_size - 1)])
       )
     )
   }
 
-  trained_step(kept_wavenumbers, list(n_bands        = length(col_names),
+  trained_step(kept_wavenumbers, list(n_bands        = length(bands),
+                                      n_constant     = n_constant,
                                       threshold      = threshold,
                                       n_windows      = length(window_scores),
                                       n_windows_kept = length(keep_indices),
@@ -256,6 +271,7 @@ print.step_select_correlation <- function(x,
 
   if (x$trained) {
     cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after windowed scoring"), "\n", sep = "")
+    print_constant_bands(x$correlation)
     if (isTRUE(x$correlation$skipped)) {
       print_selection_skipped(x)
     } else if (isTRUE(x$correlation$retained_all)) {

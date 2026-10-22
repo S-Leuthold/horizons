@@ -51,17 +51,20 @@ describe("step_select_correlation() keeps the windows that score", {
 
   })
 
-  it("scores the windows around a constant band without letting it void the threshold", {
+  it("scores the windows around a constant band without letting it void the threshold, and drops it as CARS and Boruta do", {
 
     withr::local_seed(1)
     d         <- correlation_data(n = 100)
     d$wn_4000 <- 0.5
 
-    ## A constant band has no correlation, and stats::cor() says so
-    expect_warning(prepped <- recipes::prep(correlation_recipe(d), training = d),
-                   "the standard deviation is zero", fixed = TRUE)
+    ## A constant band has no correlation; it is dropped before scoring, so
+    ## stats::cor() has nothing to warn of
+    expect_no_warning(prepped <- recipes::prep(correlation_recipe(d), training = d))
 
     expect_identical(prepped$steps[[1]]$selected_vars, signal_windows)
+    expect_identical(prepped$steps[[1]]$correlation$n_constant, 1L)
+    expect_output(print(prepped$steps[[1]]), "1 near-constant band dropped before selection",
+                  fixed = TRUE)
 
   })
 

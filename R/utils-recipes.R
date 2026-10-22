@@ -674,7 +674,8 @@ print_selection_skipped <- function(step) {
 
 #' The print() line for the near-constant bands a step dropped
 #'
-#' @param record A trained step's record (`cars` or `boruta`).
+#' @param record A trained step's record (`cars`, `boruta` or
+#'   `correlation`).
 #' @return `NULL`, invisibly; prints one line when bands were dropped.
 #' @keywords internal
 #' @noRd
@@ -685,7 +686,7 @@ print_constant_bands <- function(record) {
   if (!is.null(n) && n > 0) {
 
     cat("\u2022 ", n, " near-constant band", if (n == 1) "" else "s",
-        " dropped before clustering\n", sep = "")
+        " dropped before selection\n", sep = "")
 
   }
 

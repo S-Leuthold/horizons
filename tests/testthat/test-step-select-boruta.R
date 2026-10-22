@@ -173,7 +173,7 @@ describe("step_select_boruta() - Boruta's input and its forests", {
 
     expect_identical(step$boruta$n_constant, 1L)
     expect_identical(step$boruta$n_bands, 59L)
-    expect_output(print(step), "1 near-constant band dropped before clustering", fixed = TRUE)
+    expect_output(print(step), "1 near-constant band dropped before selection", fixed = TRUE)
 
     ## The 59 that vary cluster to 50; every one of them is selected
     expect_length(seen, 50L)
