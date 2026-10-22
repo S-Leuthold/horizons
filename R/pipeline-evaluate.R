@@ -479,8 +479,9 @@ evaluate <- function(x,
   )
   cv_fold_obj <- cv_drawn$draw
 
-  ## A stratified draw that failed fell back to an unstratified one: what
-  ## ran is not what was asked, so each draw that did says so once.
+  ## A stratified draw that failed, or that rsample had too little data to
+  ## stratify, ran unstratified: what ran is not what was asked, so each draw
+  ## that did says so once. One rsample stratified on fewer bins is a note.
   log_strata_fallback(collector, drawn, "train/test split")
   log_strata_fallback(collector, cv_drawn, "cross-validation folds")
 
@@ -611,10 +612,11 @@ evaluate <- function(x,
                round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", ",
                if (drawn$stratified) "stratified" else "unstratified", ")\n"))
 
-    if (drawn$strata_failed) {
+    split_note <- strata_tree_line(drawn, "split")
 
-      cat(paste0("\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                             "retrying without strata"), "\n"))
+    if (!is.null(split_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(split_note), "\n"))
 
     }
 
@@ -625,10 +627,11 @@ evaluate <- function(x,
                "), grid = ", tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
 
-    if (cv_drawn$strata_failed) {
+    cv_note <- strata_tree_line(cv_drawn, "CV")
 
-      cat(paste0("\u2502  ", cli::col_yellow("Stratified CV failed, ",
-                                             "retrying without strata"), "\n"))
+    if (!is.null(cv_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(cv_note), "\n"))
 
     }
 
@@ -2630,9 +2633,10 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
 #'   unstratified, because rsample dropped the strata or the stratified draw
 #'   failed; see [draw_stratified()]), `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata) and
-#'   `strata_error` (why it failed, or `NA`). Aborts as [modelling_rows()]
-#'   does.
+#'   stratified draw failed and was retried without strata),
+#'   `strata_error` (why it failed, or `NA`) and `strata_warnings` (what
+#'   rsample warned of during the stratified draw). Aborts as
+#'   [modelling_rows()] does.
 #' @keywords internal
 #' @noRd
 draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_env()) {
@@ -2649,11 +2653,12 @@ draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_en
     unstratified = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP)
   )
 
-  list(split         = drawn$draw,
-       n_dropped     = modelled$n_dropped,
-       stratified    = drawn$stratified,
-       strata_failed = drawn$strata_failed,
-       strata_error  = drawn$strata_error)
+  list(split           = drawn$draw,
+       n_dropped       = modelled$n_dropped,
+       stratified      = drawn$stratified,
+       strata_failed   = drawn$strata_failed,
+       strata_error    = drawn$strata_error,
+       strata_warnings = drawn$strata_warnings)
 
 }
 

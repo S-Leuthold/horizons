@@ -729,12 +729,11 @@ fit <- function(x,
       ")\n"
     ))
 
-    if (cold_start && cold$strata_failed) {
+    split_note <- if (cold_start) strata_tree_line(cold, "split")
 
-      cat(paste0(
-        "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                     "retrying without strata"), "\n"
-      ))
+    if (!is.null(split_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(split_note), "\n"))
 
     }
 
@@ -758,12 +757,11 @@ fit <- function(x,
         "\n"
       ))
 
-      if (calib_drawn$strata_failed) {
+      calib_strata <- strata_tree_line(calib_drawn, "calibration split")
 
-        cat(paste0(
-          "\u2502  ", cli::col_yellow("Stratified calibration split failed, ",
-                                       "retrying without strata"), "\n"
-        ))
+      if (!is.null(calib_strata)) {
+
+        cat(paste0("\u2502  ", cli::col_yellow(calib_strata), "\n"))
 
       }
 
@@ -781,13 +779,11 @@ fit <- function(x,
       "\n"
     ))
 
-    if (cv_drawn$strata_failed) {
+    cv_note <- strata_tree_line(cv_drawn, "CV")
 
-      cat(paste0(
-        "\u2502  ", cli::col_yellow(
-          "Stratified CV failed, retrying without strata"
-        ), "\n"
-      ))
+    if (!is.null(cv_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(cv_note), "\n"))
 
     }
 
@@ -1352,8 +1348,9 @@ member_row <- function(res) {
 #'   caller, `fit()`.
 #' @return List with `evaluation` (the record), `stratified` (`FALSE` when
 #'   the split is unstratified), `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata) and
-#'   `strata_error` (why), as [draw_eval_split()] returns them. Aborts with class
+#'   stratified draw failed and was retried without strata),
+#'   `strata_error` (why) and `strata_warnings` (what rsample warned of), as
+#'   [draw_eval_split()] returns them. Aborts with class
 #'   `horizons_error_input` when the object has no configuration or more than
 #'   one, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
@@ -1449,9 +1446,10 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
       runtime_secs  = 0,
       timestamp     = Sys.time()
     ),
-    stratified    = drawn$stratified,
-    strata_failed = drawn$strata_failed,
-    strata_error  = drawn$strata_error
+    stratified      = drawn$stratified,
+    strata_failed   = drawn$strata_failed,
+    strata_error    = drawn$strata_error,
+    strata_warnings = drawn$strata_warnings
   )
 
 }

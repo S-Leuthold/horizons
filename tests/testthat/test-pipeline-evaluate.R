@@ -97,6 +97,14 @@ build_checkpoints_d <- function(dir) {
 
 }
 
+## The log's notes on files in the checkpoint store it could not use
+## (log_unreadable_checkpoints()). The other notes a run on these fixtures
+## writes, rsample's on its small strata, are not under test where this is
+## read.
+store_notes <- function(log) {
+  log[log$type == "note" & grepl("could not be used as", log$message, fixed = TRUE), ]
+}
+
 ck_a <- function(.env = parent.frame()) {
   memo_dir("ck_a", build_checkpoints, prune = FALSE, .env = .env)
 }
@@ -406,12 +414,15 @@ describe("evaluate() - its control", {
     ev <- got$value
     w  <- got$warnings[[1]]
 
+    ## The warning rows: rsample's notes on the 60-row draws are not under test
+    warned <- ev$log[ev$log$type == "warning", ]
+
     expect_length(got$warnings, 1L)
     expect_s3_class(w, "horizons_warning_substitution")
     expect_match(conditionMessage(w), "evaluate\\(\\).*offers 1 worker")
-    expect_identical(ev$log$verb, "evaluate")
-    expect_identical(ev$log$topic, "substitution")
-    expect_identical(w$log, ev$log)
+    expect_identical(warned$verb, "evaluate")
+    expect_identical(warned$topic, "substitution")
+    expect_identical(w$log, warned)
     expect_identical(ev$evaluation$parallelize_over, "sequential")
 
   })
@@ -1183,6 +1194,77 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
 
   })
 
+  it("prints a note under each draw rsample stratified on fewer strata than asked", {
+
+    ## 60 rows bin into three quartile strata, and the 48 training rows the
+    ## folds are drawn on into two
+    out <- evaluate_header(make_eval_object(n = 60, n_configs = 1))
+
+    split_line <- grep("│  Split: ", out, fixed = TRUE)
+    cv_line    <- grep("│  Tuning: ", out, fixed = TRUE)
+
+    expect_identical(out[split_line], "│  Split: 48 train / 12 test (80/20, stratified)")
+    expect_identical(out[split_line + 1L], "│  Stratified split on fewer strata: too little data for 4")
+    expect_identical(out[cv_line + 1L], "│  Stratified CV on fewer strata: too little data for 4")
+
+  })
+
+  it("warns once, recorded first, when rsample had too little data to stratify, in its words, and nothing else escapes", {
+
+    ## Read the fixture before anything is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    ## 30 rows: rsample warns twice on each draw, and draws both without strata
+    got <- collect_warnings(evaluate(make_eval_object(n = 30, n_configs = 1), seed = 42L))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    expect_true(all(vapply(got$warnings, inherits, logical(1), "horizons_warning")))
+    expect_length(sub, 1L)
+
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split had too little data to stratify, so it was drawn without strata",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds had too little data to stratify", fixed = TRUE)
+    expect_match(msg, "Too little data to stratify", fixed = TRUE)
+
+    log <- got$value$log[got$value$log$type == "warning", ]
+    expect_identical(log$topic[log$topic == "substitution"], "substitution")
+    expect_identical(log$n[log$topic == "substitution"], 2L)
+    expect_identical(sub[[1]]$log, log[log$topic == "substitution", ])
+
+  })
+
+  it("records a draw rsample stratified on fewer strata as a note on the log, and warns nothing for it", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L))
+
+    expect_false(any(vapply(got$warnings, inherits, logical(1), "horizons_warning_substitution")))
+    expect_true(all(vapply(got$warnings, inherits, logical(1), "horizons_warning")))
+
+    notes <- got$value$log[got$value$log$type == "note", ]
+    expect_identical(nrow(notes), 2L)
+    expect_match(notes$message[1], "The stratified draw of the train/test split had too little data for 4 strata, so rsample drew it on fewer.",
+                 fixed = TRUE)
+    expect_match(notes$message[1], "Stratification will use 3 breaks instead", fixed = TRUE)
+    expect_match(notes$message[2], "The stratified draw of the cross-validation folds had too little data for 4 strata",
+                 fixed = TRUE)
+
+  })
+
   it("warns once, recorded first, that a failed stratified draw fell back, with why", {
 
     ## Read the fixture before anything is mocked (helper-memo.R)
@@ -1388,8 +1470,11 @@ describe("evaluate() - checkpointing", {
     skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
     expect_length(skipped, 1L)
     expect_match(conditionMessage(skipped[[1]]), "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
-    expect_identical(ev$log$topic[ev$log$verb == "evaluate"], "skipped")
-    expect_setequal(ev$log$ids[[1]], obj$config$configs$config_id)
+    ## The skipped row: the folds rsample had too little data to stratify at
+    ## 40 rows are this call's substitution, not under test here
+    warned <- ev$log[ev$log$topic %in% "skipped", ]
+    expect_identical(warned$verb, "evaluate")
+    expect_setequal(warned$ids[[1]], obj$config$configs$config_id)
 
     ## fit() refuses it at its door, naming a metric the results hold
     err <- expect_error(fit(ev, compute_uq = FALSE, compute_ad = FALSE),
@@ -1426,8 +1511,9 @@ describe("evaluate() - checkpointing", {
     expect_length(skipped, 1L)
     expect_match(conditionMessage(skipped[[1]]), "1 configuration left out of the ranking, with no cv_rpd value.",
                  fixed = TRUE)
-    expect_identical(ev$log$ids[[1]], "cfg_001")
-    expect_identical(skipped[[1]]$log, ev$log)
+    warned <- ev$log[ev$log$type == "warning", ]
+    expect_identical(warned$ids[[1]], "cfg_001")
+    expect_identical(skipped[[1]]$log, warned)
 
   })
 
@@ -2085,9 +2171,9 @@ describe("evaluate() - checkpoint data provenance", {
                seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
-    ## Nothing unusable in the store: no note on the log
+    ## Nothing unusable in the store: no note of it on the log
     expect_named(caught$value$log, names(new_log()))
-    expect_false(any(caught$value$log$verb == "evaluate" & caught$value$log$type == "note"))
+    expect_identical(nrow(store_notes(caught$value$log)), 0L)
     expect_equal(caught$value$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
 
@@ -2117,9 +2203,9 @@ describe("evaluate() - one checkpoint store (#42)", {
                          control = control_horizons(output_dir = tmpdir, verbose = TRUE))
     ))
 
-    ## (rsample's own warnings about the small strata are not under test)
+    ## (rsample's notes on the small strata are not under test)
     expect_false(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
-    note <- second$log[second$log$type == "note", ]
+    note <- store_notes(second$log)
     expect_identical(nrow(note), 1L)
     expect_identical(note$ids[[1]], "checkpoints/cfg_001.rds")
     expect_match(note$message, "1 file in .* could not be used as a checkpoint, so its configuration was evaluated again.")
@@ -2163,7 +2249,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     got <- second$evaluation$results
     expect_equal(got$cv_rpd[got$config_id == "rf_001"], real$cv_rpd)
 
-    note <- second$log$message[second$log$type == "note"]
+    note <- store_notes(second$log)$message
     expect_length(note, 1L)
     expect_true(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
                       note, fixed = TRUE))
@@ -2330,7 +2416,7 @@ describe("evaluate() - tuning-settings provenance", {
     ## A clean store reports nothing unreadable: these per-config files, so
     ## the resume records no note, and a directory with no checkpoints/.
     expect_named(second$log, names(new_log()))
-    expect_false(any(second$log$type == "note"))
+    expect_identical(nrow(store_notes(second$log)), 0L)
 
     store <- read_checkpoint_store(tmpdir)
     expect_length(store$rows, 2L)

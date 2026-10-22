@@ -500,4 +500,104 @@ describe("draw_stratified()", {
 
   })
 
+  it("keeps rsample's warnings on a draw it had too little data to stratify, rather than letting them print", {
+
+    ## Under 40 rows rsample cannot bin the outcome and warns twice as it
+    ## draws without strata
+    small <- df[1:30, , drop = FALSE]
+
+    expect_no_warning(drawn <- draw_stratified(
+      outcome      = small$y,
+      stratified   = function() rsample::vfold_cv(small, v = 5, strata = "y",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(small, v = 5)
+    ))
+
+    expect_false(drawn$stratified)
+    expect_false(drawn$strata_failed)
+    expect_length(drawn$strata_warnings, 2L)
+    expect_true(any(grepl("Too little data to stratify", drawn$strata_warnings, fixed = TRUE)))
+
+  })
+
+  it("keeps rsample's warning on a draw it stratified on fewer bins than asked", {
+
+    ## Between 40 and 79 rows the quartiles hold under 20 rows each, so
+    ## rsample uses fewer bins, and still stratifies
+    mid <- df[1:60, , drop = FALSE]
+
+    expect_no_warning(drawn <- draw_stratified(
+      outcome      = mid$y,
+      stratified   = function() rsample::vfold_cv(mid, v = 5, strata = "y",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(mid, v = 5)
+    ))
+
+    expect_true(drawn$stratified)
+    expect_length(drawn$strata_warnings, 1L)
+    expect_match(drawn$strata_warnings, "Stratification will use 3 breaks instead", fixed = TRUE)
+
+  })
+
+  it("keeps no warning from a stratified draw that failed, whose failure is the record", {
+
+    drawn <- draw_stratified(
+      outcome      = df$y,
+      stratified   = function() {
+        warning("on the way to failing")
+        stop("stratification refused")
+      },
+      unstratified = function() "the unstratified draw"
+    )
+
+    expect_true(drawn$strata_failed)
+    expect_identical(drawn$strata_warnings, character(0))
+
+  })
+
+})
+
+describe("log_strata_fallback()", {
+
+  logged <- function(drawn) {
+    collector <- log_open("evaluate")
+    log_strata_fallback(collector, drawn, "train/test split")
+    log_close(collector)
+  }
+
+  it("records a draw rsample had too little data to stratify as the fallback's substitution, in rsample's words", {
+
+    rows <- logged(list(stratified = FALSE, strata_failed = FALSE, strata_error = NA_character_,
+                        strata_warnings = c("first {word} of rsample's", "Too little data to stratify.")))
+
+    expect_identical(rows$type, "warning")
+    expect_identical(rows$topic, "substitution")
+    expect_match(rows$message, "The stratified draw of the train/test split had too little data to stratify, so it was drawn without strata.",
+                 fixed = TRUE)
+    expect_match(rows$message, "first {word} of rsample's", fixed = TRUE)
+    expect_match(rows$message, "Too little data to stratify.", fixed = TRUE)
+
+  })
+
+  it("records a draw rsample stratified on fewer bins as a note, since it still stratified", {
+
+    rows <- logged(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                        strata_warnings = "Stratification will use 3 breaks instead."))
+
+    expect_identical(rows$type, "note")
+    expect_identical(rows$topic, NA_character_)
+    expect_match(rows$message, "had too little data for 4 strata, so rsample drew it on fewer.", fixed = TRUE)
+    expect_match(rows$message, "Stratification will use 3 breaks instead.", fixed = TRUE)
+
+  })
+
+  it("records nothing for a draw that stratified as asked", {
+
+    rows <- logged(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                        strata_warnings = character(0)))
+
+    expect_identical(nrow(rows), 0L)
+
+  })
+
 })
