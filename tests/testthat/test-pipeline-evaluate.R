@@ -2458,6 +2458,8 @@ describe("evaluate() - a failed write to output_dir", {
 
     expect_match(flat_message(err), "could not write to", fixed = TRUE)
     expect_match(flat_message(err), file.path(parent, "run"), fixed = TRUE)
+    ## The directory's own failure, not the manifest's after it
+    expect_match(flat_message(err), "checkpoints: cannot create dir", fixed = TRUE)
     expect_identical(nrow(err$results), 0L)
     expect_true(all(names(create_failed_result(NA_character_)) %in% names(err$results)))
     expect_identical(ran, character(0))
