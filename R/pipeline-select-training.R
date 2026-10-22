@@ -584,7 +584,7 @@ select_training <- function(x, library,
   }
 
   if (!is_count(cluster_min))  errors <- c(errors, cli::format_inline("{.arg cluster_min} must be a single positive whole number"))
-  if (!is_count(seed, min = -.Machine$integer.max) || abs(seed) > .Machine$integer.max) {
+  if (!is_count(seed, min = -SEED_MAX) || abs(seed) > SEED_MAX) {
 
     errors <- c(errors, cli::format_inline("{.arg seed} must be a single whole number within R's integer range"))
 
