@@ -180,7 +180,9 @@ member alone, and \code{models$results} records the step and the cause in
 \code{control_horizons(keep_traces = TRUE)}, its backtrace as text in \code{trace}.
 A member's own warnings, from the engines and from tune, are in
 \code{models$results$warnings}. A bug, a refusal or a missing package is not
-the member's and stops the call. When the first members fail the same
+the member's and stops the call: before any member is fitted, \code{fit()}
+refuses members whose model's engine or feature-selection step needs a
+package that is not installed, naming each (\code{horizons_error_missing_package}). When the first members fail the same
 way across at least two models, \code{fit()} stops with
 \code{horizons_error_systemic} and the members so far as \code{results}
 (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to fit every

@@ -247,6 +247,42 @@ describe("evaluate() - gate checks", {
 
   })
 
+  it("refuses, before anything is drawn, configurations whose engine or selection step needs a package that is not installed, naming each", {
+
+    local_mocked_bindings(
+      draw_eval_split        = function(...) stop("a split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    ## Packages that are installed nowhere, for cubist's engine and for the
+    ## boruta step
+    models <- MODEL_PACKAGES
+    models[["cubist"]] <- c("rules", "horizonsFakePkgXYZ123")
+    steps <- SELECTION_PACKAGES
+    steps[["boruta"]] <- "horizonsFakePkgABC456"
+    local_mocked_bindings(MODEL_PACKAGES = models, SELECTION_PACKAGES = steps)
+
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$configs$feature_selection[1] <- "boruta"
+
+    err <- expect_error(evaluate(obj), class = "horizons_error_missing_package")
+
+    expect_s3_class(err, "horizons_error_dependency")
+    expect_identical(rlang::call_name(err$call), "evaluate")
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "`evaluate()` needs 2 packages that are not installed.", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgXYZ123, needed for cubist", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgABC456, needed for boruta feature selection", fixed = TRUE)
+    expect_match(msg, "or leave out the models or the feature selection that need them in `configure()`",
+                 fixed = TRUE)
+
+    ## The configurations with everything installed run as before
+    obj$config$configs <- obj$config$configs[obj$config$configs$model == "rf", ]
+    obj$config$configs$feature_selection <- "none"
+    expect_error(evaluate(obj), "a split was drawn", fixed = TRUE)
+
+  })
+
   it("refuses an axis whose names are not wavenumbers at its door, before anything is drawn (#121)", {
 
     ## Names the door validator cannot read as wavenumbers, so it cannot

@@ -98,7 +98,9 @@
 #' `control_horizons(keep_traces = TRUE)`, its backtrace as text in `trace`.
 #' A member's own warnings, from the engines and from tune, are in
 #' `models$results$warnings`. A bug, a refusal or a missing package is not
-#' the member's and stops the call. When the first members fail the same
+#' the member's and stops the call: before any member is fitted, `fit()`
+#' refuses members whose model's engine or feature-selection step needs a
+#' package that is not installed, naming each (`horizons_error_missing_package`). When the first members fail the same
 #' way across at least two models, `fit()` stops with
 #' `horizons_error_systemic` and the members so far as `results`
 #' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
@@ -438,6 +440,11 @@ fit <- function(x,
   all_configs  <- x$config$configs
   tuning       <- x$config$tuning
   cv_folds     <- tuning$cv_folds
+
+  ## Every engine and selection step the members need, before any is
+  ## fitted. Only the members: an evaluation that also holds a mars
+  ## configuration does not need earth to fit the others.
+  check_config_packages(all_configs[all_configs$config_id %in% top_configs$config_id, ], "fit")
 
   ## configure() stores the screening and the final re-tune budgets
   ## separately; fit() used to pass the screening one to the re-tune, so the

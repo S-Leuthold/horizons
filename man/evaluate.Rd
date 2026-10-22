@@ -187,6 +187,9 @@ on them) describe the trimmed population; the test metrics do not.
 
 \section{Failed configurations}{
 
+Before anything runs, \code{evaluate()} refuses configurations whose model's
+engine or feature-selection step needs a package that is not installed,
+naming each package and what needs it (\code{horizons_error_missing_package}).
 Each configuration runs as one unit. A failure in any of its steps fails
 that configuration alone: its row has \code{status} \code{"failed"}, an
 \code{error_message} naming the step and the cause ("Grid search failed:

@@ -59,7 +59,10 @@ filled in, is recorded as \code{ensemble$control}.}
 }
 \value{
 A \code{horizons_ensemble} object (inherits from \code{horizons_fit}) with the
-fitted ensemble in the \code{ensemble} slot.
+fitted ensemble in the \code{ensemble} slot. Before anything is built,
+\code{ensemble()} refuses members whose model's engine is not installed,
+since it predicts them, naming each package
+(\code{horizons_error_missing_package}).
 }
 \description{
 Trains a meta-learner over the models produced by \code{\link[=fit]{fit()}} and returns a

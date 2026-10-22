@@ -89,8 +89,11 @@ every sample failed quality control on every replicate and
 \code{on_all_outliers = "drop"} dropped it. One row per sample travels as
 \code{results}: its \code{sample_id} and \code{n_replicates}.}
 \item{\code{horizons_error_consent}}{(input) A library download was declined.}
-\item{\code{horizons_error_missing_predict_package}}{(dependency) \code{predict()}
-needs a model package that is not installed.}
+\item{\code{horizons_error_missing_package}}{(dependency) A package the call
+needs is not installed: a model's engine, or the package a feature
+selection step trains with (Boruta). \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}},
+\code{\link[=ensemble]{ensemble()}} and \code{predict()} check before any work starts, and refuse
+once, naming every missing package and what needs it.}
 }
 }
 

@@ -1389,19 +1389,19 @@ describe("predict.horizons_fit() - selected training set", {
 
 
 ## ---------------------------------------------------------------------------
-## abort_on_missing_predict_packages() — missing-package gate (#65)
+## check_packages() — the missing-package gate every verb shares (#65)
 ## ---------------------------------------------------------------------------
 
-describe("abort_on_missing_predict_packages() - missing package gate", {
+describe("check_packages() - missing package gate", {
 
   it("aborts cleanly, naming the package and the model that needs it", {
 
     err <- tryCatch(
-      abort_on_missing_predict_packages(list(horizonsFakePkgXYZ123 = "cubist")),
-      horizons_error_missing_predict_package = function(e) e
+      check_packages(list(horizonsFakePkgXYZ123 = "cubist"), "predict"),
+      horizons_error_missing_package = function(e) e
     )
 
-    expect_s3_class(err, "horizons_error_missing_predict_package")
+    expect_s3_class(err, "horizons_error_missing_package")
     expect_s3_class(err, "horizons_error_dependency")
     expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
     expect_match(conditionMessage(err), "cubist")
@@ -1411,14 +1411,14 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
   it("collects every missing package and aborts once, not on the first miss", {
 
     err <- tryCatch(
-      abort_on_missing_predict_packages(list(
+      check_packages(list(
         horizonsFakePkgXYZ123 = "cubist",
         horizonsFakePkgABC456 = "mars"
-      )),
-      horizons_error_missing_predict_package = function(e) e
+      ), "predict"),
+      horizons_error_missing_package = function(e) e
     )
 
-    expect_s3_class(err, "horizons_error_missing_predict_package")
+    expect_s3_class(err, "horizons_error_missing_package")
     expect_s3_class(err, "horizons_error_dependency")
     expect_match(conditionMessage(err), "horizonsFakePkgXYZ123")
     expect_match(conditionMessage(err), "horizonsFakePkgABC456")
@@ -1427,13 +1427,13 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 
   it("does not abort when every needed package is installed", {
 
-    expect_no_error(abort_on_missing_predict_packages(list(ranger = "rf")))
+    expect_no_error(check_packages(list(ranger = "rf"), "predict"))
 
   })
 
   it("is a no-op for an empty needed list", {
 
-    expect_no_error(abort_on_missing_predict_packages(list()))
+    expect_no_error(check_packages(list(), "predict"))
 
   })
 
@@ -1441,20 +1441,20 @@ describe("abort_on_missing_predict_packages() - missing package gate", {
 
 
 ## ---------------------------------------------------------------------------
-## compute_needed_predict_packages() — pure model -> package mapping (#65)
+## needed_packages() — pure model and selection -> package mapping (#65)
 ## ---------------------------------------------------------------------------
 
-describe("compute_needed_predict_packages()", {
+describe("needed_packages()", {
 
-  it("matches MODEL_PREDICT_PACKAGES for a single model", {
+  it("matches MODEL_PACKAGES for a single model", {
 
-    expect_identical(compute_needed_predict_packages("rf"), list(ranger = "rf"))
+    expect_identical(needed_packages("rf"), list(ranger = "rf"))
 
   })
 
   it("unions packages across models and dedupes reasons", {
 
-    needed <- compute_needed_predict_packages(c("rf", "cubist", "rf"))
+    needed <- needed_packages(c("rf", "cubist", "rf"))
 
     expect_setequal(names(needed), c("ranger", "rules", "Cubist"))
     expect_identical(needed$ranger, "rf")
@@ -1463,13 +1463,28 @@ describe("compute_needed_predict_packages()", {
 
   it("adds ranger, reasoned as prediction intervals, only when asked", {
 
-    without_uq <- compute_needed_predict_packages("elastic_net")
-    with_uq    <- compute_needed_predict_packages("elastic_net",
-                                                   needs_ranger_for_uq = TRUE)
+    without_uq <- needed_packages("elastic_net")
+    with_uq    <- needed_packages("elastic_net", needs_ranger_for_uq = TRUE)
 
     expect_false("ranger" %in% names(without_uq))
     expect_true("ranger" %in% names(with_uq))
     expect_identical(with_uq$ranger, "prediction intervals")
+
+  })
+
+  it("adds the packages a selection step trains with, named for the selection", {
+
+    needed <- needed_packages(c("plsr", "elastic_net"), c("boruta", "none"))
+
+    expect_identical(needed$Boruta, "boruta feature selection")
+    expect_setequal(needed$ranger, "boruta feature selection")
+    expect_identical(needed_packages("plsr", "none"), list(pls = "plsr"))
+
+  })
+
+  it("SELECTION_PACKAGES covers exactly the feature-selection methods", {
+
+    expect_setequal(names(SELECTION_PACKAGES), VALID_FEATURE_SELECTION)
 
   })
 
@@ -1480,7 +1495,7 @@ describe("compute_needed_predict_packages()", {
 ## ensure_predict_namespaces() — per-model coverage and scoping (#65)
 ## ---------------------------------------------------------------------------
 ## Every model horizons supports maps to at least one predict-time namespace
-## (MODEL_PREDICT_PACKAGES, R/constants.R). Some of those packages are
+## (MODEL_PACKAGES, R/constants.R). Some of those packages are
 ## Suggests, so whether they are installed varies by machine. The tests below
 ## read what ensure_predict_namespaces() asks the missing-package gate for,
 ## which does not vary; the gate's own tests above, and the scoping test, cover
@@ -1525,7 +1540,7 @@ requested_packages <- function(obj, config_ids) {
 
   testthat::with_mocked_bindings(
     ensure_predict_namespaces(obj, config_ids = config_ids),
-    abort_on_missing_predict_packages = function(needed_pkgs, ...) needed <<- needed_pkgs
+    check_packages = function(needed_pkgs, ...) needed <<- needed_pkgs
   )
 
   needed
@@ -1534,15 +1549,15 @@ requested_packages <- function(obj, config_ids) {
 
 describe("ensure_predict_namespaces() - per-model coverage", {
 
-  it("MODEL_PREDICT_PACKAGES covers exactly the supported models", {
+  it("MODEL_PACKAGES covers exactly the supported models", {
 
-    expect_setequal(names(MODEL_PREDICT_PACKAGES), VALID_MODELS)
+    expect_setequal(names(MODEL_PACKAGES), VALID_MODELS)
 
   })
 
   for (m in VALID_MODELS) {
 
-    pkgs <- MODEL_PREDICT_PACKAGES[[m]]
+    pkgs <- MODEL_PACKAGES[[m]]
 
     it(paste0("model '", m, "' requires its engine package(s)"), {
 
@@ -1557,6 +1572,18 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     needed <- requested_packages(make_ns_probe_fit("elastic_net", with_uq = TRUE), "cfg1")
 
     expect_identical(needed$ranger, "prediction intervals")
+
+  })
+
+  it("does not ask for a selection step's packages, which a trained step's bake does not call", {
+
+    obj <- make_ns_probe_fit("plsr")
+    obj$config$configs$feature_selection <- "boruta"
+
+    needed <- requested_packages(obj, "cfg1")
+
+    expect_true("pls" %in% names(needed))
+    expect_false("Boruta" %in% names(needed))
 
   })
 
@@ -1583,9 +1610,9 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     ## must not need it installed to predict the rf one. mars is mapped to a
     ## package that is never installed, so the check below sees a missing
     ## package wherever it runs, whether or not earth is installed.
-    unavailable <- MODEL_PREDICT_PACKAGES
+    unavailable <- MODEL_PACKAGES
     unavailable[["mars"]] <- "horizonsFakePkgXYZ123"
-    local_mocked_bindings(MODEL_PREDICT_PACKAGES = unavailable)
+    local_mocked_bindings(MODEL_PACKAGES = unavailable)
 
     obj <- make_ns_probe_fit(
       "rf", config_id = "cfg_rf",
@@ -1601,7 +1628,7 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     expect_error(
       ensure_predict_namespaces(obj, config_ids = c("cfg_rf", "cfg_mars")),
       "horizonsFakePkgXYZ123",
-      class = "horizons_error_missing_predict_package"
+      class = "horizons_error_missing_package"
     )
 
   })

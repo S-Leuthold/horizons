@@ -134,6 +134,9 @@
 #' on them) describe the trimmed population; the test metrics do not.
 #'
 #' @section Failed configurations:
+#' Before anything runs, `evaluate()` refuses configurations whose model's
+#' engine or feature-selection step needs a package that is not installed,
+#' naming each package and what needs it (`horizons_error_missing_package`).
 #' Each configuration runs as one unit. A failure in any of its steps fails
 #' that configuration alone: its row has `status` `"failed"`, an
 #' `error_message` naming the step and the cause ("Grid search failed:
@@ -306,6 +309,11 @@ evaluate <- function(x,
     ), kind = "input")
 
   }
+
+  ## Every engine and selection step the configurations need, before any
+  ## work: a missing one would otherwise fail every configuration that needs
+  ## it, one by one.
+  check_config_packages(configs, "evaluate")
 
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]

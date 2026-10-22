@@ -207,8 +207,11 @@ check_arg <- function(check,
 #'     `on_all_outliers = "drop"` dropped it. One row per sample travels as
 #'     `results`: its `sample_id` and `n_replicates`.}
 #'   \item{`horizons_error_consent`}{(input) A library download was declined.}
-#'   \item{`horizons_error_missing_predict_package`}{(dependency) `predict()`
-#'     needs a model package that is not installed.}
+#'   \item{`horizons_error_missing_package`}{(dependency) A package the call
+#'     needs is not installed: a model's engine, or the package a feature
+#'     selection step trains with (Boruta). [evaluate()], [fit()],
+#'     [ensemble()] and `predict()` check before any work starts, and refuse
+#'     once, naming every missing package and what needs it.}
 #' }
 #'
 #' @section Warning topics:

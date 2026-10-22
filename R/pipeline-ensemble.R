@@ -94,7 +94,10 @@
 #'   filled in, is recorded as `ensemble$control`.
 #'
 #' @return A `horizons_ensemble` object (inherits from `horizons_fit`) with the
-#'   fitted ensemble in the `ensemble` slot.
+#'   fitted ensemble in the `ensemble` slot. Before anything is built,
+#'   `ensemble()` refuses members whose model's engine is not installed,
+#'   since it predicts them, naming each package
+#'   (`horizons_error_missing_package`).
 #'
 #' @examples
 #' \dontrun{
@@ -185,6 +188,11 @@ ensemble <- function(x,
     ), kind = "input")
 
   }
+
+  ## The members predict the test rows and the calibration rows, so their
+  ## packages are checked, and loaded, before anything is built. The
+  ## meta-learners' own engines (glmnet, xgboost) are in Imports.
+  ensure_predict_namespaces(x, members, verb = "ensemble")
 
   ## -------------------------------------------------------------------------
   ## Step 0b: Parallel backend

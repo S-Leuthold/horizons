@@ -205,12 +205,8 @@ meta_tune_control <- function(kind = c("grid", "resamples"), allow_par = FALSE) 
 #' @keywords internal
 predict_members_on_test <- function(object, members, call = rlang::caller_env()) {
 
-  ## Load the namespaces the members' predict methods live in, as
-  ## predict.horizons_ensemble() does. An installed package loads its Imports
-  ## lazily, so on a freshly read fitted object the workflows S3 methods are
-  ## not registered until something loads them, and predict() on a member
-  ## finds no method.
-  ensure_predict_namespaces(object, members)
+  ## The namespaces the members' predict methods live in were loaded at
+  ## ensemble()'s door (ensure_predict_namespaces()), the one caller.
 
   test_data   <- rsample::assessment(object$models$split)
   role_map    <- object$data$role_map

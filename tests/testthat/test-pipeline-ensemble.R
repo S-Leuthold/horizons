@@ -350,7 +350,7 @@ describe("ensemble() - preflight validation", {
 
 describe("ensemble() - predict namespaces", {
 
-  it("loads the members' predict namespaces before scoring them on the test rows, and before predicting", {
+  it("checks and loads the members' predict namespaces at its door, before anything is built, and before predicting", {
 
     fitted   <- ens_fitted()
     ens      <- ens_built("weighted")
@@ -358,25 +358,49 @@ describe("ensemble() - predict namespaces", {
 
     ## Under an installed package the Imports load lazily, so a fitted object
     ## read into a fresh session has no workflows predict method registered
-    ## until something loads it. The member scoring and
-    ## predict.horizons_ensemble() must both ask for it.
+    ## until something loads it. ensemble() asks at its door, for the members
+    ## it scores on the test rows, and predict.horizons_ensemble() asks too.
     requested <- NULL
-    local_mocked_bindings(
-      ensure_predict_namespaces = function(object, config_ids) {
+
+    testthat::with_mocked_bindings(
+      expect_error(ensemble(fitted, method = "weighted"), class = "namespaces_asked"),
+      ensure_predict_namespaces = function(object, config_ids, ...) {
+        requested <<- config_ids
+        rlang::abort("asked", class = "namespaces_asked")
+      },
+      build_oof_matrix = function(...) stop("the meta-learner was built")
+    )
+
+    expect_identical(requested, gather_members(fitted)$members)
+
+    requested <- NULL
+    testthat::with_mocked_bindings(
+      predict(ens, test_set, interval = FALSE),
+      ensure_predict_namespaces = function(object, config_ids, ...) {
         requested <<- config_ids
         invisible(NULL)
       }
     )
 
-    members <- fitted$models$best_config
-    invisible(tryCatch(predict_members_on_test(fitted, members), error = function(e) NULL))
-
-    expect_identical(requested, members)
-
-    requested <- NULL
-    predict(ens, test_set, interval = FALSE)
-
     expect_identical(requested, ens$ensemble$weights$member)
+
+  })
+
+  it("refuses, before anything is built, members whose engine is not installed", {
+
+    fitted <- ens_fitted()
+
+    models <- MODEL_PACKAGES
+    for (m in unique(fitted$config$configs$model)) models[[m]] <- "horizonsFakePkgXYZ123"
+    local_mocked_bindings(MODEL_PACKAGES = models,
+                          build_oof_matrix = function(...) stop("the meta-learner was built"))
+
+    err <- expect_error(ensemble(fitted, method = "weighted"),
+                        class = "horizons_error_missing_package")
+
+    expect_identical(rlang::call_name(err$call), "ensemble")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "`ensemble()` needs 1 package that is not installed.", fixed = TRUE)
 
   })
 

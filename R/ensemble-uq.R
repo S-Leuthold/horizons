@@ -615,8 +615,6 @@ ensemble_trimmed_rows <- function(x, members, call = rlang::caller_env()) {
 
   if (length(trimmed_ids) == 0) return(NULL)
 
-  ensure_predict_namespaces(x, members)
-
   role_map    <- x$data$role_map
   id_col      <- id_column(role_map)
   outcome_col <- role_map$variable[role_map$role == "outcome"]
