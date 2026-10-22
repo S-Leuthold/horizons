@@ -459,10 +459,18 @@ compute_ensemble_uq <- function(oof,
 
   ## Fresh partition, disjoint-by-construction from the tuning folds (which
   ## were drawn at the base seed). Stratify on .truth, mirroring the
-  ## meta-learner's own fold draw.
+  ## meta-learner's own fold draw, and reported from this unit as it is.
   set.seed(conformal_seed)
 
-  folds_cal <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+  drawn_cal <- draw_stratified(
+    outcome      = meta_frame$.truth,
+    stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
+  )
+  report_strata_in_unit(drawn_cal, "CV+ calibration folds")
+
+  folds_cal <- drawn_cal$draw
 
   fold_fit <- unit_step("cv_plus_fold_models", fit_uq_fold_models(
     meta_frame    = meta_frame,

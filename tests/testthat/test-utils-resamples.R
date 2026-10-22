@@ -665,3 +665,63 @@ describe("log_strata_fallback()", {
   })
 
 })
+
+describe("report_strata_in_unit()", {
+
+  ## A unit cannot reach the verb's collector, so ensemble()'s draws report
+  ## from inside theirs; the verb lifts what they report onto its log
+  unstratified <- list(stratified = FALSE, strata_failed = FALSE, strata_error = NA_character_,
+                       strata_warnings = "Too little {data} to stratify.")
+  fewer        <- list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                       strata_warnings = "Stratification will use 3 breaks instead.")
+
+  it("reports from inside a unit, with its class, what log_strata_fallback() records, in the same words", {
+
+    out <- run_unit({
+      report_strata_in_unit(unstratified, "CV+ calibration folds")
+      report_strata_in_unit(fewer, "CV+ calibration folds")
+    }, unit = "intervals", id = "ensemble")
+
+    expect_identical(out$records$type, c("warning", "note"))
+    expect_identical(out$records$class, c("horizons_warning_substitution", "horizons_note"))
+
+    lifted <- log_open("ensemble")
+    log_unit_records(lifted, out$records)
+    lifted <- log_close(lifted)
+
+    direct <- log_open("ensemble")
+    log_strata_fallback(direct, unstratified, "CV+ calibration folds")
+    log_strata_fallback(direct, fewer, "CV+ calibration folds")
+    direct <- log_close(direct)
+
+    expect_identical(lifted$type, direct$type)
+    expect_identical(lifted$topic, direct$topic)
+
+    ## The same header and rsample's words, and the unit's line
+    for (said in c("The stratified draw of the CV+ calibration folds found one stratum in the outcome, so it was drawn without strata.",
+                   "Too little {data} to stratify.")) {
+      expect_match(direct$message[1], said, fixed = TRUE)
+      expect_match(lifted$message[1], said, fixed = TRUE)
+    }
+    for (said in c("The stratified draw of the CV+ calibration folds had too little data for 4 strata, so rsample drew it on fewer.",
+                   "Stratification will use 3 breaks instead.")) {
+      expect_match(direct$message[2], said, fixed = TRUE)
+      expect_match(lifted$message[2], said, fixed = TRUE)
+    }
+    expect_true(all(grepl("In the ensemble's prediction intervals.", lifted$message, fixed = TRUE)))
+
+  })
+
+  it("reports nothing for a draw that stratified as asked", {
+
+    out <- run_unit(
+      report_strata_in_unit(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                                 strata_warnings = character(0)), "CV+ calibration folds"),
+      unit = "intervals", id = "ensemble"
+    )
+
+    expect_identical(nrow(out$records), 0L)
+
+  })
+
+})

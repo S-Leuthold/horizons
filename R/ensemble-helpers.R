@@ -367,15 +367,24 @@ fit_tuned_meta_learner <- function(object,
   ## hyperparameter tuning (when optimize) and the genuine meta-OOF below, so
   ## the held-out-fold meta predictions are produced on the identical splits.
   ## Stratify on the (original-scale) outcome so folds stay balanced on skewed
-  ## soil properties; rsample gracefully reduces breaks (with a warning) when
-  ## the meta_frame is too small to stratify finely.
+  ## soil properties. A draw rsample stratifies on fewer bins than asked, or
+  ## leaves unstratified, is reported from this unit as evaluate()'s and
+  ## fit()'s draws are (draw_stratified()).
   ## Seed set here (not via a side-effect in the caller) so the folds — which
   ## seed the Phase-2 conformal calibration — are reproducible regardless of
   ## any RNG use upstream of this point.
 
   set.seed(seed)
 
-  folds   <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+  drawn <- draw_stratified(
+    outcome      = meta_frame$.truth,
+    stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
+  )
+  report_strata_in_unit(drawn, "meta-learner's cross-validation folds")
+
+  folds   <- drawn$draw
   n_folds <- nrow(folds)
 
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----

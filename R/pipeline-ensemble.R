@@ -53,7 +53,10 @@
 #' ensemble: the meta-learner's candidates left out for a missing fold, the
 #' CV+ intervals not computed, and their measured test coverage not
 #' computed. horizons' own warnings are written to the
-#' log and raised once at the end.
+#' log and raised once at the end. Among them, as in [evaluate()] and
+#' [fit()]: the meta-learner's cross-validation folds or the CV+ calibration
+#' folds drawn unstratified (`horizons_warning_substitution`); a draw rsample
+#' stratified on fewer bins than asked is a note on the log.
 #'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),

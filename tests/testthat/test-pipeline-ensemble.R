@@ -439,6 +439,81 @@ describe("ensemble() - a member's warning on the test rows", {
 
 })
 
+## =========================================================================
+## ensemble() — its stratified draws
+## =========================================================================
+## The meta-learner's folds and the CV+ folds are drawn inside their units,
+## through the draw evaluate() and fit() make, and reported from there in the
+## same words: a draw that came out unstratified is the substitution, one
+## rsample stratified on fewer bins a note. rsample's own warning used to be
+## kept raw on the ensemble's warnings and never reached the log.
+
+describe("ensemble() - its stratified draws", {
+
+  it("records a draw rsample stratified on fewer bins as a note from each unit, in its words, and raises nothing", {
+
+    ## The stored fit's meta frame has 40 to 79 rows, so rsample stratifies
+    ## both draws on two bins rather than four
+    fitted <- ens_fitted()
+
+    got <- collect_warnings(ensemble(fitted, method = "penalized", optimize = FALSE))
+
+    expect_length(got$warnings, 0L)
+
+    log   <- got$value$log[got$value$log$verb == "ensemble", ]
+    notes <- log[log$type == "note" & grepl("stratified draw", log$message, fixed = TRUE), ]
+
+    expect_identical(nrow(notes), 2L)
+    expect_match(notes$message[1], "The stratified draw of the meta-learner's cross-validation folds had too little data for 4 strata, so rsample drew it on fewer.",
+                 fixed = TRUE)
+    expect_match(notes$message[1], "In the ensemble's meta-learner", fixed = TRUE)
+    expect_match(notes$message[2], "The stratified draw of the CV+ calibration folds had too little data for 4 strata", fixed = TRUE)
+    expect_match(notes$message[2], "Stratification will use 2 breaks instead", fixed = TRUE)
+
+    ## The ensemble's own warnings keep the same lines, not rsample's alone
+    kept <- got$value$ensemble$warnings[grepl("Stratification will use", got$value$ensemble$warnings, fixed = TRUE)]
+
+    expect_length(kept, 2L)
+    expect_true(all(grepl("The stratified draw of the", kept, fixed = TRUE)))
+
+  })
+
+  it("falls back to an unstratified draw when a stratified one fails, and warns substitution once for both units", {
+
+    fitted <- ens_fitted()
+
+    real_vfold_cv <- rsample::vfold_cv
+
+    local_mocked_bindings(
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+
+    got <- collect_warnings(ensemble(fitted, method = "penalized", optimize = FALSE))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    ## The meta-learner was built and its intervals calibrated
+    expect_s3_class(got$value, "horizons_ensemble")
+    expect_false(is.null(got$value$ensemble$uq))
+
+    expect_length(sub, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the meta-learner's cross-validation folds failed, so it was drawn without strata.",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the CV+ calibration folds failed", fixed = TRUE)
+    expect_match(msg, "stratification refused", fixed = TRUE)
+
+    log <- got$value$log[got$value$log$verb == "ensemble" & got$value$log$topic %in% "substitution", ]
+    expect_identical(nrow(log), 1L)
+    expect_identical(sub[[1]]$log, log)
+
+  })
+
+})
+
 describe("ensemble() - the meta-learner as one unit", {
 
   it("stops at the first failure under debug, and keeps the backtrace under keep_traces", {
@@ -1595,7 +1670,9 @@ describe("ensemble() - allow_par", {
     expect_s3_class(w, "horizons_warning_substitution")
     expect_match(conditionMessage(w), "ensemble\\(\\).*offers 1 worker")
     expect_true(inherits(ens, "horizons_ensemble"))
+    ## The warning rows: the log also holds the meta-learner's folds' note
     added <- log_rows_added(fitted, ens)
+    added <- added[added$type == "warning", ]
     expect_identical(added$verb, "ensemble")
     expect_identical(added$topic, "substitution")
     expect_identical(w$log, added)
