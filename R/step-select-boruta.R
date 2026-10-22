@@ -155,8 +155,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## Stage 1: Resolve spectral column names
   ## ---------------------------------------------------------------------------
 
-  selectors <- step_selectors(x, "step_select_boruta")
-  col_names <- recipes::recipes_eval_select(selectors, training, info)
+  col_names <- recipes::recipes_eval_select(x$terms, training, info)
 
   check_selection_columns(col_names, "step_select_boruta")
   check_step_outcome(x$outcome, training)
@@ -188,7 +187,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   if (ncol(spectra_mat) < SELECTION_MIN_BANDS[["step_select_boruta"]]) {
 
     return(raise_selection_warning(step_select_boruta_new(
-      terms         = selectors,
+      terms         = x$terms,
       columns       = col_names,
       outcome       = x$outcome,
       role          = x$role,
@@ -351,7 +350,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   ## ---------------------------------------------------------------------------
 
   raise_selection_warning(step_select_boruta_new(
-    terms          = selectors,
+    terms          = x$terms,
     columns        = col_names,
     outcome        = x$outcome,
     role           = x$role,

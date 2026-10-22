@@ -142,8 +142,7 @@ step_select_correlation_new <- function(terms,
 prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 
   ## Stage 1: Evaluate column predictors (No changes)
-  selectors <- step_selectors(x, "step_select_correlation")
-  col_names <- recipes::recipes_eval_select(selectors, training, info)
+  col_names <- recipes::recipes_eval_select(x$terms, training, info)
 
   check_selection_columns(col_names, "step_select_correlation")
   check_step_outcome(x$outcome, training)
@@ -156,7 +155,7 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
 
   trained_step <- function(kept, record) {
     raise_selection_warning(step_select_correlation_new(
-      terms         = selectors,
+      terms         = x$terms,
       columns       = col_names,
       outcome       = x$outcome,
       role          = x$role,

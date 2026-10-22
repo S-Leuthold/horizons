@@ -140,8 +140,7 @@ step_transform_spectra_new <- function(terms,
 #' @export
 prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 
-  selectors   <- step_selectors(x, "step_transform_spectra")
-  col_names   <- recipes::recipes_eval_select(selectors, training, info)
+  col_names   <- recipes::recipes_eval_select(x$terms, training, info)
   non_numeric <- col_names[!vapply(training[, col_names], is.numeric, logical(1))]
 
   if (length(non_numeric) > 0) {
@@ -192,7 +191,7 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
   id_column <- if (!is.null(info)) info$variable[info$role %in% "id"][1] else NA_character_
 
   step_transform_spectra_new(
-    terms           = selectors,
+    terms           = x$terms,
     columns         = col_names,
     preprocessing   = x$preprocessing,
     window_size     = x$window_size,
@@ -378,7 +377,7 @@ tidy.step_transform_spectra <- function(x, ...) {
   terms <- if (isTRUE(x$trained)) {
     x$columns
   } else {
-    recipes::sel2char(step_selectors(x, "step_transform_spectra"))
+    recipes::sel2char(x$terms)
   }
 
   n <- length(terms)
