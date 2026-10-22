@@ -1152,6 +1152,38 @@ describe("predict.horizons_fit() - applicability domain", {
 
   })
 
+  it("flags every row when the stored thresholds tie, and abstains on exactly the rows past the cutoff (#240)", {
+
+    expect_true(has_ad(fitted_fixture))
+
+    ## Duplicate calibration spectra tie the quartiles. The bundle still
+    ## passes the door, whose thresholds need only be non-decreasing.
+    tied   <- fitted_fixture
+    cid    <- names(tied$models$ad)[1]
+    thr    <- tied$models$ad[[cid]]$ad_thresholds
+    thr[2] <- thr[1]
+    tied$models$ad[[cid]]$ad_thresholds <- thr
+
+    ## Half the batch shifted far off the training axis, so both sides of the
+    ## cutoff are present
+    ood_df <- new_df
+    wn     <- grep("^wn_", names(ood_df))
+    ood_df[1:6, wn] <- ood_df[1:6, wn] + 10
+
+    expect_no_warning(p <- predict(tied, ood_df, interval = FALSE))
+
+    expect_false(anyNA(p$.ad_flag))
+    expect_false(any(p$.ad_flag == "Q2"))
+
+    ood <- p$.ad_flag == "OOD"
+    expect_true(any(ood) && any(!ood))
+    expect_identical(ood, p$.ad_distance > thr[4])
+
+    abstained <- predict(tied, ood_df, interval = FALSE, abstain_ood = TRUE)
+    expect_identical(is.na(abstained$.pred), ood)
+
+  })
+
   it("refuses abstain_ood at its door when a configuration predicted has no AD", {
 
     no_ad <- fitted_fixture

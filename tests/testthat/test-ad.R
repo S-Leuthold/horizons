@@ -107,12 +107,35 @@ test_that("assign_ad_bin categorizes distances into Q1-Q4/OOD", {
 
 })
 
+test_that("assign_ad_bin bins tied thresholds by the lower-bin rule, leaving the bins between them empty (#240)", {
+
+  ## The issue's case: the second and third quartiles tie
+  bins <- assign_ad_bin(c(1, 2, 5), c(1, 2, 2, 4))
+  expect_identical(as.character(bins), c("Q1", "Q2", "OOD"))
+  expect_identical(levels(bins), AD_BINS)
+
+  ## Every quartile tied: a distance at the tie falls in Q1, Q2 and Q3 stay
+  ## empty, and OOD is exactly a distance above the cutoff
+  expect_identical(as.character(assign_ad_bin(c(0, 3, 4, 8, 9), c(3, 3, 3, 8))),
+                   c("Q1", "Q1", "Q4", "Q4", "OOD"))
+
+  ## The cutoff tied to the third quartile leaves Q4 empty
+  expect_identical(as.character(assign_ad_bin(c(4, 4.5), c(1, 2, 4, 4))),
+                   c("Q3", "OOD"))
+
+  ## A first threshold of 0 bins a zero distance Q1, and a missing distance
+  ## stays a missing flag
+  expect_identical(as.character(assign_ad_bin(c(0, NA, 0.5), c(0, 1, 2, 3))),
+                   c("Q1", NA, "Q2"))
+
+})
+
 test_that("assign_ad_bin validates inputs", {
 
   thr <- c(10, 20, 30, 40)
 
-  ## A negative squared distance would bin to NA silently, so it stops the
-  ## call; a non-numeric one cut() refuses itself
+  ## A negative squared distance would bin as Q1 silently, so it stops the
+  ## call
   expect_error(assign_ad_bin(c(-5, 10), thr), "non-negative", class = "horizons_error_internal")
 
   ## The thresholds come from a saved bundle, whose four non-decreasing
