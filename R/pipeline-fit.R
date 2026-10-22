@@ -104,7 +104,8 @@
 #' way across at least two models, `fit()` stops with
 #' `horizons_error_systemic` and the members so far as `results`
 #' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
-#' member), and it stops the same way when a parallel worker dies. With
+#' member), and it stops the same way when a parallel worker dies or lacks a
+#' package the members need. With
 #' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
 #' first failure, inside tuning included, stops the call with its backtrace.
 #' Before a parallel run `fit()` refuses a session loaded with

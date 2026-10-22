@@ -157,9 +157,11 @@
 #' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
 #' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
 #' run every configuration; the configs axis has no breaker), and their
-#' failures are not checkpointed. A parallel worker that dies stops the run
-#' the same way, during a Bayesian iteration too: tune catches future's error
-#' there, so the death is read from what future.apply reports first
+#' failures are not checkpointed. A parallel worker that lacks a package the
+#' configurations need, which this session has, stops the run the same way.
+#' So does a parallel worker that dies, during a Bayesian iteration too: tune
+#' catches future's error there, so the death is read from what future.apply
+#' reports first
 #' ("Caught FutureInterruptError. Canceling all iterations ...", a warning
 #' before future.apply 1.21.0 and a message since), which has no class and
 #' is matched by its text. When some configurations failed and
@@ -1878,15 +1880,18 @@ abort_breaker_trip <- function(breaker,
 
 }
 
-#' Stop the call when a parallel worker dies
+#' Stop the call when a parallel worker dies, or lacks a package
 #'
 #' @description
 #' future raises a worker's death as a `FutureError`, which no unit contains
 #' (`NEVER_CONTAINED`). A death that tune caught during a Bayesian search
 #' reaches here as the unit's `horizons_error_systemic`, which no unit
-#' contains either ([worker_death_signal()]). Either is turned into
-#' `horizons_error_systemic`, chained to the error, with the rows finished so
-#' far when the verb has rows; every other error passes through untouched.
+#' contains either ([worker_death_signal()]). A package missing where a unit
+#' ran, which the verb checked in the session before the run, reaches here
+#' as the unit's `horizons_error_missing_package` ([missing_package_signal()]).
+#' Each is turned into `horizons_error_systemic`, chained to the error, with
+#' the rows finished so far when the verb has rows; every other error passes
+#' through untouched.
 #' `bayes_search()` is the one raiser of `horizons_error_systemic` inside
 #' `expr`, for that death; a unit that raises it for another reason needs a
 #' subclass of its own, or it would be read here as a worker's death.
@@ -1910,10 +1915,22 @@ stop_on_worker_death <- function(expr, results, output_dir = NULL, verb = "evalu
   ## caught by the other and wrapped a second time.
   died <- function(e) {
 
-    if (!inherits(e, c("FutureError", "horizons_error_systemic"))) return(rlang::zap())
+    missing <- inherits(e, "horizons_error_missing_package")
+
+    if (!missing && !inherits(e, c("FutureError", "horizons_error_systemic"))) return(rlang::zap())
+
+    cause <- if (missing) condition_summary(e)
 
     abort_horizons(c(
-      "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on.",
+      if (missing) {
+        "A package {.fn {verb}} needs is not installed where its work ran, so the run cannot go on."
+      } else {
+        "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on."
+      },
+      "x" = if (missing) "{cause}",
+      "i" = if (missing) {
+        "{.fn {verb}} found every package it needs in this session before the run, so a parallel worker's library lacks it. Install it there."
+      },
       "i" = if (!is.null(output_dir)) {
         "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
       } else if (!is.null(results)) {

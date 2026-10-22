@@ -103,7 +103,8 @@ define_model_spec <- function(model) {
 ## verb that fits or predicts checks them before any work starts (the razor,
 ## rule 1), so a missing one is refused once, naming it, rather than failing
 ## every configuration that needs it. A package missing later, mid-run, can
-## then only be missing where a unit ran: on a parallel worker.
+## then only be missing where a unit ran, on a parallel worker, which
+## run_unit() recognises (missing_package_signal()).
 
 #' The packages a set of configurations needs, and what needs each
 #'

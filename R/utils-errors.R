@@ -190,8 +190,9 @@ check_arg <- function(check,
 #'     early, because the first configurations or members to run failed the
 #'     same way across at least two models (the circuit breaker,
 #'     `control_horizons(breaker = )`), or [evaluate()], [fit()] or
-#'     [ensemble()] stopped because a parallel worker died, or [evaluate()]
-#'     could not write to its `output_dir`. The rows finished so far travel
+#'     [ensemble()] stopped because a parallel worker died or lacks a
+#'     package the run needs, or [evaluate()] could not write to its
+#'     `output_dir`. The rows finished so far travel
 #'     as `results`; `NULL` from `ensemble()`, which has none before its
 #'     meta-learner is built.}
 #'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
@@ -211,7 +212,10 @@ check_arg <- function(check,
 #'     needs is not installed: a model's engine, or the package a feature
 #'     selection step trains with (Boruta). [evaluate()], [fit()],
 #'     [ensemble()] and `predict()` check before any work starts, and refuse
-#'     once, naming every missing package and what needs it.}
+#'     once, naming every missing package and what needs it. A package found
+#'     missing later, where a unit ran (a parallel worker's library), raises
+#'     it too, and the verbs that dispatch to workers then stop with
+#'     `horizons_error_systemic`.}
 #' }
 #'
 #' @section Warning topics:

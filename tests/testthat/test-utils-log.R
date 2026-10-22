@@ -385,6 +385,38 @@ describe("run_unit()", {
 
   })
 
+  it("raises a package missing where the unit ran as horizons_error_missing_package, chained, as base R or rlang reports it, and wrapped by a recipe step", {
+
+    ## base R's packageNotFoundError, as library() raises it on tune's workers
+    err <- expect_error(run_unit(loadNamespace("horizonsFakePkgXYZ123"), "configuration", "cfg_1"),
+                        class = "horizons_error_missing_package", inherit = FALSE)
+
+    expect_s3_class(err, "horizons_error_dependency")
+    expect_s3_class(err$parent, "packageNotFoundError")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A package needed by configuration \"cfg_1\" is not installed where it ran.", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgXYZ123", fixed = TRUE)
+
+    ## rlang's, as a step's check_installed() raises it
+    rlang::local_interactive(FALSE)
+    err <- expect_error(run_unit(rlang::check_installed("horizonsFakePkgXYZ123"), "meta_learner", "weighted"),
+                        class = "horizons_error_missing_package", inherit = FALSE)
+    expect_true(rlang::cnd_inherits(err, "rlib_error_package_not_found"))
+    expect_match(conditionMessage(err), "meta learner", fixed = TRUE)
+
+    ## Inside a recipe step, which wraps it
+    rec <- recipes::recipe(mpg ~ ., data = mtcars) |>
+      recipes::step_mutate(boom = loadNamespace("horizonsFakePkgXYZ123"))
+    expect_error(run_unit(recipes::prep(rec), "configuration", "cfg_2"),
+                 class = "horizons_error_missing_package", inherit = FALSE)
+
+    ## An error that only names a package is the unit's failure
+    out <- run_unit(stop("a column called package is missing"), "configuration", "cfg_3")
+    expect_true(out$failed)
+    expect_identical(out$records$class, "simpleError")
+
+  })
+
   it("never contains a worker's death, which future raises as a FutureError", {
 
     died <- structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),

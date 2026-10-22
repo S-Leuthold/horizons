@@ -3146,6 +3146,59 @@ describe("evaluate() - a worker's death", {
 
 
 ## =========================================================================
+## A package missing where a configuration ran is systemic
+## =========================================================================
+## The door checks the packages in this session, so one missing mid-run is
+## missing on a worker, for every configuration that needs it: the run stops,
+## as for a worker's death, with the rows so far. It used to fail each such
+## configuration in turn, as a contained run failure, and the breaker, which
+## needs a failure spanning two models, did not trip.
+
+describe("evaluate() - a package missing where a configuration ran", {
+
+  it("stops the run as systemic, chained to the missing package, with the rows finished so far", {
+
+    real_spec <- define_model_spec
+
+    ## cubist's engine cannot be loaded where its configuration runs, though
+    ## the door found it in this session
+    local_mocked_bindings(define_model_spec = function(model) {
+      if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
+      real_spec(model)
+    })
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L)),
+                        class = "horizons_error_systemic")
+
+    expect_identical(class(err)[1], "horizons_error_systemic")
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_true(rlang::cnd_inherits(err, "packageNotFoundError"))
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(err$results$status, "success")
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A package `evaluate()` needs is not installed where its work ran", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgXYZ123", fixed = TRUE)
+    expect_match(msg, "a parallel worker's library lacks it", fixed = TRUE)
+    expect_length(gregexpr("is not installed where its work ran", msg, fixed = TRUE)[[1]], 1L)
+
+  })
+
+  it("lets a dependency error that is not a missing package through, unwrapped", {
+
+    err <- expect_error(
+      stop_on_worker_death(abort_horizons("Another version.", kind = "dependency"), list(), NULL),
+      "Another version.", fixed = TRUE
+    )
+
+    expect_identical(class(err)[1], "horizons_error_dependency")
+
+  })
+
+})
+
+
+## =========================================================================
 ## The ranking report: what was left out, and what to rank by instead
 ## =========================================================================
 

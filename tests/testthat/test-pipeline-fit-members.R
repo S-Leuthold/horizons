@@ -770,4 +770,31 @@ describe("fit() - the members' packages", {
 
   })
 
+  it("stops as systemic, with the members so far, when a member's package is missing where it ran", {
+
+    x <- fit_obj(2)
+    x$evaluation$results$cv_rpd <- c(2, 1)   # cfg_001 (rf) is fitted first
+
+    ## cubist's engine cannot be loaded where its member is fitted, though
+    ## the door found it in this session
+    real_spec <- define_model_spec
+    local_mocked_bindings(define_model_spec = function(model) {
+      if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
+      real_spec(model)
+    })
+
+    err <- expect_error(
+      suppressWarnings(fit(x, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+      class = "horizons_error_systemic"
+    )
+
+    expect_identical(class(err)[1], "horizons_error_systemic")
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(err$results$status, "success")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "A package `fit()` needs is not installed where its work ran", fixed = TRUE)
+
+  })
+
 })

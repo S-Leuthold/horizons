@@ -72,8 +72,9 @@ cannot predict the test rows), \code{error_message} and \code{trace}.}
 early, because the first configurations or members to run failed the
 same way across at least two models (the circuit breaker,
 \code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
-\code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died, or \code{\link[=evaluate]{evaluate()}}
-could not write to its \code{output_dir}. The rows finished so far travel
+\code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died or lacks a
+package the run needs, or \code{\link[=evaluate]{evaluate()}} could not write to its
+\code{output_dir}. The rows finished so far travel
 as \code{results}; \code{NULL} from \code{ensemble()}, which has none before its
 meta-learner is built.}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
@@ -93,7 +94,10 @@ every sample failed quality control on every replicate and
 needs is not installed: a model's engine, or the package a feature
 selection step trains with (Boruta). \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}},
 \code{\link[=ensemble]{ensemble()}} and \code{predict()} check before any work starts, and refuse
-once, naming every missing package and what needs it.}
+once, naming every missing package and what needs it. A package found
+missing later, where a unit ran (a parallel worker's library), raises
+it too, and the verbs that dispatch to workers then stop with
+\code{horizons_error_systemic}.}
 }
 }
 

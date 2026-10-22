@@ -210,9 +210,11 @@ the first configurations to run fail the same way across at least two
 models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so far
 as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
 run every configuration; the configs axis has no breaker), and their
-failures are not checkpointed. A parallel worker that dies stops the run
-the same way, during a Bayesian iteration too: tune catches future's error
-there, so the death is read from what future.apply reports first
+failures are not checkpointed. A parallel worker that lacks a package the
+configurations need, which this session has, stops the run the same way.
+So does a parallel worker that dies, during a Bayesian iteration too: tune
+catches future's error there, so the death is read from what future.apply
+reports first
 ("Caught FutureInterruptError. Canceling all iterations ...", a warning
 before future.apply 1.21.0 and a message since), which has no class and
 is matched by its text. When some configurations failed and
