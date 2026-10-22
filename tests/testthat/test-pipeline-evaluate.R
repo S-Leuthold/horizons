@@ -2306,6 +2306,159 @@ describe("evaluate() - one checkpoint store (#42)", {
 })
 
 ## =========================================================================
+## A failed write to output_dir is systemic
+## =========================================================================
+## Every later write to the same directory would fail the same way, so the
+## run stops at once with the rows so far (the razor, rule 3). The writes
+## were base R's own: a read-only directory gave a warning and then an
+## unclassed "cannot open the connection", and a refused rename left a
+## temporary file behind and wrote nothing, without a word.
+
+## A directory that rejects writes, for the test's duration. Running as root
+## writes through the mode, which the test skips on: what the platform can do,
+## not the behaviour under test.
+local_read_only_dir <- function(path, .env = parent.frame()) {
+
+  Sys.chmod(path, "0555")
+  withr::defer(Sys.chmod(path, "0755"), envir = .env)
+  testthat::skip_if(file.access(path, 2L) == 0L, "the directory stays writable (root)")
+
+  invisible(path)
+
+}
+
+describe("write_output_file()", {
+
+  it("writes the file whole and returns NULL", {
+
+    dir  <- withr::local_tempdir()
+    path <- file.path(dir, "x.rds")
+
+    expect_null(write_output_file(list(a = 1), path))
+    expect_identical(readRDS(path), list(a = 1))
+    expect_identical(list.files(dir, all.files = TRUE, no.. = TRUE), "x.rds")
+
+  })
+
+  it("returns why it could not write into a read-only directory, raising nothing", {
+
+    dir <- local_read_only_dir(withr::local_tempdir())
+
+    expect_no_condition(why <- write_output_file(list(a = 1), file.path(dir, "x.rds")))
+    expect_match(why, "cannot open", fixed = TRUE)
+    expect_length(list.files(dir, all.files = TRUE, no.. = TRUE), 0L)
+
+  })
+
+  it("returns why a rename was refused, leaving no temporary file behind", {
+
+    dir <- withr::local_tempdir()
+    dir.create(file.path(dir, "x.rds"))   # a directory where the file should go
+
+    expect_no_condition(why <- write_output_file(list(a = 1), file.path(dir, "x.rds")))
+    expect_type(why, "character")
+    expect_identical(list.files(dir, all.files = TRUE, no.. = TRUE), "x.rds")
+
+  })
+
+})
+
+describe("evaluate() - a failed write to output_dir", {
+
+  it("stops at the first checkpoint it cannot write, naming the directory, with the rows so far, and runs nothing after", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        ran <<- c(ran, config_row$config_id)
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    tmpdir <- withr::local_tempdir()
+    store  <- file.path(tmpdir, "checkpoints")
+    dir.create(store)
+    dir.create(file.path(store, "cfg_001.rds"))   # the first rename is refused
+
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                control = control_horizons(output_dir = tmpdir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_identical(class(err)[1], "horizons_error_systemic")
+    expect_s3_class(err, "horizons_error_run")
+    expect_match(flat_message(err), "`evaluate()` could not write to", fixed = TRUE)
+    expect_match(flat_message(err), store, fixed = TRUE)
+    expect_match(flat_message(err), "cfg_001.rds: ", fixed = TRUE)
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(ran, "cfg_001")
+    expect_false(any(grepl("\\.tmp$", list.files(store, all.files = TRUE))))
+
+  })
+
+  it("stops before any configuration when output_dir cannot be created, with the empty results table", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        ran <<- c(ran, config_row$config_id)
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    parent <- local_read_only_dir(withr::local_tempdir())
+
+    expect_no_warning(err <- expect_error(
+      evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+               control = control_horizons(output_dir = file.path(parent, "run"))),
+      class = "horizons_error_systemic"
+    ))
+
+    expect_match(flat_message(err), "could not write to", fixed = TRUE)
+    expect_match(flat_message(err), file.path(parent, "run"), fixed = TRUE)
+    expect_identical(nrow(err$results), 0L)
+    expect_true(all(names(create_failed_result(NA_character_)) %in% names(err$results)))
+    expect_identical(ran, character(0))
+
+  })
+
+  it("stops before any configuration when the manifest cannot be written, with the empty results table", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        ran <<- c(ran, config_row$config_id)
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    tmpdir <- withr::local_tempdir()
+    dir.create(file.path(tmpdir, "eval_manifest.rds"))   # its rename is refused
+
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                control = control_horizons(output_dir = tmpdir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_match(flat_message(err), "eval_manifest.rds: ", fixed = TRUE)
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(ran, character(0))
+    expect_false(any(grepl("\\.tmp$", list.files(tmpdir, all.files = TRUE))))
+
+  })
+
+})
+
+## =========================================================================
 ## Tuning-settings provenance (#42)
 ## =========================================================================
 ## The data fingerprint says which rows a checkpoint was scored on, not how it

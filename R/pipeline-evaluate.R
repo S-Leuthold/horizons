@@ -51,7 +51,11 @@
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
-#'   `output_dir` per outcome. The ranking `metric` is not checked, since
+#'   `output_dir` per outcome. A write to `output_dir` that fails (the
+#'   directory, the manifest or a checkpoint) stops the run with
+#'   `horizons_error_systemic`, naming the directory, the rows finished so
+#'   far as its `results`; on the configs axis it stops once every
+#'   configuration has returned. The ranking `metric` is not checked, since
 #'   every row carries all six cross-validated metrics. A row scored under an
 #'   earlier scoring schema, or recording less of the training data and
 #'   settings than this run does, was written by an earlier version: it is
@@ -550,11 +554,16 @@ evaluate <- function(x,
 
   if (!is.null(output_dir)) {
 
-    if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
-
+    ## The store's directory, with output_dir itself when that is absent. A
+    ## directory that cannot be created is a failed write to output_dir, so
+    ## the run stops before any configuration, as it would at the first
+    ## checkpoint.
     checkpoint_dir <- file.path(output_dir, "checkpoints")
+    not_created    <- create_output_dir(checkpoint_dir)
 
-    if (!dir.exists(checkpoint_dir)) dir.create(checkpoint_dir)
+    if (!is.null(not_created)) {
+      abort_output_write(checkpoint_dir, not_created, results_so_far(list()))
+    }
 
     loaded <- load_eval_checkpoints(
       output_dir = output_dir,
@@ -698,9 +707,15 @@ evaluate <- function(x,
       data_fields                  = data_fp$data_fields,
       settings                     = settings
     )
-    tmp_manifest <- tempfile(tmpdir = output_dir, fileext = ".rds.tmp")
-    saveRDS(manifest, tmp_manifest)
-    file.rename(tmp_manifest, file.path(output_dir, "eval_manifest.rds"))
+    manifest_path <- file.path(output_dir, "eval_manifest.rds")
+    not_written   <- write_output_file(manifest, manifest_path)
+
+    ## Before any configuration runs, so the rows so far are the ones
+    ## resumed from the store
+    if (!is.null(not_written)) {
+      abort_output_write(manifest_path, not_written,
+                         results_so_far(unname(checkpoint_results)))
+    }
 
   }
 
@@ -869,11 +884,8 @@ evaluate <- function(x,
 
       }
 
-      if (!is.null(checkpoint_dir)) {
-
-        for (row in released) write_checkpoint_row(row, checkpoint_dir)
-
-      }
+      ## A write that fails stops the run, with the rows so far
+      if (!is.null(checkpoint_dir)) checkpoint_rows(released, checkpoint_dir, results_list)
 
       ## Memory cleanup
       gc(verbose = FALSE)
@@ -884,7 +896,7 @@ evaluate <- function(x,
     ## failures after all
     if (!is.null(checkpoint_dir)) {
 
-      for (row in breaker_release(breaker)) write_checkpoint_row(row, checkpoint_dir)
+      checkpoint_rows(breaker_release(breaker), checkpoint_dir, results_list)
 
     }
 
@@ -965,11 +977,28 @@ evaluate <- function(x,
     ), results_so_far(lapply(completed_ids, function(id) checkpoint_results[[id]])),
     output_dir)
 
+    ## A worker whose checkpoint could not be written said so on its row
+    ## (evaluate_config_worker()); with every row back, the run stops on the
+    ## first, carrying them all
+    not_saved <- lapply(parallel_results, attr, "checkpoint_failed")
+
+    parallel_results <- lapply(parallel_results, function(row) {
+      attr(row, "checkpoint_failed") <- NULL
+      row
+    })
+
     ## Combine: checkpoint results + parallel results
     results_list <- c(
       lapply(completed_ids, function(id) checkpoint_results[[id]]),
       parallel_results
     )
+
+    first_unsaved <- Position(Negate(is.null), not_saved)
+
+    if (!is.na(first_unsaved)) {
+      abort_output_write(checkpoint_path(checkpoint_dir, parallel_results[[first_unsaved]]$config_id),
+                         not_saved[[first_unsaved]], results_so_far(results_list))
+    }
 
   }
 
@@ -1446,12 +1475,10 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
 #' Write one result row to the per-config store
 #'
-#' Written under a name the store does not list and renamed into place, so a
-#' reader (the monitor polls while workers write) never sees half a file.
-#'
 #' @param row One-row result.
 #' @param checkpoint_dir The `checkpoints/` directory.
-#' @return `NULL`, invisibly.
+#' @return `NULL` when the row was written; otherwise why it could not be,
+#'   as [write_output_file()] reports it.
 #' @keywords internal
 #' @noRd
 write_checkpoint_row <- function(row, checkpoint_dir) {
@@ -1460,11 +1487,154 @@ write_checkpoint_row <- function(row, checkpoint_dir) {
   ## row's warnings are read on the row (lift_unit_records()).
   attr(row, "unit_records") <- NULL
 
-  tmp <- tempfile(tmpdir = checkpoint_dir, fileext = ".rds.tmp")
-  saveRDS(row, tmp)
-  file.rename(tmp, file.path(checkpoint_dir, paste0(row$config_id, ".rds")))
+  write_output_file(row, checkpoint_path(checkpoint_dir, row$config_id))
+
+}
+
+#' Where a configuration's checkpoint lives
+#'
+#' @param checkpoint_dir The `checkpoints/` directory.
+#' @param config_id Character(1).
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+checkpoint_path <- function(checkpoint_dir, config_id) {
+
+  file.path(checkpoint_dir, paste0(config_id, ".rds"))
+
+}
+
+#' Write a file into an output directory, whole or not at all
+#'
+#' @description
+#' The one writer for what `evaluate()` puts in its `output_dir`: the
+#' manifest and each configuration's checkpoint. The file is written under a
+#' name the store does not list and renamed into place, so a reader (the
+#' monitor polls while workers write) never sees half a file. A write that
+#' fails, or a rename that is refused, leaves no temporary file behind, and
+#' what base R said about it (a warning before an error, or the rename's
+#' warning) is returned rather than raised, for the verb to stop on.
+#'
+#' @param value The object to save.
+#' @param path The file to write.
+#' @return `NULL` when the file was written; otherwise Character(1), why it
+#'   could not be.
+#' @keywords internal
+#' @noRd
+write_output_file <- function(value, path) {
+
+  tmp     <- tempfile(tmpdir = dirname(path), fileext = ".rds.tmp")
+  reasons <- character(0)
+
+  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
+
+  written <- tryCatch(
+    withCallingHandlers(
+      {
+        saveRDS(value, tmp)
+        file.rename(tmp, path)
+      },
+      warning = function(w) {
+        reasons <<- c(reasons, condition_summary(w))
+        rlang::cnd_muffle(w)
+      }
+    ),
+    error = function(e) {
+      reasons <<- c(reasons, condition_summary(e))
+      FALSE
+    }
+  )
+
+  if (isTRUE(written)) return(NULL)
+
+  if (length(reasons) == 0) reasons <- "the file could not be renamed into place"
+
+  paste(unique(reasons), collapse = "; ")
+
+}
+
+#' Create an output directory, reporting why it could not be
+#'
+#' @param path The directory, created with its parents when absent.
+#' @return `NULL` when it exists; otherwise Character(1), why it could not
+#'   be created.
+#' @keywords internal
+#' @noRd
+create_output_dir <- function(path) {
+
+  if (dir.exists(path)) return(NULL)
+
+  reasons <- character(0)
+
+  withCallingHandlers(
+    dir.create(path, recursive = TRUE),
+    warning = function(w) {
+      reasons <<- c(reasons, condition_summary(w))
+      rlang::cnd_muffle(w)
+    }
+  )
+
+  if (dir.exists(path)) return(NULL)
+
+  if (length(reasons) == 0) reasons <- "the directory could not be created"
+
+  paste(unique(reasons), collapse = "; ")
+
+}
+
+#' Write rows to the checkpoint store, stopping on the first that fails
+#'
+#' @param rows List of result rows.
+#' @param checkpoint_dir The `checkpoints/` directory.
+#' @param finished List of the rows finished so far, carried as `results`
+#'   when a write fails.
+#' @param call The frame the error reports: `evaluate()`'s.
+#' @return `NULL`, invisibly; aborts through [abort_output_write()].
+#' @keywords internal
+#' @noRd
+checkpoint_rows <- function(rows, checkpoint_dir, finished, call = rlang::caller_env()) {
+
+  for (row in rows) {
+
+    failed <- write_checkpoint_row(row, checkpoint_dir)
+
+    if (!is.null(failed)) {
+      abort_output_write(checkpoint_path(checkpoint_dir, row$config_id), failed,
+                         results_so_far(finished), call = call)
+    }
+
+  }
 
   invisible(NULL)
+
+}
+
+#' Stop the call because a write to `output_dir` failed
+#'
+#' @description
+#' A write that fails once will fail for every configuration after it, so the
+#' run stops at once, as systemic, with the rows finished so far.
+#'
+#' @param path The file or directory that could not be written.
+#' @param reason Character(1). Why, from [write_output_file()] or
+#'   [create_output_dir()].
+#' @param results The results table so far, carried as `results`.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_output_write <- function(path, reason, results, call = rlang::caller_env()) {
+
+  dir  <- dirname(path)
+  name <- basename(path)
+
+  abort_horizons(c(
+    "{.fn evaluate} could not write to {.path {dir}}, so the run cannot go on.",
+    "x" = "{name}: {reason}",
+    "i" = "The rows finished so far are in this error's {.field results} field.",
+    "i" = "Make {.path {dir}} writable, or set another {.code control_horizons(output_dir = )}."
+  ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 
 }
 
@@ -3019,7 +3189,8 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   is no `debug` either, since a debug run never dispatches.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
-#'   records still on it for the parent to lift.
+#'   records still on it for the parent to lift, and, when its checkpoint
+#'   could not be written, why, as the attribute `"checkpoint_failed"`.
 #' @keywords internal
 #' @noRd
 
@@ -3103,9 +3274,14 @@ evaluate_config_worker <- function(config_i, shared) {
   result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
   result_row <- stamp_eval_settings(result_row, shared$settings)
 
+  ## A checkpoint that cannot be written is said on the row, for the parent
+  ## to stop on once every worker has returned: an error here would leave
+  ## furrr with no row from any of them, and a worker cannot stop the others.
   if (!is.null(shared$checkpoint_dir)) {
 
-    write_checkpoint_row(result_row, shared$checkpoint_dir)
+    failed <- write_checkpoint_row(result_row, shared$checkpoint_dir)
+
+    if (!is.null(failed)) attr(result_row, "checkpoint_failed") <- failed
 
   }
 

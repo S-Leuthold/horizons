@@ -98,7 +98,11 @@ aborts, naming what differs.
 So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one
-\code{output_dir} per outcome. The ranking \code{metric} is not checked, since
+\code{output_dir} per outcome. A write to \code{output_dir} that fails (the
+directory, the manifest or a checkpoint) stops the run with
+\code{horizons_error_systemic}, naming the directory, the rows finished so
+far as its \code{results}; on the configs axis it stops once every
+configuration has returned. The ranking \code{metric} is not checked, since
 every row carries all six cross-validated metrics. A row scored under an
 earlier scoring schema, or recording less of the training data and
 settings than this run does, was written by an earlier version: it is

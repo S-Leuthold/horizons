@@ -190,9 +190,10 @@ check_arg <- function(check,
 #'     early, because the first configurations or members to run failed the
 #'     same way across at least two models (the circuit breaker,
 #'     `control_horizons(breaker = )`), or [evaluate()], [fit()] or
-#'     [ensemble()] stopped because a parallel worker died. The rows finished
-#'     so far travel as `results`; `NULL` from `ensemble()`, which has none
-#'     before its meta-learner is built.}
+#'     [ensemble()] stopped because a parallel worker died, or [evaluate()]
+#'     could not write to its `output_dir`. The rows finished so far travel
+#'     as `results`; `NULL` from `ensemble()`, which has none before its
+#'     meta-learner is built.}
 #'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
 #'     warnings under `options(warn = 2)`. Instead of turning the first warning
 #'     into an error that loses the result, the verb aborts with the finished
