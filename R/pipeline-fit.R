@@ -275,7 +275,9 @@ fit <- function(x,
   ## would fail validation only after every model had been fitted.
   if (!is.null(metric)) check_rank_metric_arg(metric)
 
-  check_arg(rlang::check_number_whole, n_best, min = 1)
+  ## n_best is taken as an integer, so it is held to R's integer range, the
+  ## seed's bound
+  check_arg(rlang::check_number_whole, n_best, min = 1, max = SEED_MAX)
   check_arg(rlang::check_bool, compute_uq)
   check_arg(rlang::check_bool, compute_ad)
 

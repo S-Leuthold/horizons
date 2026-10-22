@@ -218,8 +218,9 @@ N_AD_TRAIN_MIN <- 10L
 DEFAULT_ENSEMBLE_SEED <- 307L
 
 ### The largest magnitude a verb's seed may have: set.seed() takes a whole
-### number within R's integer range unchanged. A double, as rlang's checkers
-### take their bounds.
+### number within R's integer range unchanged. fit()'s n_best, taken as an
+### integer too, is held to it. A double, as rlang's checkers take their
+### bounds.
 SEED_MAX <- as.double(.Machine$integer.max)
 
 ## Prediction Guardrails --------------------------------------------------------
