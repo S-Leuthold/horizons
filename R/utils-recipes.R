@@ -453,13 +453,14 @@ select_generated_spectra <- function(pattern = "^spec[0-9]+$") {
 #'
 #' @param col_names Character vector from `recipes::recipes_eval_select()`.
 #' @param step Character. The step's user-facing name, for the message.
+#' @param call The frame the refusal reports: the step's `prep()`.
 #'
 #' @return Invisibly `TRUE`; aborts with class `horizons_error_input` when
 #'   `col_names` is empty. Raised inside a step's `prep()`, it arrives
 #'   wrapped in `recipes_error_step`.
 #' @keywords internal
 #' @noRd
-check_selection_columns <- function(col_names, step) {
+check_selection_columns <- function(col_names, step, call = rlang::caller_env()) {
 
   if (length(col_names) == 0) {
 
@@ -468,7 +469,7 @@ check_selection_columns <- function(col_names, step) {
       "x" = "The step's selector matched no column in the training data.",
       "i" = "Inside {.fn build_recipe} the selector is {.code dplyr::matches(\"^spec[0-9]+$\")}, the names {.fn step_transform_spectra} gives its output. A zero match means that naming changed.",
       "i" = "A selection step with nothing to select cannot train; fix the selector rather than letting the step become a silent no-op."
-    ), kind = "input")
+    ), kind = "input", call = call)
 
   }
 
