@@ -74,7 +74,9 @@ same way across at least two models (the circuit breaker,
 \code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
 \code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died or lacks a
 package the run needs, or \code{\link[=evaluate]{evaluate()}} could not write to its
-\code{output_dir}. The rows finished so far travel
+\code{output_dir} (on the configs axis a checkpoint a worker could not
+write is a \code{skipped} warning instead, since every configuration has
+run by then). The rows finished so far travel
 as \code{results}; \code{NULL} from \code{ensemble()}, which has none before its
 meta-learner is built.}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
@@ -95,9 +97,9 @@ needs is not installed: a model's engine, or the package a feature
 selection step trains with (Boruta). \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}},
 \code{\link[=ensemble]{ensemble()}} and \code{predict()} check before any work starts, and refuse
 once, naming every missing package and what needs it. A package found
-missing later, where a unit ran (a parallel worker's library), raises
-it too, and the verbs that dispatch to workers then stop with
-\code{horizons_error_systemic}.}
+missing later, where a unit ran (a parallel worker's library, or a
+package the check does not know of), raises it too, and the verbs that
+dispatch units then stop with \code{horizons_error_systemic}.}
 }
 }
 
@@ -111,7 +113,9 @@ is weaker than its output shows (small folds, every member below the
 prune threshold). \code{predict()} raises each distinct warning another
 package raised while predicting under this topic, naming the
 configurations (or an ensemble's units) that raised it, and
-\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.
+\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files, except
+one opusreader2 raises while it parses a file's metadata, which
+horizons does not read: that is a note on the log, naming the files.
 \code{\link[=average]{average()}} names the samples it averaged though every replicate
 failed quality control.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such

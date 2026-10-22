@@ -192,7 +192,9 @@ check_arg <- function(check,
 #'     `control_horizons(breaker = )`), or [evaluate()], [fit()] or
 #'     [ensemble()] stopped because a parallel worker died or lacks a
 #'     package the run needs, or [evaluate()] could not write to its
-#'     `output_dir`. The rows finished so far travel
+#'     `output_dir` (on the configs axis a checkpoint a worker could not
+#'     write is a `skipped` warning instead, since every configuration has
+#'     run by then). The rows finished so far travel
 #'     as `results`; `NULL` from `ensemble()`, which has none before its
 #'     meta-learner is built.}
 #'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
@@ -213,9 +215,9 @@ check_arg <- function(check,
 #'     selection step trains with (Boruta). [evaluate()], [fit()],
 #'     [ensemble()] and `predict()` check before any work starts, and refuse
 #'     once, naming every missing package and what needs it. A package found
-#'     missing later, where a unit ran (a parallel worker's library), raises
-#'     it too, and the verbs that dispatch to workers then stop with
-#'     `horizons_error_systemic`.}
+#'     missing later, where a unit ran (a parallel worker's library, or a
+#'     package the check does not know of), raises it too, and the verbs that
+#'     dispatch units then stop with `horizons_error_systemic`.}
 #' }
 #'
 #' @section Warning topics:
@@ -227,7 +229,9 @@ check_arg <- function(check,
 #'     prune threshold). `predict()` raises each distinct warning another
 #'     package raised while predicting under this topic, naming the
 #'     configurations (or an ensemble's units) that raised it, and
-#'     [spectra()] each one raised while reading, naming the files.
+#'     [spectra()] each one raised while reading, naming the files, except
+#'     one opusreader2 raises while it parses a file's metadata, which
+#'     horizons does not read: that is a note on the log, naming the files.
 #'     [average()] names the samples it averaged though every replicate
 #'     failed quality control.}
 #'   \item{`horizons_warning_skipped`}{Something asked for did not run, such
