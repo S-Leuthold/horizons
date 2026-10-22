@@ -43,9 +43,15 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
   ## among them) arrives on its own; only what the tests set is written here.
   obj <- new_horizons_data(analysis = df, role_map = roles)
 
-  obj$config$configs   <- configs
-  obj$config$n_configs <- n_configs
-  obj$config$tuning    <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L)
+  obj$config$configs       <- configs
+  obj$config$n_configs     <- n_configs
+  obj$config$tuning        <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L,
+                                   final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER)
+
+  ## What configure() writes beside the grid, at its defaults
+  obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
+                                   pca_threshold = DEFAULT_PCA_THRESHOLD)
+  obj$config$outcome_range <- DEFAULT_OUTCOME_RANGE
 
   obj$validation["passed"]    <- list(if (add_validation) TRUE)
   obj$validation["timestamp"] <- list(if (add_validation) Sys.time())
@@ -98,9 +104,15 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
   ## among them) arrives on its own; only what the tests set is written here.
   obj <- new_horizons_data(analysis = df, role_map = roles)
 
-  obj$config$configs   <- configs
-  obj$config$n_configs <- n_configs
-  obj$config$tuning    <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L)
+  obj$config$configs       <- configs
+  obj$config$n_configs     <- n_configs
+  obj$config$tuning        <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L,
+                                   final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER)
+
+  ## What configure() writes beside the grid, at its defaults
+  obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
+                                   pca_threshold = DEFAULT_PCA_THRESHOLD)
+  obj$config$outcome_range <- DEFAULT_OUTCOME_RANGE
 
   obj$validation$passed    <- TRUE
   obj$validation$timestamp <- Sys.time()

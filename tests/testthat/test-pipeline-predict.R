@@ -44,21 +44,37 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
   ## among them) arrives on its own; only what the tests set is written here.
   obj <- new_horizons_data(analysis = df, role_map = roles)
 
-  obj$config$configs   <- configs
-  obj$config$n_configs <- 1L
-  obj$config$tuning    <- list(cv_folds = 3L, grid_size = 3L,
-                               bayesian_iter = 0L, final_bayesian_iter = 0L)
+  obj$config$configs       <- configs
+  obj$config$n_configs     <- 1L
+  obj$config$tuning        <- list(cv_folds = 3L, grid_size = 3L,
+                                   bayesian_iter = 0L, final_bayesian_iter = 0L)
+
+  ## What configure() writes beside the grid, at its defaults
+  obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
+                                   pca_threshold = DEFAULT_PCA_THRESHOLD)
+  obj$config$outcome_range <- DEFAULT_OUTCOME_RANGE
 
   obj$validation$passed <- TRUE
 
   evaluation <- list(
     results     = tibble::tibble(config_id = "cfg_001", status = "success",
+                                 ## the prune gate's reading, as prune = FALSE writes it
+                                 below_prune_threshold = NA, prune_threshold = NA_real_,
                                  rmse = 0.4, rrmse = 0.1, rsq = 0.8,
                                  ccc = 0.85, rpd = 1.5, mae = 0.3,
                                  ## fit() ranks on the CV panel (#50)
                                  cv_rmse = 0.45, cv_rrmse = 0.11, cv_rsq = 0.78,
                                  cv_ccc = 0.83, cv_rpd = 1.4, cv_mae = 0.33,
-                                 class = NA_character_),
+                                 class = NA_character_,
+                                 ## the settings evaluate() stamps on every row
+                                 settings = list(eval_settings(
+                                   cv_folds = 3L, grid_size = 3L, bayesian_iter = 0L,
+                                   prune = FALSE, prune_threshold = NA_real_, seed = seed,
+                                   sg_window = DEFAULT_SG_WINDOW,
+                                   pca_threshold = DEFAULT_PCA_THRESHOLD,
+                                   outcome_range = DEFAULT_OUTCOME_RANGE,
+                                   response_threshold = NA_real_
+                                 ))),
     best_config = "cfg_001",
     rank_metric = "rpd",
     screened    = TRUE,

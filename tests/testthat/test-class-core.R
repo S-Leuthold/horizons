@@ -1339,18 +1339,33 @@ make_valid_eval <- function() {
     cv_rmse   = c(1.1, 2.1),  cv_rrmse = c(0.11, 0.21),
     cv_rsq    = c(0.88, 0.78), cv_ccc  = c(0.88, 0.78),
     cv_rpd    = c(1.9, 1.4),  cv_mae   = c(0.9, 1.2),
-    class     = NA_character_
+    class     = NA_character_,
+    ## the prune gate's reading, as prune = FALSE writes it
+    below_prune_threshold = NA,
+    prune_threshold       = NA_real_,
+    ## the settings evaluate() stamps on every row
+    settings  = rep(list(eval_settings(
+      cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
+      prune = FALSE, prune_threshold = NA_real_, seed = 42L,
+      sg_window = DEFAULT_SG_WINDOW, pca_threshold = DEFAULT_PCA_THRESHOLD,
+      outcome_range = DEFAULT_OUTCOME_RANGE, response_threshold = NA_real_
+    )), 2)
   )
 
   obj <- list(
-    ## A grid and tuning the door validator accepts (config_findings())
+    ## A configuration the door validator accepts (config_findings()), with
+    ## what configure() writes beside the grid at its defaults
     config = list(
       configs = tibble::tibble(config_id         = c("cfg_a", "cfg_b"),
                                model             = c("rf", "plsr"),
                                transformation    = "none",
                                preprocessing     = "raw",
                                feature_selection = "none"),
-      tuning  = list(cv_folds = 5L)
+      tuning  = list(cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
+                     final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER),
+      recipe  = list(sg_window     = DEFAULT_SG_WINDOW,
+                     pca_threshold = DEFAULT_PCA_THRESHOLD),
+      outcome_range = DEFAULT_OUTCOME_RANGE
     ),
     evaluation = list(
       results          = results,
