@@ -459,15 +459,53 @@ NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependenc
 #' `rlib_error_package_not_found`, which `rlang::check_installed()` raises (a
 #' selection step's own check, when its recipe is prepped in the unit).
 #'
+#' On the configs axis tune runs inside the worker as it would in a session,
+#' and refuses at its own door before anything is fitted, unclassed. Those
+#' refusals are matched by their text, `TUNE_MISSING_PACKAGE`, anywhere in
+#' the chain, as future.apply's report of a worker's death is
+#' ([worker_death_signal()]).
+#'
 #' @param cnd A condition.
 #' @return Logical(1).
 #' @keywords internal
 #' @noRd
 missing_package_signal <- function(cnd) {
 
-  rlang::cnd_inherits(cnd, c("packageNotFoundError", "rlib_error_package_not_found"))
+  if (rlang::cnd_inherits(cnd, c("packageNotFoundError", "rlib_error_package_not_found"))) {
+    return(TRUE)
+  }
+
+  node <- cnd
+
+  ### Bounded, as in root_class(), so a chain that loops cannot hang.
+  for (i in seq_len(50L)) {
+
+    if (!inherits(node, "condition")) return(FALSE)
+
+    if (grepl(TUNE_MISSING_PACKAGE, condition_own_text(node))) return(TRUE)
+
+    node <- tryCatch(node[["parent"]], error = function(e) NULL)
+
+  }
+
+  FALSE
 
 }
+
+#' How tune refuses a workflow whose packages are not installed
+#'
+#' @description
+#' tune 2.1.0 checks, in the session that calls it, the engine packages of a
+#' workflow's model ("Package install is required for kernlab.", from
+#' `check_installs()`) and every package the workflow and its recipe's steps
+#' require ("Some package installs are needed: Boruta", from the grid
+#' search's loop). Both are raised unclassed, so they are matched by text;
+#' the tests produce each from tune's own code, so a change in its wording
+#' fails the suite.
+#'
+#' @keywords internal
+#' @noRd
+TUNE_MISSING_PACKAGE <- "^(Some package installs are needed: |Package installs? (is|are) required for )"
 
 #' Raise a package missing where a unit ran, so no unit contains it
 #'

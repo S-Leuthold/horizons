@@ -699,3 +699,65 @@ describe("note_in_unit()", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## missing_package_signal(): tune's own refusals, by their text
+## ---------------------------------------------------------------------------
+## On the configs axis tune runs in the worker as in a session, and refuses
+## at its own door, unclassed, a workflow whose packages are not installed.
+## Each refusal below comes from tune's own code, so a change in its wording
+## fails here rather than letting a worker's missing package read as each
+## configuration's own failure again.
+
+describe("missing_package_signal() - tune's refusals", {
+
+  wf <- workflows::workflow() |>
+    workflows::add_formula(mpg ~ .) |>
+    workflows::add_model(parsnip::linear_reg() |> parsnip::set_engine("lm"))
+
+  it("recognises tune's refusal of the packages a workflow and its recipe require", {
+
+    set.seed(1)
+    folds <- rsample::vfold_cv(mtcars, v = 2)
+    run   <- function() {
+      tune::fit_resamples(wf, folds, control = tune::control_resamples(pkgs = "horizonsFakePkgXYZ123"))
+    }
+
+    err <- expect_error(run(), "Some package installs are needed: horizonsFakePkgXYZ123", fixed = TRUE)
+
+    expect_true(missing_package_signal(err))
+    expect_error(run_unit(run(), "configuration", "cfg_1"),
+                 class = "horizons_error_missing_package", inherit = FALSE)
+
+  })
+
+  it("recognises tune's refusal of a model's engine packages", {
+
+    set.seed(1)
+    folds <- rsample::vfold_cv(mtcars, v = 2)
+
+    ## The lm engine's dependencies gain a package installed nowhere
+    real <- parsnip::get_dependency
+    local_mocked_bindings(get_dependency = function(model) {
+      deps     <- real(model)
+      deps$pkg <- lapply(deps$pkg, function(p) c(p, "horizonsFakePkgXYZ123"))
+      deps
+    }, .package = "parsnip")
+
+    err <- expect_error(tune::fit_resamples(wf, folds),
+                        "Package install is required for horizonsFakePkgXYZ123.", fixed = TRUE)
+
+    expect_true(missing_package_signal(err))
+
+  })
+
+  it("reads no other failure as a missing package", {
+
+    expect_false(missing_package_signal(simpleError("A package install directory was not set.")))
+    expect_false(missing_package_signal(rlang::catch_cnd(rlang::abort("Grid search failed: singular matrix"))))
+
+  })
+
+})
+

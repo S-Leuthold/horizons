@@ -728,6 +728,86 @@ describe("evaluate() - configs axis", {
 
 
 ## =========================================================================
+## A package missing on a worker
+## =========================================================================
+## evaluate() checks the configurations' packages in this session, so a worker
+## whose library lacks one fails every configuration that needs it: the run
+## stops as systemic, with the rows so far. The signal differs by axis. On the
+## resamples axis tune's workers attach the workflow's packages with
+## library(), which raises base R's packageNotFoundError; on the configs axis
+## tune runs inside the worker and refuses at its own door, by text. Both are
+## read here from real workers whose library hides kernlab.
+
+## A library holding every package this session sees but `hidden`, and the
+## site library variable pointing at it, for workers started in the test. A
+## worker's library paths always end in the site libraries and base R's.
+local_hidden_package_lib <- function(hidden, .env = parent.frame()) {
+
+  dir <- withr::local_tempdir(.local_envir = .env)
+
+  for (lib in .libPaths()) {
+    for (pkg in list.files(lib)) {
+      target <- file.path(dir, pkg)
+      if (pkg != hidden && !file.exists(target)) file.symlink(file.path(lib, pkg), target)
+    }
+  }
+
+  withr::local_envvar(R_LIBS_SITE = dir, .local_envir = .env)
+
+  dir
+
+}
+
+describe("evaluate() - a package missing on a worker", {
+
+  it("stops the run as systemic, with the rows so far, on either axis, when a worker lacks a package this session has (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("kernlab")
+
+    lib <- local_hidden_package_lib("kernlab")
+    local_plan(future::multisession, workers = 2, rscript_libs = c(lib, .Library))
+
+    ## The fixture reaches the state under test: a worker runs this horizons
+    ## without kernlab, which this session has
+    expect_false(future::value(future::future(requireNamespace("kernlab", quietly = TRUE), seed = FALSE)))
+    expect_identical(future::value(future::future(as.character(utils::packageVersion("horizons")), seed = FALSE)),
+                     as.character(utils::packageVersion("horizons")))
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model <- c("plsr", "svm_rbf")
+
+    ## The resamples axis: plsr runs first and is kept
+    err <- expect_error(
+      suppressWarnings(evaluate(obj, seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_true(rlang::cnd_inherits(err, "packageNotFoundError"))
+    expect_identical(err$results$config_id, "cfg_001")
+
+    ## The configs axis: tune's own refusal in the worker
+    dir <- withr::local_tempdir()
+    err <- expect_error(
+      suppressWarnings(evaluate(obj, seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                           output_dir = dir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "is required for kernlab", fixed = TRUE)
+
+  })
+
+})
+
+
+## =========================================================================
 ## Cross-mode resume
 ## =========================================================================
 
