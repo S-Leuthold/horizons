@@ -275,7 +275,7 @@ print.step_select_correlation <- function(x,
     if (isTRUE(x$correlation$skipped)) {
       print_selection_skipped(x)
     } else if (isTRUE(x$correlation$retained_all)) {
-      cat("\u2022 No window cleared the threshold, so every band was kept\n")
+      cat("\u2022 No window cleared the threshold, so every variance-filtered band was kept\n")
     }
   } else {
     cat("\u2022 Step not yet trained\n")

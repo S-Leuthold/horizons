@@ -644,7 +644,7 @@ selection_warning <- function(step) {
 
     return(list(topic = "substitution", env = environment(), message = c(
       "No window cleared {.fn step_select_correlation}'s threshold, so it selected nothing.",
-      "i" = "Retaining all {n} wavenumber{?s}; the model sees an unselected spectrum."
+      "i" = "Retaining all {n} variance-filtered wavenumber{?s}; the model sees an unselected spectrum."
     )))
 
   }

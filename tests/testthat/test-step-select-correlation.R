@@ -88,7 +88,9 @@ describe("step_select_correlation() keeps the windows that score", {
                         fixed = TRUE, class = "horizons_warning_substitution")
 
     expect_identical(w$step, "step_select_correlation")
-    expect_match(conditionMessage(w), "Retaining all 6 wavenumbers", fixed = TRUE)
+    expect_match(conditionMessage(w), "Retaining all 6 variance-filtered wavenumbers", fixed = TRUE)
+    expect_output(print(prepped$steps[[1]]),
+                  "No window cleared the threshold, so every variance-filtered band was kept", fixed = TRUE)
     expect_true(prepped$steps[[1]]$correlation$retained_all)
     expect_identical(prepped$steps[[1]]$correlation$n_windows, 4L)
     expect_identical(prepped$steps[[1]]$correlation$n_windows_kept, 0L)
