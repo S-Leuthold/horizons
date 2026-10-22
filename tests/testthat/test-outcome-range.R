@@ -104,9 +104,8 @@ signed_run <- function(.env = parent.frame()) {
 
 }
 
-#' The non-negative fixture as make_eval_object() builds it, with no
-#' config$outcome_range (an object from before the range existed),
-#' cold-started at no Bayesian budget
+#' The non-negative fixture as make_eval_object() builds it, under the
+#' default range, cold-started at no Bayesian budget
 #' @noRd
 build_nonneg_fit <- function() {
 
@@ -181,16 +180,9 @@ describe("outcome_range_setting()", {
 
   })
 
-  it("gives an object configured before the range existed the zero floor", {
-
-    expect_identical(outcome_range_setting(list(config = list(configs = NULL))),
-                     DEFAULT_OUTCOME_RANGE)
-    expect_identical(DEFAULT_OUTCOME_RANGE, c(0, Inf))
-
-  })
-
-  ## A stored range configure() could not have written is refused at every
-  ## verb's door (config_findings(), test-class-core.R), so this only reads.
+  ## A missing range, or one configure() could not have written, is refused
+  ## at every verb's door (config_findings(), test-class-core.R), so this
+  ## only reads.
 
 })
 
@@ -657,10 +649,9 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
 describe("a negative outcome under the default range", {
 
-  ## make_eval_object() sets no config$outcome_range, like an object
-  ## configured before the range existed. configure() would have refused the
-  ## outcome; evaluate() and a cold-start fit() must refuse it before they
-  ## draw or tune anything.
+  ## make_eval_object() carries configure()'s default range. configure()
+  ## would have refused the outcome; evaluate() and a cold-start fit() must
+  ## refuse it before they draw or tune anything.
   obj <- make_eval_object(n = 60, n_configs = 1)
   obj$data$analysis$SOC <- to_d13c(obj$data$analysis$SOC)
 
@@ -717,23 +708,30 @@ describe("a negative outcome under the default range", {
 
 describe("a non-negative outcome under the default range", {
 
-  ## make_eval_object() carries no config$outcome_range: an object from
-  ## before the range existed. The bound and the floor must be what they were.
-  ## The bound, max * RESPONSE_BOUND_MARGIN, is tested to the bit in
+  ## make_eval_object() carries configure()'s default range. The bound and
+  ## the floor must be what they were before the range existed. The bound,
+  ## max * RESPONSE_BOUND_MARGIN, is tested to the bit in
   ## compute_response_bound()'s tests above, and over the fit rows end to end
   ## in test-pipeline-fit.R (#68). The fit is nonneg_fit(), shared with the
   ## malformed-range block below.
 
-  it("validates without the key, and with it removed from a fitted object", {
+  it("refuses a configured object without the key, naming it", {
 
-    fitted <- nonneg_fit()$fitted
+    fx     <- nonneg_fit()
+    fitted <- fx$fitted
 
     expect_no_error(validate_horizons_fit(fitted))
 
-    ## the constructor's shape with the key present but NULL
+    ## the constructor's shape with the key present but NULL, at predict()'s
+    ## door
     keyed <- fitted
     keyed$config["outcome_range"] <- list(NULL)
-    expect_no_error(validate_horizons_fit(keyed))
+    new_data <- fx$obj$data$analysis[1:5, setdiff(names(fx$obj$data$analysis), "SOC")]
+
+    err <- expect_error(predict(keyed, new_data, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("config$outcome_range is not a usable range (two numbers, lower below upper): it is `NULL`",
+                          err$findings, fixed = TRUE)))
 
   })
 

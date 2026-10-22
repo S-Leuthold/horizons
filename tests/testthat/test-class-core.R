@@ -3130,6 +3130,58 @@ describe("config_findings() at every verb's door", {
 
   })
 
+  it("refuses a missing outcome range, recipe settings configure() would refuse, and a tuning budget below configure()'s minimum, with the remedy (#212)", {
+
+    refusal <- function(obj) {
+      tryCatch(validate_horizons_data(obj), horizons_error_validation = function(e) e)
+    }
+
+    obj <- configured_object()
+    obj$config["outcome_range"] <- list(NULL)
+    err <- refusal(obj)
+    expect_s3_class(err, "horizons_error_validation")
+    expect_true(any(grepl("config$outcome_range is not a usable range (two numbers, lower below upper): it is `NULL`",
+                          err$findings, fixed = TRUE)))
+    expect_match(conditionMessage(err), "rebuild it with the verbs that wrote it", fixed = TRUE)
+
+    minimums <- c(grid_size = 1, bayesian_iter = 0, final_bayesian_iter = 0)
+
+    for (field in names(minimums)) {
+
+      for (bad in list(minimums[[field]] - 1, 1.5, NA_real_, "5", NULL)) {
+
+        obj <- configured_object()
+        obj$config$tuning[field] <- list(bad)
+        expect_true(any(grepl(paste0("config$tuning$", field, " must be a whole number of at least ",
+                                     minimums[[field]]),
+                              finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                    label = paste(field, deparse(bad)))
+
+      }
+
+    }
+
+    recipes <- list(NULL, c(9, 0.995),
+                    list(pca_threshold = 0.995),
+                    list(sg_window = 8L, pca_threshold = 0.995),
+                    list(sg_window = 3L, pca_threshold = 0.995),
+                    list(sg_window = 9L),
+                    list(sg_window = 9L, pca_threshold = 0),
+                    list(sg_window = 9L, pca_threshold = 1.5),
+                    list(sg_window = 9L, pca_threshold = NA_real_))
+
+    for (recipe in recipes) {
+
+      obj <- configured_object()
+      obj$config["recipe"] <- list(recipe)
+      expect_true(any(grepl("config$recipe must be a list with an odd whole sg_window of at least 5 and a pca_threshold in (0, 1]",
+                            finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                  label = deparse(recipe))
+
+    }
+
+  })
+
   it("leaves the configuration to configure(), which is the remedy for a bad one", {
 
     obj <- configured_object()

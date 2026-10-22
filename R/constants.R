@@ -136,9 +136,8 @@ DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 
 # Recipe settings configure() records and build_recipe() applies to every
 # config (#62): the Savitzky-Golay window in grid points, and the share of
-# variance step_pca() keeps. These are what the recipe ran before the settings
-# were exposed, so an object configured before them (no `config$recipe`) runs
-# unchanged through the fallback in recipe_settings().
+# variance step_pca() keeps. These are configure()'s defaults, and what the
+# recipe ran before the settings were exposed.
 DEFAULT_SG_WINDOW     <- 9L
 DEFAULT_PCA_THRESHOLD <- 0.995
 
@@ -234,9 +233,7 @@ RESPONSE_BOUND_MARGIN <- 1.5
 ### The physical range of the outcome when configure() is not told otherwise
 ### (#76). Every prediction the package scores or serves is clamped to
 ### configure()'s outcome_range; the default is the non-negative range the
-### package has always assumed, so an object configured before the argument
-### existed (no `config$outcome_range`) runs unchanged through the fallback in
-### outcome_range_setting().
+### package has always assumed.
 DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
 ## Parallel Worker Contract ----------------------------------------------------

@@ -317,8 +317,7 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Every test-set and tuning prediction is clamped to configure()'s
   ## outcome_range, so an outcome outside it would be scored against values
-  ## the predictions cannot reach. configure() refuses that already, but an
-  ## object configured before the range existed reads as c(0, Inf), and rows
+  ## the predictions cannot reach. configure() refuses that already, but rows
   ## can change after configure(). Refused here, before any split or tuning,
   ## so it costs a second rather than the whole grid (#76).
 
@@ -352,8 +351,8 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 3a: The window has to fit the spectrum
   ## -----------------------------------------------------------------------
-  ## Object-level recipe settings, the same for every config; see
-  ## recipe_settings() for objects configured before they were recorded.
+  ## Object-level recipe settings, the same for every config
+  ## (recipe_settings()).
   ##
   ## configure() cannot check the window against the spectrum, because
   ## standardize() can still change the axis after it. Past this point a

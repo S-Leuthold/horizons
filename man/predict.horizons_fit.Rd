@@ -131,9 +131,8 @@ error of class \code{horizons_error_input}.
 \strong{Outcome range.} Point predictions and interval bounds are clamped to
 the \code{outcome_range} given to \code{\link[=configure]{configure()}}, silently, since the range is
 the outcome's physical range. Under the default, \code{c(0, Inf)}, that is a
-floor at zero, and objects configured before the range existed predict
-under it; a signed property configured with \code{c(-Inf, Inf)} is not clamped
-at all (#76). Clamping an interval keeps its coverage only for a truth
+floor at zero; a signed property configured with \code{c(-Inf, Inf)} is not
+clamped at all (#76). Clamping an interval keeps its coverage only for a truth
 inside the range: coverage is at least the nominal level minus the
 probability that the truth lies outside the range, so a range narrower
 than the property's physical bounds costs coverage. A finite upper bound

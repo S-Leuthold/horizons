@@ -288,8 +288,7 @@ fit <- function(x,
 
   ## The outcome has to lie inside the range every prediction is clamped to,
   ## checked on either path before anything is drawn or fitted (#76).
-  ## configure() and evaluate() check it too, but an object configured before
-  ## the range existed reads as c(0, Inf), and its rows can have changed
+  ## configure() and evaluate() check it too, but the rows can have changed
   ## since; this is the last check before the re-tune pays for itself.
   check_outcome_range(x, verb = "fit")
   outcome_range <- outcome_range_setting(x)
@@ -436,14 +435,12 @@ fit <- function(x,
 
   ## configure() stores the screening and the final re-tune budgets
   ## separately; fit() used to pass the screening one to the re-tune, so the
-  ## user-facing `final_bayesian_iter` did nothing (#46). Objects configured
-  ## before that field existed fall back to the constant. The tree header
+  ## user-facing `final_bayesian_iter` did nothing (#46). The tree header
   ## prints this budget, the one that runs.
-  final_bayesian_iter <- tuning$final_bayesian_iter %||% DEFAULT_FINAL_BAYES_ITER
+  final_bayesian_iter <- tuning$final_bayesian_iter
 
   ## The recipe settings evaluate() ran with, or on a cold start the ones
-  ## cold_start_evaluation() checked against the spectrum; see
-  ## recipe_settings().
+  ## cold_start_evaluation() checked against the spectrum.
   recipe_cfg   <- recipe_settings(x)
 
   ## The rows evaluate() modelled: the same rule on the same table (#67).

@@ -246,9 +246,8 @@ build_recipe <- function(config_row,
 #' @description
 #' Reads the `sg_window` and `pca_threshold` `configure()` recorded in
 #' `x$config$recipe`, the values `evaluate()` and `fit()` hand to
-#' `build_recipe()` for every config. An object configured before the settings
-#' existed carries no record and gets the defaults, which are what its recipe
-#' ran then, so it evaluates and fits exactly as before.
+#' `build_recipe()` for every config. Every verb's door validator requires
+#' the record ([config_findings()]), so this only reads it.
 #'
 #' @param x A configured `horizons_data` object.
 #'
@@ -259,10 +258,7 @@ recipe_settings <- function(x) {
 
   recorded <- x$config$recipe
 
-  list(
-    sg_window     = recorded$sg_window     %||% DEFAULT_SG_WINDOW,
-    pca_threshold = recorded$pca_threshold %||% DEFAULT_PCA_THRESHOLD
-  )
+  list(sg_window = recorded$sg_window, pca_threshold = recorded$pca_threshold)
 
 }
 

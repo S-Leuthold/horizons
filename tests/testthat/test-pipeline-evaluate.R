@@ -1468,15 +1468,6 @@ describe("evaluate() - recipe settings", {
 
   })
 
-  it("falls back to the values the recipe always ran when the record is absent (older objects)", {
-
-    obj$config$recipe <- NULL
-
-    expect_identical(capture_recipe_args(obj),
-                     list(sg_window = 9L, pca_threshold = 0.995))
-
-  })
-
   ## A window as wide as the spectrum used to pass prep() and fail every
   ## config inside tune ("Grid search failed"); a wider one failed them all
   ## ("All configurations failed"). Neither named the window. evaluate() now
