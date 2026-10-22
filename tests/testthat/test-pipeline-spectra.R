@@ -860,6 +860,16 @@ test_that("a warning opusreader2 raises while parsing a file's metadata is a not
 
 })
 
+test_that("reads no reader warning as the metadata's when opusreader2 has no metadata parser", {
+
+  ## A version of opusreader2 without get_basic_metadata(): its warnings stay
+  ## quality warnings, as any other reader warning is
+  local_mocked_bindings(get_basic_metadata = NULL, .package = "opusreader2")
+
+  expect_false(in_opus_metadata_parse())
+
+})
+
 test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, never the first on the list (#191)", {
 
   ## Arrange ---------------------------------------------------------------
