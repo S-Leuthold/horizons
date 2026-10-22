@@ -1333,8 +1333,8 @@ member_row <- function(res) {
 #' With one configuration there is nothing for `evaluate()` to screen, so
 #' `fit()` starts from the configured object (#45). This checks that the
 #' object can start cold, draws the train/test split `evaluate()` would draw
-#' at the same `seed` ([draw_eval_split()], after the same sample-size floor
-#' and the same Savitzky-Golay window check, [evaluation_recipe()]), and
+#' at the same `seed` ([draw_eval_split()], after the same Savitzky-Golay
+#' window check, [evaluation_recipe()]), and
 #' returns the record `fit()` stores in `x$evaluation` in place of
 #' `evaluate()`'s. The record carries every key [validate_horizons_eval()]
 #' requires, with `screened = FALSE`, and `recipe` and `response_trim` as
@@ -1358,7 +1358,9 @@ member_row <- function(res) {
 #'   the split is unstratified), `strata_failed` (`TRUE` when the
 #'   stratified draw failed and was retried without strata),
 #'   `strata_error` (why) and `strata_warnings` (what rsample warned of), as
-#'   [draw_eval_split()] returns them. Aborts with class
+#'   [draw_eval_split()] returns them. It runs no sample-size check: `fit()`
+#'   checks the rows its folds are drawn from, which refuses every case a
+#'   check here would. Aborts with class
 #'   `horizons_error_input` when the object has no configuration or more than
 #'   one, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
