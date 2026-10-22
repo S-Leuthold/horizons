@@ -402,7 +402,9 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 #'   (`predictors`, `truth`, `sample_id`), or `NULL` when there are none.
 #'   Default `NULL`.
 #'
-#' @return The uq bundle list (see [fit_ensemble_uq()]). Aborts with class
+#' @return The uq bundle list (see [fit_ensemble_uq()]), with the tree's line
+#'   for its folds as the attribute `"strata_line"` ([strata_tree_line()],
+#'   `NULL` when they stratified as asked). Aborts with class
 #'   `horizons_error_run` when a size gate fails.
 #'
 #' @noRd
@@ -575,7 +577,9 @@ compute_ensemble_uq <- function(oof,
 
   })
 
-  list(
+  ## The tree's line for the folds travels on the bundle, for ensemble() to
+  ## read and drop
+  bundle <- list(
     method          = "cv_plus",
     ensemble_method = contract$method,
     members         = contract$weights$member,
@@ -588,6 +592,10 @@ compute_ensemble_uq <- function(oof,
     mean_width      = mean(widths, na.rm = TRUE),
     timestamp       = Sys.time()
   )
+
+  attr(bundle, "strata_line") <- strata_tree_line(drawn_cal, "CV+ folds")
+
+  bundle
 
 }
 
@@ -755,7 +763,10 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
-#' @return `x` with `$ensemble$uq` populated. [ensemble()] then adds the
+#' @return `x` with `$ensemble$uq` populated, and the tree's line for the CV+
+#'   folds as the attribute `"strata_line"`, which [ensemble()] reads and
+#'   drops ([strata_tree_line()], `NULL` when they stratified as asked).
+#'   [ensemble()] then adds the
 #'   measured coverage on the test rows, `test_coverage`, `test_mean_width`
 #'   and `n_test` (`ensemble_test_coverage()`). The bundle carries: `method`
 #'   (`"cv_plus"`), `ensemble_method`, `members`, `fold_models`, `calib`
@@ -812,7 +823,13 @@ fit_ensemble_uq <- function(x,
 
   }
 
+  ## The tree's line for the folds moves from the bundle to the unit's
+  ## value, for ensemble() to read and drop
+  strata_line <- attr(bundle, "strata_line")
+  attr(bundle, "strata_line") <- NULL
+
   x$ensemble$uq <- bundle
+  attr(x, "strata_line") <- strata_line
 
   x
 

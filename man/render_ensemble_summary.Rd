@@ -4,12 +4,16 @@
 \alias{render_ensemble_summary}
 \title{Render the Ensemble Summary Tree}
 \usage{
-render_ensemble_summary(contract, rank_metric)
+render_ensemble_summary(contract, rank_metric, strata_lines = list())
 }
 \arguments{
 \item{contract}{The ensemble contract list.}
 
 \item{rank_metric}{Character. The metric improvement is measured on.}
+
+\item{strata_lines}{List with \code{meta} and \code{cv_plus}: the tree's line for
+the meta-learner's folds and for the CV+ folds when either did not
+stratify as asked (\code{\link[=strata_tree_line]{strata_tree_line()}}), or \code{NULL}.}
 }
 \value{
 Invisibly NULL; called for its console output.

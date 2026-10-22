@@ -287,7 +287,12 @@ ensemble <- function(x,
   flagged     <- attr(contract, "flagged")
   warning_log <- attr(contract, "warning_log")
 
-  for (a in c("unit_records", "flagged", "warning_log")) attr(contract, a) <- NULL
+  ## And the tree's lines for a stratified draw that did not stratify as
+  ## asked, as evaluate() and fit() print them: the meta-learner's folds' here,
+  ## the CV+ folds' once they are drawn
+  strata_lines <- list(meta = attr(contract, "strata_line"), cv_plus = NULL)
+
+  for (a in c("unit_records", "flagged", "warning_log", "strata_line")) attr(contract, a) <- NULL
 
   ## -------------------------------------------------------------------------
   ## Step 3: Promote class and attach the ensemble
@@ -328,6 +333,9 @@ ensemble <- function(x,
     } else {
 
       x <- cv_plus$value
+
+      strata_lines["cv_plus"] <- list(attr(x, "strata_line"))
+      attr(x, "strata_line") <- NULL
 
     }
 
@@ -385,7 +393,7 @@ ensemble <- function(x,
 
   if (verbose) {
 
-    render_ensemble_summary(x$ensemble, rank_metric)
+    render_ensemble_summary(x$ensemble, rank_metric, strata_lines)
 
   }
 
@@ -411,9 +419,12 @@ ensemble <- function(x,
 #'
 #' @param contract The ensemble contract list.
 #' @param rank_metric Character. The metric improvement is measured on.
+#' @param strata_lines List with `meta` and `cv_plus`: the tree's line for
+#'   the meta-learner's folds and for the CV+ folds when either did not
+#'   stratify as asked ([strata_tree_line()]), or `NULL`.
 #' @return Invisibly NULL; called for its console output.
 #' @keywords internal
-render_ensemble_summary <- function(contract, rank_metric) {
+render_ensemble_summary <- function(contract, rank_metric, strata_lines = list()) {
 
   ## Top contributing members (by absolute weight) --------------------------
 
@@ -432,6 +443,14 @@ render_ensemble_summary <- function(contract, rank_metric) {
       "\u2502  ", branch, " ", top$member[i],
       ": ", round(top$coef[i], 4), "\n"
     ))
+
+  }
+
+  ## The meta-learner's folds, when they did not stratify as asked, in the
+  ## line evaluate() and fit() print for their own folds
+  if (!is.null(strata_lines$meta)) {
+
+    cat(paste0("\u2502  ", cli::col_yellow(strata_lines$meta), "\n"))
 
   }
 
@@ -471,6 +490,13 @@ render_ensemble_summary <- function(contract, rank_metric) {
   if (!is.null(uq)) {
 
     cat(paste0("\u2502  \u251c\u2500 UQ: CV+ conformal (n_calib = ", uq$n_calib, ")\n"))
+
+    if (!is.null(strata_lines$cv_plus)) {
+
+      cat(paste0("\u2502  \u2502  \u251c\u2500 ", cli::col_yellow(strata_lines$cv_plus), "\n"))
+
+    }
+
     cat(paste0("\u2502  \u2502  \u2514\u2500 ", format_test_coverage(uq), "\n"))
 
   } else {

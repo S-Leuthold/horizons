@@ -254,20 +254,26 @@ predict_members_on_test <- function(object, members, call = rlang::caller_env())
 #' contract. What the run recorded that the unit cannot see travels on it as
 #' attributes, which `ensemble()` reads and drops: the members' unit records
 #' and the test rows they could not use (from [predict_members_on_test()]),
-#' and the warning records tune kept as notes.
+#' the warning records tune kept as notes, and the tree's line for the
+#' meta-learner's folds.
 #'
 #' @param contract From [build_ensemble_contract()].
 #' @param member_pred From [predict_members_on_test()].
 #' @param warning_log Records shaped like [new_warning_log()]'s.
-#' @return `contract`, with the attributes `"unit_records"`, `"flagged"` and
-#'   `"warning_log"`.
+#' @param strata_line The tree's line for the meta-learner's cross-validation
+#'   folds ([strata_tree_line()]), or `NULL` when they stratified as asked or
+#'   the engine draws none.
+#' @return `contract`, with the attributes `"unit_records"`, `"flagged"`,
+#'   `"warning_log"` and `"strata_line"`.
 #' @keywords internal
 #' @noRd
-with_run_records <- function(contract, member_pred, warning_log = new_warning_log()) {
+with_run_records <- function(contract, member_pred, warning_log = new_warning_log(),
+                             strata_line = NULL) {
 
   attr(contract, "unit_records") <- attr(member_pred, "unit_records")
   attr(contract, "flagged")      <- attr(member_pred, "flagged")
   attr(contract, "warning_log")  <- warning_log
+  attr(contract, "strata_line")  <- strata_line
 
   contract
 
@@ -577,7 +583,8 @@ fit_tuned_meta_learner <- function(object,
     seed          = seed
   ))
 
-  with_run_records(contract, member_pred, warning_log)
+  with_run_records(contract, member_pred, warning_log,
+                   strata_line = strata_tree_line(drawn, "meta-learner CV"))
 
 }
 

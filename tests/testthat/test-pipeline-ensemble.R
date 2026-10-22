@@ -1931,6 +1931,40 @@ describe("ensemble() - the summary it prints", {
 
   })
 
+  it("prints the line evaluate() and fit() print for a draw that did not stratify as asked, under the members and under the UQ", {
+
+    fewer <- list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                  strata_warnings = "Stratification will use 2 breaks instead.")
+    failed <- list(stratified = FALSE, strata_failed = TRUE, strata_error = "stratification refused",
+                   strata_warnings = character(0))
+
+    lines <- list(meta    = strata_tree_line(fewer, "meta-learner CV"),
+                  cv_plus = strata_tree_line(failed, "CV+ folds"))
+
+    expect_snapshot(render_ensemble_summary(summary_contract(improvement = 0.0412, coef = c(0.5, 0.3, 0.2)),
+                                            "rpd", lines))
+
+  })
+
+  it("prints them for the stored fit, whose meta frame rsample stratifies on fewer bins", {
+
+    fitted <- ens_fitted()
+
+    out <- utils::capture.output(suppressWarnings(
+      ensemble(fitted, method = "penalized", optimize = FALSE, control = control_horizons(verbose = TRUE))
+    ))
+
+    meta <- grep("Stratified meta-learner CV on fewer strata: too little data for 4", out, fixed = TRUE)
+    cvp  <- grep("Stratified CV+ folds on fewer strata: too little data for 4", out, fixed = TRUE)
+    uq   <- grep("UQ: CV+ conformal", out, fixed = TRUE)
+
+    expect_length(meta, 1L)
+    expect_length(cvp, 1L)
+    expect_identical(cvp, uq + 1L)
+    expect_match(out[meta - 1L], "└─ ", fixed = TRUE)   # the last member's line
+
+  })
+
   it("orders members by the size of their weight, and flags an ensemble worse than its best member", {
 
     worse <- summary_contract(improvement = -0.0123, coef = c(0.2, -0.5, 0.3),

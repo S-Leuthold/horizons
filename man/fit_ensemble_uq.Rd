@@ -16,7 +16,10 @@ fit_ensemble_uq(x, level = DEFAULT_UQ_LEVEL, min_calib_rows = N_CALIB_MIN)
 \code{control_horizons(min_calib_rows = )}. Default \code{N_CALIB_MIN}.}
 }
 \value{
-\code{x} with \verb{$ensemble$uq} populated. \code{\link[=ensemble]{ensemble()}} then adds the
+\code{x} with \verb{$ensemble$uq} populated, and the tree's line for the CV+
+folds as the attribute \code{"strata_line"}, which \code{\link[=ensemble]{ensemble()}} reads and
+drops (\code{\link[=strata_tree_line]{strata_tree_line()}}, \code{NULL} when they stratified as asked).
+\code{\link[=ensemble]{ensemble()}} then adds the
 measured coverage on the test rows, \code{test_coverage}, \code{test_mean_width}
 and \code{n_test} (\code{ensemble_test_coverage()}). The bundle carries: \code{method}
 (\code{"cv_plus"}), \code{ensemble_method}, \code{members}, \code{fold_models}, \code{calib}
