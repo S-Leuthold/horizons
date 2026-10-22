@@ -437,7 +437,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  it("refuses a compute_uq or compute_ad that is not TRUE or FALSE, before anything is fitted", {
+  it("refuses a compute_uq, compute_ad, n_best or seed it cannot use, before anything is fitted", {
 
     local_mocked_bindings(
       fit_single_config = function(...) stop("fit_single_config() was called")
@@ -457,7 +457,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     }
 
-    for (bad in list(1.5, NA, "307", Inf, c(1, 2))) {
+    for (bad in list(1.5, NA, "307", Inf, c(1, 2), .Machine$integer.max + 1)) {
 
       expect_error(fit(ev, seed = bad), "`seed`", fixed = TRUE,
                    class = "horizons_error_input")
