@@ -391,7 +391,7 @@ describe("compute_response_bound()", {
 
 describe("configure() - outcome_range", {
 
-  it("records the non-negative default, the value an older object reads as", {
+  it("records the non-negative default, configure()'s formal, under a key the constructor declares", {
 
     res <- configure_small(make_range_hd())
 
@@ -952,7 +952,7 @@ describe("checkpoint rows and the outcome range", {
 
 describe("check_evaluated_outcome_range()", {
 
-  ## An evaluation's results rows, as stamped before and after #76
+  ## An evaluation's results rows, each with the settings evaluate() stamped
   results_with <- function(stamps) {
     tibble::tibble(config_id = paste0("c", seq_along(stamps)), settings = stamps)
   }
