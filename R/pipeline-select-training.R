@@ -655,8 +655,13 @@ select_training <- function(x, library,
     check_shared_columns(target_vars, reg_vars, restandardize = restandardize,
                          library_form = "registered", library_baseline = isTRUE(reg_grid$baseline))
 
+    ### The record build_ossl_library()'s standardize() writes, whose hull,
+    ### when it fits one, spans the grid
+    reg_range <- c(reg_grid$wn_min, reg_grid$wn_max)
+
     check_same_standardization(list(baseline         = isTRUE(reg_grid$baseline),
-                                    wavelength_range = c(reg_grid$wn_min, reg_grid$wn_max)),
+                                    baseline_range   = if (isTRUE(reg_grid$baseline)) reg_range,
+                                    wavelength_range = reg_range),
                                x$data$standardization,
                                pool_step     = reg_grid$wn_step,
                                target_step   = grid_summary(predictor_wavenumbers(x))$resolution,

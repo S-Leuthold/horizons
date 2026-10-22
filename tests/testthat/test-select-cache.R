@@ -239,6 +239,38 @@ test_that("baseline-corrected targets are refused against a registered library b
 
 })
 
+test_that("a hull-corrected registered library is compared by the range its build fits the hull over, before it is downloaded (#107)", {
+
+  ## A registry entry whose build fits a hull over its grid, 600 to 700 cm-1
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  entry$filters$baseline <- TRUE
+  local_mini_registry(entry)
+  local_mocked_bindings(resolve_source = function(...) stop("the library was resolved"))
+
+  wn  <- seq(700, 600, by = -2)
+  tbl <- withr::with_seed(1, data.frame(sample_id = paste0("T", 1:3),
+                                        matrix(1 + stats::runif(3 * length(wn)), 3,
+                                               dimnames = list(NULL, paste0("wn_", wn))),
+                                        check.names = FALSE))
+  utils::capture.output({
+    x       <- spectra(tbl, id_col = "sample_id")
+    shorter <- standardize(x, resample = 2, trim = c(620, 700), baseline = TRUE)
+  })
+
+  ## Targets hulled over a narrower range are pinned at different ends
+  err <- expect_error(select_training(shorter, "mini", k = 5L), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+  expect_match(msg, "the library's hull over 600 to 700 cm-1 and the targets' over 620 to 700 cm-1",
+               fixed = TRUE)
+
+  ## Targets with no hull are offered the library's range to fit one over
+  err <- expect_error(select_training(x, "mini", k = 5L), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+  expect_match(msg, "The library was baseline-corrected", fixed = TRUE)
+  expect_match(msg, "standardize(x, resample = 2, trim = c(600, 700), baseline = TRUE)", fixed = TRUE)
+
+})
+
 test_that("targets short of the library's range search the overlap, uncached, and warn coverage", {
 
   m <- use_mini()
