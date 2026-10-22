@@ -638,9 +638,11 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
     ts <- make_tune_setup()
 
     ## What tune_bayes() returns when every candidate fails: the starting
-    ## grid's results alone
-    local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) initial,
-                          .package = "tune")
+    ## grid's results alone, which it marks as iteration 0
+    local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) {
+      initial$.iter <- 0L
+      initial
+    }, .package = "tune")
 
     w <- expect_warning(
       result <- tune_warmstart_bayes(
