@@ -450,6 +450,20 @@ describe("fit() - cold start from one configuration (#45)", {
 
     }
 
+    for (bad in list(0, 1.5, "5", NA, c(1, 2))) {
+
+      expect_error(fit(ev, n_best = bad), "`n_best`", fixed = TRUE,
+                   class = "horizons_error_input")
+
+    }
+
+    for (bad in list(1.5, NA, "307", Inf, c(1, 2))) {
+
+      expect_error(fit(ev, seed = bad), "`seed`", fixed = TRUE,
+                   class = "horizons_error_input")
+
+    }
+
   })
 
 })

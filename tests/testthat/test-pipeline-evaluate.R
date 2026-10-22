@@ -213,6 +213,32 @@ describe("evaluate() - gate checks", {
 
   })
 
+  it("refuses a seed, prune or prune_threshold it cannot use, before anything is drawn", {
+
+    local_mocked_bindings(
+      draw_eval_split        = function(...) stop("a split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    obj <- make_eval_object()
+
+    for (bad in list(1.5, NA, "307", Inf, c(1, 2), NULL, .Machine$integer.max + 1)) {
+      expect_error(evaluate(obj, seed = bad), "`seed`", fixed = TRUE,
+                   class = "horizons_error_input")
+    }
+
+    for (bad in list(NA, "yes", c(TRUE, FALSE), NULL)) {
+      expect_error(evaluate(obj, prune = bad), "`prune`", fixed = TRUE,
+                   class = "horizons_error_input")
+    }
+
+    for (bad in list(-1, NA_real_, Inf, "1", c(1, 2), NULL)) {
+      expect_error(evaluate(obj, prune_threshold = bad), "`prune_threshold`", fixed = TRUE,
+                   class = "horizons_error_input")
+    }
+
+  })
+
   it("refuses an axis whose names are not wavenumbers at its door, before anything is drawn (#121)", {
 
     ## Names the door validator cannot read as wavenumbers, so it cannot

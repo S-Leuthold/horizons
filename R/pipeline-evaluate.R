@@ -285,6 +285,12 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
 
   check_rank_metric_arg(metric)
+  check_arg(rlang::check_bool, prune)
+  check_arg(rlang::check_number_decimal, prune_threshold, min = 0, allow_infinite = FALSE)
+
+  ## The seed, as at every verb, is a whole number set.seed() takes
+  ## unchanged.
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
 
   configs <- x$config$configs
 

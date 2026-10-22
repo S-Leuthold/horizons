@@ -217,6 +217,11 @@ N_AD_TRAIN_MIN <- 10L
 ### verb default and the engines' defaults cannot drift independently.
 DEFAULT_ENSEMBLE_SEED <- 307L
 
+### The largest magnitude a verb's seed may have: set.seed() takes a whole
+### number within R's integer range unchanged. A double, as rlang's checkers
+### take their bounds.
+SEED_MAX <- as.double(.Machine$integer.max)
+
 ## Prediction Guardrails --------------------------------------------------------
 
 ### Winsorization margin for the deploy-time response upper bound: predictions

@@ -312,7 +312,7 @@ describe("ensemble() - preflight validation", {
       fit_ensemble_weighted = function(...) stop("fit_ensemble_weighted() was called")
     )
 
-    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307", Inf)
+    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307", Inf, 1.5)
 
     for (s in bad_seeds) {
 

@@ -275,8 +275,13 @@ fit <- function(x,
   ## would fail validation only after every model had been fitted.
   if (!is.null(metric)) check_rank_metric_arg(metric)
 
+  check_arg(rlang::check_number_whole, n_best, min = 1)
   check_arg(rlang::check_bool, compute_uq)
   check_arg(rlang::check_bool, compute_ad)
+
+  ## The seed, as at every verb, is a whole number set.seed() takes
+  ## unchanged.
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
 
   ## The object as it arrives (#234): on the evaluate() path its evaluation
   ## record, and through it the base contract; on a cold start the base

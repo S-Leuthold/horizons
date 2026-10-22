@@ -158,9 +158,10 @@ ensemble <- function(x,
   ## Both are recorded on the ensemble, which the validator checks only after
   ## the meta-learner is built, and fit_ensemble_uq() rebuilds the fold
   ## models from them; checked here so a bad value is refused before any
-  ## engine runs.
+  ## engine runs. The seed, as at every verb, is a whole number set.seed()
+  ## takes unchanged.
   check_arg(rlang::check_bool, optimize)
-  check_arg(rlang::check_number_decimal, seed, allow_infinite = FALSE)
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
   check_arg(rlang::check_bool, compute_uq)
 
   ## The fit contract, and through it the evaluation and base contracts at
