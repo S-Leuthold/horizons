@@ -316,17 +316,16 @@ draw_stratified <- function(outcome, stratified, unstratified) {
 #' Record a stratified draw that did not stratify as asked
 #'
 #' @description
-#' A draw that fell back to an unstratified one is a substitution: what ran
-#' is not what was asked. That is so when the stratified call failed and was
-#' retried without strata, and when rsample had too little data to stratify
-#' and drew without strata itself, saying so in a warning. Each such draw is
-#' recorded once, with why, and the verb raises one
-#' `horizons_warning_substitution` at its end. A draw rsample stratified on
-#' fewer bins than asked, with a warning, is still stratified, so what ran
-#' is what was asked: it is a note, recorded and shown in the tree, not
-#' raised. A draw rsample left unstratified without a warning (a few-valued
-#' outcome pooled into one stratum) is not recorded here; the tree says it
-#' is unstratified.
+#' A draw that came out unstratified is a substitution: what ran is not what
+#' was asked. That is so when the stratified call failed and was retried
+#' without strata, and when rsample drew without strata itself, for whatever
+#' reason (too little data, tied quantiles leaving one bin, a few-valued
+#' outcome pooled into one stratum), with a warning or without. Each such
+#' draw is recorded once, the failure's cause or rsample's words when it gave
+#' any, and the verb raises one `horizons_warning_substitution` at its end. A
+#' draw rsample stratified on fewer bins than asked, with a warning, is still
+#' stratified, so what ran is what was asked: it is a note, recorded and
+#' shown in the tree, not raised.
 #'
 #' @param collector The verb's collector, from `log_open()`.
 #' @param drawn A result of [draw_stratified()].
@@ -349,25 +348,23 @@ log_strata_fallback <- function(collector, drawn, what) {
 
   }
 
-  reasons <- drawn$strata_warnings
-
-  if (length(reasons) == 0) return(invisible(NULL))
-
   ### rsample's words, substituted rather than inlined, so braces stay text
+  reasons <- drawn$strata_warnings
   bullets <- stats::setNames(sprintf("{reasons[%d]}", seq_along(reasons)),
                              rep("x", length(reasons)))
 
-  if (isTRUE(drawn$stratified)) {
+  ## What rsample did, not why: its warnings, when it gave any, say why
+  if (!isTRUE(drawn$stratified)) {
 
-    log_note(collector, c(
-      "The stratified draw of the {what} had too little data for {STRATA_BREAKS} strata, so rsample drew it on fewer.",
+    log_warning(collector, "substitution", c(
+      "The stratified draw of the {what} found one stratum in the outcome, so it was drawn without strata.",
       bullets
     ))
 
-  } else {
+  } else if (length(reasons) > 0) {
 
-    log_warning(collector, "substitution", c(
-      "The stratified draw of the {what} had too little data to stratify, so it was drawn without strata.",
+    log_note(collector, c(
+      "The stratified draw of the {what} had too little data for {STRATA_BREAKS} strata, so rsample drew it on fewer.",
       bullets
     ))
 
@@ -384,8 +381,7 @@ log_strata_fallback <- function(collector, drawn, what) {
 #' @param what Character(1). The draw, as the tree names it, e.g. `"split"`
 #'   or `"CV"`.
 #' @return Character(1), or `NULL` when the draw stratified as asked or
-#'   rsample left it unstratified without a warning (its line says
-#'   "unstratified").
+#'   rsample left it unstratified (its line says "unstratified").
 #' @keywords internal
 #' @noRd
 

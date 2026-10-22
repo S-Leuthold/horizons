@@ -1212,9 +1212,9 @@ describe("fit() - what it reports at its end", {
     expect_true(all(vapply(got$warnings, inherits, logical(1), "horizons_warning")))
     expect_length(w, 1L)
     msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
-    expect_match(msg, "The stratified draw of the train/test split had too little data to stratify", fixed = TRUE)
-    expect_match(msg, "The stratified draw of the calibration split had too little data to stratify", fixed = TRUE)
-    expect_match(msg, "The stratified draw of the cross-validation folds had too little data to stratify", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the train/test split found one stratum in the outcome", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the calibration split found one stratum in the outcome", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds found one stratum in the outcome", fixed = TRUE)
     expect_match(msg, "Too little data to stratify", fixed = TRUE)
 
     log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "substitution", ]

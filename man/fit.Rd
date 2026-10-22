@@ -146,7 +146,8 @@ per-member results travel on the condition as \code{results}, and
 
 \code{fit()} warns once per kind at its end, after writing each warning to the
 object's \code{log}: a stratified draw (the calibration split, the folds, a
-cold start's split) that fell back to an unstratified one
+cold start's split) that came out unstratified, because the stratified
+draw failed or rsample formed one stratum from the outcome
 (\code{horizons_warning_substitution}); a smallest assessment fold under
 \code{SMALL_FOLD_ROWS} rows, or every member below \code{evaluate()}'s prune
 threshold (\code{horizons_warning_quality}); UQ and AD switched off because the

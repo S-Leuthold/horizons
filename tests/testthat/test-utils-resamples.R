@@ -572,10 +572,74 @@ describe("log_strata_fallback()", {
 
     expect_identical(rows$type, "warning")
     expect_identical(rows$topic, "substitution")
-    expect_match(rows$message, "The stratified draw of the train/test split had too little data to stratify, so it was drawn without strata.",
+    expect_match(rows$message, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata.",
                  fixed = TRUE)
     expect_match(rows$message, "first {word} of rsample's", fixed = TRUE)
     expect_match(rows$message, "Too little data to stratify.", fixed = TRUE)
+
+  })
+
+  ## The real draws, as the verbs make them: rsample leaves each unstratified,
+  ## two of them without a word
+  drawn_on <- function(y) {
+    df <- data.frame(y = y)
+    draw_stratified(
+      outcome      = y,
+      stratified   = function() rsample::vfold_cv(df, v = 5, strata = "y",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(df, v = 5)
+    )
+  }
+
+  it("records a draw rsample left unstratified without a warning as the substitution: a zero-inflated outcome", {
+
+    ## 85 % zeros: every quartile but the top is 0, so the bins collapse to one
+    set.seed(1)
+    drawn <- drawn_on(c(rep(0, 85), runif(15)))
+
+    expect_false(drawn$stratified)
+    expect_false(drawn$strata_failed)
+    expect_identical(drawn$strata_warnings, character(0))
+
+    rows <- logged(drawn)
+
+    expect_identical(rows$type, "warning")
+    expect_identical(rows$topic, "substitution")
+    expect_identical(rows$message, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata.")
+
+  })
+
+  it("records a draw rsample left unstratified without a warning as the substitution: a few-valued outcome pooled into one stratum", {
+
+    ## 2 is under 10 % of the 30 rows, so it is pooled into 1
+    drawn <- drawn_on(c(rep(1, 28), rep(2, 2)))
+
+    expect_false(drawn$stratified)
+    expect_identical(drawn$strata_warnings, character(0))
+
+    rows <- logged(drawn)
+
+    expect_identical(rows$topic, "substitution")
+    expect_match(rows$message, "found one stratum in the outcome", fixed = TRUE)
+
+  })
+
+  it("claims no shortage of data for a draw tied quantiles left unstratified, and gives rsample's words", {
+
+    ## 60 rows ask rsample for fewer bins, and 70 % zeros tie them into one:
+    ## its warning is about the bins, not about too little data to stratify
+    set.seed(1)
+    drawn <- drawn_on(c(rep(0, 42), runif(18)))
+
+    expect_false(drawn$stratified)
+    expect_length(drawn$strata_warnings, 1L)
+
+    rows <- logged(drawn)
+
+    expect_identical(rows$topic, "substitution")
+    expect_match(rows$message, "found one stratum in the outcome, so it was drawn without strata.", fixed = TRUE)
+    expect_match(rows$message, "Stratification will use 3 breaks instead", fixed = TRUE)
+    expect_no_match(rows$message, "too little data", fixed = TRUE)
 
   })
 

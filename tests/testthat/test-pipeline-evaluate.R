@@ -1264,9 +1264,9 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
     expect_length(sub, 1L)
 
     msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
-    expect_match(msg, "The stratified draw of the train/test split had too little data to stratify, so it was drawn without strata",
+    expect_match(msg, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata",
                  fixed = TRUE)
-    expect_match(msg, "The stratified draw of the cross-validation folds had too little data to stratify", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds found one stratum in the outcome", fixed = TRUE)
     expect_match(msg, "Too little data to stratify", fixed = TRUE)
 
     log <- got$value$log[got$value$log$type == "warning", ]
@@ -1298,6 +1298,37 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
     expect_match(notes$message[1], "Stratification will use 3 breaks instead", fixed = TRUE)
     expect_match(notes$message[2], "The stratified draw of the cross-validation folds had too little data for 4 strata",
                  fixed = TRUE)
+
+  })
+
+  it("warns substitution for the draws a zero-inflated outcome leaves unstratified, though rsample says nothing", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    ## 100 rows, 85 of them 0: the quartiles tie, so each draw forms one
+    ## stratum, and rsample draws both without strata, silently
+    obj <- make_eval_object(n = 100, n_configs = 1)
+    obj$data$analysis$SOC <- c(rep(0, 85), seq(0.5, 7.5, by = 0.5))
+
+    got <- collect_warnings(evaluate(obj, seed = 42L))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    expect_length(sub, 1L)
+
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata.",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds found one stratum in the outcome", fixed = TRUE)
+
+    log <- got$value$log
+    expect_identical(log$n[log$topic %in% "substitution"], 2L)
+    expect_identical(sum(got$value$log$type == "note" & grepl("strata", got$value$log$message)), 0L)
 
   })
 

@@ -66,7 +66,8 @@
 #' @section What fit() reports:
 #' `fit()` warns once per kind at its end, after writing each warning to the
 #' object's `log`: a stratified draw (the calibration split, the folds, a
-#' cold start's split) that fell back to an unstratified one
+#' cold start's split) that came out unstratified, because the stratified
+#' draw failed or rsample formed one stratum from the outcome
 #' (`horizons_warning_substitution`); a smallest assessment fold under
 #' `SMALL_FOLD_ROWS` rows, or every member below `evaluate()`'s prune
 #' threshold (`horizons_warning_quality`); UQ and AD switched off because the

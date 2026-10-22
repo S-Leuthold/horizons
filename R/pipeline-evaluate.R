@@ -493,9 +493,9 @@ evaluate <- function(x,
   )
   cv_fold_obj <- cv_drawn$draw
 
-  ## A stratified draw that failed, or that rsample had too little data to
-  ## stratify, ran unstratified: what ran is not what was asked, so each draw
-  ## that did says so once. One rsample stratified on fewer bins is a note.
+  ## A stratified draw that came out unstratified, because it failed or
+  ## rsample formed one stratum, is not what was asked, so each draw that did
+  ## says so once. One rsample stratified on fewer bins is a note.
   log_strata_fallback(collector, drawn, "train/test split")
   log_strata_fallback(collector, cv_drawn, "cross-validation folds")
 
