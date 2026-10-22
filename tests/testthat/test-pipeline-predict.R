@@ -453,6 +453,19 @@ describe("predict.horizons_fit() - input validation", {
 
   })
 
+  it("refuses at its door a fit whose transformation it does not know, serving nothing (#234)", {
+
+    ## An object edited out of shape: an unknown transformation once reached
+    ## the back-transform, which served the predictions untransformed
+    broken <- fitted_fixture
+    broken$config$configs$transformation <- "bogus"
+
+    err <- expect_error(predict(broken, make_new_spectra(), interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("unknown transformation value \"bogus\"", err$findings, fixed = TRUE)))
+
+  })
+
   it("refuses an abstain_ood that is not TRUE or FALSE", {
 
     new_df <- make_new_spectra()
