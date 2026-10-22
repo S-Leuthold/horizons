@@ -141,23 +141,6 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
   })
 
-  it("bakes and prints a step trained before the record existed", {
-
-    skip_if_not_installed("Boruta")
-
-    d       <- boruta_signal_data()
-    prepped <- boruta_prepped()
-    baked   <- recipes::bake(prepped, new_data = d)
-
-    old <- prepped
-    old$steps[[1]]$boruta <- NULL
-
-    expect_false("boruta" %in% names(old$steps[[1]]))
-    expect_identical(recipes::bake(old, new_data = d), baked)
-    expect_output(print(old$steps[[1]]), "wavenumbers retained after Boruta")
-
-  })
-
 })
 
 ## =========================================================================

@@ -746,9 +746,6 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #' @param x A `horizons_ensemble` object (output of [ensemble()]).
 #' @param level Numeric in (0, 1). Target two-sided coverage. Default
 #'   `DEFAULT_UQ_LEVEL` (0.90).
-#' @param seed Integer or NULL. Base seed for the calibration partition
-#'   (`+ 1000` is applied internally). `NULL` (default) resolves to the seed
-#'   recorded on the ensemble contract.
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
@@ -763,7 +760,6 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #' @keywords internal
 fit_ensemble_uq <- function(x,
                             level          = DEFAULT_UQ_LEVEL,
-                            seed           = NULL,
                             min_calib_rows = N_CALIB_MIN) {
 
   members <- x$ensemble$weights$member
@@ -772,8 +768,8 @@ fit_ensemble_uq <- function(x,
 
   trimmed <- unit_step("cv_plus_trimmed", ensemble_trimmed_rows(x, members))
 
-  base_seed      <- seed %||% x$ensemble$seed %||% DEFAULT_ENSEMBLE_SEED
-  conformal_seed <- base_seed + 1000L
+  ## The seed ensemble() recorded, which the ensemble validator requires
+  conformal_seed <- x$ensemble$seed + 1000L
 
   ## The build-time flag, so a weighted ensemble's fold weights are
   ## re-derived by the rule the deployed weights came from. For

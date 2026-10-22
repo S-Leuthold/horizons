@@ -614,11 +614,6 @@ configure <- function(x,
 
   x$config$outcome_range <- as.numeric(unname(outcome_range))
 
-  ## Objects configured before #62 carry `config$defaults`, a record of
-  ## settings the recipe never ran. Re-configuring one drops it.
-
-  x$config$defaults <- NULL
-
   ## ---------------------------------------------------------------------------
   ## Step 5b: Re-validate
   ## ---------------------------------------------------------------------------

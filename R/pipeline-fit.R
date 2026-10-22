@@ -1797,8 +1797,8 @@ calib_split_seed <- function(seed) {
 #' member's intervals and an ensemble's.
 #'
 #' @param uq A member's UQ bundle or an ensemble's CV+ bundle, carrying
-#'   `test_coverage`, `test_mean_width`, `n_test` and `level_default`.
-#'   Bundles made before these fields existed read as unmeasured.
+#'   `test_coverage`, `test_mean_width`, `n_test` and `level_default`. A
+#'   bundle without them (built by hand) reads as unmeasured.
 #' @return Character(1).
 #' @keywords internal
 #' @noRd

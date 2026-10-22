@@ -130,8 +130,8 @@ step_select_cars <- function(recipe,
 ## Follows recipes' own contract: `terms` holds the selector quosures and
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
-## `cars` is prep's record of what CARS did (see prep()); bake never reads it,
-## and a step trained before it existed has none.
+## `cars` is prep's record of what CARS did (see prep()); bake never reads
+## it.
 
 #' @keywords internal
 #' @noRd

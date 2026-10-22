@@ -115,7 +115,7 @@ step_select_boruta <- function(recipe,
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
 ## `boruta` is prep's record of what Boruta did (see prep()); bake never
-## reads it, and a step trained before it existed has none.
+## reads it.
 
 #' @keywords internal
 #' @noRd
@@ -404,26 +404,21 @@ print.step_select_boruta <- function(x,
 
     cat(glue::glue("\u2022 {length(x$selected_vars)} wavenumbers retained after Boruta"), "\n", sep = "")
 
-    ## A step trained before the record existed has none to show.
     b <- x$boruta
 
-    if (!is.null(b)) {
+    print_constant_bands(b)
 
-      print_constant_bands(b)
+    if (isTRUE(b$skipped)) {
+      print_selection_skipped(x)
+      return(invisible(x))
+    }
 
-      if (isTRUE(b$skipped)) {
-        print_selection_skipped(x)
-        return(invisible(x))
-      }
+    cat(glue::glue("\u2022 Boruta: {b$n_confirmed} confirmed, {b$n_tentative} tentative, ",
+                   "{b$n_rejected} rejected of {b$n_attributes} cluster representatives ",
+                   "in {b$runs} runs"), "\n", sep = "")
 
-      cat(glue::glue("\u2022 Boruta: {b$n_confirmed} confirmed, {b$n_tentative} tentative, ",
-                     "{b$n_rejected} rejected of {b$n_attributes} cluster representatives ",
-                     "in {b$runs} runs"), "\n", sep = "")
-
-      if (isTRUE(b$retained_all)) {
-        cat("\u2022 Nothing selected, so every variance-filtered wavenumber is retained\n")
-      }
-
+    if (isTRUE(b$retained_all)) {
+      cat("\u2022 Nothing selected, so every variance-filtered wavenumber is retained\n")
     }
 
   } else {

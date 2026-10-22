@@ -886,10 +886,9 @@ resolve_config_ids <- function(object, config, call = rlang::caller_env()) {
   if (identical(config, "best")) {
 
     ## fit() recorded the top config (by the metric it actually ranked on) in
-    ## best-first order; read it rather than re-deriving. Fall back to the first
-    ## fitted workflow for objects written before this field existed.
-    best <- object$models$best_config %||% available[1]
-    return(best)
+    ## best-first order; read it rather than re-deriving. The fit validator
+    ## requires it among the fitted workflows.
+    return(object$models$best_config)
 
   }
 

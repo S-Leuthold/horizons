@@ -558,8 +558,7 @@ check_step_new_data <- function(object, new_data, call = rlang::caller_env()) {
 #' The record a trained selection step keeps
 #'
 #' @param step A trained `step_select_*` step.
-#' @return Its record (a list), or `NULL` for another step, or a step
-#'   trained before records existed.
+#' @return Its record (a list), or `NULL` for another step.
 #' @keywords internal
 #' @noRd
 selection_record <- function(step) {
@@ -675,8 +674,7 @@ print_selection_skipped <- function(step) {
 
 #' The print() line for the near-constant bands a step dropped
 #'
-#' @param record A trained step's record (`cars` or `boruta`), or `NULL` for
-#'   a step trained before the record existed.
+#' @param record A trained step's record (`cars` or `boruta`).
 #' @return `NULL`, invisibly; prints one line when bands were dropped.
 #' @keywords internal
 #' @noRd

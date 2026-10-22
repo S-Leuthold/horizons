@@ -105,7 +105,7 @@ step_select_correlation <- function(recipe,
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
 ## `correlation` is prep's record of what it did (see prep()); bake never
-## reads it, and a step trained before it existed has none.
+## reads it.
 
 #' @keywords internal
 #' @noRd

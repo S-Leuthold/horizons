@@ -633,16 +633,9 @@ describe("configure() storage", {
 
   })
 
-  test_that("re-configuring an object from an earlier version drops its config$defaults and covariates column", {
+  test_that("re-configuring an object from an earlier version drops its covariates column", {
 
     hd <- make_single_response_hd()
-    hd$config$defaults <- list(
-      preprocessing_params = list(sg_window = 11L, sg_order = 2L),
-      feature_params       = list(pca_threshold = 0.99, correlation_n = 200L),
-      transform_params     = list()
-    )
-
-    expect_null(quiet_configure(hd)$config$defaults)
 
     ## configure() writes a fresh grid, so a covariates column an earlier
     ## version wrote does not survive it.

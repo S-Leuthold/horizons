@@ -214,8 +214,7 @@ N_AD_TRAIN_MIN <- 10L
 
 ### Default seed for ensemble() — the meta-learner's tuning/OOF folds. Ensemble
 ### UQ draws its calibration partition at this seed + 1000. Centralized so the
-### verb default, the weighted-engine default, and fit_ensemble_uq()'s legacy
-### fallback cannot drift independently.
+### verb default and the engines' defaults cannot drift independently.
 DEFAULT_ENSEMBLE_SEED <- 307L
 
 ## Prediction Guardrails --------------------------------------------------------
