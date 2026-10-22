@@ -765,7 +765,7 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #'
 #' @return `x` with `$ensemble$uq` populated, and the tree's line for the CV+
 #'   folds as the attribute `"strata_line"`, which [ensemble()] reads and
-#'   drops ([strata_tree_line()], `NULL` when they stratified as asked).
+#'   drops (`strata_tree_line()`, `NULL` when they stratified as asked).
 #'   [ensemble()] then adds the
 #'   measured coverage on the test rows, `test_coverage`, `test_mean_width`
 #'   and `n_test` (`ensemble_test_coverage()`). The bundle carries: `method`

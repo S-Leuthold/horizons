@@ -421,7 +421,7 @@ ensemble <- function(x,
 #' @param rank_metric Character. The metric improvement is measured on.
 #' @param strata_lines List with `meta` and `cv_plus`: the tree's line for
 #'   the meta-learner's folds and for the CV+ folds when either did not
-#'   stratify as asked ([strata_tree_line()]), or `NULL`.
+#'   stratify as asked (`strata_tree_line()`), or `NULL`.
 #' @return Invisibly NULL; called for its console output.
 #' @keywords internal
 render_ensemble_summary <- function(contract, rank_metric, strata_lines = list()) {

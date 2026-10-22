@@ -13,7 +13,7 @@ render_ensemble_summary(contract, rank_metric, strata_lines = list())
 
 \item{strata_lines}{List with \code{meta} and \code{cv_plus}: the tree's line for
 the meta-learner's folds and for the CV+ folds when either did not
-stratify as asked (\code{\link[=strata_tree_line]{strata_tree_line()}}), or \code{NULL}.}
+stratify as asked (\code{strata_tree_line()}), or \code{NULL}.}
 }
 \value{
 Invisibly NULL; called for its console output.
