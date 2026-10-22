@@ -54,8 +54,11 @@
 #'   `output_dir` per outcome. A write to `output_dir` that fails (the
 #'   directory, the manifest or a checkpoint) stops the run with
 #'   `horizons_error_systemic`, naming the directory, the rows finished so
-#'   far as its `results`; on the configs axis it stops once every
-#'   configuration has returned. The ranking `metric` is not checked, since
+#'   far as its `results`. On the configs axis a checkpoint a worker could
+#'   not write is known only once every configuration has run, so the
+#'   evaluation is returned, with one `horizons_warning_skipped` naming the
+#'   directory and the configurations a resumed run evaluates again. The
+#'   ranking `metric` is not checked, since
 #'   every row carries all six cross-validated metrics. A row scored under an
 #'   earlier scoring schema, or recording less of the training data and
 #'   settings than this run does, was written by an earlier version: it is
@@ -988,8 +991,9 @@ evaluate <- function(x,
     output_dir)
 
     ## A worker whose checkpoint could not be written said so on its row
-    ## (evaluate_config_worker()); with every row back, the run stops on the
-    ## first, carrying them all
+    ## (evaluate_config_worker()). Every configuration has run by now, so
+    ## the evaluation is returned, and one warning names what a resumed run
+    ## would evaluate again
     not_saved <- lapply(parallel_results, attr, "checkpoint_failed")
 
     parallel_results <- lapply(parallel_results, function(row) {
@@ -997,18 +1001,19 @@ evaluate <- function(x,
       row
     })
 
+    unsaved <- !vapply(not_saved, is.null, logical(1))
+
+    log_unsaved_checkpoints(collector,
+                            ids            = vapply(parallel_results[unsaved], `[[`, character(1), "config_id"),
+                            reasons        = unlist(not_saved[unsaved]),
+                            checkpoint_dir = checkpoint_dir,
+                            output_dir     = output_dir)
+
     ## Combine: checkpoint results + parallel results
     results_list <- c(
       lapply(completed_ids, function(id) checkpoint_results[[id]]),
       parallel_results
     )
-
-    first_unsaved <- Position(Negate(is.null), not_saved)
-
-    if (!is.na(first_unsaved)) {
-      abort_output_write(checkpoint_path(checkpoint_dir, parallel_results[[first_unsaved]]$config_id),
-                         not_saved[[first_unsaved]], results_so_far(results_list))
-    }
 
   }
 
@@ -1645,6 +1650,46 @@ abort_output_write <- function(path, reason, results, call = rlang::caller_env()
     "i" = "The rows finished so far are in this error's {.field results} field.",
     "i" = "Make {.path {dir}} writable, or set another {.code control_horizons(output_dir = )}."
   ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
+
+}
+
+#' Record the checkpoints the configs axis's workers could not write
+#'
+#' @description
+#' On the configs axis a worker that cannot write its checkpoint says so on
+#' the row it returns, and `furrr::future_map()` returns only once every
+#' configuration has run. With nothing left to save by then, the evaluation
+#' is returned, and the checkpoints asked for that were not written are one
+#' `skipped` warning: a run resumed from `output_dir` evaluates those
+#' configurations again.
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param ids Character. The configurations whose checkpoint was not written.
+#' @param reasons Character, one per id: why, from [write_output_file()].
+#' @param checkpoint_dir The `checkpoints/` directory.
+#' @param output_dir The run's `output_dir`.
+#' @return `NULL`, invisibly; adds one warning to the collector, its ids the
+#'   configurations, when there are any.
+#' @keywords internal
+#' @noRd
+log_unsaved_checkpoints <- function(collector, ids, reasons, checkpoint_dir, output_dir) {
+
+  n_ids <- length(ids)
+
+  if (n_ids == 0) return(invisible(NULL))
+
+  ### The first one's cause, as a stop on the sequential path gives it
+  name   <- basename(checkpoint_path(checkpoint_dir, ids[1]))
+  reason <- reasons[1]
+
+  log_warning(collector, "skipped", c(
+    "{n_ids} configuration{?s} {?was/were} evaluated, but {?its/their} checkpoint{?s} could not be written to {.path {checkpoint_dir}}: {.val {ids}}.",
+    "x" = "{name}: {reason}",
+    "i" = "The evaluation is returned, but {cli::qty(n_ids)}{?that configuration has/those configurations have} no checkpoint, so a run resumed from {.path {output_dir}} evaluates {cli::qty(n_ids)}{?it/them} again.",
+    "i" = "Make {.path {checkpoint_dir}} writable before resuming."
+  ), ids = ids)
+
+  invisible(NULL)
 
 }
 
@@ -3300,7 +3345,7 @@ evaluate_config_worker <- function(config_i, shared) {
   result_row <- stamp_eval_settings(result_row, shared$settings)
 
   ## A checkpoint that cannot be written is said on the row, for the parent
-  ## to stop on once every worker has returned: an error here would leave
+  ## to report once every worker has returned: an error here would leave
   ## furrr with no row from any of them, and a worker cannot stop the others.
   if (!is.null(shared$checkpoint_dir)) {
 

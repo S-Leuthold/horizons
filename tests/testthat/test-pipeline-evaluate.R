@@ -2525,6 +2525,31 @@ describe("evaluate() - a failed write to output_dir", {
 
   })
 
+  ## The configs axis returns the evaluation instead, since every
+  ## configuration has run by the time it knows (test-evaluate-parallel.R)
+  it("records the checkpoints the configs axis's workers could not write as one skipped warning, naming each configuration", {
+
+    collector <- log_open("evaluate")
+    log_unsaved_checkpoints(collector, c("cfg_002", "cfg_003"),
+                            c("cannot open {the} file", "another reason"),
+                            checkpoint_dir = "/run/checkpoints", output_dir = "/run")
+    rows <- log_close(collector)
+
+    expect_identical(rows$type, "warning")
+    expect_identical(rows$topic, "skipped")
+    expect_identical(rows$ids[[1]], c("cfg_002", "cfg_003"))
+    expect_match(rows$message, "2 configurations were evaluated, but their checkpoints could not be written to '/run/checkpoints'",
+                 fixed = TRUE)
+    expect_match(rows$message, "cfg_002.rds: cannot open {the} file", fixed = TRUE)
+    expect_match(rows$message, "a run resumed from '/run' evaluates them again", fixed = TRUE)
+
+    ## Nothing when every checkpoint was written
+    collector <- log_open("evaluate")
+    log_unsaved_checkpoints(collector, character(0), NULL, "/run/checkpoints", "/run")
+    expect_identical(nrow(log_close(collector)), 0L)
+
+  })
+
 })
 
 ## =========================================================================

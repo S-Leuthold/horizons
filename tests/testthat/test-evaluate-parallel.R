@@ -210,46 +210,6 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("stops on the configs axis once every configuration has returned, when a worker could not write its checkpoint, with every row", {
-
-    ## The dispatch runs each worker body in this session, so this runs
-    ## under load_all() too
-    local_mocked_bindings(
-      running_under_load_all  = function() FALSE,
-      worker_horizons_version = function() as.character(utils::packageVersion("horizons")),
-      check_parallel_backend  = function(...) TRUE,
-      registered_workers      = function() 2L,
-      registered_plan_label   = function() "multisession",
-      evaluate_single_config  = function(config_row, ...) {
-        create_failed_result(config_row$config_id, "mocked")
-      }
-    )
-    local_mocked_bindings(future_map = function(.x, .f, ..., .options = NULL) lapply(.x, .f, ...),
-                          .package = "furrr")
-
-    tmpdir <- withr::local_tempdir()
-    store  <- file.path(tmpdir, "checkpoints")
-    dir.create(store)
-    dir.create(file.path(store, "cfg_002.rds"))   # the second worker's rename is refused
-
-    err <- expect_error(
-      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
-                                control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
-                                                           output_dir = tmpdir))),
-      class = "horizons_error_systemic"
-    )
-
-    expect_identical(class(err)[1], "horizons_error_systemic")
-    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err)))
-    expect_match(msg, "`evaluate()` could not write to", fixed = TRUE)
-    expect_match(msg, "cfg_002.rds: ", fixed = TRUE)
-    expect_setequal(err$results$config_id, c("cfg_001", "cfg_002", "cfg_003"))
-    expect_null(attr(err$results, "checkpoint_failed"))
-    expect_true(file.exists(file.path(store, "cfg_001.rds")) && !dir.exists(file.path(store, "cfg_001.rds")))
-    expect_false(any(grepl("\\.tmp$", list.files(store, all.files = TRUE))))
-
-  })
-
   it("refuses a parallel run under devtools::load_all(), on either axis, before anything is drawn", {
 
     ## The seam reports load_all(), so this runs on an installed build too;
@@ -553,6 +513,77 @@ describe("evaluate() - the parallel axis's setup", {
     manifest <- readRDS(file.path(dir, "eval_manifest.rds"))
     expect_identical(manifest[c("allow_par", "axis", "plan", "workers")],
                      list(allow_par = TRUE, axis = "sequential", plan = "sequential", workers = 1L))
+
+  })
+
+})
+
+## A worker cannot stop the others, so a checkpoint it could not write is
+## found only once every configuration has run: the evaluation is returned,
+## with one warning. The sequential path stops at the first failed write
+## (test-pipeline-evaluate.R).
+
+describe("evaluate() - a checkpoint a configs-axis worker could not write", {
+
+  it("returns the evaluation on the configs axis when a worker could not write its checkpoint, with one skipped warning naming it", {
+
+    ## A real result row to return, read before anything is mocked
+    ## (helper-memo.R)
+    template <- allow_par_run()$result$evaluation$results[1, ]
+
+    ## The dispatch runs each worker body in this session, so this runs
+    ## under load_all() too
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      worker_horizons_version = function() as.character(utils::packageVersion("horizons")),
+      check_parallel_backend  = function(...) TRUE,
+      registered_workers      = function() 2L,
+      registered_plan_label   = function() "multisession",
+      evaluate_single_config  = function(config_row, ...) {
+        row <- template
+        row$config_id <- config_row$config_id
+        row
+      }
+    )
+    local_mocked_bindings(future_map = function(.x, .f, ..., .options = NULL) lapply(.x, .f, ...),
+                          .package = "furrr")
+
+    tmpdir <- withr::local_tempdir()
+    store  <- file.path(tmpdir, "checkpoints")
+    dir.create(store)
+    dir.create(file.path(store, "cfg_002.rds"))   # the second worker's rename is refused
+
+    got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                          output_dir = tmpdir))
+    )
+
+    ## Every configuration's row is returned, and none carries the reason
+    res <- got$value$evaluation$results
+    expect_setequal(res$config_id, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_identical(res$status, rep("success", 3L))
+    expect_null(attr(res, "checkpoint_failed"))
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+
+    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(skipped[[1]])))
+    expect_match(msg, "1 configuration was evaluated, but its checkpoint could not be written to", fixed = TRUE)
+    expect_match(msg, store, fixed = TRUE)
+    expect_match(msg, "cfg_002.rds: ", fixed = TRUE)
+    expect_match(msg, "a run resumed from", fixed = TRUE)
+
+    ## Recorded on the log first, naming the configuration
+    row <- got$value$log[got$value$log$topic %in% "skipped" & grepl("checkpoint", got$value$log$message), ]
+    expect_identical(nrow(row), 1L)
+    expect_identical(row$ids[[1]], "cfg_002")
+    expect_identical(skipped[[1]]$log, row)
+
+    ## The others' checkpoints were written, and no temporary file is left
+    expect_true(file.exists(file.path(store, "cfg_001.rds")) && !dir.exists(file.path(store, "cfg_001.rds")))
+    expect_true(file.exists(file.path(store, "cfg_003.rds")))
+    expect_false(any(grepl("\\.tmp$", list.files(store, all.files = TRUE))))
 
   })
 
