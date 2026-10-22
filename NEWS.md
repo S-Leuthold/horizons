@@ -111,6 +111,11 @@
 * After a response trim, an ensemble's CV+ intervals are calibrated on the trimmed training rows too, predicted by members that never trained on them, so coverage over new data as a whole is at the level, as it is for a fit's, and `predict()` no longer warns about the fences (#103). The coverage is marginal: a sample whose outcome lies far outside the fences is rarely inside its interval. `ensemble$uq$calib` gains `sample_id`.
 * `ccc_vec(na_rm = FALSE)` returns `NA` on a missing value, as `rpd_vec()` and `rrmse_vec()` do (#176).
 * Measured coverage on the held-out test rows is reported beside the nominal level wherever intervals are shown: `print()` and `summary()` of a fit, and `ensemble()`'s summary, `print()` and `summary()` of an ensemble, which now measures its CV+ coverage (`ensemble$uq$test_coverage`, `test_mean_width`, `n_test`).
+* A configured object without its recipe settings, outcome range or full tuning budget, or with a one-point grid while a Bayesian search runs, is refused at every verb's door with a remedy. So is an evaluated object without its configuration grid, an evaluation whose results lack the prune reading or, once screened, the settings each row was scored under, and a standardization record that has a convex-hull baseline but no hull range. Objects made before 0.10.0 lacked these fields, and they are no longer read through defaults (#212).
+* A custom recipe step built before 0.10.0, whose selectors were stored in `columns`, is no longer re-prepped; rebuild the recipe (#212).
+* `predict()` bins applicability-domain distances when calibration thresholds tie (duplicate calibration spectra), rather than dropping the applicability domain for the whole batch (#240).
+* `evaluate()` checks `seed`, `prune` and `prune_threshold` at its door, and `fit()` checks `n_best` and `seed`. `seed` must be a whole number in every verb, so `ensemble()` now refuses a fractional seed it used to truncate.
+* `step_select_correlation()` drops near-constant bands before scoring, as `step_select_cars()` and `step_select_boruta()` do, rather than passing base R's warning through. Its record counts them.
 
 # horizons 0.11.0
 
