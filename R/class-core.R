@@ -911,7 +911,8 @@ ad_bundle_ok <- function(bundle) {
 #' What every verb after `configure()` reads from `config` and `validation`,
 #' checked once at the door instead of where each value is used: a usable
 #' outcome range, a tuning record whose four budgets are whole numbers of at
-#' least `configure()`'s minimums, recipe settings `configure()` would accept,
+#' least `configure()`'s minimums, with a grid of at least two points while
+#' either Bayesian search runs, recipe settings `configure()` would accept,
 #' a configuration grid with unique ids whose models, transformations,
 #' preprocessing and feature selection are all known, one outcome, and a
 #' response-trim request that is for that outcome and has a usable threshold.
@@ -985,20 +986,34 @@ config_findings <- function(x) {
   ### either search may be off
   tuning_minimums <- c(cv_folds = 2, grid_size = 1, bayesian_iter = 0,
                        final_bayesian_iter = 0)
+  tuning          <- x$config$tuning
+  tuning_ok       <- TRUE
 
   for (field in names(tuning_minimums)) {
 
-    value   <- x$config$tuning[[field]]
+    value   <- tuning[[field]]
     minimum <- tuning_minimums[[field]]
 
     if (!(is.numeric(value) && length(value) == 1 && is.finite(value) &&
           value >= minimum && value == round(value))) {
 
-      findings <- c(findings, cli::format_inline(
+      tuning_ok <- FALSE
+      findings  <- c(findings, cli::format_inline(
         "{.field config$tuning${field}} must be a whole number of at least {minimum}, not {.code {deparse1(value)}}"
       ))
 
     }
+
+  }
+
+  ### And configure()'s rule on the three together: both Bayesian searches
+  ### start from the grid, and tune_bayes() needs two of its points (#209)
+  if (tuning_ok && tuning$grid_size < 2 &&
+      (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
+    ))
 
   }
 

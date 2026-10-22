@@ -2462,10 +2462,13 @@ describe("evaluate() - the configurations' warnings and failures on the log", {
 
   it("names a configuration whose Bayesian search failed in one substitution warning (#209)", {
 
-    ## A grid of one gives tune_bayes() a single initial point, so the search
-    ## fails; configure() refuses this, the object here is set by hand
+    ## A search that cannot start. A grid of one point would do it, but
+    ## configure() and the door refuse that, so tune_bayes() is made to fail
+    ## (the unit's own test runs the grid of one).
+    local_mocked_bindings(tune_bayes = function(...) stop("the search could not start"),
+                          .package = "tune")
+
     obj <- make_eval_object(n = 60, n_configs = 1)
-    obj$config$tuning$grid_size     <- 1L
     obj$config$tuning$bayesian_iter <- 2L
 
     got <- collect_warnings(evaluate(obj, prune = FALSE, seed = 42L))

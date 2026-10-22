@@ -3187,6 +3187,28 @@ describe("config_findings() at every verb's door", {
 
   })
 
+  it("refuses a grid of one point while either Bayesian search runs, as configure() does (#209)", {
+
+    finding <- "config$tuning$grid_size must be at least 2 while bayesian_iter or final_bayesian_iter is above 0, not `1L`"
+
+    for (searches in list(c(2L, 0L), c(0L, 3L), c(2L, 3L))) {
+
+      obj <- configured_object()
+      obj$config$tuning$grid_size           <- 1L
+      obj$config$tuning$bayesian_iter       <- searches[1]
+      obj$config$tuning$final_bayesian_iter <- searches[2]
+      expect_identical(finding_of(validate_horizons_data(obj)), finding,
+                       label = paste(searches, collapse = ", "))
+
+    }
+
+    ## With both searches off, a grid of one is configure()'s own boundary
+    obj <- configured_object()
+    obj$config$tuning[c("grid_size", "bayesian_iter", "final_bayesian_iter")] <- list(1L, 0L, 0L)
+    expect_identical(validate_horizons_data(obj), obj)
+
+  })
+
   it("refuses an evaluated object without its configuration grid, which would leave the configuration unchecked (#212)", {
 
     ## The stored fit, as a verb wrote it. Without the grid the base
