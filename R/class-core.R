@@ -1898,14 +1898,15 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #'    gate's reading (`below_prune_threshold`, logical, and `prune_threshold`,
 #'    numeric) and, when `screened`, the `settings` list column `evaluate()`
 #'    stamps on every row; at least
-#'    one row; `config_id` values unique; and, when `x$config$configs` is
-#'    set, `config_id` set-equal to its `config_id`. Failed, pruned and
+#'    one row; `config_id` values unique; and `config_id` set-equal to
+#'    `x$config$configs$config_id`. Failed, pruned and
 #'    not-evaluated configs keep their rows, so a config with no row was
 #'    lost, and a row with no config describes a config that isn't there.
+#'    The grid itself is required (#212): the base validator checks the
+#'    configuration only on an object that has one.
 #' 3. **best_config** (I5): a length-1 character, `NA` when no
 #'    configuration has the ranking metric, otherwise present in
-#'    `results$config_id` — and, when the config table is reachable at
-#'    `x$config$configs$config_id`, present there too.
+#'    `results$config_id` and in `x$config$configs$config_id`.
 #' 4. **rank_metric**: a length-1 character naming one of the six metrics.
 #' 5. **split**: an `rsplit` (the train/test partition `fit()` reuses).
 #' 6. **n_train / n_test**: single non-negative whole numbers.
@@ -1952,6 +1953,20 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
   errors  <- character()
   ev      <- x$evaluation
   cfg_ids <- x$config$configs$config_id
+
+  ## The configuration grid (#212) ----------------------------------------------
+  ## Every verb that writes an evaluation reads it, and the base validator
+  ## checks the configuration only on an object that has one, so an
+  ## evaluation without it would pass with its configuration unchecked. The
+  ## checks below that read the grid leave a missing one to this finding.
+
+  if (!is.data.frame(x$config$configs)) {
+
+    errors <- c(errors, cli::format_inline(
+      "{.field config$configs} must be the configuration grid {.fn configure} wrote (a data frame)"
+    ))
+
+  }
 
   ## Slot completeness ----------------------------------------------------------
 
@@ -2150,7 +2165,8 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
   ## Failed, pruned and not-evaluated configs keep their rows with a status, so
   ## a config with no row was lost, and a row with no config describes one the
   ## table no longer holds. Ids are listed five at a time: a lost batch of a
-  ## large grid would otherwise flood the report.
+  ## large grid would otherwise flood the report. A missing grid is reported
+  ## above.
 
   if (res_valid && !is.null(x$config$configs) &&
       !setequal(res$config_id, cfg_ids)) {
@@ -2202,9 +2218,9 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
     }
 
-    ## Cross-check against the config catalog when it is reachable — a
-    ## best_config that names no defined config means the ranking pointed at a
-    ## row that the config table never held.
+    ## Cross-check against the config catalog, a missing one being reported
+    ## above: a best_config that names no defined config means the ranking
+    ## pointed at a row that the config table never held.
     if (!is.null(cfg_ids) && !bc %in% cfg_ids) {
 
       errors <- c(errors, cli::format_inline("{.field best_config} ({bc}) is not present in {.field config$configs$config_id}"))
@@ -2320,8 +2336,8 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    range, `c(0, Inf)`, that is a single positive finite numeric; under
 #'    `c(-Inf, Inf)` any finite bound, negative included.
 #' 7. **selection_present**: `TRUE` or `FALSE`.
-#' 8. **I6 — workflow ⊆ config**: when `x$config$configs$config_id` is
-#'    reachable, every workflow key is a defined config id.
+#' 8. **I6 — workflow ⊆ config**: every workflow key is a defined config id
+#'    in `x$config$configs$config_id`, the grid the eval validator requires.
 #' 9. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
 #'    subset of the workflow keys (not every fitted config earns a UQ bundle —
 #'    only successful ones with sufficient calibration data). Each bundle
@@ -2562,9 +2578,10 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
   ## I6: workflow keys are a subset of config ids -------------------------------
 
+  ## The eval validator, run first, requires the grid.
   cfg_ids <- x$config$configs$config_id
 
-  if (wf_valid && !is.null(cfg_ids)) {
+  if (wf_valid) {
 
     unknown <- setdiff(wf_keys, cfg_ids)
 

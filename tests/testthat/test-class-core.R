@@ -1996,11 +1996,16 @@ test_that("validate_horizons_eval requires results to cover the config table exa
   expect_match(conditionMessage(err),
                "cfg_01, cfg_02, cfg_03, cfg_04, cfg_05, and 3 more", fixed = TRUE)
 
-  ## Without a config table there is nothing to cover.
+  ## Without a config table there is nothing to cover: the missing table is
+  ## the one finding (#212).
   no_configs <- make_valid_eval()
   no_configs$config <- NULL
 
-  expect_identical(validate_horizons_eval(no_configs), no_configs)
+  err <- tryCatch(validate_horizons_eval(no_configs), error = function(e) e)
+
+  expect_s3_class(err, "horizons_error_validation")
+  expect_identical(err$findings,
+                   "config$configs must be the configuration grid `configure()` wrote (a data frame)")
 
 })
 
@@ -3179,6 +3184,33 @@ describe("config_findings() at every verb's door", {
                   label = deparse(recipe))
 
     }
+
+  })
+
+  it("refuses an evaluated object without its configuration grid, which would leave the configuration unchecked (#212)", {
+
+    ## The stored fit, as a verb wrote it. Without the grid the base
+    ## validator skips the configuration's findings, so a fit without its
+    ## outcome range too reached the response bound's check, which reads it
+    fx      <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+    finding <- "config$configs must be the configuration grid `configure()` wrote (a data frame)"
+
+    for (keys in list("configs", c("configs", "outcome_range"))) {
+
+      obj <- fx
+      obj$config[keys] <- list(NULL)
+      err <- tryCatch(validate_horizons_fit(obj), error = function(e) e)
+
+      expect_s3_class(err, "horizons_error_validation")
+      expect_identical(err$findings, finding, label = paste(keys, collapse = ", "))
+
+    }
+
+    ## The evaluation it carries, refused the same way
+    ev <- reset_slots(fx, c("models", "ensemble"))
+    class(ev) <- c("horizons_eval", "horizons_data", "list")
+    ev$config["configs"] <- list(NULL)
+    expect_identical(finding_of(validate_horizons_eval(ev)), finding)
 
   })
 
