@@ -59,7 +59,10 @@ filled in, is recorded as \code{ensemble$control}.}
 }
 \value{
 A \code{horizons_ensemble} object (inherits from \code{horizons_fit}) with the
-fitted ensemble in the \code{ensemble} slot.
+fitted ensemble in the \code{ensemble} slot. Before anything is built,
+\code{ensemble()} refuses members whose model's engine is not installed,
+since it predicts them, naming each package
+(\code{horizons_error_missing_package}).
 }
 \description{
 Trains a meta-learner over the models produced by \code{\link[=fit]{fit()}} and returns a
@@ -103,7 +106,10 @@ rows) are kept in \code{ensemble$warnings}, as a member's are in
 ensemble: the meta-learner's candidates left out for a missing fold, the
 CV+ intervals not computed, and their measured test coverage not
 computed. horizons' own warnings are written to the
-log and raised once at the end.
+log and raised once at the end. Among them, as in \code{\link[=evaluate]{evaluate()}} and
+\code{\link[=fit]{fit()}}: the meta-learner's cross-validation folds or the CV+ calibration
+folds drawn unstratified (\code{horizons_warning_substitution}); a draw rsample
+stratified on fewer bins than asked is a note on the log.
 }
 \examples{
 \dontrun{

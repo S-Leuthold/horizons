@@ -1202,6 +1202,26 @@ describe("fit() - what it reports at its end", {
 
   })
 
+  it("warns substitution once for the draws rsample had too little data to stratify, in its words, and nothing else escapes", {
+
+    ## A cold start on 30 rows with AD on: the split, the calibration split
+    ## and the folds each have too few rows for rsample to bin the outcome
+    got <- fit_reports(make_eval_object(n = 30, n_configs = 1), compute_uq = FALSE, compute_ad = TRUE)
+    w   <- got$warnings[got$classes == "horizons_warning_substitution"]
+
+    expect_true(all(vapply(got$warnings, inherits, logical(1), "horizons_warning")))
+    expect_length(w, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(w[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split found one stratum in the outcome", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the calibration split found one stratum in the outcome", fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds found one stratum in the outcome", fixed = TRUE)
+    expect_match(msg, "Too little data to stratify", fixed = TRUE)
+
+    log <- got$value$log[got$value$log$verb == "fit" & got$value$log$topic %in% "substitution", ]
+    expect_identical(log$n, 3L)
+
+  })
+
   it("warns quality when its own smallest assessment fold is small", {
 
     ## 48 fit rows in 6 folds: 8 to assess in each

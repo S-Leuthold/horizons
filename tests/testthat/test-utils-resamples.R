@@ -500,4 +500,228 @@ describe("draw_stratified()", {
 
   })
 
+  it("keeps rsample's warnings on a draw it had too little data to stratify, rather than letting them print", {
+
+    ## Under 40 rows rsample cannot bin the outcome and warns twice as it
+    ## draws without strata
+    small <- df[1:30, , drop = FALSE]
+
+    expect_no_warning(drawn <- draw_stratified(
+      outcome      = small$y,
+      stratified   = function() rsample::vfold_cv(small, v = 5, strata = "y",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(small, v = 5)
+    ))
+
+    expect_false(drawn$stratified)
+    expect_false(drawn$strata_failed)
+    expect_length(drawn$strata_warnings, 2L)
+    expect_true(any(grepl("Too little data to stratify", drawn$strata_warnings, fixed = TRUE)))
+
+  })
+
+  it("keeps rsample's warning on a draw it stratified on fewer bins than asked", {
+
+    ## Between 40 and 79 rows the quartiles hold under 20 rows each, so
+    ## rsample uses fewer bins, and still stratifies
+    mid <- df[1:60, , drop = FALSE]
+
+    expect_no_warning(drawn <- draw_stratified(
+      outcome      = mid$y,
+      stratified   = function() rsample::vfold_cv(mid, v = 5, strata = "y",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(mid, v = 5)
+    ))
+
+    expect_true(drawn$stratified)
+    expect_length(drawn$strata_warnings, 1L)
+    expect_match(drawn$strata_warnings, "Stratification will use 3 breaks instead", fixed = TRUE)
+
+  })
+
+  it("keeps no warning from a stratified draw that failed, whose failure is the record", {
+
+    drawn <- draw_stratified(
+      outcome      = df$y,
+      stratified   = function() {
+        warning("on the way to failing")
+        stop("stratification refused")
+      },
+      unstratified = function() "the unstratified draw"
+    )
+
+    expect_true(drawn$strata_failed)
+    expect_identical(drawn$strata_warnings, character(0))
+
+  })
+
+})
+
+describe("log_strata_fallback()", {
+
+  logged <- function(drawn) {
+    collector <- log_open("evaluate")
+    log_strata_fallback(collector, drawn, "train/test split")
+    log_close(collector)
+  }
+
+  it("records a draw rsample had too little data to stratify as the fallback's substitution, in rsample's words", {
+
+    rows <- logged(list(stratified = FALSE, strata_failed = FALSE, strata_error = NA_character_,
+                        strata_warnings = c("first {word} of rsample's", "Too little data to stratify.")))
+
+    expect_identical(rows$type, "warning")
+    expect_identical(rows$topic, "substitution")
+    expect_match(rows$message, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata.",
+                 fixed = TRUE)
+    expect_match(rows$message, "first {word} of rsample's", fixed = TRUE)
+    expect_match(rows$message, "Too little data to stratify.", fixed = TRUE)
+
+  })
+
+  ## The real draws, as the verbs make them: rsample leaves each unstratified,
+  ## two of them without a word
+  drawn_on <- function(y) {
+    df <- data.frame(y = y)
+    draw_stratified(
+      outcome      = y,
+      stratified   = function() rsample::vfold_cv(df, v = 5, strata = "y",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(df, v = 5)
+    )
+  }
+
+  it("records a draw rsample left unstratified without a warning as the substitution: a zero-inflated outcome", {
+
+    ## 85 % zeros: every quartile but the top is 0, so the bins collapse to one
+    set.seed(1)
+    drawn <- drawn_on(c(rep(0, 85), runif(15)))
+
+    expect_false(drawn$stratified)
+    expect_false(drawn$strata_failed)
+    expect_identical(drawn$strata_warnings, character(0))
+
+    rows <- logged(drawn)
+
+    expect_identical(rows$type, "warning")
+    expect_identical(rows$topic, "substitution")
+    expect_identical(rows$message, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata.")
+
+  })
+
+  it("records a draw rsample left unstratified without a warning as the substitution: a few-valued outcome pooled into one stratum", {
+
+    ## 2 is under 10 % of the 30 rows, so it is pooled into 1
+    drawn <- drawn_on(c(rep(1, 28), rep(2, 2)))
+
+    expect_false(drawn$stratified)
+    expect_identical(drawn$strata_warnings, character(0))
+
+    rows <- logged(drawn)
+
+    expect_identical(rows$topic, "substitution")
+    expect_match(rows$message, "found one stratum in the outcome", fixed = TRUE)
+
+  })
+
+  it("claims no shortage of data for a draw tied quantiles left unstratified, and gives rsample's words", {
+
+    ## 60 rows ask rsample for fewer bins, and 70 % zeros tie them into one:
+    ## its warning is about the bins, not about too little data to stratify
+    set.seed(1)
+    drawn <- drawn_on(c(rep(0, 42), runif(18)))
+
+    expect_false(drawn$stratified)
+    expect_length(drawn$strata_warnings, 1L)
+
+    rows <- logged(drawn)
+
+    expect_identical(rows$topic, "substitution")
+    expect_match(rows$message, "found one stratum in the outcome, so it was drawn without strata.", fixed = TRUE)
+    expect_match(rows$message, "Stratification will use 3 breaks instead", fixed = TRUE)
+    expect_no_match(rows$message, "too little data", fixed = TRUE)
+
+  })
+
+  it("records a draw rsample stratified on fewer bins as a note, since it still stratified", {
+
+    rows <- logged(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                        strata_warnings = "Stratification will use 3 breaks instead."))
+
+    expect_identical(rows$type, "note")
+    expect_identical(rows$topic, NA_character_)
+    expect_match(rows$message, "had too little data for 4 strata, so rsample drew it on fewer.", fixed = TRUE)
+    expect_match(rows$message, "Stratification will use 3 breaks instead.", fixed = TRUE)
+
+  })
+
+  it("records nothing for a draw that stratified as asked", {
+
+    rows <- logged(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                        strata_warnings = character(0)))
+
+    expect_identical(nrow(rows), 0L)
+
+  })
+
+})
+
+describe("report_strata_in_unit()", {
+
+  ## A unit cannot reach the verb's collector, so ensemble()'s draws report
+  ## from inside theirs; the verb lifts what they report onto its log
+  unstratified <- list(stratified = FALSE, strata_failed = FALSE, strata_error = NA_character_,
+                       strata_warnings = "Too little {data} to stratify.")
+  fewer        <- list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                       strata_warnings = "Stratification will use 3 breaks instead.")
+
+  it("reports from inside a unit, with its class, what log_strata_fallback() records, in the same words", {
+
+    out <- run_unit({
+      report_strata_in_unit(unstratified, "CV+ calibration folds")
+      report_strata_in_unit(fewer, "CV+ calibration folds")
+    }, unit = "intervals", id = "ensemble")
+
+    expect_identical(out$records$type, c("warning", "note"))
+    expect_identical(out$records$class, c("horizons_warning_substitution", "horizons_note"))
+
+    lifted <- log_open("ensemble")
+    log_unit_records(lifted, out$records)
+    lifted <- log_close(lifted)
+
+    direct <- log_open("ensemble")
+    log_strata_fallback(direct, unstratified, "CV+ calibration folds")
+    log_strata_fallback(direct, fewer, "CV+ calibration folds")
+    direct <- log_close(direct)
+
+    expect_identical(lifted$type, direct$type)
+    expect_identical(lifted$topic, direct$topic)
+
+    ## The same header and rsample's words, and the unit's line
+    for (said in c("The stratified draw of the CV+ calibration folds found one stratum in the outcome, so it was drawn without strata.",
+                   "Too little {data} to stratify.")) {
+      expect_match(direct$message[1], said, fixed = TRUE)
+      expect_match(lifted$message[1], said, fixed = TRUE)
+    }
+    for (said in c("The stratified draw of the CV+ calibration folds had too little data for 4 strata, so rsample drew it on fewer.",
+                   "Stratification will use 3 breaks instead.")) {
+      expect_match(direct$message[2], said, fixed = TRUE)
+      expect_match(lifted$message[2], said, fixed = TRUE)
+    }
+    expect_true(all(grepl("In the ensemble's prediction intervals.", lifted$message, fixed = TRUE)))
+
+  })
+
+  it("reports nothing for a draw that stratified as asked", {
+
+    out <- run_unit(
+      report_strata_in_unit(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                                 strata_warnings = character(0)), "CV+ calibration folds"),
+      unit = "intervals", id = "ensemble"
+    )
+
+    expect_identical(nrow(out$records), 0L)
+
+  })
+
 })

@@ -51,7 +51,14 @@
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
-#'   `output_dir` per outcome. The ranking `metric` is not checked, since
+#'   `output_dir` per outcome. A write to `output_dir` that fails (the
+#'   directory, the manifest or a checkpoint) stops the run with
+#'   `horizons_error_systemic`, naming the directory, the rows finished so
+#'   far as its `results`. On the configs axis a checkpoint a worker could
+#'   not write is known only once every configuration has run, so the
+#'   evaluation is returned, with one `horizons_warning_skipped` naming the
+#'   directory and the configurations a resumed run evaluates again. The
+#'   ranking `metric` is not checked, since
 #'   every row carries all six cross-validated metrics. A row scored under an
 #'   earlier scoring schema, or recording less of the training data and
 #'   settings than this run does, was written by an earlier version: it is
@@ -130,6 +137,9 @@
 #' on them) describe the trimmed population; the test metrics do not.
 #'
 #' @section Failed configurations:
+#' Before anything runs, `evaluate()` refuses configurations whose model's
+#' engine or feature-selection step needs a package that is not installed,
+#' naming each package and what needs it (`horizons_error_missing_package`).
 #' Each configuration runs as one unit. A failure in any of its steps fails
 #' that configuration alone: its row has `status` `"failed"`, an
 #' `error_message` naming the step and the cause ("Grid search failed:
@@ -150,9 +160,11 @@
 #' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
 #' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
 #' run every configuration; the configs axis has no breaker), and their
-#' failures are not checkpointed. A parallel worker that dies stops the run
-#' the same way, during a Bayesian iteration too: tune catches future's error
-#' there, so the death is read from what future.apply reports first
+#' failures are not checkpointed. A parallel worker that lacks a package the
+#' configurations need, which this session has, stops the run the same way.
+#' So does a parallel worker that dies, during a Bayesian iteration too: tune
+#' catches future's error there, so the death is read from what future.apply
+#' reports first
 #' ("Caught FutureInterruptError. Canceling all iterations ...", a warning
 #' before future.apply 1.21.0 and a message since), which has no class and
 #' is matched by its text. When some configurations failed and
@@ -302,6 +314,11 @@ evaluate <- function(x,
     ), kind = "input")
 
   }
+
+  ## Every engine and selection step the configurations need, before any
+  ## work: a missing one would otherwise fail every configuration that needs
+  ## it, one by one.
+  check_config_packages(configs, "evaluate")
 
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
@@ -479,8 +496,9 @@ evaluate <- function(x,
   )
   cv_fold_obj <- cv_drawn$draw
 
-  ## A stratified draw that failed fell back to an unstratified one: what
-  ## ran is not what was asked, so each draw that did says so once.
+  ## A stratified draw that came out unstratified, because it failed or
+  ## rsample formed one stratum, is not what was asked, so each draw that did
+  ## says so once. One rsample stratified on fewer bins is a note.
   log_strata_fallback(collector, drawn, "train/test split")
   log_strata_fallback(collector, cv_drawn, "cross-validation folds")
 
@@ -549,11 +567,16 @@ evaluate <- function(x,
 
   if (!is.null(output_dir)) {
 
-    if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
-
+    ## The store's directory, with output_dir itself when that is absent. A
+    ## directory that cannot be created is a failed write to output_dir, so
+    ## the run stops before any configuration, as it would at the first
+    ## checkpoint.
     checkpoint_dir <- file.path(output_dir, "checkpoints")
+    not_created    <- create_output_dir(checkpoint_dir)
 
-    if (!dir.exists(checkpoint_dir)) dir.create(checkpoint_dir)
+    if (!is.null(not_created)) {
+      abort_output_write(checkpoint_dir, not_created, results_so_far(list()))
+    }
 
     loaded <- load_eval_checkpoints(
       output_dir = output_dir,
@@ -611,10 +634,11 @@ evaluate <- function(x,
                round(100 * SPLIT_PROP), "/", round(100 * (1 - SPLIT_PROP)), ", ",
                if (drawn$stratified) "stratified" else "unstratified", ")\n"))
 
-    if (drawn$strata_failed) {
+    split_note <- strata_tree_line(drawn, "split")
 
-      cat(paste0("\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                             "retrying without strata"), "\n"))
+    if (!is.null(split_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(split_note), "\n"))
 
     }
 
@@ -625,10 +649,11 @@ evaluate <- function(x,
                "), grid = ", tuning$grid_size, ", bayesian = ",
                tuning$bayesian_iter, "\n"))
 
-    if (cv_drawn$strata_failed) {
+    cv_note <- strata_tree_line(cv_drawn, "CV")
 
-      cat(paste0("\u2502  ", cli::col_yellow("Stratified CV failed, ",
-                                             "retrying without strata"), "\n"))
+    if (!is.null(cv_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(cv_note), "\n"))
 
     }
 
@@ -695,9 +720,15 @@ evaluate <- function(x,
       data_fields                  = data_fp$data_fields,
       settings                     = settings
     )
-    tmp_manifest <- tempfile(tmpdir = output_dir, fileext = ".rds.tmp")
-    saveRDS(manifest, tmp_manifest)
-    file.rename(tmp_manifest, file.path(output_dir, "eval_manifest.rds"))
+    manifest_path <- file.path(output_dir, "eval_manifest.rds")
+    not_written   <- write_output_file(manifest, manifest_path)
+
+    ## Before any configuration runs, so the rows so far are the ones
+    ## resumed from the store
+    if (!is.null(not_written)) {
+      abort_output_write(manifest_path, not_written,
+                         results_so_far(unname(checkpoint_results)))
+    }
 
   }
 
@@ -866,11 +897,8 @@ evaluate <- function(x,
 
       }
 
-      if (!is.null(checkpoint_dir)) {
-
-        for (row in released) write_checkpoint_row(row, checkpoint_dir)
-
-      }
+      ## A write that fails stops the run, with the rows so far
+      if (!is.null(checkpoint_dir)) checkpoint_rows(released, checkpoint_dir, results_list)
 
       ## Memory cleanup
       gc(verbose = FALSE)
@@ -881,7 +909,7 @@ evaluate <- function(x,
     ## failures after all
     if (!is.null(checkpoint_dir)) {
 
-      for (row in breaker_release(breaker)) write_checkpoint_row(row, checkpoint_dir)
+      checkpoint_rows(breaker_release(breaker), checkpoint_dir, results_list)
 
     }
 
@@ -961,6 +989,25 @@ evaluate <- function(x,
       .options = furrr::furrr_options(seed = TRUE, chunk_size = 1)
     ), results_so_far(lapply(completed_ids, function(id) checkpoint_results[[id]])),
     output_dir)
+
+    ## A worker whose checkpoint could not be written said so on its row
+    ## (evaluate_config_worker()). Every configuration has run by now, so
+    ## the evaluation is returned, and one warning names what a resumed run
+    ## would evaluate again
+    not_saved <- lapply(parallel_results, attr, "checkpoint_failed")
+
+    parallel_results <- lapply(parallel_results, function(row) {
+      attr(row, "checkpoint_failed") <- NULL
+      row
+    })
+
+    unsaved <- !vapply(not_saved, is.null, logical(1))
+
+    log_unsaved_checkpoints(collector,
+                            ids            = vapply(parallel_results[unsaved], `[[`, character(1), "config_id"),
+                            reasons        = unlist(not_saved[unsaved]),
+                            checkpoint_dir = checkpoint_dir,
+                            output_dir     = output_dir)
 
     ## Combine: checkpoint results + parallel results
     results_list <- c(
@@ -1443,12 +1490,10 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
 #' Write one result row to the per-config store
 #'
-#' Written under a name the store does not list and renamed into place, so a
-#' reader (the monitor polls while workers write) never sees half a file.
-#'
 #' @param row One-row result.
 #' @param checkpoint_dir The `checkpoints/` directory.
-#' @return `NULL`, invisibly.
+#' @return `NULL` when the row was written; otherwise why it could not be,
+#'   as [write_output_file()] reports it.
 #' @keywords internal
 #' @noRd
 write_checkpoint_row <- function(row, checkpoint_dir) {
@@ -1457,9 +1502,192 @@ write_checkpoint_row <- function(row, checkpoint_dir) {
   ## row's warnings are read on the row (lift_unit_records()).
   attr(row, "unit_records") <- NULL
 
-  tmp <- tempfile(tmpdir = checkpoint_dir, fileext = ".rds.tmp")
-  saveRDS(row, tmp)
-  file.rename(tmp, file.path(checkpoint_dir, paste0(row$config_id, ".rds")))
+  write_output_file(row, checkpoint_path(checkpoint_dir, row$config_id))
+
+}
+
+#' Where a configuration's checkpoint lives
+#'
+#' @param checkpoint_dir The `checkpoints/` directory.
+#' @param config_id Character(1).
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+checkpoint_path <- function(checkpoint_dir, config_id) {
+
+  file.path(checkpoint_dir, paste0(config_id, ".rds"))
+
+}
+
+#' Write a file into an output directory, whole or not at all
+#'
+#' @description
+#' The one writer for what `evaluate()` puts in its `output_dir`: the
+#' manifest and each configuration's checkpoint. The file is written under a
+#' name the store does not list and renamed into place, so a reader (the
+#' monitor polls while workers write) never sees half a file. A write that
+#' fails, or a rename that is refused, leaves no temporary file behind, and
+#' what base R said about it (a warning before an error, or the rename's
+#' warning) is returned rather than raised, for the verb to stop on.
+#'
+#' @param value The object to save.
+#' @param path The file to write.
+#' @return `NULL` when the file was written; otherwise Character(1), why it
+#'   could not be.
+#' @keywords internal
+#' @noRd
+write_output_file <- function(value, path) {
+
+  tmp     <- tempfile(tmpdir = dirname(path), fileext = ".rds.tmp")
+  reasons <- character(0)
+
+  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
+
+  written <- tryCatch(
+    withCallingHandlers(
+      {
+        saveRDS(value, tmp)
+        file.rename(tmp, path)
+      },
+      warning = function(w) {
+        reasons <<- c(reasons, condition_summary(w))
+        rlang::cnd_muffle(w)
+      }
+    ),
+    error = function(e) {
+      reasons <<- c(reasons, condition_summary(e))
+      FALSE
+    }
+  )
+
+  if (isTRUE(written)) return(NULL)
+
+  if (length(reasons) == 0) reasons <- "the file could not be renamed into place"
+
+  paste(unique(reasons), collapse = "; ")
+
+}
+
+#' Create an output directory, reporting why it could not be
+#'
+#' @param path The directory, created with its parents when absent.
+#' @return `NULL` when it exists; otherwise Character(1), why it could not
+#'   be created.
+#' @keywords internal
+#' @noRd
+create_output_dir <- function(path) {
+
+  if (dir.exists(path)) return(NULL)
+
+  reasons <- character(0)
+
+  withCallingHandlers(
+    dir.create(path, recursive = TRUE),
+    warning = function(w) {
+      reasons <<- c(reasons, condition_summary(w))
+      rlang::cnd_muffle(w)
+    }
+  )
+
+  if (dir.exists(path)) return(NULL)
+
+  if (length(reasons) == 0) reasons <- "the directory could not be created"
+
+  paste(unique(reasons), collapse = "; ")
+
+}
+
+#' Write rows to the checkpoint store, stopping on the first that fails
+#'
+#' @param rows List of result rows.
+#' @param checkpoint_dir The `checkpoints/` directory.
+#' @param finished List of the rows finished so far, carried as `results`
+#'   when a write fails.
+#' @param call The frame the error reports: `evaluate()`'s.
+#' @return `NULL`, invisibly; aborts through [abort_output_write()].
+#' @keywords internal
+#' @noRd
+checkpoint_rows <- function(rows, checkpoint_dir, finished, call = rlang::caller_env()) {
+
+  for (row in rows) {
+
+    failed <- write_checkpoint_row(row, checkpoint_dir)
+
+    if (!is.null(failed)) {
+      abort_output_write(checkpoint_path(checkpoint_dir, row$config_id), failed,
+                         results_so_far(finished), call = call)
+    }
+
+  }
+
+  invisible(NULL)
+
+}
+
+#' Stop the call because a write to `output_dir` failed
+#'
+#' @description
+#' A write that fails once will fail for every configuration after it, so the
+#' run stops at once, as systemic, with the rows finished so far.
+#'
+#' @param path The file or directory that could not be written.
+#' @param reason Character(1). Why, from [write_output_file()] or
+#'   [create_output_dir()].
+#' @param results The results table so far, carried as `results`.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_output_write <- function(path, reason, results, call = rlang::caller_env()) {
+
+  dir  <- dirname(path)
+  name <- basename(path)
+
+  abort_horizons(c(
+    "{.fn evaluate} could not write to {.path {dir}}, so the run cannot go on.",
+    "x" = "{name}: {reason}",
+    "i" = "The rows finished so far are in this error's {.field results} field.",
+    "i" = "Make {.path {dir}} writable, or set another {.code control_horizons(output_dir = )}."
+  ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
+
+}
+
+#' Record the checkpoints the configs axis's workers could not write
+#'
+#' @description
+#' On the configs axis a worker that cannot write its checkpoint says so on
+#' the row it returns, and `furrr::future_map()` returns only once every
+#' configuration has run. With nothing left to save by then, the evaluation
+#' is returned, and the checkpoints asked for that were not written are one
+#' `skipped` warning: a run resumed from `output_dir` evaluates those
+#' configurations again.
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param ids Character. The configurations whose checkpoint was not written.
+#' @param reasons Character, one per id: why, from [write_output_file()].
+#' @param checkpoint_dir The `checkpoints/` directory.
+#' @param output_dir The run's `output_dir`.
+#' @return `NULL`, invisibly; adds one warning to the collector, its ids the
+#'   configurations, when there are any.
+#' @keywords internal
+#' @noRd
+log_unsaved_checkpoints <- function(collector, ids, reasons, checkpoint_dir, output_dir) {
+
+  n_ids <- length(ids)
+
+  if (n_ids == 0) return(invisible(NULL))
+
+  ### The first one's cause, as a stop on the sequential path gives it
+  name   <- basename(checkpoint_path(checkpoint_dir, ids[1]))
+  reason <- reasons[1]
+
+  log_warning(collector, "skipped", c(
+    "{n_ids} configuration{?s} {?was/were} evaluated, but {?its/their} checkpoint{?s} could not be written to {.path {checkpoint_dir}}: {.val {ids}}.",
+    "x" = "{name}: {reason}",
+    "i" = "The evaluation is returned, but {cli::qty(n_ids)}{?that configuration has/those configurations have} no checkpoint, so a run resumed from {.path {output_dir}} evaluates {cli::qty(n_ids)}{?it/them} again.",
+    "i" = "Make {.path {checkpoint_dir}} writable before resuming."
+  ), ids = ids)
 
   invisible(NULL)
 
@@ -1697,15 +1925,18 @@ abort_breaker_trip <- function(breaker,
 
 }
 
-#' Stop the call when a parallel worker dies
+#' Stop the call when a parallel worker dies, or lacks a package
 #'
 #' @description
 #' future raises a worker's death as a `FutureError`, which no unit contains
 #' (`NEVER_CONTAINED`). A death that tune caught during a Bayesian search
 #' reaches here as the unit's `horizons_error_systemic`, which no unit
-#' contains either ([worker_death_signal()]). Either is turned into
-#' `horizons_error_systemic`, chained to the error, with the rows finished so
-#' far when the verb has rows; every other error passes through untouched.
+#' contains either ([worker_death_signal()]). A package missing where a unit
+#' ran, which the verb checked in the session before the run, reaches here
+#' as the unit's `horizons_error_missing_package` ([missing_package_signal()]).
+#' Each is turned into `horizons_error_systemic`, chained to the error, with
+#' the rows finished so far when the verb has rows; every other error passes
+#' through untouched.
 #' `bayes_search()` is the one raiser of `horizons_error_systemic` inside
 #' `expr`, for that death; a unit that raises it for another reason needs a
 #' subclass of its own, or it would be read here as a worker's death.
@@ -1729,10 +1960,23 @@ stop_on_worker_death <- function(expr, results, output_dir = NULL, verb = "evalu
   ## caught by the other and wrapped a second time.
   died <- function(e) {
 
-    if (!inherits(e, c("FutureError", "horizons_error_systemic"))) return(rlang::zap())
+    missing <- inherits(e, "horizons_error_missing_package")
+
+    if (!missing && !inherits(e, c("FutureError", "horizons_error_systemic"))) return(rlang::zap())
+
+    cause <- if (missing) condition_summary(e)
 
     abort_horizons(c(
-      "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on.",
+      if (missing) {
+        "A package {.fn {verb}} needs is not installed where its work ran, so the run cannot go on."
+      } else {
+        "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on."
+      },
+      "x" = if (missing) "{cause}",
+      ### Either the run was parallel, or the door's lists missed the package
+      "i" = if (missing) {
+        "{.fn {verb}} checked this session for the packages it knows of before the run. If the run was parallel, a worker's library lacks this one: install it there. If not, {.fn {verb}} does not check for it, which is a bug in horizons: install it, and please report it."
+      },
       "i" = if (!is.null(output_dir)) {
         "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
       } else if (!is.null(results)) {
@@ -2630,9 +2874,10 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
 #'   unstratified, because rsample dropped the strata or the stratified draw
 #'   failed; see [draw_stratified()]), `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata) and
-#'   `strata_error` (why it failed, or `NA`). Aborts as [modelling_rows()]
-#'   does.
+#'   stratified draw failed and was retried without strata),
+#'   `strata_error` (why it failed, or `NA`) and `strata_warnings` (what
+#'   rsample warned of during the stratified draw). Aborts as
+#'   [modelling_rows()] does.
 #' @keywords internal
 #' @noRd
 draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_env()) {
@@ -2649,11 +2894,12 @@ draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_en
     unstratified = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP)
   )
 
-  list(split         = drawn$draw,
-       n_dropped     = modelled$n_dropped,
-       stratified    = drawn$stratified,
-       strata_failed = drawn$strata_failed,
-       strata_error  = drawn$strata_error)
+  list(split           = drawn$draw,
+       n_dropped       = modelled$n_dropped,
+       stratified      = drawn$stratified,
+       strata_failed   = drawn$strata_failed,
+       strata_error    = drawn$strata_error,
+       strata_warnings = drawn$strata_warnings)
 
 }
 
@@ -3014,7 +3260,8 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   is no `debug` either, since a debug run never dispatches.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
-#'   records still on it for the parent to lift.
+#'   records still on it for the parent to lift, and, when its checkpoint
+#'   could not be written, why, as the attribute `"checkpoint_failed"`.
 #' @keywords internal
 #' @noRd
 
@@ -3098,9 +3345,14 @@ evaluate_config_worker <- function(config_i, shared) {
   result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
   result_row <- stamp_eval_settings(result_row, shared$settings)
 
+  ## A checkpoint that cannot be written is said on the row, for the parent
+  ## to report once every worker has returned: an error here would leave
+  ## furrr with no row from any of them, and a worker cannot stop the others.
   if (!is.null(shared$checkpoint_dir)) {
 
-    write_checkpoint_row(result_row, shared$checkpoint_dir)
+    failed <- write_checkpoint_row(result_row, shared$checkpoint_dir)
+
+    if (!is.null(failed)) attr(result_row, "checkpoint_failed") <- failed
 
   }
 

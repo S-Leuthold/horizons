@@ -8,7 +8,9 @@
       │
       │  Dropped 2 rows with NA outcome
       │  Split: 46 train / 12 test (80/20, stratified)
+      │  Stratified split on fewer strata: too little data for 4
       │  Tuning: 3-fold CV (stratified), grid = 2, bayesian = 0
+      │  Stratified CV on fewer strata: too little data for 4
       │  Configs: 3 total
       │
       │  ├─ [1/3] Random Forest + none + raw + none
@@ -38,7 +40,9 @@
       │
       │  Dropped 2 rows with NA outcome
       │  Split: 46 train / 12 test (80/20, stratified)
+      │  Stratified split on fewer strata: too little data for 4
       │  Tuning: 3-fold CV (stratified), grid = 2, bayesian = 0
+      │  Stratified CV on fewer strata: too little data for 4
       │  Configs: 3 total (2 from checkpoint)
       │
       │  ├─ [1/3] Random Forest + none + raw + none

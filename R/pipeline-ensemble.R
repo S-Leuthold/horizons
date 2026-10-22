@@ -53,7 +53,10 @@
 #' ensemble: the meta-learner's candidates left out for a missing fold, the
 #' CV+ intervals not computed, and their measured test coverage not
 #' computed. horizons' own warnings are written to the
-#' log and raised once at the end.
+#' log and raised once at the end. Among them, as in [evaluate()] and
+#' [fit()]: the meta-learner's cross-validation folds or the CV+ calibration
+#' folds drawn unstratified (`horizons_warning_substitution`); a draw rsample
+#' stratified on fewer bins than asked is a note on the log.
 #'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),
@@ -94,7 +97,10 @@
 #'   filled in, is recorded as `ensemble$control`.
 #'
 #' @return A `horizons_ensemble` object (inherits from `horizons_fit`) with the
-#'   fitted ensemble in the `ensemble` slot.
+#'   fitted ensemble in the `ensemble` slot. Before anything is built,
+#'   `ensemble()` refuses members whose model's engine is not installed,
+#'   since it predicts them, naming each package
+#'   (`horizons_error_missing_package`).
 #'
 #' @examples
 #' \dontrun{
@@ -186,6 +192,11 @@ ensemble <- function(x,
 
   }
 
+  ## The members predict the test rows and the calibration rows, so their
+  ## packages are checked, and loaded, before anything is built. The
+  ## meta-learners' own engines (glmnet, xgboost) are in Imports.
+  ensure_predict_namespaces(x, members, verb = "ensemble")
+
   ## -------------------------------------------------------------------------
   ## Step 0b: Parallel backend
   ## -------------------------------------------------------------------------
@@ -276,7 +287,12 @@ ensemble <- function(x,
   flagged     <- attr(contract, "flagged")
   warning_log <- attr(contract, "warning_log")
 
-  for (a in c("unit_records", "flagged", "warning_log")) attr(contract, a) <- NULL
+  ## And the tree's lines for a stratified draw that did not stratify as
+  ## asked, as evaluate() and fit() print them: the meta-learner's folds' here,
+  ## the CV+ folds' once they are drawn
+  strata_lines <- list(meta = attr(contract, "strata_line"), cv_plus = NULL)
+
+  for (a in c("unit_records", "flagged", "warning_log", "strata_line")) attr(contract, a) <- NULL
 
   ## -------------------------------------------------------------------------
   ## Step 3: Promote class and attach the ensemble
@@ -317,6 +333,9 @@ ensemble <- function(x,
     } else {
 
       x <- cv_plus$value
+
+      strata_lines["cv_plus"] <- list(attr(x, "strata_line"))
+      attr(x, "strata_line") <- NULL
 
     }
 
@@ -374,7 +393,7 @@ ensemble <- function(x,
 
   if (verbose) {
 
-    render_ensemble_summary(x$ensemble, rank_metric)
+    render_ensemble_summary(x$ensemble, rank_metric, strata_lines)
 
   }
 
@@ -400,9 +419,12 @@ ensemble <- function(x,
 #'
 #' @param contract The ensemble contract list.
 #' @param rank_metric Character. The metric improvement is measured on.
+#' @param strata_lines List with `meta` and `cv_plus`: the tree's line for
+#'   the meta-learner's folds and for the CV+ folds when either did not
+#'   stratify as asked (`strata_tree_line()`), or `NULL`.
 #' @return Invisibly NULL; called for its console output.
 #' @keywords internal
-render_ensemble_summary <- function(contract, rank_metric) {
+render_ensemble_summary <- function(contract, rank_metric, strata_lines = list()) {
 
   ## Top contributing members (by absolute weight) --------------------------
 
@@ -421,6 +443,14 @@ render_ensemble_summary <- function(contract, rank_metric) {
       "\u2502  ", branch, " ", top$member[i],
       ": ", round(top$coef[i], 4), "\n"
     ))
+
+  }
+
+  ## The meta-learner's folds, when they did not stratify as asked, in the
+  ## line evaluate() and fit() print for their own folds
+  if (!is.null(strata_lines$meta)) {
+
+    cat(paste0("\u2502  ", cli::col_yellow(strata_lines$meta), "\n"))
 
   }
 
@@ -460,6 +490,13 @@ render_ensemble_summary <- function(contract, rank_metric) {
   if (!is.null(uq)) {
 
     cat(paste0("\u2502  \u251c\u2500 UQ: CV+ conformal (n_calib = ", uq$n_calib, ")\n"))
+
+    if (!is.null(strata_lines$cv_plus)) {
+
+      cat(paste0("\u2502  \u2502  \u251c\u2500 ", cli::col_yellow(strata_lines$cv_plus), "\n"))
+
+    }
+
     cat(paste0("\u2502  \u2502  \u2514\u2500 ", format_test_coverage(uq), "\n"))
 
   } else {

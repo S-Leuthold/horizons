@@ -9,6 +9,7 @@
       │  Re-tuning top 2 of 2 configurations
       │  Split: 48 train / 12 test (evaluate()'s held-out rows)
       │  CV: 3-fold stratified on SOC
+      │  Stratified CV on fewer strata: too little data for 4
       │  Bayesian: 25 iterations with warm-start
       │
       │  ├─ [1/2] Random Forest + none + raw + none

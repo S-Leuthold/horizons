@@ -205,12 +205,8 @@ meta_tune_control <- function(kind = c("grid", "resamples"), allow_par = FALSE) 
 #' @keywords internal
 predict_members_on_test <- function(object, members, call = rlang::caller_env()) {
 
-  ## Load the namespaces the members' predict methods live in, as
-  ## predict.horizons_ensemble() does. An installed package loads its Imports
-  ## lazily, so on a freshly read fitted object the workflows S3 methods are
-  ## not registered until something loads them, and predict() on a member
-  ## finds no method.
-  ensure_predict_namespaces(object, members)
+  ## The namespaces the members' predict methods live in were loaded at
+  ## ensemble()'s door (ensure_predict_namespaces()), the one caller.
 
   test_data   <- rsample::assessment(object$models$split)
   role_map    <- object$data$role_map
@@ -258,20 +254,26 @@ predict_members_on_test <- function(object, members, call = rlang::caller_env())
 #' contract. What the run recorded that the unit cannot see travels on it as
 #' attributes, which `ensemble()` reads and drops: the members' unit records
 #' and the test rows they could not use (from [predict_members_on_test()]),
-#' and the warning records tune kept as notes.
+#' the warning records tune kept as notes, and the tree's line for the
+#' meta-learner's folds.
 #'
 #' @param contract From [build_ensemble_contract()].
 #' @param member_pred From [predict_members_on_test()].
 #' @param warning_log Records shaped like [new_warning_log()]'s.
-#' @return `contract`, with the attributes `"unit_records"`, `"flagged"` and
-#'   `"warning_log"`.
+#' @param strata_line The tree's line for the meta-learner's cross-validation
+#'   folds ([strata_tree_line()]), or `NULL` when they stratified as asked or
+#'   the engine draws none.
+#' @return `contract`, with the attributes `"unit_records"`, `"flagged"`,
+#'   `"warning_log"` and `"strata_line"`.
 #' @keywords internal
 #' @noRd
-with_run_records <- function(contract, member_pred, warning_log = new_warning_log()) {
+with_run_records <- function(contract, member_pred, warning_log = new_warning_log(),
+                             strata_line = NULL) {
 
   attr(contract, "unit_records") <- attr(member_pred, "unit_records")
   attr(contract, "flagged")      <- attr(member_pred, "flagged")
   attr(contract, "warning_log")  <- warning_log
+  attr(contract, "strata_line")  <- strata_line
 
   contract
 
@@ -371,15 +373,24 @@ fit_tuned_meta_learner <- function(object,
   ## hyperparameter tuning (when optimize) and the genuine meta-OOF below, so
   ## the held-out-fold meta predictions are produced on the identical splits.
   ## Stratify on the (original-scale) outcome so folds stay balanced on skewed
-  ## soil properties; rsample gracefully reduces breaks (with a warning) when
-  ## the meta_frame is too small to stratify finely.
+  ## soil properties. A draw rsample stratifies on fewer bins than asked, or
+  ## leaves unstratified, is reported from this unit as evaluate()'s and
+  ## fit()'s draws are (draw_stratified()).
   ## Seed set here (not via a side-effect in the caller) so the folds — which
   ## seed the Phase-2 conformal calibration — are reproducible regardless of
   ## any RNG use upstream of this point.
 
   set.seed(seed)
 
-  folds   <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+  drawn <- draw_stratified(
+    outcome      = meta_frame$.truth,
+    stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
+  )
+  report_strata_in_unit(drawn, "meta-learner's cross-validation folds")
+
+  folds   <- drawn$draw
   n_folds <- nrow(folds)
 
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
@@ -572,7 +583,8 @@ fit_tuned_meta_learner <- function(object,
     seed          = seed
   ))
 
-  with_run_records(contract, member_pred, warning_log)
+  with_run_records(contract, member_pred, warning_log,
+                   strata_line = strata_tree_line(drawn, "meta-learner CV"))
 
 }
 

@@ -15,10 +15,16 @@ one specific refusal, and filter warnings by what happened.
 \describe{
 \item{\code{horizons_error_input}}{The call cannot run as written: an
 argument outside its domain, a required input missing, or data that
-breaks a stated requirement. Raised before any work starts.}
+breaks a stated requirement. Raised before any work starts.
+\code{\link[=select_training]{select_training()}} refuses its arguments and its library's data once,
+with every problem it found in the field \code{findings}, as a validation
+error does.}
 \item{\code{horizons_error_validation}}{An object breaks its class contract,
 because it was edited by hand or written by an older version. Re-run
-the verb that wrote the field, or start again from \code{\link[=configure]{configure()}}.}
+the verb that wrote the field, or start again from \code{\link[=configure]{configure()}}. The
+message shows the first five checks that failed; the field \code{findings}
+holds every one, a character vector with one plain-text message per
+check.}
 \item{\code{horizons_error_dependency}}{A needed package is missing, or the
 environment cannot run the call (a parallel run under
 \code{devtools::load_all()}, whose workers load the installed build, or one
@@ -62,13 +68,17 @@ one row shaped as \code{horizons_error_prediction_failed}'s: \code{unit}
 (\code{"meta_learner"}), \code{config_id} (\code{NA}), \code{step}, \code{class} (the root
 cause's, e.g. \code{horizons_error_prediction_failed} for a member that
 cannot predict the test rows), \code{error_message} and \code{trace}.}
-\item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
-because the first configurations to run failed the same way across at
-least two models (the circuit breaker,
+\item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} or \code{\link[=fit]{fit()}} stopped
+early, because the first configurations or members to run failed the
+same way across at least two models (the circuit breaker,
 \code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
-\code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died. The rows finished
-so far travel as \code{results}; \code{NULL} from \code{ensemble()}, which has none
-before its meta-learner is built.}
+\code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died or lacks a
+package the run needs, or \code{\link[=evaluate]{evaluate()}} could not write to its
+\code{output_dir} (on the configs axis a checkpoint a worker could not
+write is a \code{skipped} warning instead, since every configuration has
+run by then). The rows finished so far travel
+as \code{results}; \code{NULL} from \code{ensemble()}, which has none before its
+meta-learner is built.}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
 warnings under \code{options(warn = 2)}. Instead of turning the first warning
 into an error that loses the result, the verb aborts with the finished
@@ -82,8 +92,14 @@ every sample failed quality control on every replicate and
 \code{on_all_outliers = "drop"} dropped it. One row per sample travels as
 \code{results}: its \code{sample_id} and \code{n_replicates}.}
 \item{\code{horizons_error_consent}}{(input) A library download was declined.}
-\item{\code{horizons_error_missing_predict_package}}{(dependency) \code{predict()}
-needs a model package that is not installed.}
+\item{\code{horizons_error_missing_package}}{(dependency) A package the call
+needs is not installed: a model's engine, or the package a feature
+selection step trains with (Boruta). \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}},
+\code{\link[=ensemble]{ensemble()}} and \code{predict()} check before any work starts, and refuse
+once, naming every missing package and what needs it. A package found
+missing later, where a unit ran (a parallel worker's library, or a
+package the check does not know of), raises it too, and the verbs that
+dispatch units then stop with \code{horizons_error_systemic}.}
 }
 }
 
@@ -97,7 +113,9 @@ is weaker than its output shows (small folds, every member below the
 prune threshold). \code{predict()} raises each distinct warning another
 package raised while predicting under this topic, naming the
 configurations (or an ensemble's units) that raised it, and
-\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files.
+\code{\link[=spectra]{spectra()}} each one raised while reading, naming the files, except
+one opusreader2 raises while it parses a file's metadata, which
+horizons does not read: that is a note on the log, naming the files.
 \code{\link[=average]{average()}} names the samples it averaged though every replicate
 failed quality control.}
 \item{\code{horizons_warning_skipped}}{Something asked for did not run, such

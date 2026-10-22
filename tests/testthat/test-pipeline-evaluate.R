@@ -97,6 +97,14 @@ build_checkpoints_d <- function(dir) {
 
 }
 
+## The log's notes on files in the checkpoint store it could not use
+## (log_unreadable_checkpoints()). The other notes a run on these fixtures
+## writes, rsample's on its small strata, are not under test where this is
+## read.
+store_notes <- function(log) {
+  log[log$type == "note" & grepl("could not be used as", log$message, fixed = TRUE), ]
+}
+
 ck_a <- function(.env = parent.frame()) {
   memo_dir("ck_a", build_checkpoints, prune = FALSE, .env = .env)
 }
@@ -236,6 +244,42 @@ describe("evaluate() - gate checks", {
       expect_error(evaluate(obj, prune_threshold = bad), "`prune_threshold`", fixed = TRUE,
                    class = "horizons_error_input")
     }
+
+  })
+
+  it("refuses, before anything is drawn, configurations whose engine or selection step needs a package that is not installed, naming each", {
+
+    local_mocked_bindings(
+      draw_eval_split        = function(...) stop("a split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    ## Packages that are installed nowhere, for cubist's engine and for the
+    ## boruta step
+    models <- MODEL_PACKAGES
+    models[["cubist"]] <- c("rules", "horizonsFakePkgXYZ123")
+    steps <- SELECTION_PACKAGES
+    steps[["boruta"]] <- "horizonsFakePkgABC456"
+    local_mocked_bindings(MODEL_PACKAGES = models, SELECTION_PACKAGES = steps)
+
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$configs$feature_selection[1] <- "boruta"
+
+    err <- expect_error(evaluate(obj), class = "horizons_error_missing_package")
+
+    expect_s3_class(err, "horizons_error_dependency")
+    expect_identical(rlang::call_name(err$call), "evaluate")
+    msg <- gsub("\\s+", " ", conditionMessage(err))   # undo cli line wrapping
+    expect_match(msg, "`evaluate()` needs 2 packages that are not installed.", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgXYZ123, needed for cubist", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgABC456, needed for boruta feature selection", fixed = TRUE)
+    expect_match(msg, "or leave out the models or the feature selection that need them in `configure()`",
+                 fixed = TRUE)
+
+    ## The configurations with everything installed run as before
+    obj$config$configs <- obj$config$configs[obj$config$configs$model == "rf", ]
+    obj$config$configs$feature_selection <- "none"
+    expect_error(evaluate(obj), "a split was drawn", fixed = TRUE)
 
   })
 
@@ -406,12 +450,15 @@ describe("evaluate() - its control", {
     ev <- got$value
     w  <- got$warnings[[1]]
 
+    ## The warning rows: rsample's notes on the 60-row draws are not under test
+    warned <- ev$log[ev$log$type == "warning", ]
+
     expect_length(got$warnings, 1L)
     expect_s3_class(w, "horizons_warning_substitution")
     expect_match(conditionMessage(w), "evaluate\\(\\).*offers 1 worker")
-    expect_identical(ev$log$verb, "evaluate")
-    expect_identical(ev$log$topic, "substitution")
-    expect_identical(w$log, ev$log)
+    expect_identical(warned$verb, "evaluate")
+    expect_identical(warned$topic, "substitution")
+    expect_identical(w$log, warned)
     expect_identical(ev$evaluation$parallelize_over, "sequential")
 
   })
@@ -1183,6 +1230,108 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
 
   })
 
+  it("prints a note under each draw rsample stratified on fewer strata than asked", {
+
+    ## 60 rows bin into three quartile strata, and the 48 training rows the
+    ## folds are drawn on into two
+    out <- evaluate_header(make_eval_object(n = 60, n_configs = 1))
+
+    split_line <- grep("│  Split: ", out, fixed = TRUE)
+    cv_line    <- grep("│  Tuning: ", out, fixed = TRUE)
+
+    expect_identical(out[split_line], "│  Split: 48 train / 12 test (80/20, stratified)")
+    expect_identical(out[split_line + 1L], "│  Stratified split on fewer strata: too little data for 4")
+    expect_identical(out[cv_line + 1L], "│  Stratified CV on fewer strata: too little data for 4")
+
+  })
+
+  it("warns once, recorded first, when rsample had too little data to stratify, in its words, and nothing else escapes", {
+
+    ## Read the fixture before anything is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    ## 30 rows: rsample warns twice on each draw, and draws both without strata
+    got <- collect_warnings(evaluate(make_eval_object(n = 30, n_configs = 1), seed = 42L))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    expect_true(all(vapply(got$warnings, inherits, logical(1), "horizons_warning")))
+    expect_length(sub, 1L)
+
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds found one stratum in the outcome", fixed = TRUE)
+    expect_match(msg, "Too little data to stratify", fixed = TRUE)
+
+    log <- got$value$log[got$value$log$type == "warning", ]
+    expect_identical(log$topic[log$topic == "substitution"], "substitution")
+    expect_identical(log$n[log$topic == "substitution"], 2L)
+    expect_identical(sub[[1]]$log, log[log$topic == "substitution", ])
+
+  })
+
+  it("records a draw rsample stratified on fewer strata as a note on the log, and warns nothing for it", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L))
+
+    expect_false(any(vapply(got$warnings, inherits, logical(1), "horizons_warning_substitution")))
+    expect_true(all(vapply(got$warnings, inherits, logical(1), "horizons_warning")))
+
+    notes <- got$value$log[got$value$log$type == "note", ]
+    expect_identical(nrow(notes), 2L)
+    expect_match(notes$message[1], "The stratified draw of the train/test split had too little data for 4 strata, so rsample drew it on fewer.",
+                 fixed = TRUE)
+    expect_match(notes$message[1], "Stratification will use 3 breaks instead", fixed = TRUE)
+    expect_match(notes$message[2], "The stratified draw of the cross-validation folds had too little data for 4 strata",
+                 fixed = TRUE)
+
+  })
+
+  it("warns substitution for the draws a zero-inflated outcome leaves unstratified, though rsample says nothing", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    ## 100 rows, 85 of them 0: the quartiles tie, so each draw forms one
+    ## stratum, and rsample draws both without strata, silently
+    obj <- make_eval_object(n = 100, n_configs = 1)
+    obj$data$analysis$SOC <- c(rep(0, 85), seq(0.5, 7.5, by = 0.5))
+
+    got <- collect_warnings(evaluate(obj, seed = 42L))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    expect_length(sub, 1L)
+
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the train/test split found one stratum in the outcome, so it was drawn without strata.",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the cross-validation folds found one stratum in the outcome", fixed = TRUE)
+
+    log <- got$value$log
+    expect_identical(log$n[log$topic %in% "substitution"], 2L)
+    expect_identical(sum(got$value$log$type == "note" & grepl("strata", got$value$log$message)), 0L)
+
+  })
+
   it("warns once, recorded first, that a failed stratified draw fell back, with why", {
 
     ## Read the fixture before anything is mocked (helper-memo.R)
@@ -1388,8 +1537,11 @@ describe("evaluate() - checkpointing", {
     skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
     expect_length(skipped, 1L)
     expect_match(conditionMessage(skipped[[1]]), "2 succeeded, but none has a cv_rpd value", fixed = TRUE)
-    expect_identical(ev$log$topic[ev$log$verb == "evaluate"], "skipped")
-    expect_setequal(ev$log$ids[[1]], obj$config$configs$config_id)
+    ## The skipped row: the folds rsample had too little data to stratify at
+    ## 40 rows are this call's substitution, not under test here
+    warned <- ev$log[ev$log$topic %in% "skipped", ]
+    expect_identical(warned$verb, "evaluate")
+    expect_setequal(warned$ids[[1]], obj$config$configs$config_id)
 
     ## fit() refuses it at its door, naming a metric the results hold
     err <- expect_error(fit(ev, compute_uq = FALSE, compute_ad = FALSE),
@@ -1426,8 +1578,9 @@ describe("evaluate() - checkpointing", {
     expect_length(skipped, 1L)
     expect_match(conditionMessage(skipped[[1]]), "1 configuration left out of the ranking, with no cv_rpd value.",
                  fixed = TRUE)
-    expect_identical(ev$log$ids[[1]], "cfg_001")
-    expect_identical(skipped[[1]]$log, ev$log)
+    warned <- ev$log[ev$log$type == "warning", ]
+    expect_identical(warned$ids[[1]], "cfg_001")
+    expect_identical(skipped[[1]]$log, warned)
 
   })
 
@@ -2085,9 +2238,9 @@ describe("evaluate() - checkpoint data provenance", {
                seed = 42L, control = control_horizons(output_dir = tmpdir))
     )
 
-    ## Nothing unusable in the store: no note on the log
+    ## Nothing unusable in the store: no note of it on the log
     expect_named(caught$value$log, names(new_log()))
-    expect_false(any(caught$value$log$verb == "evaluate" & caught$value$log$type == "note"))
+    expect_identical(nrow(store_notes(caught$value$log)), 0L)
     expect_equal(caught$value$evaluation$results$runtime_secs,
                  first$evaluation$results$runtime_secs)
 
@@ -2117,9 +2270,9 @@ describe("evaluate() - one checkpoint store (#42)", {
                          control = control_horizons(output_dir = tmpdir, verbose = TRUE))
     ))
 
-    ## (rsample's own warnings about the small strata are not under test)
+    ## (rsample's notes on the small strata are not under test)
     expect_false(any(grepl("cfg_001.rds", warns, fixed = TRUE)))
-    note <- second$log[second$log$type == "note", ]
+    note <- store_notes(second$log)
     expect_identical(nrow(note), 1L)
     expect_identical(note$ids[[1]], "checkpoints/cfg_001.rds")
     expect_match(note$message, "1 file in .* could not be used as a checkpoint, so its configuration was evaluated again.")
@@ -2163,7 +2316,7 @@ describe("evaluate() - one checkpoint store (#42)", {
     got <- second$evaluation$results
     expect_equal(got$cv_rpd[got$config_id == "rf_001"], real$cv_rpd)
 
-    note <- second$log$message[second$log$type == "note"]
+    note <- store_notes(second$log)$message
     expect_length(note, 1L)
     expect_true(grepl("file1a2b3c.rds: holds config rf_001; not a checkpoint name",
                       note, fixed = TRUE))
@@ -2214,6 +2367,186 @@ describe("evaluate() - one checkpoint store (#42)", {
 
     expect_s3_class(err, "horizons_error_input")
     expect_match(flat_message(err), "cfg_001.rds", fixed = TRUE)
+
+  })
+
+})
+
+## =========================================================================
+## A failed write to output_dir is systemic
+## =========================================================================
+## Every later write to the same directory would fail the same way, so the
+## run stops at once with the rows so far (the razor, rule 3). The writes
+## were base R's own: a read-only directory gave a warning and then an
+## unclassed "cannot open the connection", and a refused rename left a
+## temporary file behind and wrote nothing, without a word.
+
+## A directory that rejects writes, for the test's duration. Running as root
+## writes through the mode, which the test skips on: what the platform can do,
+## not the behaviour under test.
+local_read_only_dir <- function(path, .env = parent.frame()) {
+
+  Sys.chmod(path, "0555")
+  withr::defer(Sys.chmod(path, "0755"), envir = .env)
+  testthat::skip_if(file.access(path, 2L) == 0L, "the directory stays writable (root)")
+
+  invisible(path)
+
+}
+
+describe("write_output_file()", {
+
+  it("writes the file whole and returns NULL", {
+
+    dir  <- withr::local_tempdir()
+    path <- file.path(dir, "x.rds")
+
+    expect_null(write_output_file(list(a = 1), path))
+    expect_identical(readRDS(path), list(a = 1))
+    expect_identical(list.files(dir, all.files = TRUE, no.. = TRUE), "x.rds")
+
+  })
+
+  it("returns why it could not write into a read-only directory, raising nothing", {
+
+    dir <- local_read_only_dir(withr::local_tempdir())
+
+    expect_no_condition(why <- write_output_file(list(a = 1), file.path(dir, "x.rds")))
+    expect_match(why, "cannot open", fixed = TRUE)
+    expect_length(list.files(dir, all.files = TRUE, no.. = TRUE), 0L)
+
+  })
+
+  it("returns why a rename was refused, leaving no temporary file behind", {
+
+    dir <- withr::local_tempdir()
+    dir.create(file.path(dir, "x.rds"))   # a directory where the file should go
+
+    expect_no_condition(why <- write_output_file(list(a = 1), file.path(dir, "x.rds")))
+    expect_type(why, "character")
+    expect_identical(list.files(dir, all.files = TRUE, no.. = TRUE), "x.rds")
+
+  })
+
+})
+
+describe("evaluate() - a failed write to output_dir", {
+
+  it("stops at the first checkpoint it cannot write, naming the directory, with the rows so far, and runs nothing after", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        ran <<- c(ran, config_row$config_id)
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    tmpdir <- withr::local_tempdir()
+    store  <- file.path(tmpdir, "checkpoints")
+    dir.create(store)
+    dir.create(file.path(store, "cfg_001.rds"))   # the first rename is refused
+
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                control = control_horizons(output_dir = tmpdir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_identical(class(err)[1], "horizons_error_systemic")
+    expect_s3_class(err, "horizons_error_run")
+    expect_match(flat_message(err), "`evaluate()` could not write to", fixed = TRUE)
+    expect_match(flat_message(err), store, fixed = TRUE)
+    expect_match(flat_message(err), "cfg_001.rds: ", fixed = TRUE)
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(ran, "cfg_001")
+    expect_false(any(grepl("\\.tmp$", list.files(store, all.files = TRUE))))
+
+  })
+
+  it("stops before any configuration when output_dir cannot be created, with the empty results table", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        ran <<- c(ran, config_row$config_id)
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    parent <- local_read_only_dir(withr::local_tempdir())
+
+    expect_no_warning(err <- expect_error(
+      evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+               control = control_horizons(output_dir = file.path(parent, "run"))),
+      class = "horizons_error_systemic"
+    ))
+
+    expect_match(flat_message(err), "could not write to", fixed = TRUE)
+    expect_match(flat_message(err), file.path(parent, "run"), fixed = TRUE)
+    ## The directory's own failure, not the manifest's after it
+    expect_match(flat_message(err), "checkpoints: cannot create dir", fixed = TRUE)
+    expect_identical(nrow(err$results), 0L)
+    expect_true(all(names(create_failed_result(NA_character_)) %in% names(err$results)))
+    expect_identical(ran, character(0))
+
+  })
+
+  it("stops before any configuration when the manifest cannot be written, with the empty results table", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        ran <<- c(ran, config_row$config_id)
+        mock_eval_row(template, config_row$config_id, "success")
+      }
+    )
+
+    tmpdir <- withr::local_tempdir()
+    dir.create(file.path(tmpdir, "eval_manifest.rds"))   # its rename is refused
+
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                control = control_horizons(output_dir = tmpdir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_match(flat_message(err), "eval_manifest.rds: ", fixed = TRUE)
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(ran, character(0))
+    expect_false(any(grepl("\\.tmp$", list.files(tmpdir, all.files = TRUE))))
+
+  })
+
+  ## The configs axis returns the evaluation instead, since every
+  ## configuration has run by the time it knows (test-evaluate-parallel.R)
+  it("records the checkpoints the configs axis's workers could not write as one skipped warning, naming each configuration", {
+
+    collector <- log_open("evaluate")
+    log_unsaved_checkpoints(collector, c("cfg_002", "cfg_003"),
+                            c("cannot open {the} file", "another reason"),
+                            checkpoint_dir = "/run/checkpoints", output_dir = "/run")
+    rows <- log_close(collector)
+
+    expect_identical(rows$type, "warning")
+    expect_identical(rows$topic, "skipped")
+    expect_identical(rows$ids[[1]], c("cfg_002", "cfg_003"))
+    expect_match(rows$message, "2 configurations were evaluated, but their checkpoints could not be written to '/run/checkpoints'",
+                 fixed = TRUE)
+    expect_match(rows$message, "cfg_002.rds: cannot open {the} file", fixed = TRUE)
+    expect_match(rows$message, "a run resumed from '/run' evaluates them again", fixed = TRUE)
+
+    ## Nothing when every checkpoint was written
+    collector <- log_open("evaluate")
+    log_unsaved_checkpoints(collector, character(0), NULL, "/run/checkpoints", "/run")
+    expect_identical(nrow(log_close(collector)), 0L)
 
   })
 
@@ -2330,7 +2663,7 @@ describe("evaluate() - tuning-settings provenance", {
     ## A clean store reports nothing unreadable: these per-config files, so
     ## the resume records no note, and a directory with no checkpoints/.
     expect_named(second$log, names(new_log()))
-    expect_false(any(second$log$type == "note"))
+    expect_identical(nrow(store_notes(second$log)), 0L)
 
     store <- read_checkpoint_store(tmpdir)
     expect_length(store$rows, 2L)
@@ -2864,6 +3197,61 @@ describe("evaluate() - a worker's death", {
     expect_false(worker_death_signal(told("simpleError")))
     expect_false(worker_death_signal(caught("rlang_error")))
     expect_false(worker_death_signal(simpleWarning("A FutureInterruptError was caught.")))
+
+  })
+
+})
+
+
+## =========================================================================
+## A package missing where a configuration ran is systemic
+## =========================================================================
+## The door checks the packages in this session, so one missing mid-run is
+## missing on a worker, for every configuration that needs it: the run stops,
+## as for a worker's death, with the rows so far. It used to fail each such
+## configuration in turn, as a contained run failure, and the breaker, which
+## needs a failure spanning two models, did not trip.
+
+describe("evaluate() - a package missing where a configuration ran", {
+
+  it("stops the run as systemic, chained to the missing package, with the rows finished so far", {
+
+    real_spec <- define_model_spec
+
+    ## cubist's engine cannot be loaded where its configuration runs, though
+    ## the door found it in this session
+    local_mocked_bindings(define_model_spec = function(model) {
+      if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
+      real_spec(model)
+    })
+
+    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L)),
+                        class = "horizons_error_systemic")
+
+    expect_identical(class(err)[1], "horizons_error_systemic")
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_true(rlang::cnd_inherits(err, "packageNotFoundError"))
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(err$results$status, "success")
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A package `evaluate()` needs is not installed where its work ran", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgXYZ123", fixed = TRUE)
+    ## A sequential run: the hint covers it as well as a parallel one
+    expect_match(msg, "If the run was parallel, a worker's library lacks this one: install it there.", fixed = TRUE)
+    expect_match(msg, "If not, `evaluate()` does not check for it, which is a bug in horizons", fixed = TRUE)
+    expect_length(gregexpr("is not installed where its work ran", msg, fixed = TRUE)[[1]], 1L)
+
+  })
+
+  it("lets a dependency error that is not a missing package through, unwrapped", {
+
+    err <- expect_error(
+      stop_on_worker_death(abort_horizons("Another version.", kind = "dependency"), list(), NULL),
+      "Another version.", fixed = TRUE
+    )
+
+    expect_identical(class(err)[1], "horizons_error_dependency")
 
   })
 

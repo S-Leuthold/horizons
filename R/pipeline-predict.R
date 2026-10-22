@@ -536,18 +536,20 @@ check_predict_dots <- function(..., .level_default = NULL, .collector,
 #' horizons)` alone does not load them. A fresh session predicting a
 #' deserialized fit then fails with "no applicable method for 'predict'"
 #' (#65) instead of a clear message about a missing package. Called at the
-#' top of [predict.horizons_fit()] and [predict.horizons_ensemble()], with
-#' `config_ids` already resolved to the configs actually being predicted (not
-#' every config the object stores — a fit holding both an `rf` and a `mars`
-#' config should not need `earth` installed just to predict the `rf` one).
+#' door of [predict.horizons_fit()], [predict.horizons_ensemble()] and
+#' [ensemble()], with `config_ids` already resolved to the configs actually
+#' being predicted (not every config the object stores — a fit holding both
+#' an `rf` and a `mars` config should not need `earth` installed just to
+#' predict the `rf` one).
 #'
-#' Most of this is an availability preflight, not a dispatch fix. Once
+#' Most of this is an availability check, not a dispatch fix. Once
 #' `workflows`/`parsnip` are loaded, `parsnip`'s own `predict.model_fit()`
 #' dispatch loads each model's own engine package itself; horizons does not
 #' need to preload it for dispatch to work (see the rationale comment on
-#' [MODEL_PREDICT_PACKAGES], `R/constants.R`). Checking here instead means a
-#' genuinely missing (Suggested) engine package aborts with an actionable,
-#' package-naming message up front, rather than surfacing as an obscure
+#' [MODEL_PACKAGES], `R/constants.R`). Checking here instead means a
+#' genuinely missing (Suggested) engine package is refused with an
+#' actionable, package-naming message up front, through the check every
+#' verb shares ([check_packages()]), rather than surfacing as an obscure
 #' failure partway through prediction. `ranger` for the UQ quantile forest is
 #' the one case that is genuinely dispatch-critical, not just availability:
 #' `stats::predict()` there dispatches on a bare `ranger::ranger` object
@@ -557,12 +559,15 @@ check_predict_dots <- function(..., .level_default = NULL, .collector,
 #' @param config_ids Character vector of config_ids actually being predicted
 #'   (the resolved `config` argument for a fit, or the member set for an
 #'   ensemble — see the call sites).
+#' @param verb Character(1). The verb that refuses: `"predict"`, or
+#'   `"ensemble"`, which predicts its members.
 #' @param call The frame a refusal reports: the verb's.
 #' @return Invisibly `NULL`. Called for the side effect of loading
 #'   namespaces (and aborting when a required Suggested package is missing).
 #' @keywords internal
 #' @noRd
-ensure_predict_namespaces <- function(object, config_ids, call = rlang::caller_env()) {
+ensure_predict_namespaces <- function(object, config_ids, verb = "predict",
+                                      call = rlang::caller_env()) {
 
   configs <- object$config$configs
 
@@ -585,7 +590,9 @@ ensure_predict_namespaces <- function(object, config_ids, call = rlang::caller_e
   needs_ranger <- !inherits(object, "horizons_ensemble") &&
     any(!vapply(object$models$uq[config_ids], is.null, logical(1)))
 
-  needed <- compute_needed_predict_packages(models, needs_ranger)
+  ## A trained recipe's selection steps call no other package to bake, so
+  ## only the models' packages are needed
+  needed <- needed_packages(models, needs_ranger_for_uq = needs_ranger)
 
   ## workflows/parsnip/recipes are needed to dispatch on ANY stored workflow
   ## at all, regardless of model — folded into the same collect-then-abort-
@@ -596,107 +603,7 @@ ensure_predict_namespaces <- function(object, config_ids, call = rlang::caller_e
   needed[["parsnip"]]   <- unique(c(needed[["parsnip"]],   base_reason))
   needed[["recipes"]]   <- unique(c(needed[["recipes"]],   base_reason))
 
-  abort_on_missing_predict_packages(needed, call = call)
-
-}
-
-## ---------------------------------------------------------------------------
-## compute_needed_predict_packages() — model(s) -> package(s) (pure helper)
-## ---------------------------------------------------------------------------
-
-#' Compute the predict-time packages a set of models needs
-#'
-#' Pure: no `requireNamespace()` calls, no side effects. Factored out of
-#' [ensure_predict_namespaces()] so "which packages, and why" is directly
-#' testable without touching the search path or building a fitted object.
-#'
-#' @param models Character vector of model short names in use (the `model`
-#'   values of the config rows being predicted; may repeat).
-#' @param needs_ranger_for_uq Logical. Add `ranger` (reason: "prediction
-#'   intervals") when `TRUE` — the caller sets this when a per-config UQ
-#'   bundle is present, since [fit_uq()]'s quantile forest is always a bare
-#'   `ranger::ranger` object regardless of the config's own model.
-#' @return Named list: package name -> character vector of reasons (model
-#'   names, or a UQ note) that need it.
-#' @keywords internal
-#' @noRd
-compute_needed_predict_packages <- function(models, needs_ranger_for_uq = FALSE) {
-
-  needed <- list()
-
-  for (m in unique(models)) {
-
-    for (pkg in MODEL_PREDICT_PACKAGES[[m]] %||% character(0)) {
-
-      needed[[pkg]] <- unique(c(needed[[pkg]], m))
-
-    }
-
-  }
-
-  if (isTRUE(needs_ranger_for_uq)) {
-
-    needed[["ranger"]] <- unique(c(needed[["ranger"]], "prediction intervals"))
-
-  }
-
-  needed
-
-}
-
-## ---------------------------------------------------------------------------
-## abort_on_missing_predict_packages() — missing-package gate (silent helper)
-## ---------------------------------------------------------------------------
-
-#' Abort informatively when a predict-time package is not installed
-#'
-#' Factored out of [ensure_predict_namespaces()] so the missing-package abort
-#' path is unit-testable against a synthetic `needed` mapping, without a real
-#' fitted object or mocking `requireNamespace()`. Checks every needed package
-#' and aborts once, naming every missing one and what needs it — not on the
-#' first miss, which would hide the rest behind a fix-one-rerun-find-the-next
-#' cycle.
-#'
-#' @param needed Named list: package name -> character vector of reasons
-#'   (model names, or a UQ note) that need it.
-#' @param call The frame the refusal reports: the verb's.
-#' @return Invisibly `NULL`; aborts with class
-#'   `horizons_error_missing_predict_package` (kind `dependency`).
-#' @keywords internal
-#' @noRd
-abort_on_missing_predict_packages <- function(needed, call = rlang::caller_env()) {
-
-  missing <- names(needed)[
-    !vapply(names(needed), requireNamespace, logical(1), quietly = TRUE)
-  ]
-
-  if (length(missing) == 0) {
-
-    return(invisible(NULL))
-
-  }
-
-  ## Built with paste0(), not glue interpolation: pkg/reasons/hint are all
-  ## package- or model-controlled strings (never an upstream error message),
-  ## so there is no brace-injection risk here — but the resulting
-  ## {.pkg ...} / {.code ...} spans are still literal cli markup, rendered
-  ## when the abort parses the finished vector below.
-  bullets <- vapply(missing, function(pkg) {
-
-    reasons <- paste(needed[[pkg]], collapse = ", ")
-    ## Every predict-time package is on CRAN
-    hint    <- sprintf('install.packages("%s")', pkg)
-
-    paste0("{.pkg ", pkg, "}, needed for ", reasons, ": {.code ", hint, "}")
-
-  }, character(1))
-
-  names(bullets) <- rep("x", length(bullets))
-
-  abort_horizons(c(
-    "Predicting from this object needs {length(missing)} package{?s} that {?is/are} not installed.",
-    bullets
-  ), kind = "dependency", class = "horizons_error_missing_predict_package", call = call)
+  check_packages(needed, verb, call = call)
 
 }
 

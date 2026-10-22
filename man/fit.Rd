@@ -146,7 +146,8 @@ per-member results travel on the condition as \code{results}, and
 
 \code{fit()} warns once per kind at its end, after writing each warning to the
 object's \code{log}: a stratified draw (the calibration split, the folds, a
-cold start's split) that fell back to an unstratified one
+cold start's split) that came out unstratified, because the stratified
+draw failed or rsample formed one stratum from the outcome
 (\code{horizons_warning_substitution}); a smallest assessment fold under
 \code{SMALL_FOLD_ROWS} rows, or every member below \code{evaluate()}'s prune
 threshold (\code{horizons_warning_quality}); UQ and AD switched off because the
@@ -180,11 +181,14 @@ member alone, and \code{models$results} records the step and the cause in
 \code{control_horizons(keep_traces = TRUE)}, its backtrace as text in \code{trace}.
 A member's own warnings, from the engines and from tune, are in
 \code{models$results$warnings}. A bug, a refusal or a missing package is not
-the member's and stops the call. When the first members fail the same
+the member's and stops the call: before any member is fitted, \code{fit()}
+refuses members whose model's engine or feature-selection step needs a
+package that is not installed, naming each (\code{horizons_error_missing_package}). When the first members fail the same
 way across at least two models, \code{fit()} stops with
 \code{horizons_error_systemic} and the members so far as \code{results}
 (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to fit every
-member), and it stops the same way when a parallel worker dies. With
+member), and it stops the same way when a parallel worker dies or lacks a
+package the members need. With
 \code{control_horizons(debug = TRUE)} the re-tunes run in this session and the
 first failure, inside tuning included, stops the call with its backtrace.
 Before a parallel run \code{fit()} refuses a session loaded with

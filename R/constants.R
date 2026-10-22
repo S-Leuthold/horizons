@@ -31,26 +31,26 @@ MODEL_SPECS <- list(
   mars        = list(fn = "mars",         engine = "earth")
 )
 
-# Predict-time namespace requirements per model (#65), keyed by the same short
-# names as MODEL_SPECS and VALID_MODELS. Not derivable from MODEL_SPECS$engine
-# alone: cubist_rules() needs `rules` (registers the parsnip spec) alongside
-# `Cubist` (the model implementation), and boost_tree(engine = "lightgbm")
-# needs `bonsai` (registers the engine) alongside `lightgbm`.
+# The packages each model needs, to fit it and to predict from it (#65),
+# keyed by the same short names as MODEL_SPECS and VALID_MODELS. Not derivable
+# from MODEL_SPECS$engine alone: cubist_rules() needs `rules` (registers the
+# parsnip spec) alongside `Cubist` (the model implementation), and
+# boost_tree(engine = "lightgbm") needs `bonsai` (registers the engine)
+# alongside `lightgbm`.
 #
-# Mostly an AVAILABILITY PREFLIGHT, not a dispatch fix: once workflows and
-# parsnip are loaded (ensure_predict_namespaces() always requires both, along
-# with recipes), parsnip's own predict.model_fit() dispatch loads each
-# model's engine package itself via load_libs() — horizons does not need to
-# preload it for dispatch to work. Checking here instead means a genuinely
-# missing (Suggested) engine package aborts with an actionable,
-# package-naming message up front, rather than surfacing as an obscure
-# failure partway through prediction. The one dispatch-critical case is
-# `ranger` for the UQ quantile forest: stats::predict() there dispatches on a
-# bare ranger::ranger object directly, with no parsnip/workflows layer to
-# auto-load it, so a missing ranger namespace genuinely breaks dispatch, not
-# just availability (see the ranger branch in ensure_predict_namespaces()).
-# Read by ensure_predict_namespaces() (R/pipeline-predict.R).
-MODEL_PREDICT_PACKAGES <- list(
+# Mostly an AVAILABILITY CHECK, not a dispatch fix: once workflows and parsnip
+# are loaded (ensure_predict_namespaces() always requires both, along with
+# recipes), parsnip's own predict.model_fit() dispatch loads each model's
+# engine package itself via load_libs(), and tune loads it to fit. Checking at
+# the door instead means a genuinely missing (Suggested) engine package is
+# refused with an actionable, package-naming message before any work, rather
+# than failing every configuration that needs it. The one dispatch-critical
+# case is `ranger` for the UQ quantile forest: stats::predict() there
+# dispatches on a bare ranger::ranger object directly, with no
+# parsnip/workflows layer to auto-load it, so a missing ranger namespace
+# genuinely breaks dispatch, not just availability (see the ranger branch in
+# ensure_predict_namespaces()). Read by needed_packages() (R/utils-models.R).
+MODEL_PACKAGES <- list(
   rf          = "ranger",
   cubist      = c("rules", "Cubist"),
   xgboost     = "xgboost",
@@ -60,6 +60,19 @@ MODEL_PREDICT_PACKAGES <- list(
   mlp         = "nnet",
   lightgbm    = c("bonsai", "lightgbm"),
   mars        = "earth"
+)
+
+# The packages each feature-selection method's recipe step calls when it is
+# trained, keyed by VALID_FEATURE_SELECTION: the step's required_pkgs() less
+# horizons. Boruta is the one in Suggests. A trained step's bake() calls none
+# of them, so predict() does not need them. Read by needed_packages()
+# (R/utils-models.R).
+SELECTION_PACKAGES <- list(
+  none        = character(0),
+  pca         = character(0),
+  correlation = "zoo",
+  boruta      = c("Boruta", "ranger"),
+  cars        = "pls"
 )
 
 # The most components the plsr model tunes over (#216). The runners cap it

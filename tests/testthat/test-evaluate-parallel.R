@@ -192,6 +192,24 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("says on the row it returns, raising nothing, when its checkpoint cannot be written", {
+
+    shared <- worker_payload()
+    shared$checkpoint_dir <- withr::local_tempdir()
+    dir.create(file.path(shared$checkpoint_dir, "cfg_001.rds"))   # the rename is refused
+
+    testthat::local_mocked_bindings(
+      evaluate_single_config = function(...) tibble::tibble(config_id = "cfg_001", status = "failed"),
+      .package = "horizons"
+    )
+
+    expect_no_error(row <- horizons:::evaluate_config_worker(1L, shared))
+
+    expect_type(attr(row, "checkpoint_failed"), "character")
+    expect_identical(list.files(shared$checkpoint_dir, all.files = TRUE, no.. = TRUE), "cfg_001.rds")
+
+  })
+
   it("refuses a parallel run under devtools::load_all(), on either axis, before anything is drawn", {
 
     ## The seam reports load_all(), so this runs on an installed build too;
@@ -500,6 +518,77 @@ describe("evaluate() - the parallel axis's setup", {
 
 })
 
+## A worker cannot stop the others, so a checkpoint it could not write is
+## found only once every configuration has run: the evaluation is returned,
+## with one warning. The sequential path stops at the first failed write
+## (test-pipeline-evaluate.R).
+
+describe("evaluate() - a checkpoint a configs-axis worker could not write", {
+
+  it("returns the evaluation on the configs axis when a worker could not write its checkpoint, with one skipped warning naming it", {
+
+    ## A real result row to return, read before anything is mocked
+    ## (helper-memo.R)
+    template <- allow_par_run()$result$evaluation$results[1, ]
+
+    ## The dispatch runs each worker body in this session, so this runs
+    ## under load_all() too
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      worker_horizons_version = function() as.character(utils::packageVersion("horizons")),
+      check_parallel_backend  = function(...) TRUE,
+      registered_workers      = function() 2L,
+      registered_plan_label   = function() "multisession",
+      evaluate_single_config  = function(config_row, ...) {
+        row <- template
+        row$config_id <- config_row$config_id
+        row
+      }
+    )
+    local_mocked_bindings(future_map = function(.x, .f, ..., .options = NULL) lapply(.x, .f, ...),
+                          .package = "furrr")
+
+    tmpdir <- withr::local_tempdir()
+    store  <- file.path(tmpdir, "checkpoints")
+    dir.create(store)
+    dir.create(file.path(store, "cfg_002.rds"))   # the second worker's rename is refused
+
+    got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                          output_dir = tmpdir))
+    )
+
+    ## Every configuration's row is returned, and none carries the reason
+    res <- got$value$evaluation$results
+    expect_setequal(res$config_id, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_identical(res$status, rep("success", 3L))
+    expect_null(attr(res, "checkpoint_failed"))
+
+    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
+    expect_length(skipped, 1L)
+
+    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(skipped[[1]])))
+    expect_match(msg, "1 configuration was evaluated, but its checkpoint could not be written to", fixed = TRUE)
+    expect_match(msg, store, fixed = TRUE)
+    expect_match(msg, "cfg_002.rds: ", fixed = TRUE)
+    expect_match(msg, "a run resumed from", fixed = TRUE)
+
+    ## Recorded on the log first, naming the configuration
+    row <- got$value$log[got$value$log$topic %in% "skipped" & grepl("checkpoint", got$value$log$message), ]
+    expect_identical(nrow(row), 1L)
+    expect_identical(row$ids[[1]], "cfg_002")
+    expect_identical(skipped[[1]]$log, row)
+
+    ## The others' checkpoints were written, and no temporary file is left
+    expect_true(file.exists(file.path(store, "cfg_001.rds")) && !dir.exists(file.path(store, "cfg_001.rds")))
+    expect_true(file.exists(file.path(store, "cfg_003.rds")))
+    expect_false(any(grepl("\\.tmp$", list.files(store, all.files = TRUE))))
+
+  })
+
+})
+
 describe("evaluate() - output_dir and the configs axis (#233)", {
 
   it("refuses an explicit configs axis without an output_dir before anything runs", {
@@ -663,6 +752,86 @@ describe("evaluate() - configs axis", {
 
     expect_identical(run$value$plan_after, run$value$plan_before)
     expect_identical(run$value$workers_after, 2L)
+
+  })
+
+})
+
+
+## =========================================================================
+## A package missing on a worker
+## =========================================================================
+## evaluate() checks the configurations' packages in this session, so a worker
+## whose library lacks one fails every configuration that needs it: the run
+## stops as systemic, with the rows so far. The signal differs by axis. On the
+## resamples axis tune's workers attach the workflow's packages with
+## library(), which raises base R's packageNotFoundError; on the configs axis
+## tune runs inside the worker and refuses at its own door, by text. Both are
+## read here from real workers whose library hides kernlab.
+
+## A library holding every package this session sees but `hidden`, and the
+## site library variable pointing at it, for workers started in the test. A
+## worker's library paths always end in the site libraries and base R's.
+local_hidden_package_lib <- function(hidden, .env = parent.frame()) {
+
+  dir <- withr::local_tempdir(.local_envir = .env)
+
+  for (lib in .libPaths()) {
+    for (pkg in list.files(lib)) {
+      target <- file.path(dir, pkg)
+      if (pkg != hidden && !file.exists(target)) file.symlink(file.path(lib, pkg), target)
+    }
+  }
+
+  withr::local_envvar(R_LIBS_SITE = dir, .local_envir = .env)
+
+  dir
+
+}
+
+describe("evaluate() - a package missing on a worker", {
+
+  it("stops the run as systemic, with the rows so far, on either axis, when a worker lacks a package this session has (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("kernlab")
+
+    lib <- local_hidden_package_lib("kernlab")
+    local_plan(future::multisession, workers = 2, rscript_libs = c(lib, .Library))
+
+    ## The fixture reaches the state under test: a worker runs this horizons
+    ## without kernlab, which this session has
+    expect_false(future::value(future::future(requireNamespace("kernlab", quietly = TRUE), seed = FALSE)))
+    expect_identical(future::value(future::future(as.character(utils::packageVersion("horizons")), seed = FALSE)),
+                     as.character(utils::packageVersion("horizons")))
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model <- c("plsr", "svm_rbf")
+
+    ## The resamples axis: plsr runs first and is kept
+    err <- expect_error(
+      suppressWarnings(evaluate(obj, seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_true(rlang::cnd_inherits(err, "packageNotFoundError"))
+    expect_identical(err$results$config_id, "cfg_001")
+
+    ## The configs axis: tune's own refusal in the worker
+    dir <- withr::local_tempdir()
+    err <- expect_error(
+      suppressWarnings(evaluate(obj, seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                           output_dir = dir))),
+      class = "horizons_error_systemic"
+    )
+
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "is required for kernlab", fixed = TRUE)
 
   })
 

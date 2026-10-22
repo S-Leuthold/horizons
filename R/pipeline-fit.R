@@ -66,7 +66,8 @@
 #' @section What fit() reports:
 #' `fit()` warns once per kind at its end, after writing each warning to the
 #' object's `log`: a stratified draw (the calibration split, the folds, a
-#' cold start's split) that fell back to an unstratified one
+#' cold start's split) that came out unstratified, because the stratified
+#' draw failed or rsample formed one stratum from the outcome
 #' (`horizons_warning_substitution`); a smallest assessment fold under
 #' `SMALL_FOLD_ROWS` rows, or every member below `evaluate()`'s prune
 #' threshold (`horizons_warning_quality`); UQ and AD switched off because the
@@ -98,11 +99,14 @@
 #' `control_horizons(keep_traces = TRUE)`, its backtrace as text in `trace`.
 #' A member's own warnings, from the engines and from tune, are in
 #' `models$results$warnings`. A bug, a refusal or a missing package is not
-#' the member's and stops the call. When the first members fail the same
+#' the member's and stops the call: before any member is fitted, `fit()`
+#' refuses members whose model's engine or feature-selection step needs a
+#' package that is not installed, naming each (`horizons_error_missing_package`). When the first members fail the same
 #' way across at least two models, `fit()` stops with
 #' `horizons_error_systemic` and the members so far as `results`
 #' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
-#' member), and it stops the same way when a parallel worker dies. With
+#' member), and it stops the same way when a parallel worker dies or lacks a
+#' package the members need. With
 #' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
 #' first failure, inside tuning included, stops the call with its backtrace.
 #' Before a parallel run `fit()` refuses a session loaded with
@@ -439,6 +443,11 @@ fit <- function(x,
   tuning       <- x$config$tuning
   cv_folds     <- tuning$cv_folds
 
+  ## Every engine and selection step the members need, before any is
+  ## fitted. Only the members: an evaluation that also holds a mars
+  ## configuration does not need earth to fit the others.
+  check_config_packages(all_configs[all_configs$config_id %in% top_configs$config_id, ], "fit")
+
   ## configure() stores the screening and the final re-tune budgets
   ## separately; fit() used to pass the screening one to the re-tune, so the
   ## user-facing `final_bayesian_iter` did nothing (#46). The tree header
@@ -729,12 +738,11 @@ fit <- function(x,
       ")\n"
     ))
 
-    if (cold_start && cold$strata_failed) {
+    split_note <- if (cold_start) strata_tree_line(cold, "split")
 
-      cat(paste0(
-        "\u2502  ", cli::col_yellow("Stratified split failed, ",
-                                     "retrying without strata"), "\n"
-      ))
+    if (!is.null(split_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(split_note), "\n"))
 
     }
 
@@ -758,12 +766,11 @@ fit <- function(x,
         "\n"
       ))
 
-      if (calib_drawn$strata_failed) {
+      calib_strata <- strata_tree_line(calib_drawn, "calibration split")
 
-        cat(paste0(
-          "\u2502  ", cli::col_yellow("Stratified calibration split failed, ",
-                                       "retrying without strata"), "\n"
-        ))
+      if (!is.null(calib_strata)) {
+
+        cat(paste0("\u2502  ", cli::col_yellow(calib_strata), "\n"))
 
       }
 
@@ -781,13 +788,11 @@ fit <- function(x,
       "\n"
     ))
 
-    if (cv_drawn$strata_failed) {
+    cv_note <- strata_tree_line(cv_drawn, "CV")
 
-      cat(paste0(
-        "\u2502  ", cli::col_yellow(
-          "Stratified CV failed, retrying without strata"
-        ), "\n"
-      ))
+    if (!is.null(cv_note)) {
+
+      cat(paste0("\u2502  ", cli::col_yellow(cv_note), "\n"))
 
     }
 
@@ -1329,8 +1334,8 @@ member_row <- function(res) {
 #' With one configuration there is nothing for `evaluate()` to screen, so
 #' `fit()` starts from the configured object (#45). This checks that the
 #' object can start cold, draws the train/test split `evaluate()` would draw
-#' at the same `seed` ([draw_eval_split()], after the same sample-size floor
-#' and the same Savitzky-Golay window check, [evaluation_recipe()]), and
+#' at the same `seed` ([draw_eval_split()], after the same Savitzky-Golay
+#' window check, [evaluation_recipe()]), and
 #' returns the record `fit()` stores in `x$evaluation` in place of
 #' `evaluate()`'s. The record carries every key [validate_horizons_eval()]
 #' requires, with `screened = FALSE`, and `recipe` and `response_trim` as
@@ -1352,8 +1357,11 @@ member_row <- function(res) {
 #'   caller, `fit()`.
 #' @return List with `evaluation` (the record), `stratified` (`FALSE` when
 #'   the split is unstratified), `strata_failed` (`TRUE` when the
-#'   stratified draw failed and was retried without strata) and
-#'   `strata_error` (why), as [draw_eval_split()] returns them. Aborts with class
+#'   stratified draw failed and was retried without strata),
+#'   `strata_error` (why) and `strata_warnings` (what rsample warned of), as
+#'   [draw_eval_split()] returns them. It runs no sample-size check: `fit()`
+#'   checks the rows its folds are drawn from, which refuses every case a
+#'   check here would. Aborts with class
 #'   `horizons_error_input` when the object has no configuration or more than
 #'   one, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
@@ -1449,9 +1457,10 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
       runtime_secs  = 0,
       timestamp     = Sys.time()
     ),
-    stratified    = drawn$stratified,
-    strata_failed = drawn$strata_failed,
-    strata_error  = drawn$strata_error
+    stratified      = drawn$stratified,
+    strata_failed   = drawn$strata_failed,
+    strata_error    = drawn$strata_error,
+    strata_warnings = drawn$strata_warnings
   )
 
 }

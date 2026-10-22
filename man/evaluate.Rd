@@ -98,7 +98,14 @@ aborts, naming what differs.
 So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one
-\code{output_dir} per outcome. The ranking \code{metric} is not checked, since
+\code{output_dir} per outcome. A write to \code{output_dir} that fails (the
+directory, the manifest or a checkpoint) stops the run with
+\code{horizons_error_systemic}, naming the directory, the rows finished so
+far as its \code{results}. On the configs axis a checkpoint a worker could
+not write is known only once every configuration has run, so the
+evaluation is returned, with one \code{horizons_warning_skipped} naming the
+directory and the configurations a resumed run evaluates again. The
+ranking \code{metric} is not checked, since
 every row carries all six cross-validated metrics. A row scored under an
 earlier scoring schema, or recording less of the training data and
 settings than this run does, was written by an earlier version: it is
@@ -183,6 +190,9 @@ on them) describe the trimmed population; the test metrics do not.
 
 \section{Failed configurations}{
 
+Before anything runs, \code{evaluate()} refuses configurations whose model's
+engine or feature-selection step needs a package that is not installed,
+naming each package and what needs it (\code{horizons_error_missing_package}).
 Each configuration runs as one unit. A failure in any of its steps fails
 that configuration alone: its row has \code{status} \code{"failed"}, an
 \code{error_message} naming the step and the cause ("Grid search failed:
@@ -203,9 +213,11 @@ the first configurations to run fail the same way across at least two
 models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so far
 as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
 run every configuration; the configs axis has no breaker), and their
-failures are not checkpointed. A parallel worker that dies stops the run
-the same way, during a Bayesian iteration too: tune catches future's error
-there, so the death is read from what future.apply reports first
+failures are not checkpointed. A parallel worker that lacks a package the
+configurations need, which this session has, stops the run the same way.
+So does a parallel worker that dies, during a Bayesian iteration too: tune
+catches future's error there, so the death is read from what future.apply
+reports first
 ("Caught FutureInterruptError. Canceling all iterations ...", a warning
 before future.apply 1.21.0 and a message since), which has no class and
 is matched by its text. When some configurations failed and

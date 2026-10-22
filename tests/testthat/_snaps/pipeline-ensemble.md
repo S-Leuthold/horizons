@@ -35,6 +35,28 @@
       │
       └─ Class: horizons_fit → horizons_ensemble
 
+# ensemble() - the summary it prints / prints the line evaluate() and fit() print for a draw that did not stratify as asked, under the members and under the UQ
+
+    Code
+      render_ensemble_summary(summary_contract(improvement = 0.0412, coef = c(0.5,
+        0.3, 0.2)), "rpd", lines)
+    Output
+      │  Top members (by weight)
+      │  ├─ cubist_log: 0.5
+      │  ├─ plsr_log: 0.3
+      │  └─ plsr_sqrt: 0.2
+      │  Stratified meta-learner CV on fewer strata: too little data for 4
+      │
+      │  Summary
+      │  ├─ Ensemble rpd: 1.87
+      │  ├─ Improvement over best member: +0.0412
+      │  ├─ UQ: CV+ conformal (n_calib = 24)
+      │  │  ├─ Stratified CV+ folds failed, retrying without strata
+      │  │  └─ UQ coverage: 83.3% on 12 held-out test rows (nominal 90%, mean width 3.04)
+      │  └─ Runtime: 12.4s
+      │
+      └─ Class: horizons_fit → horizons_ensemble
+
 # ensemble() - the summary it prints / orders members by the size of their weight, and flags an ensemble worse than its best member
 
     Code

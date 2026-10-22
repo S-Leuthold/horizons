@@ -402,7 +402,9 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 #'   (`predictors`, `truth`, `sample_id`), or `NULL` when there are none.
 #'   Default `NULL`.
 #'
-#' @return The uq bundle list (see [fit_ensemble_uq()]). Aborts with class
+#' @return The uq bundle list (see [fit_ensemble_uq()]), with the tree's line
+#'   for its folds as the attribute `"strata_line"` ([strata_tree_line()],
+#'   `NULL` when they stratified as asked). Aborts with class
 #'   `horizons_error_run` when a size gate fails.
 #'
 #' @noRd
@@ -459,10 +461,18 @@ compute_ensemble_uq <- function(oof,
 
   ## Fresh partition, disjoint-by-construction from the tuning folds (which
   ## were drawn at the base seed). Stratify on .truth, mirroring the
-  ## meta-learner's own fold draw.
+  ## meta-learner's own fold draw, and reported from this unit as it is.
   set.seed(conformal_seed)
 
-  folds_cal <- rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+  drawn_cal <- draw_stratified(
+    outcome      = meta_frame$.truth,
+    stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
+                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
+    unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
+  )
+  report_strata_in_unit(drawn_cal, "CV+ calibration folds")
+
+  folds_cal <- drawn_cal$draw
 
   fold_fit <- unit_step("cv_plus_fold_models", fit_uq_fold_models(
     meta_frame    = meta_frame,
@@ -567,7 +577,9 @@ compute_ensemble_uq <- function(oof,
 
   })
 
-  list(
+  ## The tree's line for the folds travels on the bundle, for ensemble() to
+  ## read and drop
+  bundle <- list(
     method          = "cv_plus",
     ensemble_method = contract$method,
     members         = contract$weights$member,
@@ -580,6 +592,10 @@ compute_ensemble_uq <- function(oof,
     mean_width      = mean(widths, na.rm = TRUE),
     timestamp       = Sys.time()
   )
+
+  attr(bundle, "strata_line") <- strata_tree_line(drawn_cal, "CV+ folds")
+
+  bundle
 
 }
 
@@ -614,8 +630,6 @@ ensemble_trimmed_rows <- function(x, members, call = rlang::caller_env()) {
   trimmed_ids <- x$evaluation$response_trim$trimmed_ids %||% character(0)
 
   if (length(trimmed_ids) == 0) return(NULL)
-
-  ensure_predict_namespaces(x, members)
 
   role_map    <- x$data$role_map
   id_col      <- id_column(role_map)
@@ -749,7 +763,10 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
-#' @return `x` with `$ensemble$uq` populated. [ensemble()] then adds the
+#' @return `x` with `$ensemble$uq` populated, and the tree's line for the CV+
+#'   folds as the attribute `"strata_line"`, which [ensemble()] reads and
+#'   drops (`strata_tree_line()`, `NULL` when they stratified as asked).
+#'   [ensemble()] then adds the
 #'   measured coverage on the test rows, `test_coverage`, `test_mean_width`
 #'   and `n_test` (`ensemble_test_coverage()`). The bundle carries: `method`
 #'   (`"cv_plus"`), `ensemble_method`, `members`, `fold_models`, `calib`
@@ -806,7 +823,13 @@ fit_ensemble_uq <- function(x,
 
   }
 
+  ## The tree's line for the folds moves from the bundle to the unit's
+  ## value, for ensemble() to read and drop
+  strata_line <- attr(bundle, "strata_line")
+  attr(bundle, "strata_line") <- NULL
+
   x$ensemble$uq <- bundle
+  attr(x, "strata_line") <- strata_line
 
   x
 

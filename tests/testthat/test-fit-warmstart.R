@@ -854,6 +854,22 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
 describe("bayes_search()", {
 
+  it("raises a package missing on a worker during the search again, rather than falling back from it", {
+
+    ## tune's loop recovers from the error and returns; the search records it
+    ## as it is raised
+    local_mocked_bindings(tune_bayes = function(...) {
+      loadNamespace("horizonsFakePkgXYZ123")
+    }, .package = "tune")
+
+    expect_no_warning(expect_error(
+      bayes_search(workflow = NULL, resamples = NULL, initial = NULL, iter = 1L,
+                   param_info = NULL, metrics = NULL),
+      class = "packageNotFoundError"
+    ))
+
+  })
+
   it("caps the line tune logged for a candidate it dropped, as another package's text, when debug stops on it", {
 
     long <- paste0("All models failed for: ", strrep("penalty=1e-04, ", 70))

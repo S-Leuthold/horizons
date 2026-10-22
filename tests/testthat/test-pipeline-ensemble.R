@@ -350,7 +350,7 @@ describe("ensemble() - preflight validation", {
 
 describe("ensemble() - predict namespaces", {
 
-  it("loads the members' predict namespaces before scoring them on the test rows, and before predicting", {
+  it("checks and loads the members' predict namespaces at its door, before anything is built, and before predicting", {
 
     fitted   <- ens_fitted()
     ens      <- ens_built("weighted")
@@ -358,25 +358,49 @@ describe("ensemble() - predict namespaces", {
 
     ## Under an installed package the Imports load lazily, so a fitted object
     ## read into a fresh session has no workflows predict method registered
-    ## until something loads it. The member scoring and
-    ## predict.horizons_ensemble() must both ask for it.
+    ## until something loads it. ensemble() asks at its door, for the members
+    ## it scores on the test rows, and predict.horizons_ensemble() asks too.
     requested <- NULL
-    local_mocked_bindings(
-      ensure_predict_namespaces = function(object, config_ids) {
+
+    testthat::with_mocked_bindings(
+      expect_error(ensemble(fitted, method = "weighted"), class = "namespaces_asked"),
+      ensure_predict_namespaces = function(object, config_ids, ...) {
+        requested <<- config_ids
+        rlang::abort("asked", class = "namespaces_asked")
+      },
+      build_oof_matrix = function(...) stop("the meta-learner was built")
+    )
+
+    expect_identical(requested, gather_members(fitted)$members)
+
+    requested <- NULL
+    testthat::with_mocked_bindings(
+      predict(ens, test_set, interval = FALSE),
+      ensure_predict_namespaces = function(object, config_ids, ...) {
         requested <<- config_ids
         invisible(NULL)
       }
     )
 
-    members <- fitted$models$best_config
-    invisible(tryCatch(predict_members_on_test(fitted, members), error = function(e) NULL))
-
-    expect_identical(requested, members)
-
-    requested <- NULL
-    predict(ens, test_set, interval = FALSE)
-
     expect_identical(requested, ens$ensemble$weights$member)
+
+  })
+
+  it("refuses, before anything is built, members whose engine is not installed", {
+
+    fitted <- ens_fitted()
+
+    models <- MODEL_PACKAGES
+    for (m in unique(fitted$config$configs$model)) models[[m]] <- "horizonsFakePkgXYZ123"
+    local_mocked_bindings(MODEL_PACKAGES = models,
+                          build_oof_matrix = function(...) stop("the meta-learner was built"))
+
+    err <- expect_error(ensemble(fitted, method = "weighted"),
+                        class = "horizons_error_missing_package")
+
+    expect_identical(rlang::call_name(err$call), "ensemble")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "`ensemble()` needs 1 package that is not installed.", fixed = TRUE)
 
   })
 
@@ -410,6 +434,81 @@ describe("ensemble() - a member's warning on the test rows", {
 
     expect_length(run$warnings, 0L)
     expect_identical(sum(grepl("the member engine says hello", kept, fixed = TRUE)), 1L)
+
+  })
+
+})
+
+## =========================================================================
+## ensemble() — its stratified draws
+## =========================================================================
+## The meta-learner's folds and the CV+ folds are drawn inside their units,
+## through the draw evaluate() and fit() make, and reported from there in the
+## same words: a draw that came out unstratified is the substitution, one
+## rsample stratified on fewer bins a note. rsample's own warning used to be
+## kept raw on the ensemble's warnings and never reached the log.
+
+describe("ensemble() - its stratified draws", {
+
+  it("records a draw rsample stratified on fewer bins as a note from each unit, in its words, and raises nothing", {
+
+    ## The stored fit's meta frame has 40 to 79 rows, so rsample stratifies
+    ## both draws on two bins rather than four
+    fitted <- ens_fitted()
+
+    got <- collect_warnings(ensemble(fitted, method = "penalized", optimize = FALSE))
+
+    expect_length(got$warnings, 0L)
+
+    log   <- got$value$log[got$value$log$verb == "ensemble", ]
+    notes <- log[log$type == "note" & grepl("stratified draw", log$message, fixed = TRUE), ]
+
+    expect_identical(nrow(notes), 2L)
+    expect_match(notes$message[1], "The stratified draw of the meta-learner's cross-validation folds had too little data for 4 strata, so rsample drew it on fewer.",
+                 fixed = TRUE)
+    expect_match(notes$message[1], "In the ensemble's meta-learner", fixed = TRUE)
+    expect_match(notes$message[2], "The stratified draw of the CV+ calibration folds had too little data for 4 strata", fixed = TRUE)
+    expect_match(notes$message[2], "Stratification will use 2 breaks instead", fixed = TRUE)
+
+    ## The ensemble's own warnings keep the same lines, not rsample's alone
+    kept <- got$value$ensemble$warnings[grepl("Stratification will use", got$value$ensemble$warnings, fixed = TRUE)]
+
+    expect_length(kept, 2L)
+    expect_true(all(grepl("The stratified draw of the", kept, fixed = TRUE)))
+
+  })
+
+  it("falls back to an unstratified draw when a stratified one fails, and warns substitution once for both units", {
+
+    fitted <- ens_fitted()
+
+    real_vfold_cv <- rsample::vfold_cv
+
+    local_mocked_bindings(
+      vfold_cv = function(data, v = 10, repeats = 1, strata = NULL, ...) {
+        if (!missing(strata)) stop("stratification refused")
+        real_vfold_cv(data, v = v, repeats = repeats, ...)
+      },
+      .package = "rsample"
+    )
+
+    got <- collect_warnings(ensemble(fitted, method = "penalized", optimize = FALSE))
+    sub <- Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings)
+
+    ## The meta-learner was built and its intervals calibrated
+    expect_s3_class(got$value, "horizons_ensemble")
+    expect_false(is.null(got$value$ensemble$uq))
+
+    expect_length(sub, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(sub[[1]]))
+    expect_match(msg, "The stratified draw of the meta-learner's cross-validation folds failed, so it was drawn without strata.",
+                 fixed = TRUE)
+    expect_match(msg, "The stratified draw of the CV+ calibration folds failed", fixed = TRUE)
+    expect_match(msg, "stratification refused", fixed = TRUE)
+
+    log <- got$value$log[got$value$log$verb == "ensemble" & got$value$log$topic %in% "substitution", ]
+    expect_identical(nrow(log), 1L)
+    expect_identical(sub[[1]]$log, log)
 
   })
 
@@ -1571,7 +1670,9 @@ describe("ensemble() - allow_par", {
     expect_s3_class(w, "horizons_warning_substitution")
     expect_match(conditionMessage(w), "ensemble\\(\\).*offers 1 worker")
     expect_true(inherits(ens, "horizons_ensemble"))
+    ## The warning rows: the log also holds the meta-learner's folds' note
     added <- log_rows_added(fitted, ens)
+    added <- added[added$type == "warning", ]
     expect_identical(added$verb, "ensemble")
     expect_identical(added$topic, "substitution")
     expect_identical(w$log, added)
@@ -1827,6 +1928,40 @@ describe("ensemble() - the summary it prints", {
 
     expect_snapshot(render_ensemble_summary(better, "rpd"))
     expect_false(cli::ansi_has_any(improvement_line(better)))
+
+  })
+
+  it("prints the line evaluate() and fit() print for a draw that did not stratify as asked, under the members and under the UQ", {
+
+    fewer <- list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                  strata_warnings = "Stratification will use 2 breaks instead.")
+    failed <- list(stratified = FALSE, strata_failed = TRUE, strata_error = "stratification refused",
+                   strata_warnings = character(0))
+
+    lines <- list(meta    = strata_tree_line(fewer, "meta-learner CV"),
+                  cv_plus = strata_tree_line(failed, "CV+ folds"))
+
+    expect_snapshot(render_ensemble_summary(summary_contract(improvement = 0.0412, coef = c(0.5, 0.3, 0.2)),
+                                            "rpd", lines))
+
+  })
+
+  it("prints them for the stored fit, whose meta frame rsample stratifies on fewer bins", {
+
+    fitted <- ens_fitted()
+
+    out <- utils::capture.output(suppressWarnings(
+      ensemble(fitted, method = "penalized", optimize = FALSE, control = control_horizons(verbose = TRUE))
+    ))
+
+    meta <- grep("Stratified meta-learner CV on fewer strata: too little data for 4", out, fixed = TRUE)
+    cvp  <- grep("Stratified CV+ folds on fewer strata: too little data for 4", out, fixed = TRUE)
+    uq   <- grep("UQ: CV+ conformal", out, fixed = TRUE)
+
+    expect_length(meta, 1L)
+    expect_length(cvp, 1L)
+    expect_identical(cvp, uq + 1L)
+    expect_match(out[meta - 1L], "└─ ", fixed = TRUE)   # the last member's line
 
   })
 

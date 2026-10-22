@@ -432,7 +432,8 @@ tune_warmstart_bayes <- function(workflow,
 #' what it finished: the iterations that ran, or the grid's choice when none
 #' did, and says so with a substitution warning ([warn_in_unit()]) that the
 #' unit's row shows and the verb puts on its log (#209). That fallback is
-#' containment, so the kinds no unit contains still propagate, and under
+#' containment, so the kinds no unit contains still propagate, as does a
+#' package missing on a worker ([missing_package_signal()]), and under
 #' `debug` nothing is fallen back from.
 #'
 #' tune recovers from an error inside its search loop itself: an on.exit()
@@ -554,7 +555,10 @@ bayes_search <- function(workflow,
 
   }
 
-  if (!is.null(stopped) && (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED))) {
+  ## A kind no unit contains, or a package missing on a worker, is raised
+  ## again for the unit, not fallen back from
+  if (!is.null(stopped) &&
+      (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED) || missing_package_signal(stopped))) {
 
     stop(stopped)
 

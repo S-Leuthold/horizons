@@ -729,3 +729,72 @@ describe("fit() - each member is one unit", {
   })
 
 })
+
+
+## =========================================================================
+## The packages the members need, checked at the door
+## =========================================================================
+## A missing engine used to fail every member that needed it, one by one, as
+## run failures; it is refused before any member is fitted, for the members
+## alone.
+
+describe("fit() - the members' packages", {
+
+  it("refuses, before any member is fitted, a member whose engine is not installed, and checks only the members", {
+
+    ## Read the fixture before anything is mocked (helper-memo.R)
+    x <- fit_obj(2)
+    x$evaluation$results$cv_rpd <- c(2, 1)   # cfg_001 (rf) ranks first
+
+    local_mocked_bindings(
+      fit_single_config = function(...) rlang::abort("reached", class = "member_reached")
+    )
+
+    ## cubist's engine is installed nowhere
+    models <- MODEL_PACKAGES
+    models[["cubist"]] <- c("rules", "horizonsFakePkgXYZ123")
+    local_mocked_bindings(MODEL_PACKAGES = models)
+
+    err <- expect_error(fit(x, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE),
+                        class = "horizons_error_missing_package")
+
+    expect_s3_class(err, "horizons_error_dependency")
+    expect_identical(rlang::call_name(err$call), "fit")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "`fit()` needs 1 package that is not installed.", fixed = TRUE)
+    expect_match(msg, "horizonsFakePkgXYZ123, needed for cubist", fixed = TRUE)
+
+    ## The one member, rf, needs nothing missing, so it is fitted
+    expect_error(fit(x, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE),
+                 class = "member_reached")
+
+  })
+
+  it("stops as systemic, with the members so far, when a member's package is missing where it ran", {
+
+    x <- fit_obj(2)
+    x$evaluation$results$cv_rpd <- c(2, 1)   # cfg_001 (rf) is fitted first
+
+    ## cubist's engine cannot be loaded where its member is fitted, though
+    ## the door found it in this session
+    real_spec <- define_model_spec
+    local_mocked_bindings(define_model_spec = function(model) {
+      if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
+      real_spec(model)
+    })
+
+    err <- expect_error(
+      suppressWarnings(fit(x, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+      class = "horizons_error_systemic"
+    )
+
+    expect_identical(class(err)[1], "horizons_error_systemic")
+    expect_s3_class(err$parent, "horizons_error_missing_package")
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(err$results$status, "success")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "A package `fit()` needs is not installed where its work ran", fixed = TRUE)
+
+  })
+
+})

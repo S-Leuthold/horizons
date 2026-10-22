@@ -437,12 +437,103 @@ flatten_message <- function(message) {
 #' and backtrace intact. Nor is a parallel worker's death, which future
 #' raises as a `FutureError`, or a unit raises as `horizons_error_systemic`
 #' when tune caught future's error: the run cannot go on, and the verb stops
-#' it as systemic.
+#' it as systemic. A package found missing mid-run, which reaches a unit in
+#' another package's classes, is recognised by [missing_package_signal()].
 #'
 #' @keywords internal
 #' @noRd
 NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependency", "systemic")),
                      "FutureError")
+
+#' Whether a failure is a package missing where the unit ran
+#'
+#' @description
+#' The verbs check every package their configurations need at the door
+#' ([check_packages()]), so a package missing mid-run is missing where the
+#' unit ran: on a parallel worker, whose library is not the session's. That
+#' would fail every unit that needs it, so it is not the unit's failure. It
+#' reaches the unit in another package's class, anywhere in the chain:
+#' base R's `packageNotFoundError`, which `library()` and `loadNamespace()`
+#' raise (tune's workers attach every package the workflow needs with
+#' `library()`, so a run on the resamples axis meets it there), and rlang's
+#' `rlib_error_package_not_found`, which `rlang::check_installed()` raises (a
+#' selection step's own check, when its recipe is prepped in the unit).
+#'
+#' On the configs axis tune runs inside the worker as it would in a session,
+#' and refuses at its own door before anything is fitted, unclassed. Those
+#' refusals are matched by their text, `TUNE_MISSING_PACKAGE`, anywhere in
+#' the chain, as future.apply's report of a worker's death is
+#' ([worker_death_signal()]).
+#'
+#' @param cnd A condition.
+#' @return Logical(1).
+#' @keywords internal
+#' @noRd
+missing_package_signal <- function(cnd) {
+
+  if (rlang::cnd_inherits(cnd, c("packageNotFoundError", "rlib_error_package_not_found"))) {
+    return(TRUE)
+  }
+
+  node <- cnd
+
+  ### Bounded, as in root_class(), so a chain that loops cannot hang.
+  for (i in seq_len(50L)) {
+
+    if (!inherits(node, "condition")) return(FALSE)
+
+    if (grepl(TUNE_MISSING_PACKAGE, condition_own_text(node))) return(TRUE)
+
+    node <- tryCatch(node[["parent"]], error = function(e) NULL)
+
+  }
+
+  FALSE
+
+}
+
+#' How tune refuses a workflow whose packages are not installed
+#'
+#' @description
+#' tune 2.1.0 checks, in the session that calls it, the engine packages of a
+#' workflow's model ("Package install is required for kernlab.", from
+#' `check_installs()`) and every package the workflow and its recipe's steps
+#' require ("Some package installs are needed: Boruta", from the grid
+#' search's loop). Both are raised unclassed, so they are matched by text;
+#' the tests produce each from tune's own code, so a change in its wording
+#' fails the suite.
+#'
+#' @keywords internal
+#' @noRd
+TUNE_MISSING_PACKAGE <- "^(Some package installs are needed: |Package installs? (is|are) required for )"
+
+#' Raise a package missing where a unit ran, so no unit contains it
+#'
+#' @description
+#' Raised from [run_unit()] in place of recording the unit's failure, as
+#' `horizons_error_missing_package` (kind `dependency`), which no unit
+#' contains, chained to what was raised. The verbs that dispatch to workers
+#' stop on it as systemic, with the work so far ([stop_on_worker_death()]),
+#' as they stop on a worker's death.
+#'
+#' @param cnd The condition [missing_package_signal()] recognised.
+#' @param unit,id The unit it arose in, as [run_unit()] was given them.
+#' @return Does not return.
+#' @keywords internal
+#' @noRd
+abort_missing_mid_run <- function(cnd, unit, id) {
+
+  cause <- condition_summary(cnd)
+  where <- gsub("_", " ", unit, fixed = TRUE)
+
+  abort_horizons(c(
+    "A package needed by {where} {.val {id}} is not installed where it ran.",
+    "x" = "{cause}",
+    "i" = "Install it in every library the session and its parallel workers load."
+  ), kind = "dependency", class = "horizons_error_missing_package", parent = cnd,
+  call = NULL)
+
+}
 
 #' The labels of the steps running now, innermost last
 #'
@@ -598,6 +689,9 @@ new_unit_records <- function() {
 #' * A note ([note_in_unit()]) is recorded and muffled the same way.
 #' * An error of a kind in `NEVER_CONTAINED` propagates untouched, with its
 #'   class, chain and backtrace, including when a recipe step has wrapped it.
+#' * A package missing where the unit ran ([missing_package_signal()]) is
+#'   raised as `horizons_error_missing_package`, which propagates the same
+#'   way ([abort_missing_mid_run()]).
 #' * Any other error is a run failure: it is recorded with the step it arose
 #'   in and its root cause's class, and the unit's value is `NULL`.
 #'
@@ -719,6 +813,9 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
       ### zap() is not enough: try_fetch() then offers the condition's parent
       ### to the same handler, and an upstream parent would be contained.
       if (rlang::cnd_inherits(e, NEVER_CONTAINED)) stop(e)
+      ### Not the unit's failure, and the one place every unit's failure is
+      ### recorded, so the one place it is recognised
+      if (missing_package_signal(e)) abort_missing_mid_run(e, unit, id)
       record(e, "failure")
       structure(list(), class = "horizons_unit_failed")
     }

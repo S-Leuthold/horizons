@@ -788,15 +788,18 @@ describe("selection steps abort on a zero-column selector", {
 
   }
 
-  it("step_select_correlation aborts naming itself, classed", {
+  it("step_select_correlation aborts naming itself, classed, as the step's prep()", {
 
     ## The three steps share one gate, check_selection_columns(), so this
-    ## step's class check stands for all of them.
+    ## step's class and call checks stand for all of them.
     rec <- base_recipe() |>
       step_select_correlation(dplyr::matches(no_match), outcome = "SOC")
 
-    expect_error(recipes::prep(rec), "`step_select_correlation()` selected zero columns",
-                 fixed = TRUE, class = "horizons_error_input")
+    err <- expect_error(recipes::prep(rec), "`step_select_correlation()` selected zero columns",
+                        fixed = TRUE, class = "horizons_error_input")
+
+    ## Reported as the step's prep(), not the helper that found it
+    expect_identical(rlang::call_name(err$parent$call), "prep")
 
   })
 
