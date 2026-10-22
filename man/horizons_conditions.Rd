@@ -15,10 +15,16 @@ one specific refusal, and filter warnings by what happened.
 \describe{
 \item{\code{horizons_error_input}}{The call cannot run as written: an
 argument outside its domain, a required input missing, or data that
-breaks a stated requirement. Raised before any work starts.}
+breaks a stated requirement. Raised before any work starts.
+\code{\link[=select_training]{select_training()}} refuses its arguments and its library's data once,
+with every problem it found in the field \code{findings}, as a validation
+error does.}
 \item{\code{horizons_error_validation}}{An object breaks its class contract,
 because it was edited by hand or written by an older version. Re-run
-the verb that wrote the field, or start again from \code{\link[=configure]{configure()}}.}
+the verb that wrote the field, or start again from \code{\link[=configure]{configure()}}. The
+message shows the first five checks that failed; the field \code{findings}
+holds every one, a character vector with one plain-text message per
+check.}
 \item{\code{horizons_error_dependency}}{A needed package is missing, or the
 environment cannot run the call (a parallel run under
 \code{devtools::load_all()}, whose workers load the installed build, or one
@@ -62,9 +68,9 @@ one row shaped as \code{horizons_error_prediction_failed}'s: \code{unit}
 (\code{"meta_learner"}), \code{config_id} (\code{NA}), \code{step}, \code{class} (the root
 cause's, e.g. \code{horizons_error_prediction_failed} for a member that
 cannot predict the test rows), \code{error_message} and \code{trace}.}
-\item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} stopped early,
-because the first configurations to run failed the same way across at
-least two models (the circuit breaker,
+\item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} or \code{\link[=fit]{fit()}} stopped
+early, because the first configurations or members to run failed the
+same way across at least two models (the circuit breaker,
 \code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
 \code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died. The rows finished
 so far travel as \code{results}; \code{NULL} from \code{ensemble()}, which has none

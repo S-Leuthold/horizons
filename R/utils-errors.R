@@ -135,10 +135,16 @@ check_arg <- function(check,
 #' \describe{
 #'   \item{`horizons_error_input`}{The call cannot run as written: an
 #'     argument outside its domain, a required input missing, or data that
-#'     breaks a stated requirement. Raised before any work starts.}
+#'     breaks a stated requirement. Raised before any work starts.
+#'     [select_training()] refuses its arguments and its library's data once,
+#'     with every problem it found in the field `findings`, as a validation
+#'     error does.}
 #'   \item{`horizons_error_validation`}{An object breaks its class contract,
 #'     because it was edited by hand or written by an older version. Re-run
-#'     the verb that wrote the field, or start again from [configure()].}
+#'     the verb that wrote the field, or start again from [configure()]. The
+#'     message shows the first five checks that failed; the field `findings`
+#'     holds every one, a character vector with one plain-text message per
+#'     check.}
 #'   \item{`horizons_error_dependency`}{A needed package is missing, or the
 #'     environment cannot run the call (a parallel run under
 #'     `devtools::load_all()`, whose workers load the installed build, or one
@@ -180,9 +186,9 @@ check_arg <- function(check,
 #'     (`"meta_learner"`), `config_id` (`NA`), `step`, `class` (the root
 #'     cause's, e.g. `horizons_error_prediction_failed` for a member that
 #'     cannot predict the test rows), `error_message` and `trace`.}
-#'   \item{`horizons_error_systemic`}{(run) [evaluate()] stopped early,
-#'     because the first configurations to run failed the same way across at
-#'     least two models (the circuit breaker,
+#'   \item{`horizons_error_systemic`}{(run) [evaluate()] or [fit()] stopped
+#'     early, because the first configurations or members to run failed the
+#'     same way across at least two models (the circuit breaker,
 #'     `control_horizons(breaker = )`), or [evaluate()], [fit()] or
 #'     [ensemble()] stopped because a parallel worker died. The rows finished
 #'     so far travel as `results`; `NULL` from `ensemble()`, which has none
