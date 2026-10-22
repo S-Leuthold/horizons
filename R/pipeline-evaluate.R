@@ -1706,6 +1706,9 @@ abort_breaker_trip <- function(breaker,
 #' contains either ([worker_death_signal()]). Either is turned into
 #' `horizons_error_systemic`, chained to the error, with the rows finished so
 #' far when the verb has rows; every other error passes through untouched.
+#' `bayes_search()` is the one raiser of `horizons_error_systemic` inside
+#' `expr`, for that death; a unit that raises it for another reason needs a
+#' subclass of its own, or it would be read here as a worker's death.
 #'
 #' @param expr The work that dispatches to workers.
 #' @param results The results table finished so far, carried as `results`;
