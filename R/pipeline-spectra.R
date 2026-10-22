@@ -66,9 +66,12 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' recorded on the object's `log`. When no file can be read, as when the one
 #' file given fails, the call aborts with `horizons_error_read_failed`, one
 #' row per file in its `results`. A data frame's columns are refused at the
-#' door instead, as an input error, since they are the caller's. A
-#' warning `opusreader2` or `readr` raises while reading is passed on, once
-#' per distinct message, as a `horizons_warning_quality`.
+#' door instead, as an input error, since they are the caller's. A warning
+#' `opusreader2` raises while parsing a file's metadata (its sample name and
+#' acquisition time), which horizons does not read, is a note on the
+#' object's `log`, once per distinct message, naming the files, and is not
+#' raised. Any other warning `opusreader2` or `readr` raises while reading
+#' is passed on, once per distinct message, as a `horizons_warning_quality`.
 #'
 #' **Axes that drift:** scans from different sessions on one instrument can
 #' carry wavenumbers that differ in the last digits. A file whose every
@@ -413,7 +416,8 @@ spectra_from_tibble <- function(data,
 #' named in one `partial_failure` warning; when none can be read the call
 #' aborts with `horizons_error_read_failed`, one row per file in its
 #' `results`. Another package's warnings raised while reading are each
-#' collected once as a `quality` warning.
+#' collected once as a `quality` warning, except what opusreader2 warns of
+#' while parsing a file's metadata, a note ([read_opus_noting_metadata()]).
 #'
 #' @param source Character. Paths, which `spectra()` has checked exist.
 #' @param type `spectra()`'s `type`, checked, or `NULL`.
@@ -588,6 +592,76 @@ spectra_from_path <- function(source,
 
 
 ## ---------------------------------------------------------------------------
+## read_opus_noting_metadata() — opusreader2's metadata warnings as notes
+## ---------------------------------------------------------------------------
+
+#' Read an OPUS file, noting what its metadata parse warns of
+#'
+#' @description
+#' `opusreader2::read_opus()` parses each file's metadata, its sample name
+#' and acquisition time, which horizons never reads. A warning raised while
+#' it does is reported from the file's unit as a note ([note_in_unit()]),
+#' which the log keeps once per distinct message with the files it arose in,
+#' and is never raised: nothing horizons returns is weaker for it.
+#' opusreader2 0.6.9.9999 warns "NAs introduced by coercion" there for every
+#' file acquired west of Greenwich, whose negative UTC offset its parser
+#' cannot read. Every other warning the reader raises reaches the unit as
+#' another package's warning, raised once at the end of `spectra()` as
+#' `quality`.
+#'
+#' @param path Character(1). The file.
+#' @return What `opusreader2::read_opus()` returns.
+#' @keywords internal
+#' @noRd
+read_opus_noting_metadata <- function(path) {
+
+  withCallingHandlers(
+    opusreader2::read_opus(path),
+    warning = function(w) {
+
+      if (!in_opus_metadata_parse()) return(invisible(NULL))
+
+      cause <- condition_summary(w)
+      where <- condition_call_label(w) %||% "its metadata parser"
+
+      note_in_unit("opusreader2 warned while parsing the file's metadata, which horizons does not read: {cause} (in {where}).")
+      rlang::cnd_muffle(w)
+
+    }
+  )
+
+}
+
+#' Whether a condition is being raised inside opusreader2's metadata parse
+#'
+#' @description
+#' Called from a warning handler, while the warning's frames are still on the
+#' stack. opusreader2 parses a file's metadata in `get_basic_metadata()`, the
+#' one caller of each of its `get_meta_*()` helpers, so a warning raised
+#' while that function is on the stack arose in the metadata, whichever
+#' function base R attributes it to: `as.integer()`'s warning names its
+#' caller, `get_meta_utc_datetime()`, but a base function's own warning
+#' would name the base function. The function is compared by identity, so
+#' another of the same name does not count, and with an opusreader2 that has
+#' none, no warning is read as the metadata's.
+#'
+#' @return Logical(1).
+#' @keywords internal
+#' @noRd
+in_opus_metadata_parse <- function() {
+
+  parser <- get0("get_basic_metadata", envir = asNamespace("opusreader2"),
+                 mode = "function", inherits = FALSE)
+
+  if (is.null(parser)) return(FALSE)
+
+  any(vapply(seq_len(sys.nframe()), function(i) identical(sys.function(i), parser),
+             logical(1)))
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## read_opus_file() — One OPUS file's absorbance spectrum
 ## ---------------------------------------------------------------------------
 
@@ -600,7 +674,9 @@ spectra_from_path <- function(source,
 #' (`ab_no_atm_comp_data_param` among them), so the first block on the list,
 #' or the first whose name starts with `ab`, can be the wrong one. A file
 #' with neither, or whose block is in a form horizons does not read, fails
-#' its unit naming what it holds.
+#' its unit naming what it holds. What opusreader2 warns of while parsing
+#' the file's metadata is a note, not a warning
+#' ([read_opus_noting_metadata()]).
 #'
 #' @param path Character(1). The file.
 #'
@@ -611,7 +687,7 @@ spectra_from_path <- function(source,
 #' @noRd
 read_opus_file <- function(path) {
 
-  opus_obj <- unit_step("file_read", opusreader2::read_opus(path))
+  opus_obj <- unit_step("file_read", read_opus_noting_metadata(path))
 
   ## read_opus() returns a list keyed by file, then the blocks within it -----
 

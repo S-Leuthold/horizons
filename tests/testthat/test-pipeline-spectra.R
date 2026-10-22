@@ -831,6 +831,35 @@ test_that("a warning opusreader2 raises while reading is passed on once, as qual
 
 })
 
+test_that("a warning opusreader2 raises while parsing a file's metadata is a note on the log, never raised", {
+
+  ## The fixtures were acquired at GMT+0. opusreader2 0.6.9.9999 cannot read
+  ## a negative UTC offset: for "GMT-6", as.integer() of the string warns
+  ## "NAs introduced by coercion" in get_meta_utc_datetime(), and the
+  ## acquisition time is NA. Its parser here does what it does for such a
+  ## file; the real reader runs everything else on the real files.
+  local_mocked_bindings(get_meta_utc_datetime = function(timestamp) {
+    utc_diff <- as.integer("GMT-6")
+    as.POSIXct(NA)
+  }, .package = "opusreader2")
+
+  paths <- list.files(opus_dir(), full.names = TRUE)
+
+  expect_no_warning(out <- spectra(opus_dir(), type = "opus"))
+
+  notes <- out$log[out$log$type == "note" & grepl("metadata", out$log$message, fixed = TRUE), ]
+
+  expect_identical(nrow(notes), 1L)
+  expect_match(notes$message,
+               "opusreader2 warned while parsing the file's metadata, which horizons does not read: NAs introduced by coercion (in `get_meta_utc_datetime()`).",
+               fixed = TRUE)
+  expect_setequal(notes$ids[[1]], paths)
+  expect_identical(notes$n, 3L)
+  expect_false(any(out$log$type == "warning"))
+  expect_identical(out$data$n_rows, 3L)
+
+})
+
 test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, never the first on the list (#191)", {
 
   ## Arrange ---------------------------------------------------------------

@@ -77,9 +77,12 @@ their causes and remedies, in one \code{horizons_warning_partial_failure},
 recorded on the object's \code{log}. When no file can be read, as when the one
 file given fails, the call aborts with \code{horizons_error_read_failed}, one
 row per file in its \code{results}. A data frame's columns are refused at the
-door instead, as an input error, since they are the caller's. A
-warning \code{opusreader2} or \code{readr} raises while reading is passed on, once
-per distinct message, as a \code{horizons_warning_quality}.
+door instead, as an input error, since they are the caller's. A warning
+\code{opusreader2} raises while parsing a file's metadata (its sample name and
+acquisition time), which horizons does not read, is a note on the
+object's \code{log}, once per distinct message, naming the files, and is not
+raised. Any other warning \code{opusreader2} or \code{readr} raises while reading
+is passed on, once per distinct message, as a \code{horizons_warning_quality}.
 
 \strong{Axes that drift:} scans from different sessions on one instrument can
 carry wavenumbers that differ in the last digits. A file whose every
