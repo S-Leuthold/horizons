@@ -3108,7 +3108,7 @@ describe("config_findings() at every verb's door", {
     expect_true(any(grepl("config$outcome_range is not a usable range",
                           finding_of(validate_horizons_data(obj)), fixed = TRUE)))
 
-    for (bad in list(1, 2.5, NA_real_, "5", NULL)) {
+    for (bad in list(1, 2.5, NA_real_, "5", NULL, Inf)) {
 
       obj <- configured_object()
       obj$config$tuning["cv_folds"] <- list(bad)
@@ -3148,7 +3148,7 @@ describe("config_findings() at every verb's door", {
 
     for (field in names(minimums)) {
 
-      for (bad in list(minimums[[field]] - 1, 1.5, NA_real_, "5", NULL)) {
+      for (bad in list(minimums[[field]] - 1, 1.5, NA_real_, "5", NULL, Inf)) {
 
         obj <- configured_object()
         obj$config$tuning[field] <- list(bad)

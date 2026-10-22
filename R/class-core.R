@@ -965,7 +965,7 @@ config_findings <- function(x) {
     value   <- x$config$tuning[[field]]
     minimum <- tuning_minimums[[field]]
 
-    if (!(is.numeric(value) && length(value) == 1 && !is.na(value) &&
+    if (!(is.numeric(value) && length(value) == 1 && is.finite(value) &&
           value >= minimum && value == round(value))) {
 
       findings <- c(findings, cli::format_inline(
