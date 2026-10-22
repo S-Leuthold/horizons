@@ -236,11 +236,13 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
   })
 
-  ## Rows written without the gate's reading: a pruned row is below the
-  ## threshold all the same, since the gate pruned it, and a success is not
+  ## Rows with no reading (NA, as prune = FALSE writes them): a pruned row is
+  ## below the threshold all the same, since the gate pruned it, and a
+  ## success is not
   it("counts a pruned member without a reading as below the threshold, and a success without one as not", {
 
-    unread <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), cv_rpd = c(0.93, 0.88))
+    unread <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), cv_rpd = c(0.93, 0.88),
+                             below_prune_threshold = NA, prune_threshold = NA_real_)
 
     pruned <- unread
     pruned$status <- "pruned"

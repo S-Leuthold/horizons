@@ -959,37 +959,33 @@ describe("check_evaluated_outcome_range()", {
 
   x_with <- function(results) list(evaluation = list(results = results))
 
-  it("passes rows that record this range, and unrecorded rows under the default", {
+  it("passes rows that record this range", {
 
     signed <- results_with(list(eval_settings(outcome_range = c(-Inf, Inf))))
     expect_null(check_evaluated_outcome_range(x_with(signed), c(-Inf, Inf)))
 
-    old <- results_with(list(eval_settings(seed = 1L)))
-    expect_null(check_evaluated_outcome_range(x_with(old), DEFAULT_OUTCOME_RANGE))
-
-    ## Evaluations from before the settings stamp carry no settings column
-    bare <- tibble::tibble(config_id = "c1")
-    expect_null(check_evaluated_outcome_range(x_with(bare), DEFAULT_OUTCOME_RANGE))
+    default <- results_with(list(eval_settings(outcome_range = DEFAULT_OUTCOME_RANGE)))
+    expect_null(check_evaluated_outcome_range(x_with(default), DEFAULT_OUTCOME_RANGE))
 
   })
 
-  it("refuses a recorded range that differs, and unrecorded rows under another range", {
+  it("refuses a recorded range that differs, and a row that records none under every range", {
 
     signed <- results_with(list(eval_settings(outcome_range = c(-Inf, Inf))))
     expect_error(check_evaluated_outcome_range(x_with(signed), DEFAULT_OUTCOME_RANGE),
                  class = "horizons_error_input")
 
+    ## A results table without the settings column is the eval validator's
+    ## finding (test-class-core.R), so a row reaches this only with a record
     old <- results_with(list(eval_settings(seed = 1L)))
-    err <- expect_error(check_evaluated_outcome_range(x_with(old), c(-Inf, Inf)),
-                        class = "horizons_error_input")
-    expect_match(flat_message(err), "unrecorded", fixed = TRUE)
 
-    ## Evaluations from before the settings stamp carry no settings column;
-    ## they count as the default too
-    bare <- tibble::tibble(config_id = "c1")
-    expect_error(check_evaluated_outcome_range(x_with(bare), c(-Inf, Inf)),
-                 "recorded unrecorded (the zero floor) on 1 results row",
-                 fixed = TRUE, class = "horizons_error_input")
+    for (range in list(DEFAULT_OUTCOME_RANGE, c(-Inf, Inf))) {
+
+      expect_error(check_evaluated_outcome_range(x_with(old), range),
+                   "recorded no outcome range on 1 results row",
+                   fixed = TRUE, class = "horizons_error_input")
+
+    }
 
   })
 

@@ -1868,7 +1868,10 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #'    and `upper` single numbers, finite whenever rows were trimmed, since
 #'    the degradation check reads them.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
-#'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
+#'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); the prune
+#'    gate's reading (`below_prune_threshold`, logical, and `prune_threshold`,
+#'    numeric) and, when `screened`, the `settings` list column `evaluate()`
+#'    stamps on every row; at least
 #'    one row; `config_id` values unique; and, when `x$config$configs` is
 #'    set, `config_id` set-equal to its `config_id`. Failed, pruned and
 #'    not-evaluated configs keep their rows, so a config with no row was
@@ -2081,6 +2084,36 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
       errors <- c(errors, cli::format_inline(
         "{.field results} has no cross-validated {cli::qty(length(missing_cv))}column{?s} {.field {missing_cv}}, which {.fn fit} ranks by"
+      ))
+
+    }
+
+    ## The prune gate's reading, which every row writer records (NA when the
+    ## gate did not run) and fit() reads to say when every member fell below
+    ## the threshold
+    if (!"below_prune_threshold" %in% names(res) || !is.logical(res$below_prune_threshold)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no logical {.field below_prune_threshold} column, the prune gate's reading"
+      ))
+
+    }
+
+    if (!"prune_threshold" %in% names(res) || !is.numeric(res$prune_threshold)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no numeric {.field prune_threshold} column, the threshold the prune gate read"
+      ))
+
+    }
+
+    ## Each row of a screened evaluation records the settings evaluate()
+    ## scored it under, which fit() compares its outcome range with. fit()'s
+    ## cold start scores nothing, so its unscreened evaluation has none.
+    if (isTRUE(ev$screened) && (!"settings" %in% names(res) || !is.list(res$settings))) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no {.field settings} list column, the settings {.fn evaluate} scored each row under"
       ))
 
     }

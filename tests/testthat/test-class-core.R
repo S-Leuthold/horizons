@@ -3289,6 +3289,41 @@ describe("the class validators' new checks (#234)", {
 
   })
 
+  it("require the prune gate's reading on every evaluation, and the settings on a screened one, with the remedy (#212)", {
+
+    for (column in c("below_prune_threshold", "prune_threshold")) {
+
+      obj <- make_valid_eval()
+      obj$evaluation$results[[column]] <- NULL
+      err <- tryCatch(validate_horizons_eval(obj), horizons_error_validation = function(e) e)
+
+      expect_true(any(grepl(paste0("results has no ", if (column == "prune_threshold") "numeric " else "logical ",
+                                   column, " column"),
+                            err$findings, fixed = TRUE)), label = column)
+      expect_match(conditionMessage(err), "Re-run evaluate() on the object", fixed = TRUE)
+
+    }
+
+    obj <- make_valid_eval()
+    obj$evaluation$results$below_prune_threshold <- "no"
+    obj$evaluation$results$prune_threshold       <- "1.5"
+    findings <- finding_of(validate_horizons_eval(obj))
+    expect_true(any(grepl("no logical below_prune_threshold column", findings, fixed = TRUE)))
+    expect_true(any(grepl("no numeric prune_threshold column", findings, fixed = TRUE)))
+
+    screened <- make_valid_eval()
+    screened$evaluation$results$settings <- NULL
+    expect_true(any(grepl("results has no settings list column",
+                          finding_of(validate_horizons_eval(screened)), fixed = TRUE)))
+
+    ## fit()'s cold start scores nothing, so its unscreened evaluation has
+    ## no settings to record
+    cold <- screened
+    cold$evaluation$screened <- FALSE
+    expect_identical(validate_horizons_eval(cold), cold)
+
+  })
+
   it("require the failure class column on the evaluation and the members' results", {
 
     obj <- make_valid_fit()
