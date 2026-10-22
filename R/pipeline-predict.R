@@ -126,9 +126,8 @@ NULL
 #' **Outcome range.** Point predictions and interval bounds are clamped to
 #' the `outcome_range` given to [configure()], silently, since the range is
 #' the outcome's physical range. Under the default, `c(0, Inf)`, that is a
-#' floor at zero, and objects configured before the range existed predict
-#' under it; a signed property configured with `c(-Inf, Inf)` is not clamped
-#' at all (#76). Clamping an interval keeps its coverage only for a truth
+#' floor at zero; a signed property configured with `c(-Inf, Inf)` is not
+#' clamped at all (#76). Clamping an interval keeps its coverage only for a truth
 #' inside the range: coverage is at least the nominal level minus the
 #' probability that the truth lies outside the range, so a range narrower
 #' than the property's physical bounds costs coverage. A finite upper bound
@@ -887,10 +886,9 @@ resolve_config_ids <- function(object, config, call = rlang::caller_env()) {
   if (identical(config, "best")) {
 
     ## fit() recorded the top config (by the metric it actually ranked on) in
-    ## best-first order; read it rather than re-deriving. Fall back to the first
-    ## fitted workflow for objects written before this field existed.
-    best <- object$models$best_config %||% available[1]
-    return(best)
+    ## best-first order; read it rather than re-deriving. The fit validator
+    ## requires it among the fitted workflows.
+    return(object$models$best_config)
 
   }
 

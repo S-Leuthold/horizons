@@ -584,7 +584,7 @@ select_training <- function(x, library,
   }
 
   if (!is_count(cluster_min))  errors <- c(errors, cli::format_inline("{.arg cluster_min} must be a single positive whole number"))
-  if (!is_count(seed, min = -.Machine$integer.max) || abs(seed) > .Machine$integer.max) {
+  if (!is_count(seed, min = -SEED_MAX) || abs(seed) > SEED_MAX) {
 
     errors <- c(errors, cli::format_inline("{.arg seed} must be a single whole number within R's integer range"))
 
@@ -655,8 +655,13 @@ select_training <- function(x, library,
     check_shared_columns(target_vars, reg_vars, restandardize = restandardize,
                          library_form = "registered", library_baseline = isTRUE(reg_grid$baseline))
 
+    ### The record build_ossl_library()'s standardize() writes, whose hull,
+    ### when it fits one, spans the grid
+    reg_range <- c(reg_grid$wn_min, reg_grid$wn_max)
+
     check_same_standardization(list(baseline         = isTRUE(reg_grid$baseline),
-                                    wavelength_range = c(reg_grid$wn_min, reg_grid$wn_max)),
+                                    baseline_range   = if (isTRUE(reg_grid$baseline)) reg_range,
+                                    wavelength_range = reg_range),
                                x$data$standardization,
                                pool_step     = reg_grid$wn_step,
                                target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
@@ -1778,9 +1783,8 @@ check_pool_unpromoted <- function(pool) {
 #' @details
 #' `standardize()` records the range each hull was fitted over as
 #' `baseline_range`, kept when a later `standardize(force = TRUE)` trims the
-#' axis further, so a hull's ends are its record's `baseline_range`; a
-#' record written before it was kept has its hull over its
-#' `wavelength_range`, which is read in its place ([prior_hull_range()]).
+#' axis further, so a hull's ends are its record's `baseline_range`
+#' ([prior_hull_range()]).
 #' Those ranges are compared, not the `trim` arguments: data that stops
 #' short of a bound fits
 #' a different hull under an equal trim, and `trim = NULL` on data spanning

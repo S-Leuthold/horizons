@@ -136,9 +136,8 @@ DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 
 # Recipe settings configure() records and build_recipe() applies to every
 # config (#62): the Savitzky-Golay window in grid points, and the share of
-# variance step_pca() keeps. These are what the recipe ran before the settings
-# were exposed, so an object configured before them (no `config$recipe`) runs
-# unchanged through the fallback in recipe_settings().
+# variance step_pca() keeps. These are configure()'s defaults, and what the
+# recipe ran before the settings were exposed.
 DEFAULT_SG_WINDOW     <- 9L
 DEFAULT_PCA_THRESHOLD <- 0.995
 
@@ -215,9 +214,14 @@ N_AD_TRAIN_MIN <- 10L
 
 ### Default seed for ensemble() — the meta-learner's tuning/OOF folds. Ensemble
 ### UQ draws its calibration partition at this seed + 1000. Centralized so the
-### verb default, the weighted-engine default, and fit_ensemble_uq()'s legacy
-### fallback cannot drift independently.
+### verb default and the engines' defaults cannot drift independently.
 DEFAULT_ENSEMBLE_SEED <- 307L
+
+### The largest magnitude a verb's seed may have: set.seed() takes a whole
+### number within R's integer range unchanged. fit()'s n_best, taken as an
+### integer too, is held to it. A double, as rlang's checkers take their
+### bounds.
+SEED_MAX <- as.double(.Machine$integer.max)
 
 ## Prediction Guardrails --------------------------------------------------------
 
@@ -234,9 +238,7 @@ RESPONSE_BOUND_MARGIN <- 1.5
 ### The physical range of the outcome when configure() is not told otherwise
 ### (#76). Every prediction the package scores or serves is clamped to
 ### configure()'s outcome_range; the default is the non-negative range the
-### package has always assumed, so an object configured before the argument
-### existed (no `config$outcome_range`) runs unchanged through the fallback in
-### outcome_range_setting().
+### package has always assumed.
 DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
 ## Parallel Worker Contract ----------------------------------------------------

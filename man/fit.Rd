@@ -248,8 +248,7 @@ when the ranking metric is \code{"rrmse"} and the range's lower bound is
 negative, since the mean outcome it divides by can then be zero or
 negative; and, on the \code{evaluate()} path, with class \code{horizons_error_input},
 when the range differs from the one \code{evaluate()} recorded on its results
-rows (rows from before the range was recorded count as the default), since
-the members were chosen on predictions clamped to that range.
+rows, since the members were chosen on predictions clamped to that range.
 }
 
 \section{Zero outcome variance}{

@@ -614,11 +614,6 @@ configure <- function(x,
 
   x$config$outcome_range <- as.numeric(unname(outcome_range))
 
-  ## Objects configured before #62 carry `config$defaults`, a record of
-  ## settings the recipe never ran. Re-configuring one drops it.
-
-  x$config$defaults <- NULL
-
   ## ---------------------------------------------------------------------------
   ## Step 5b: Re-validate
   ## ---------------------------------------------------------------------------
@@ -764,9 +759,9 @@ axis_spacing_cm <- function(x) {
 #' @description
 #' A numeric vector of two non-missing values, lower strictly below upper;
 #' either end may be infinite. `configure()` refuses anything else, and every
-#' reader of a stored range applies the same rule through
-#' [outcome_range_setting()], so a range that clamps everything to one value,
-#' or nothing to anything sensible, never reaches a prediction.
+#' verb's door validator applies the same rule to a stored range
+#' ([config_findings()]), so a range that clamps everything to one value, or
+#' nothing to anything sensible, never reaches a prediction.
 #'
 #' @param r The range to check.
 #'
@@ -784,12 +779,9 @@ is_valid_outcome_range <- function(r) {
 #'
 #' @description
 #' Reads the `outcome_range` `configure()` recorded in `x$config$outcome_range`.
-#' An object configured before the range existed, or fitted then and
-#' deserialized now, carries no record and gets `DEFAULT_OUTCOME_RANGE`, the
-#' zero floor it was scored and served under, so it evaluates, fits and
-#' predicts exactly as before. A stored range that breaks
-#' [is_valid_outcome_range()] was not written by `configure()`; every verb's
-#' door validator refuses it, so this never reads one.
+#' Every verb's door validator refuses a configured object whose range is
+#' missing or breaks [is_valid_outcome_range()] ([config_findings()], #234),
+#' so this only reads it.
 #'
 #' @param x A `horizons_data` object, or any subclass.
 #'
@@ -798,9 +790,7 @@ is_valid_outcome_range <- function(r) {
 #' @noRd
 outcome_range_setting <- function(x) {
 
-  ### Every verb's door validator refuses an unusable recorded range (#234),
-  ### so this only reads it.
-  x$config$outcome_range %||% DEFAULT_OUTCOME_RANGE
+  x$config$outcome_range
 
 }
 
@@ -858,9 +848,8 @@ outcome_range_breach <- function(values, outcome_range) {
 #' @description
 #' `evaluate()`, `fit()` and `ensemble()` call this on entry, before they
 #' draw a split or fit anything, so an object whose outcome no longer fits its
-#' range (or was configured before the range existed, under the default)
-#' fails in a second rather than after the tuning cost (#76). The rows are
-#' the ones the verbs model: missing outcomes are ignored.
+#' range fails in a second rather than after the tuning cost (#76). The rows
+#' are the ones the verbs model: missing outcomes are ignored.
 #'
 #' @param x A configured `horizons_data` object.
 #' @param verb `character(1)`. The calling verb, named in the message.
@@ -881,10 +870,10 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
 
   }
 
-  ## An unusable stored range is the door validator's finding. ensemble()
-  ## runs this check before its validator, so it is left to the validator here
-  ## rather than read.
-  if (!is_valid_outcome_range(x$config$outcome_range %||% DEFAULT_OUTCOME_RANGE)) {
+  ## A missing or unusable stored range is the door validator's finding.
+  ## ensemble() runs this check before its validator, so it is left to the
+  ## validator here rather than read.
+  if (!is_valid_outcome_range(x$config$outcome_range)) {
 
     return(invisible(NULL))
 

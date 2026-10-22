@@ -49,18 +49,22 @@ The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolutio
 the spectrum, computes the mean absolute Spearman correlation between each window and
 the outcome, and retains all wavenumbers from windows where the score exceeds
 \verb{mean + 1 SD}. Duplicate selections are collapsed. If no window meets the
-threshold, every input wavenumber is retained, the trained step records
+threshold, every band it scored is retained, the trained step records
 \code{retained_all = TRUE}, and the step warns with class
 \code{horizons_warning_substitution} (#105).
 
-With fewer than five bands there are fewer than three windows, and the
+A near-constant band (a variance not finite, zero, or at most a
+hundred-millionth of the median band's) has no rank correlation with the
+outcome, so it is dropped before the windows are scored, as
+\code{step_select_cars()} and \code{step_select_boruta()} drop it. With fewer than
+five bands left there are fewer than three windows, and the
 threshold cannot select among them (one window has no standard deviation,
 and two windows' mean plus one standard deviation lies above the higher):
 the step keeps the bands and warns with class \code{horizons_warning_skipped},
 rather than report a substitution it could not have avoided. The
 trained step records what it did in its \code{correlation} element: the bands
-it scored, the threshold, the windows scored and kept, \code{retained_all} and
-\code{skipped}.
+it scored (\code{n_bands}), the near-constant bands it dropped (\code{n_constant}),
+the threshold, the windows scored and kept, \code{retained_all} and \code{skipped}.
 
 This step is designed to operate on spectra that have already been preprocessed
 (e.g., SNV + derivative). It should be applied after spectral transformation but

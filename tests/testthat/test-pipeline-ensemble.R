@@ -312,7 +312,7 @@ describe("ensemble() - preflight validation", {
       fit_ensemble_weighted = function(...) stop("fit_ensemble_weighted() was called")
     )
 
-    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307", Inf)
+    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307", Inf, 1.5, .Machine$integer.max + 1)
 
     for (s in bad_seeds) {
 
@@ -1361,6 +1361,8 @@ describe("ensemble() - CV+ coverage after a response trim (#103)", {
       obj$config$n_configs     <- 2L
       obj$config$tuning        <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L,
                                        final_bayesian_iter = 0L)
+      obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
+                                       pca_threshold = DEFAULT_PCA_THRESHOLD)
       obj$config$outcome_range <- c(-Inf, Inf)
 
       utils::capture.output(

@@ -821,10 +821,8 @@ flag_unusable <- function(analysis, role_map, reason, collector, short_range = N
 #' The range a standardization record's hull was fitted over
 #'
 #' @description
-#' `baseline_range` when the record has it. A record written before it was
-#' kept was written by one call, whose hull was fitted over the axis it
-#' records, so its `wavelength_range` is read in its place; reading it as
-#' missing would let a hull pass a comparison it fails (#107).
+#' `baseline_range`, which the base validator requires of a record that
+#' carries a hull (#107).
 #'
 #' @param record A `data$standardization` record, or `NULL`.
 #' @return `numeric(2)`, or `NULL` when the record carries no hull.
@@ -834,7 +832,7 @@ prior_hull_range <- function(record) {
 
   if (!isTRUE(record$baseline)) return(NULL)
 
-  record$baseline_range %||% record$wavelength_range
+  record$baseline_range
 
 }
 

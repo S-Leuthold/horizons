@@ -213,6 +213,32 @@ describe("evaluate() - gate checks", {
 
   })
 
+  it("refuses a seed, prune or prune_threshold it cannot use, before anything is drawn", {
+
+    local_mocked_bindings(
+      draw_eval_split        = function(...) stop("a split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    obj <- make_eval_object()
+
+    for (bad in list(1.5, NA, "307", Inf, c(1, 2), NULL, .Machine$integer.max + 1)) {
+      expect_error(evaluate(obj, seed = bad), "`seed`", fixed = TRUE,
+                   class = "horizons_error_input")
+    }
+
+    for (bad in list(NA, "yes", c(TRUE, FALSE), NULL)) {
+      expect_error(evaluate(obj, prune = bad), "`prune`", fixed = TRUE,
+                   class = "horizons_error_input")
+    }
+
+    for (bad in list(-1, NA_real_, Inf, "1", c(1, 2), NULL)) {
+      expect_error(evaluate(obj, prune_threshold = bad), "`prune_threshold`", fixed = TRUE,
+                   class = "horizons_error_input")
+    }
+
+  })
+
   it("refuses an axis whose names are not wavenumbers at its door, before anything is drawn (#121)", {
 
     ## Names the door validator cannot read as wavenumbers, so it cannot
@@ -1468,15 +1494,6 @@ describe("evaluate() - recipe settings", {
 
   })
 
-  it("falls back to the values the recipe always ran when the record is absent (older objects)", {
-
-    obj$config$recipe <- NULL
-
-    expect_identical(capture_recipe_args(obj),
-                     list(sg_window = 9L, pca_threshold = 0.995))
-
-  })
-
   ## A window as wide as the spectrum used to pass prep() and fail every
   ## config inside tune ("Grid search failed"); a wider one failed them all
   ## ("All configurations failed"). Neither named the window. evaluate() now
@@ -2445,10 +2462,13 @@ describe("evaluate() - the configurations' warnings and failures on the log", {
 
   it("names a configuration whose Bayesian search failed in one substitution warning (#209)", {
 
-    ## A grid of one gives tune_bayes() a single initial point, so the search
-    ## fails; configure() refuses this, the object here is set by hand
+    ## A search that cannot start. A grid of one point would do it, but
+    ## configure() and the door refuse that, so tune_bayes() is made to fail
+    ## (the unit's own test runs the grid of one).
+    local_mocked_bindings(tune_bayes = function(...) stop("the search could not start"),
+                          .package = "tune")
+
     obj <- make_eval_object(n = 60, n_configs = 1)
-    obj$config$tuning$grid_size     <- 1L
     obj$config$tuning$bayesian_iter <- 2L
 
     got <- collect_warnings(evaluate(obj, prune = FALSE, seed = 42L))

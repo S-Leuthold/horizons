@@ -113,6 +113,15 @@ make_configured_hd <- function(n_samples      = 100L,
   obj$config$n_configs        <- if (!is.null(configs)) nrow(configs)
   obj$config$tuning$cv_folds  <- cv_folds
 
+  ## What configure() writes beside the grid, at its defaults
+  if (has_config) {
+
+    obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
+                                     pca_threshold = DEFAULT_PCA_THRESHOLD)
+    obj$config$outcome_range <- DEFAULT_OUTCOME_RANGE
+
+  }
+
   obj
 
 }

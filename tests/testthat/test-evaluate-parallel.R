@@ -1012,7 +1012,8 @@ describe("evaluate() - recipe settings on the configs axis", {
     )
 
     default_obj <- obj
-    default_obj$config$recipe <- NULL
+    default_obj$config$recipe <- list(sg_window     = DEFAULT_SG_WINDOW,
+                                      pca_threshold = DEFAULT_PCA_THRESHOLD)
 
     seq_default <- suppressWarnings(
       evaluate(default_obj, seed = 42L, control = control_horizons(allow_par = FALSE))

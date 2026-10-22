@@ -570,14 +570,6 @@ describe("fit() - final_bayesian_iter", {
 
   })
 
-  it("falls back to the package default when the field is absent (older objects)", {
-
-    obj$config$tuning$final_bayesian_iter <- NULL
-
-    expect_identical(capture_final_iter(obj), DEFAULT_FINAL_BAYES_ITER)
-
-  })
-
 })
 
 
@@ -622,15 +614,6 @@ describe("fit() - recipe settings", {
 
     expect_identical(capture_recipe_args(obj),
                      list(sg_window = 7L, pca_threshold = 0.9))
-
-  })
-
-  it("falls back to the values the recipe always ran when the record is absent (older objects)", {
-
-    obj$config$recipe <- NULL
-
-    expect_identical(capture_recipe_args(obj),
-                     list(sg_window = 9L, pca_threshold = 0.995))
 
   })
 

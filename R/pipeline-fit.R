@@ -192,8 +192,7 @@
 #' negative, since the mean outcome it divides by can then be zero or
 #' negative; and, on the `evaluate()` path, with class `horizons_error_input`,
 #' when the range differs from the one `evaluate()` recorded on its results
-#' rows (rows from before the range was recorded count as the default), since
-#' the members were chosen on predictions clamped to that range.
+#' rows, since the members were chosen on predictions clamped to that range.
 #'
 #' @section Zero outcome variance:
 #' On either path, before anything is drawn, `fit()` aborts with class
@@ -276,8 +275,15 @@ fit <- function(x,
   ## would fail validation only after every model had been fitted.
   if (!is.null(metric)) check_rank_metric_arg(metric)
 
+  ## n_best is taken as an integer, so it is held to R's integer range, the
+  ## seed's bound
+  check_arg(rlang::check_number_whole, n_best, min = 1, max = SEED_MAX)
   check_arg(rlang::check_bool, compute_uq)
   check_arg(rlang::check_bool, compute_ad)
+
+  ## The seed, as at every verb, is a whole number set.seed() takes
+  ## unchanged.
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
 
   ## The object as it arrives (#234): on the evaluate() path its evaluation
   ## record, and through it the base contract; on a cold start the base
@@ -288,8 +294,7 @@ fit <- function(x,
 
   ## The outcome has to lie inside the range every prediction is clamped to,
   ## checked on either path before anything is drawn or fitted (#76).
-  ## configure() and evaluate() check it too, but an object configured before
-  ## the range existed reads as c(0, Inf), and its rows can have changed
+  ## configure() and evaluate() check it too, but the rows can have changed
   ## since; this is the last check before the re-tune pays for itself.
   check_outcome_range(x, verb = "fit")
   outcome_range <- outcome_range_setting(x)
@@ -436,14 +441,12 @@ fit <- function(x,
 
   ## configure() stores the screening and the final re-tune budgets
   ## separately; fit() used to pass the screening one to the re-tune, so the
-  ## user-facing `final_bayesian_iter` did nothing (#46). Objects configured
-  ## before that field existed fall back to the constant. The tree header
+  ## user-facing `final_bayesian_iter` did nothing (#46). The tree header
   ## prints this budget, the one that runs.
-  final_bayesian_iter <- tuning$final_bayesian_iter %||% DEFAULT_FINAL_BAYES_ITER
+  final_bayesian_iter <- tuning$final_bayesian_iter
 
   ## The recipe settings evaluate() ran with, or on a cold start the ones
-  ## cold_start_evaluation() checked against the spectrum; see
-  ## recipe_settings().
+  ## cold_start_evaluation() checked against the spectrum.
   recipe_cfg   <- recipe_settings(x)
 
   ## The rows evaluate() modelled: the same rule on the same table (#67).
@@ -1464,9 +1467,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
 #' `settings` record (#76). `fit()` takes its members and their warm-start
 #' parameters from those rows, so a range changed since `evaluate()` would
 #' carry the old range's scoring into the new fit. A recorded range must
-#' equal this object's. A row with no recorded range (evaluated before the
-#' range existed, or built by hand) was scored under the zero floor, so it
-#' passes only under the default range.
+#' equal this object's, and a row that records none is refused under every
+#' range.
 #'
 #' @param x A `horizons_eval` that was screened by `evaluate()`.
 #' @param outcome_range `numeric(2)`. The object's range, from
@@ -1479,23 +1481,20 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
 check_evaluated_outcome_range <- function(x, outcome_range,
                                           call = rlang::caller_env()) {
 
-  ### The eval validator at fit()'s door requires results with rows.
+  ### The eval validator at fit()'s door requires results with rows and,
+  ### since fit() calls this only on a screened evaluation, their settings.
   results <- x$evaluation$results
 
-  stamps <- if ("settings" %in% names(results)) {
-    lapply(results$settings, function(s) if (is.list(s)) normalize_eval_settings(s) else NULL)
-  } else {
-    rep(list(NULL), nrow(results))
-  }
+  stamps <- lapply(results$settings, function(s) if (is.list(s)) normalize_eval_settings(s) else NULL)
 
   differs <- !vapply(stamps, function(s) {
-    identical(s$outcome_range %||% DEFAULT_OUTCOME_RANGE, as.double(outcome_range))
+    identical(s$outcome_range, as.double(outcome_range))
   }, logical(1))
 
   if (!any(differs)) return(invisible(NULL))
 
   recorded <- unique(vapply(stamps[differs], function(s) {
-    if (is.null(s$outcome_range)) "unrecorded (the zero floor)" else format_outcome_range(s$outcome_range)
+    if (is.null(s$outcome_range)) "no outcome range" else format_outcome_range(s$outcome_range)
   }, character(1)))
 
   range_text <- format_outcome_range(outcome_range)
@@ -1669,10 +1668,9 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 #' are pruned configurations (the fallback, because none succeeded) the
 #' warning says so.
 #'
-#' A pruned row counts as below the threshold whether or not it carries the
-#' column, since the gate put it there. A row with no reading (`prune =
-#' FALSE`, or written before the column existed) does not, so one such member
-#' keeps the warning from firing.
+#' A pruned row counts as below the threshold whatever its reading, since the
+#' gate put it there. A row with no reading (`NA`, as `prune = FALSE` writes
+#' it) does not, so one such member keeps the warning from firing.
 #'
 #' @param collector `fit()`'s collector, from `log_open()`.
 #' @param members The member rows (`evaluation$results` shape).
@@ -1686,18 +1684,14 @@ abort_all_members_failed <- function(results, call = rlang::caller_env()) {
 #' @noRd
 log_members_below_threshold <- function(collector, members, fallback, bayesian_iter = NULL) {
 
-  ## Columns are read by name: results from before they existed, or built by
-  ## hand, lack them, and `$` on a tibble without the column warns.
-  column_or <- function(col, fill) {
-    if (col %in% names(members)) members[[col]] else rep(fill, nrow(members))
-  }
-
+  ### The eval validator requires the reading and the cross-validated RPD on
+  ### every row, and the cold start writes them.
   n_members <- nrow(members)
-  below     <- column_or("below_prune_threshold", NA) | members$status %in% "pruned"
+  below     <- members$below_prune_threshold | members$status %in% "pruned"
 
   if (n_members == 0 || !isTRUE(all(below))) return(invisible(collector))
 
-  thresholds <- unique(stats::na.omit(column_or("prune_threshold", NA_real_)))
+  thresholds <- unique(stats::na.omit(members$prune_threshold))
 
   threshold_text <- if (length(thresholds) == 0) {
     "the prune threshold (not recorded on these rows)"
@@ -1705,7 +1699,7 @@ log_members_below_threshold <- function(collector, members, fallback, bayesian_i
     paste0("the prune threshold of ", paste(format(thresholds), collapse = " and "))
   }
 
-  cv_rpd  <- column_or("cv_rpd", NA_real_)
+  cv_rpd  <- members$cv_rpd
   cv_text <- paste0(members$config_id, " ",
                     ifelse(is.na(cv_rpd), "NA", formatC(cv_rpd, digits = 2, format = "f")),
                     collapse = ", ")
@@ -1810,8 +1804,8 @@ calib_split_seed <- function(seed) {
 #' member's intervals and an ensemble's.
 #'
 #' @param uq A member's UQ bundle or an ensemble's CV+ bundle, carrying
-#'   `test_coverage`, `test_mean_width`, `n_test` and `level_default`.
-#'   Bundles made before these fields existed read as unmeasured.
+#'   `test_coverage`, `test_mean_width`, `n_test` and `level_default`. A
+#'   bundle without them (built by hand) reads as unmeasured.
 #' @return Character(1).
 #' @keywords internal
 #' @noRd

@@ -113,12 +113,13 @@ cluster_spectral_predictors <- function(spectra_mat,
 }
 
 
-#' Drop the Near-Constant Bands Before Clustering
+#' Drop the Near-Constant Bands Before Selecting
 #'
 #' @description
-#' Shared by `step_select_cars()` and `step_select_boruta()`. A band with no
-#' spread has no correlation with any other, which `hclust()` refuses, and a
-#' band whose spread is round-off carries nothing to select. A band is
+#' Shared by the three selection steps. A band with no spread has no
+#' correlation with any other, or with the outcome, which `hclust()` refuses
+#' and `stats::cor()` warns of, and a band whose spread is round-off carries
+#' nothing to select. A band is
 #' dropped when its variance is not finite, is zero, or is at most
 #' `NEAR_CONSTANT_RATIO` of the median variance of the bands that vary. The
 #' cutoff is relative to the spectrum because correlation is scale-free:

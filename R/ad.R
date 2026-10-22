@@ -222,7 +222,11 @@ AD_BINS <- c("Q1", "Q2", "Q3", "Q4", "OOD")
 #' The bins are quartiles of the held-out calibration distances plus an OOD tail
 #' above the `level` cutoff — they are calibration-distance quartiles, a
 #' reporting convenience, not an absolute risk scale. A sample exactly at a
-#' threshold falls in the lower bin (right-closed intervals).
+#' threshold falls in the lower bin (right-closed intervals). Thresholds tie
+#' when calibration distances do (duplicate calibration spectra); the bins
+#' between tied thresholds are then empty, a distance at the tie falls in the
+#' lowest of them, and `OOD` is still exactly a distance above the cutoff
+#' (#240).
 #'
 #' @param distances Numeric vector of squared distances from
 #'   [calculate_ad_distance()]. Non-negative.
@@ -237,9 +241,8 @@ AD_BINS <- c("Q1", "Q2", "Q3", "Q4", "OOD")
 #' @noRd
 assign_ad_bin <- function(distances, thresholds) {
 
-  ## A negative squared distance falls outside cut()'s breaks and bins to NA,
-  ## silently, and an NA flag is never abstained on; cut() itself refuses a
-  ## non-numeric.
+  ## No squared distance is negative, and one would bin as Q1, silently, so
+  ## it stops the call.
 
   if (any(distances < 0, na.rm = TRUE)) {
 
@@ -248,15 +251,15 @@ assign_ad_bin <- function(distances, thresholds) {
   }
 
   ### The thresholds come from a saved AD bundle, whose shape predict()'s door
-  ### validator checks.
+  ### validator checks: four numbers, non-decreasing.
 
-  cut(
-    distances,
-    breaks         = c(0, thresholds, Inf),
-    labels         = AD_BINS,
-    right          = TRUE,
-    include.lowest = TRUE
-  )
+  ## A distance's bin is one past the number of thresholds strictly below it,
+  ## so a distance at a threshold falls in the lower bin, and tied thresholds
+  ## leave the bins between them empty rather than being refused as breaks
+  ## (#240). A missing distance stays a missing flag.
+  below <- findInterval(distances, thresholds, left.open = TRUE)
+
+  factor(AD_BINS[below + 1L], levels = AD_BINS)
 
 }
 

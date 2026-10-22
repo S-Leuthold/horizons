@@ -1339,18 +1339,33 @@ make_valid_eval <- function() {
     cv_rmse   = c(1.1, 2.1),  cv_rrmse = c(0.11, 0.21),
     cv_rsq    = c(0.88, 0.78), cv_ccc  = c(0.88, 0.78),
     cv_rpd    = c(1.9, 1.4),  cv_mae   = c(0.9, 1.2),
-    class     = NA_character_
+    class     = NA_character_,
+    ## the prune gate's reading, as prune = FALSE writes it
+    below_prune_threshold = NA,
+    prune_threshold       = NA_real_,
+    ## the settings evaluate() stamps on every row
+    settings  = rep(list(eval_settings(
+      cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
+      prune = FALSE, prune_threshold = NA_real_, seed = 42L,
+      sg_window = DEFAULT_SG_WINDOW, pca_threshold = DEFAULT_PCA_THRESHOLD,
+      outcome_range = DEFAULT_OUTCOME_RANGE, response_threshold = NA_real_
+    )), 2)
   )
 
   obj <- list(
-    ## A grid and tuning the door validator accepts (config_findings())
+    ## A configuration the door validator accepts (config_findings()), with
+    ## what configure() writes beside the grid at its defaults
     config = list(
       configs = tibble::tibble(config_id         = c("cfg_a", "cfg_b"),
                                model             = c("rf", "plsr"),
                                transformation    = "none",
                                preprocessing     = "raw",
                                feature_selection = "none"),
-      tuning  = list(cv_folds = 5L)
+      tuning  = list(cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
+                     final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER),
+      recipe  = list(sg_window     = DEFAULT_SG_WINDOW,
+                     pca_threshold = DEFAULT_PCA_THRESHOLD),
+      outcome_range = DEFAULT_OUTCOME_RANGE
     ),
     evaluation = list(
       results          = results,
@@ -1981,11 +1996,16 @@ test_that("validate_horizons_eval requires results to cover the config table exa
   expect_match(conditionMessage(err),
                "cfg_01, cfg_02, cfg_03, cfg_04, cfg_05, and 3 more", fixed = TRUE)
 
-  ## Without a config table there is nothing to cover.
+  ## Without a config table there is nothing to cover: the missing table is
+  ## the one finding (#212).
   no_configs <- make_valid_eval()
   no_configs$config <- NULL
 
-  expect_identical(validate_horizons_eval(no_configs), no_configs)
+  err <- tryCatch(validate_horizons_eval(no_configs), error = function(e) e)
+
+  expect_s3_class(err, "horizons_error_validation")
+  expect_identical(err$findings,
+                   "config$configs must be the configuration grid `configure()` wrote (a data frame)")
 
 })
 
@@ -3093,7 +3113,7 @@ describe("config_findings() at every verb's door", {
     expect_true(any(grepl("config$outcome_range is not a usable range",
                           finding_of(validate_horizons_data(obj)), fixed = TRUE)))
 
-    for (bad in list(1, 2.5, NA_real_, "5", NULL)) {
+    for (bad in list(1, 2.5, NA_real_, "5", NULL, Inf)) {
 
       obj <- configured_object()
       obj$config$tuning["cv_folds"] <- list(bad)
@@ -3112,6 +3132,107 @@ describe("config_findings() at every verb's door", {
 
     expect_true(any(grepl("configured but has no outcome role",
                           finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+
+  })
+
+  it("refuses a missing outcome range, recipe settings configure() would refuse, and a tuning budget below configure()'s minimum, with the remedy (#212)", {
+
+    refusal <- function(obj) {
+      tryCatch(validate_horizons_data(obj), horizons_error_validation = function(e) e)
+    }
+
+    obj <- configured_object()
+    obj$config["outcome_range"] <- list(NULL)
+    err <- refusal(obj)
+    expect_s3_class(err, "horizons_error_validation")
+    expect_true(any(grepl("config$outcome_range is not a usable range (two numbers, lower below upper): it is `NULL`",
+                          err$findings, fixed = TRUE)))
+    expect_match(conditionMessage(err), "rebuild it with the verbs that wrote it", fixed = TRUE)
+
+    minimums <- c(grid_size = 1, bayesian_iter = 0, final_bayesian_iter = 0)
+
+    for (field in names(minimums)) {
+
+      for (bad in list(minimums[[field]] - 1, 1.5, NA_real_, "5", NULL, Inf)) {
+
+        obj <- configured_object()
+        obj$config$tuning[field] <- list(bad)
+        expect_true(any(grepl(paste0("config$tuning$", field, " must be a whole number of at least ",
+                                     minimums[[field]]),
+                              finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                    label = paste(field, deparse(bad)))
+
+      }
+
+    }
+
+    recipes <- list(NULL, c(9, 0.995),
+                    list(pca_threshold = 0.995),
+                    list(sg_window = 8L, pca_threshold = 0.995),
+                    list(sg_window = 3L, pca_threshold = 0.995),
+                    list(sg_window = 9L),
+                    list(sg_window = 9L, pca_threshold = 0),
+                    list(sg_window = 9L, pca_threshold = 1.5),
+                    list(sg_window = 9L, pca_threshold = NA_real_))
+
+    for (recipe in recipes) {
+
+      obj <- configured_object()
+      obj$config["recipe"] <- list(recipe)
+      expect_true(any(grepl("config$recipe must be a list with an odd whole sg_window of at least 5 and a pca_threshold in (0, 1]",
+                            finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                  label = deparse(recipe))
+
+    }
+
+  })
+
+  it("refuses a grid of one point while either Bayesian search runs, as configure() does (#209)", {
+
+    finding <- "config$tuning$grid_size must be at least 2 while bayesian_iter or final_bayesian_iter is above 0, not `1L`"
+
+    for (searches in list(c(2L, 0L), c(0L, 3L), c(2L, 3L))) {
+
+      obj <- configured_object()
+      obj$config$tuning$grid_size           <- 1L
+      obj$config$tuning$bayesian_iter       <- searches[1]
+      obj$config$tuning$final_bayesian_iter <- searches[2]
+      expect_identical(finding_of(validate_horizons_data(obj)), finding,
+                       label = paste(searches, collapse = ", "))
+
+    }
+
+    ## With both searches off, a grid of one is configure()'s own boundary
+    obj <- configured_object()
+    obj$config$tuning[c("grid_size", "bayesian_iter", "final_bayesian_iter")] <- list(1L, 0L, 0L)
+    expect_identical(validate_horizons_data(obj), obj)
+
+  })
+
+  it("refuses an evaluated object without its configuration grid, which would leave the configuration unchecked (#212)", {
+
+    ## The stored fit, as a verb wrote it. Without the grid the base
+    ## validator skips the configuration's findings, so a fit without its
+    ## outcome range too reached the response bound's check, which reads it
+    fx      <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+    finding <- "config$configs must be the configuration grid `configure()` wrote (a data frame)"
+
+    for (keys in list("configs", c("configs", "outcome_range"))) {
+
+      obj <- fx
+      obj$config[keys] <- list(NULL)
+      err <- tryCatch(validate_horizons_fit(obj), error = function(e) e)
+
+      expect_s3_class(err, "horizons_error_validation")
+      expect_identical(err$findings, finding, label = paste(keys, collapse = ", "))
+
+    }
+
+    ## The evaluation it carries, refused the same way
+    ev <- reset_slots(fx, c("models", "ensemble"))
+    class(ev) <- c("horizons_eval", "horizons_data", "list")
+    ev$config["configs"] <- list(NULL)
+    expect_identical(finding_of(validate_horizons_eval(ev)), finding)
 
   })
 
@@ -3219,6 +3340,41 @@ describe("the class validators' new checks (#234)", {
 
     expect_true(any(grepl("do not carry unique sample_ids", finding_of(validate_horizons_fit(obj)),
                           fixed = TRUE)))
+
+  })
+
+  it("require the prune gate's reading on every evaluation, and the settings on a screened one, with the remedy (#212)", {
+
+    for (column in c("below_prune_threshold", "prune_threshold")) {
+
+      obj <- make_valid_eval()
+      obj$evaluation$results[[column]] <- NULL
+      err <- tryCatch(validate_horizons_eval(obj), horizons_error_validation = function(e) e)
+
+      expect_true(any(grepl(paste0("results has no ", if (column == "prune_threshold") "numeric " else "logical ",
+                                   column, " column"),
+                            err$findings, fixed = TRUE)), label = column)
+      expect_match(conditionMessage(err), "Re-run evaluate() on the object", fixed = TRUE)
+
+    }
+
+    obj <- make_valid_eval()
+    obj$evaluation$results$below_prune_threshold <- "no"
+    obj$evaluation$results$prune_threshold       <- "1.5"
+    findings <- finding_of(validate_horizons_eval(obj))
+    expect_true(any(grepl("no logical below_prune_threshold column", findings, fixed = TRUE)))
+    expect_true(any(grepl("no numeric prune_threshold column", findings, fixed = TRUE)))
+
+    screened <- make_valid_eval()
+    screened$evaluation$results$settings <- NULL
+    expect_true(any(grepl("results has no settings list column",
+                          finding_of(validate_horizons_eval(screened)), fixed = TRUE)))
+
+    ## fit()'s cold start scores nothing, so its unscreened evaluation has
+    ## no settings to record
+    cold <- screened
+    cold$evaluation$screened <- FALSE
+    expect_identical(validate_horizons_eval(cold), cold)
 
   })
 

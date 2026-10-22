@@ -34,8 +34,9 @@ describe("step_select_correlation() keeps the windows that score", {
   ## The outcome follows wn_3980, so the three 3-band windows holding it,
   ## wn_3984 to wn_3976, score high. At n = 100 the selection is exactly
   ## those five bands at 100 of 100 seeds, with or without a constant band
-  ## at wn_4000. At seed 1 the lowest of the three windows sits 0.106 above
-  ## the threshold (0.233) and the best noise window 0.119 below it.
+  ## at wn_4000 and a missing value at wn_3990. At seed 1 the lowest of the
+  ## three windows sits 0.106 above the threshold (0.233) and the best noise
+  ## window 0.119 below it.
   signal_windows <- paste0("wn_", seq(3984, 3976, by = -2))
 
   it("keeps the bands of each window whose mean absolute correlation clears the mean plus one sd", {
@@ -51,25 +52,36 @@ describe("step_select_correlation() keeps the windows that score", {
 
   })
 
-  it("scores the windows around a constant band without letting it void the threshold", {
+  it("scores the windows around a constant band without letting it void the threshold, and drops it as CARS and Boruta do", {
 
     withr::local_seed(1)
     d         <- correlation_data(n = 100)
     d$wn_4000 <- 0.5
 
-    ## A constant band has no correlation, and stats::cor() says so
-    expect_warning(prepped <- recipes::prep(correlation_recipe(d), training = d),
-                   "the standard deviation is zero", fixed = TRUE)
+    ## A band that varies but has one missing value is kept by the filter
+    ## and has no correlation, so the three windows holding it score NA,
+    ## which the threshold leaves out
+    d$wn_3990[1] <- NA
+
+    ## A constant band has no correlation; it is dropped before scoring, so
+    ## stats::cor() has nothing to warn of
+    expect_no_warning(prepped <- recipes::prep(correlation_recipe(d), training = d))
 
     expect_identical(prepped$steps[[1]]$selected_vars, signal_windows)
+    expect_identical(prepped$steps[[1]]$correlation$n_constant, 1L)
+    expect_identical(prepped$steps[[1]]$correlation$n_bands, 19L)
+    expect_output(print(prepped$steps[[1]]), "1 near-constant band dropped before selection",
+                  fixed = TRUE)
 
   })
 
-  it("keeps every band, and says so, when no window clears the threshold", {
+  it("keeps every band the filter leaves, and says so, when no window clears the threshold", {
 
     ## Six bands, four windows: a noise band, then five copies of the band
     ## the outcome follows. The windows score s, r, r, r with s below r, so
-    ## the threshold, their mean plus one sd, is r + (r - s) / 4, above all
+    ## the threshold, their mean plus one sd, is r + (r - s) / 4, above all.
+    ## A seventh band, constant, is dropped before the windows are scored,
+    ## so it is not among the bands kept.
     d <- withr::with_seed(1, {
       signal <- stats::rnorm(30)
       m      <- cbind(stats::rnorm(30), matrix(signal, 30, 5))
@@ -78,6 +90,7 @@ describe("step_select_correlation() keeps the windows that score", {
       d$SOC <- 2 * signal + stats::rnorm(30, sd = 0.5)
       d
     })
+    d$wn_3988 <- 0.5
 
     ## A substitution, said once and recorded on the trained step (#105)
     w <- expect_warning(prepped <- recipes::prep(correlation_recipe(d), training = d),
@@ -85,12 +98,16 @@ describe("step_select_correlation() keeps the windows that score", {
                         fixed = TRUE, class = "horizons_warning_substitution")
 
     expect_identical(w$step, "step_select_correlation")
-    expect_match(conditionMessage(w), "Retaining all 6 wavenumbers", fixed = TRUE)
+    expect_match(conditionMessage(w), "Retaining all 6 variance-filtered wavenumbers", fixed = TRUE)
+    expect_output(print(prepped$steps[[1]]),
+                  "No window cleared the threshold, so every variance-filtered band was kept", fixed = TRUE)
     expect_true(prepped$steps[[1]]$correlation$retained_all)
     expect_identical(prepped$steps[[1]]$correlation$n_windows, 4L)
     expect_identical(prepped$steps[[1]]$correlation$n_windows_kept, 0L)
+    expect_identical(prepped$steps[[1]]$correlation$n_constant, 1L)
 
-    ## Kept whole, the selection carries the names recipes gave the columns
+    ## Kept whole, the selection carries the names recipes gave the columns,
+    ## and not the constant band
     expect_identical(unname(prepped$steps[[1]]$selected_vars), colnames(d)[1:6])
 
   })
@@ -194,6 +211,28 @@ describe("step_select_correlation() with too few bands to select from", {
       expect_output(print(step), sprintf("`step_select_correlation()` had %d band", p), fixed = TRUE)
 
     }
+
+    ## Six bands, two of them constant: the four the filter leaves are too
+    ## few, since the bands are counted after it, as CARS and Boruta count
+    ## them
+    d <- withr::with_seed(1, {
+      m <- matrix(stats::rnorm(30 * 6), 30)
+      colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = 6))
+      m[, c("wn_3998", "wn_3990")] <- 1
+      d <- tibble::as_tibble(m)
+      d$SOC <- d$wn_4000 + stats::rnorm(30, sd = 0.3)
+      d
+    })
+
+    expect_warning(prepped <- recipes::prep(correlation_recipe(d), training = d),
+                   "had 4 bands to select from, fewer than the 5 it needs, so they are kept",
+                   fixed = TRUE, class = "horizons_warning_skipped")
+
+    step <- prepped$steps[[1]]
+
+    expect_true(step$correlation$skipped)
+    expect_identical(step$correlation$n_constant, 2L)
+    expect_identical(unname(step$selected_vars), c("wn_4000", "wn_3996", "wn_3994", "wn_3992"))
 
   })
 

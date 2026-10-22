@@ -424,24 +424,6 @@ tune_warmstart_bayes <- function(workflow,
 }
 
 
-#' Whether a Bayesian search produced any iteration past its grid
-#'
-#' tune_bayes() returns, rather than erroring, when the search loop errors
-#' (its on.exit() hands back the results so far) or when every candidate fails
-#' in every fold (it drops such a candidate without a note). Either way the
-#' result holds only the initial grid, as `.iter` 0, so a search that kept
-#' nothing is told apart by having no row with `.iter` above 0.
-#'
-#' @param results A `tune_results` object from [tune::tune_bayes()].
-#' @return Logical(1).
-#' @keywords internal
-#' @noRd
-bayes_iterations_ran <- function(results) {
-
-  ".iter" %in% names(results) && any(results$.iter > 0, na.rm = TRUE)
-
-}
-
 #' Run a Bayesian search from a grid, keeping what it finished
 #'
 #' @description
@@ -592,10 +574,13 @@ bayes_search <- function(workflow,
 
   if (!is.null(bayes_results)) check_tune_result(bayes_results, failure = NULL, debug = debug)
 
+  ## tune_bayes() returns, rather than erroring, when the search loop errors
+  ## (its on.exit() hands back the results so far) or when every candidate
+  ## fails in every fold (it drops such a candidate without a note). Either
+  ## way the result holds only the initial grid, whose rows tune gives `.iter`
+  ## 0, so a search that kept nothing has no iteration past it.
   cause  <- if (!is.null(stopped)) condition_summary(stopped)
-  n_iter <- if (!is.null(bayes_results) && bayes_iterations_ran(bayes_results)) {
-    max(bayes_results$.iter, na.rm = TRUE)
-  } else 0L
+  n_iter <- if (is.null(bayes_results)) 0L else max(bayes_results$.iter)
 
   if (n_iter > 0) {
 

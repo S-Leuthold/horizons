@@ -141,23 +141,6 @@ describe("step_select_boruta() selects by Boruta (#75)", {
 
   })
 
-  it("bakes and prints a step trained before the record existed", {
-
-    skip_if_not_installed("Boruta")
-
-    d       <- boruta_signal_data()
-    prepped <- boruta_prepped()
-    baked   <- recipes::bake(prepped, new_data = d)
-
-    old <- prepped
-    old$steps[[1]]$boruta <- NULL
-
-    expect_false("boruta" %in% names(old$steps[[1]]))
-    expect_identical(recipes::bake(old, new_data = d), baked)
-    expect_output(print(old$steps[[1]]), "wavenumbers retained after Boruta")
-
-  })
-
 })
 
 ## =========================================================================
@@ -190,7 +173,7 @@ describe("step_select_boruta() - Boruta's input and its forests", {
 
     expect_identical(step$boruta$n_constant, 1L)
     expect_identical(step$boruta$n_bands, 59L)
-    expect_output(print(step), "1 near-constant band dropped before clustering", fixed = TRUE)
+    expect_output(print(step), "1 near-constant band dropped before selection", fixed = TRUE)
 
     ## The 59 that vary cluster to 50; every one of them is selected
     expect_length(seen, 50L)

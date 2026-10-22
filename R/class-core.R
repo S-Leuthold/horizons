@@ -129,16 +129,13 @@ new_horizons_data <- function(analysis = NULL,
                                 final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER),
 
                   ## Written by configure(): list(sg_window, pca_threshold),
-                  ## the settings build_recipe() applies to
-                  ## every config. NULL until then, and on objects configured
-                  ## before it existed; see recipe_settings().
+                  ## the settings build_recipe() applies to every config.
+                  ## NULL until then; see recipe_settings().
                   recipe = NULL,
 
                   ## Written by configure(): numeric(2), the outcome's
                   ## physical range every prediction is clamped to (#76).
-                  ## NULL until then, and on objects configured before it
-                  ## existed, which read as c(0, Inf); see
-                  ## outcome_range_setting().
+                  ## NULL until then; see outcome_range_setting().
                   outcome_range = NULL,
 
                   ## Written by configure(): the arguments it was given
@@ -364,9 +361,9 @@ new_horizons_data <- function(analysis = NULL,
 #'
 #' 14. **Configuration**: on a configured object (unless `config = FALSE`),
 #'     the checks in [config_findings()]: unique configuration ids, known
-#'     models, transformations,
-#'     preprocessing and feature selection, a usable outcome range, a whole
-#'     number of folds of at least 2, one outcome, and a response-trim
+#'     models, transformations, preprocessing and feature selection, a usable
+#'     outcome range, the four tuning budgets as whole numbers (at least 2
+#'     folds), valid recipe settings, one outcome, and a response-trim
 #'     request for that outcome with a usable threshold. Every class
 #'     validator reaches these through the chain.
 #'
@@ -375,6 +372,11 @@ new_horizons_data <- function(analysis = NULL,
 #'     the pipeline: the verbs read the standardization record from
 #'     `data$standardization` and the history from the log, so its record
 #'     would go unread.
+#'
+#' 16. **Standardization record**: a `data$standardization` that records a
+#'     convex-hull baseline carries its `baseline_range`, two numbers, the
+#'     range the hull was fitted over, which `select_training()` compares
+#'     (#107).
 #'
 #' Empty objects (both analysis and role_map NULL) pass validation — this
 #' allows for incremental object construction. The selection record is
@@ -478,6 +480,27 @@ validate_horizons_data <- function(x,
     errors <- c(errors, cli::format_inline(
       "The object carries a {.field provenance} slot, which horizons no longer writes: it was made by an earlier version. Re-run the pipeline from {.fn spectra}."
     ))
+
+  }
+
+  ## The standardization record ----
+  ## A record that says the spectra carry a convex-hull baseline holds the
+  ## range the hull was fitted over, which select_training() compares between
+  ## a library and its targets (#107); standardize() always writes it.
+
+  std <- x$data$standardization
+
+  if (is.list(std) && isTRUE(std$baseline)) {
+
+    hull <- std$baseline_range
+
+    if (!(is.numeric(hull) && length(hull) == 2 && !anyNA(hull))) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field data$standardization} records a convex-hull baseline but no {.field baseline_range} (two numbers), the range the hull was fitted over"
+      ))
+
+    }
 
   }
 
@@ -887,11 +910,12 @@ ad_bundle_ok <- function(bundle) {
 #' @description
 #' What every verb after `configure()` reads from `config` and `validation`,
 #' checked once at the door instead of where each value is used: a usable
-#' outcome range, a whole number of folds, a configuration grid with unique
-#' ids whose models, transformations, preprocessing and feature selection are
-#' all known, one
-#' outcome, and a response-trim request that is for that outcome and has a
-#' usable threshold.
+#' outcome range, a tuning record whose four budgets are whole numbers of at
+#' least `configure()`'s minimums, with a grid of at least two points while
+#' either Bayesian search runs, recipe settings `configure()` would accept,
+#' a configuration grid with unique ids whose models, transformations,
+#' preprocessing and feature selection are all known, one outcome, and a
+#' response-trim request that is for that outcome and has a usable threshold.
 #'
 #' @param x A `horizons_data` with `config$configs` set.
 #' @return [Character.] Validation messages, possibly empty.
@@ -944,24 +968,65 @@ config_findings <- function(x) {
   }
 
   ## Settings every later verb reads -------------------------------------------
+  ## configure() writes each of them, under the rules its own door applies, so
+  ## one that is missing or breaks a rule was edited by hand. A value is shown
+  ## deparsed, so a missing one reads as NULL.
 
   range <- x$config$outcome_range
 
-  if (!is.null(range) && !is_valid_outcome_range(range)) {
+  if (!is_valid_outcome_range(range)) {
 
     findings <- c(findings, cli::format_inline(
-      "{.field config$outcome_range} is not a usable range (two numbers, lower below upper): it is {.val {range}}"
+      "{.field config$outcome_range} is not a usable range (two numbers, lower below upper): it is {.code {deparse1(range)}}"
     ))
 
   }
 
-  cv_folds <- x$config$tuning$cv_folds
+  ### configure()'s minimums: folds to split, a grid to start from, and
+  ### either search may be off
+  tuning_minimums <- c(cv_folds = 2, grid_size = 1, bayesian_iter = 0,
+                       final_bayesian_iter = 0)
+  tuning          <- x$config$tuning
+  tuning_ok       <- TRUE
 
-  if (!(is.numeric(cv_folds) && length(cv_folds) == 1 && !is.na(cv_folds) &&
-        cv_folds >= 2 && cv_folds == round(cv_folds))) {
+  for (field in names(tuning_minimums)) {
+
+    value   <- tuning[[field]]
+    minimum <- tuning_minimums[[field]]
+
+    if (!(is.numeric(value) && length(value) == 1 && is.finite(value) &&
+          value >= minimum && value == round(value))) {
+
+      tuning_ok <- FALSE
+      findings  <- c(findings, cli::format_inline(
+        "{.field config$tuning${field}} must be a whole number of at least {minimum}, not {.code {deparse1(value)}}"
+      ))
+
+    }
+
+  }
+
+  ### And configure()'s rule on the three together: both Bayesian searches
+  ### start from the grid, and tune_bayes() needs two of its points (#209)
+  if (tuning_ok && tuning$grid_size < 2 &&
+      (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
 
     findings <- c(findings, cli::format_inline(
-      "{.field config$tuning$cv_folds} must be a whole number of at least 2, not {.val {cv_folds}}"
+      "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
+    ))
+
+  }
+
+  recipe        <- x$config$recipe
+  sg_window     <- if (is.list(recipe)) recipe$sg_window
+  pca_threshold <- if (is.list(recipe)) recipe$pca_threshold
+
+  if (!(is_valid_sg_window(sg_window) &&
+        is.numeric(pca_threshold) && length(pca_threshold) == 1 &&
+        !is.na(pca_threshold) && pca_threshold > 0 && pca_threshold <= 1)) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$recipe} must be a list with an odd whole {.field sg_window} of at least {SG_WINDOW_MIN} and a {.field pca_threshold} in (0, 1], not {.code {deparse1(recipe)}}"
     ))
 
   }
@@ -1844,15 +1909,19 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #'    and `upper` single numbers, finite whenever rows were trimmed, since
 #'    the degradation check reads them.
 #' 2. **results**: data frame carrying `config_id`, `status`, and the six
-#'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); at least
-#'    one row; `config_id` values unique; and, when `x$config$configs` is
-#'    set, `config_id` set-equal to its `config_id`. Failed, pruned and
+#'    metric columns (`rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`); the prune
+#'    gate's reading (`below_prune_threshold`, logical, and `prune_threshold`,
+#'    numeric) and, when `screened`, the `settings` list column `evaluate()`
+#'    stamps on every row; at least
+#'    one row; `config_id` values unique; and `config_id` set-equal to
+#'    `x$config$configs$config_id`. Failed, pruned and
 #'    not-evaluated configs keep their rows, so a config with no row was
 #'    lost, and a row with no config describes a config that isn't there.
+#'    The grid itself is required (#212): the base validator checks the
+#'    configuration only on an object that has one.
 #' 3. **best_config** (I5): a length-1 character, `NA` when no
 #'    configuration has the ranking metric, otherwise present in
-#'    `results$config_id` — and, when the config table is reachable at
-#'    `x$config$configs$config_id`, present there too.
+#'    `results$config_id` and in `x$config$configs$config_id`.
 #' 4. **rank_metric**: a length-1 character naming one of the six metrics.
 #' 5. **split**: an `rsplit` (the train/test partition `fit()` reuses).
 #' 6. **n_train / n_test**: single non-negative whole numbers.
@@ -1899,6 +1968,20 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
   errors  <- character()
   ev      <- x$evaluation
   cfg_ids <- x$config$configs$config_id
+
+  ## The configuration grid (#212) ----------------------------------------------
+  ## Every verb that writes an evaluation reads it, and the base validator
+  ## checks the configuration only on an object that has one, so an
+  ## evaluation without it would pass with its configuration unchecked. The
+  ## checks below that read the grid leave a missing one to this finding.
+
+  if (!is.data.frame(x$config$configs)) {
+
+    errors <- c(errors, cli::format_inline(
+      "{.field config$configs} must be the configuration grid {.fn configure} wrote (a data frame)"
+    ))
+
+  }
 
   ## Slot completeness ----------------------------------------------------------
 
@@ -2061,13 +2144,44 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
     }
 
+    ## The prune gate's reading, which every row writer records (NA when the
+    ## gate did not run) and fit() reads to say when every member fell below
+    ## the threshold
+    if (!"below_prune_threshold" %in% names(res) || !is.logical(res$below_prune_threshold)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no logical {.field below_prune_threshold} column, the prune gate's reading"
+      ))
+
+    }
+
+    if (!"prune_threshold" %in% names(res) || !is.numeric(res$prune_threshold)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no numeric {.field prune_threshold} column, the threshold the prune gate read"
+      ))
+
+    }
+
+    ## Each row of a screened evaluation records the settings evaluate()
+    ## scored it under, which fit() compares its outcome range with. fit()'s
+    ## cold start scores nothing, so its unscreened evaluation has none.
+    if (isTRUE(ev$screened) && (!"settings" %in% names(res) || !is.list(res$settings))) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no {.field settings} list column, the settings {.fn evaluate} scored each row under"
+      ))
+
+    }
+
   }
 
   ## results cover the config table exactly -------------------------------------
   ## Failed, pruned and not-evaluated configs keep their rows with a status, so
   ## a config with no row was lost, and a row with no config describes one the
   ## table no longer holds. Ids are listed five at a time: a lost batch of a
-  ## large grid would otherwise flood the report.
+  ## large grid would otherwise flood the report. A missing grid is reported
+  ## above.
 
   if (res_valid && !is.null(x$config$configs) &&
       !setequal(res$config_id, cfg_ids)) {
@@ -2119,9 +2233,9 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
     }
 
-    ## Cross-check against the config catalog when it is reachable — a
-    ## best_config that names no defined config means the ranking pointed at a
-    ## row that the config table never held.
+    ## Cross-check against the config catalog, a missing one being reported
+    ## above: a best_config that names no defined config means the ranking
+    ## pointed at a row that the config table never held.
     if (!is.null(cfg_ids) && !bc %in% cfg_ids) {
 
       errors <- c(errors, cli::format_inline("{.field best_config} ({bc}) is not present in {.field config$configs$config_id}"))
@@ -2237,8 +2351,8 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    range, `c(0, Inf)`, that is a single positive finite numeric; under
 #'    `c(-Inf, Inf)` any finite bound, negative included.
 #' 7. **selection_present**: `TRUE` or `FALSE`.
-#' 8. **I6 — workflow ⊆ config**: when `x$config$configs$config_id` is
-#'    reachable, every workflow key is a defined config id.
+#' 8. **I6 — workflow ⊆ config**: every workflow key is a defined config id
+#'    in `x$config$configs$config_id`, the grid the eval validator requires.
 #' 9. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
 #'    subset of the workflow keys (not every fitted config earns a UQ bundle —
 #'    only successful ones with sufficient calibration data). Each bundle
@@ -2479,9 +2593,10 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
   ## I6: workflow keys are a subset of config ids -------------------------------
 
+  ## The eval validator, run first, requires the grid.
   cfg_ids <- x$config$configs$config_id
 
-  if (wf_valid && !is.null(cfg_ids)) {
+  if (wf_valid) {
 
     unknown <- setdiff(wf_keys, cfg_ids)
 
@@ -3441,9 +3556,8 @@ summary.horizons_data <- function(object, ...) {
     cat(paste0("   \u251C\u2500 Configs defined: ", n_configs, "\n"))
     cat(paste0("   \u251C\u2500 Outcome: ", exp$outcome, "\n"))
 
-    ## The range only when it is not the default, which is what an object
-    ## configured before the range existed reads as (#76). Read raw, not
-    ## through outcome_range_setting(), so a summary never aborts.
+    ## The range only when it is not the default (#76). Read raw and checked,
+    ## so a summary of an object without one prints rather than aborts.
     range_rec <- x$config$outcome_range
 
     if (is.numeric(range_rec) && !identical(as.double(range_rec), DEFAULT_OUTCOME_RANGE)) {

@@ -4,22 +4,13 @@
 \alias{fit_ensemble_uq}
 \title{Fit CV+ Conformal Uncertainty Quantification for a Stacked Ensemble}
 \usage{
-fit_ensemble_uq(
-  x,
-  level = DEFAULT_UQ_LEVEL,
-  seed = NULL,
-  min_calib_rows = N_CALIB_MIN
-)
+fit_ensemble_uq(x, level = DEFAULT_UQ_LEVEL, min_calib_rows = N_CALIB_MIN)
 }
 \arguments{
 \item{x}{A \code{horizons_ensemble} object (output of \code{\link[=ensemble]{ensemble()}}).}
 
 \item{level}{Numeric in (0, 1). Target two-sided coverage. Default
 \code{DEFAULT_UQ_LEVEL} (0.90).}
-
-\item{seed}{Integer or NULL. Base seed for the calibration partition
-(\code{+ 1000} is applied internally). \code{NULL} (default) resolves to the seed
-recorded on the ensemble contract.}
 
 \item{min_calib_rows}{Integer. The fewest rows the bundle calibrates on;
 \code{control_horizons(min_calib_rows = )}. Default \code{N_CALIB_MIN}.}

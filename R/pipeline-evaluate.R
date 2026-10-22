@@ -285,6 +285,12 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
 
   check_rank_metric_arg(metric)
+  check_arg(rlang::check_bool, prune)
+  check_arg(rlang::check_number_decimal, prune_threshold, min = 0, allow_infinite = FALSE)
+
+  ## The seed, as at every verb, is a whole number set.seed() takes
+  ## unchanged.
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
 
   configs <- x$config$configs
 
@@ -317,8 +323,7 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Every test-set and tuning prediction is clamped to configure()'s
   ## outcome_range, so an outcome outside it would be scored against values
-  ## the predictions cannot reach. configure() refuses that already, but an
-  ## object configured before the range existed reads as c(0, Inf), and rows
+  ## the predictions cannot reach. configure() refuses that already, but rows
   ## can change after configure(). Refused here, before any split or tuning,
   ## so it costs a second rather than the whole grid (#76).
 
@@ -352,8 +357,8 @@ evaluate <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 3a: The window has to fit the spectrum
   ## -----------------------------------------------------------------------
-  ## Object-level recipe settings, the same for every config; see
-  ## recipe_settings() for objects configured before they were recorded.
+  ## Object-level recipe settings, the same for every config
+  ## (recipe_settings()).
   ##
   ## configure() cannot check the window against the spectrum, because
   ## standardize() can still change the axis after it. Past this point a
@@ -1701,6 +1706,9 @@ abort_breaker_trip <- function(breaker,
 #' contains either ([worker_death_signal()]). Either is turned into
 #' `horizons_error_systemic`, chained to the error, with the rows finished so
 #' far when the verb has rows; every other error passes through untouched.
+#' `bayes_search()` is the one raiser of `horizons_error_systemic` inside
+#' `expr`, for that death; a unit that raises it for another reason needs a
+#' subclass of its own, or it would be read here as a worker's death.
 #'
 #' @param expr The work that dispatches to workers.
 #' @param results The results table finished so far, carried as `results`;

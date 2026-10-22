@@ -246,9 +246,8 @@ build_recipe <- function(config_row,
 #' @description
 #' Reads the `sg_window` and `pca_threshold` `configure()` recorded in
 #' `x$config$recipe`, the values `evaluate()` and `fit()` hand to
-#' `build_recipe()` for every config. An object configured before the settings
-#' existed carries no record and gets the defaults, which are what its recipe
-#' ran then, so it evaluates and fits exactly as before.
+#' `build_recipe()` for every config. Every verb's door validator requires
+#' the record ([config_findings()]), so this only reads it.
 #'
 #' @param x A configured `horizons_data` object.
 #'
@@ -259,10 +258,7 @@ recipe_settings <- function(x) {
 
   recorded <- x$config$recipe
 
-  list(
-    sg_window     = recorded$sg_window     %||% DEFAULT_SG_WINDOW,
-    pca_threshold = recorded$pca_threshold %||% DEFAULT_PCA_THRESHOLD
-  )
+  list(sg_window = recorded$sg_window, pca_threshold = recorded$pca_threshold)
 
 }
 
@@ -562,8 +558,7 @@ check_step_new_data <- function(object, new_data, call = rlang::caller_env()) {
 #' The record a trained selection step keeps
 #'
 #' @param step A trained `step_select_*` step.
-#' @return Its record (a list), or `NULL` for another step, or a step
-#'   trained before records existed.
+#' @return Its record (a list), or `NULL` for another step.
 #' @keywords internal
 #' @noRd
 selection_record <- function(step) {
@@ -649,7 +644,7 @@ selection_warning <- function(step) {
 
     return(list(topic = "substitution", env = environment(), message = c(
       "No window cleared {.fn step_select_correlation}'s threshold, so it selected nothing.",
-      "i" = "Retaining all {n} wavenumber{?s}; the model sees an unselected spectrum."
+      "i" = "Retaining all {n} variance-filtered wavenumber{?s}; the model sees an unselected spectrum."
     )))
 
   }
@@ -679,8 +674,8 @@ print_selection_skipped <- function(step) {
 
 #' The print() line for the near-constant bands a step dropped
 #'
-#' @param record A trained step's record (`cars` or `boruta`), or `NULL` for
-#'   a step trained before the record existed.
+#' @param record A trained step's record (`cars`, `boruta` or
+#'   `correlation`).
 #' @return `NULL`, invisibly; prints one line when bands were dropped.
 #' @keywords internal
 #' @noRd
@@ -691,7 +686,7 @@ print_constant_bands <- function(record) {
   if (!is.null(n) && n > 0) {
 
     cat("\u2022 ", n, " near-constant band", if (n == 1) "" else "s",
-        " dropped before clustering\n", sep = "")
+        " dropped before selection\n", sep = "")
 
   }
 
@@ -779,8 +774,7 @@ quiet_selection_warnings <- function(expr) {
 #' @description
 #' Shared by the `tidy()` methods of the three selection steps, which follow
 #' recipes' filter steps (`tidy.step_corr()`): before `prep()`, `terms`
-#' holds the selectors as text; after, the columns the step removed. A step
-#' from before #52 is read through [step_selectors()] and its `columns`.
+#' holds the selectors as text; after, the columns the step removed.
 #'
 #' @param x A `step_select_*` step.
 #' @return Tibble with `terms` (character) and `id`.
@@ -791,64 +785,9 @@ tidy_selection_step <- function(x) {
   terms <- if (isTRUE(x$trained)) {
     unname(setdiff(x$columns, x$selected_vars))
   } else {
-    recipes::sel2char(step_selectors(x, class(x)[1]))
+    recipes::sel2char(x$terms)
   }
 
   tibble::tibble(terms = as.character(terms), id = rep(x$id, length(terms)))
-
-}
-
-## ---------------------------------------------------------------------------
-## step_selectors
-## ---------------------------------------------------------------------------
-
-#' The Selector Quosures a Custom Step Should Resolve at prep()
-#'
-#' @description
-#' Shared by the `prep()` methods of the four custom steps. Since #52 a step
-#' keeps its selectors in `terms` and its resolved names in `columns`. Steps
-#' built by earlier versions kept the selectors in `columns` and overwrote them
-#' with the resolved names at `prep()`, so this reads whichever layout the step
-#' has and names the one case that cannot be recovered.
-#'
-#' Three layouts, in order:
-#'
-#' 1. `terms` holds the selectors. Returned as they are. After `butcher()` they
-#'    are a plain list of quosures rather than a `quosures` object, which still
-#'    counts.
-#' 2. `columns` holds quosures: an untrained step from an earlier version.
-#'    Returned, so the step preps normally and comes out in the current layout.
-#' 3. Neither: a step from an earlier version that has already been prepped,
-#'    whose selectors are gone. Aborts. Without this check the step resolves
-#'    zero columns and aborts on a symptom (the window check, or a selection
-#'    step's "selected zero columns") that points at the wrong cause.
-#'
-#' A `butcher()`ed step from an earlier version carries `terms = list()`, an
-#' empty plain list, which is why an empty `terms` counts as selectors only
-#' when it is a `quosures` object (a step called with no selectors at all).
-#'
-#' @param x A custom step object, as passed to its `prep()` method.
-#' @param step Character. The step's user-facing name, for the message.
-#'
-#' @return The selector quosures to pass to `recipes::recipes_eval_select()`.
-#' @keywords internal
-#' @noRd
-step_selectors <- function(x, step) {
-
-  terms <- x[["terms"]]
-
-  holds_quosures <- rlang::is_quosures(terms) ||
-    (is.list(terms) && length(terms) > 0 &&
-       all(vapply(terms, rlang::is_quosure, logical(1))))
-
-  if (holds_quosures) return(terms)
-
-  if (rlang::is_quosures(x[["columns"]])) return(x[["columns"]])
-
-  cli::cli_abort(c(
-    "{.fn {step}} has no stored selectors, so it cannot be prepped again.",
-    "x" = "The step was built by an earlier version of horizons, which replaced its selectors with the resolved column names at {.fn prep} (#52).",
-    "i" = "Rebuild the recipe with this version of horizons. A trained recipe from the earlier version still bakes; only re-prepping it needs the rebuild."
-  ), class = "horizons_input_error")
 
 }

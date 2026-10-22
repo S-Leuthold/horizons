@@ -567,18 +567,15 @@ describe("configure() storage", {
 
   })
 
-  test_that("configure()'s defaults are the values recipe_settings() falls back on", {
+  test_that("configure()'s recipe defaults are the package's constants", {
 
-    ## An object configured before the settings existed runs the fallback;
-    ## a freshly configured one runs the formals. They must be the same
-    ## values, or the two would build different recipes from one grid.
+    ## The constants are also build_recipe()'s and the single-config
+    ## runners' defaults, so a grid configured by default and a recipe built
+    ## by default must run the same settings.
     fm <- formals(configure)
 
     expect_identical(fm$sg_window, DEFAULT_SG_WINDOW)
     expect_identical(fm$pca_threshold, DEFAULT_PCA_THRESHOLD)
-    expect_identical(recipe_settings(list(config = list(configs = NULL))),
-                     list(sg_window = DEFAULT_SG_WINDOW,
-                          pca_threshold = DEFAULT_PCA_THRESHOLD))
 
   })
 
@@ -636,16 +633,9 @@ describe("configure() storage", {
 
   })
 
-  test_that("re-configuring an object from an earlier version drops its config$defaults and covariates column", {
+  test_that("re-configuring an object from an earlier version drops its covariates column", {
 
     hd <- make_single_response_hd()
-    hd$config$defaults <- list(
-      preprocessing_params = list(sg_window = 11L, sg_order = 2L),
-      feature_params       = list(pca_threshold = 0.99, correlation_n = 200L),
-      transform_params     = list()
-    )
-
-    expect_null(quiet_configure(hd)$config$defaults)
 
     ## configure() writes a fresh grid, so a covariates column an earlier
     ## version wrote does not survive it.

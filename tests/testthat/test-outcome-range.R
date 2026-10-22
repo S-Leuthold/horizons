@@ -104,9 +104,8 @@ signed_run <- function(.env = parent.frame()) {
 
 }
 
-#' The non-negative fixture as make_eval_object() builds it, with no
-#' config$outcome_range (an object from before the range existed),
-#' cold-started at no Bayesian budget
+#' The non-negative fixture as make_eval_object() builds it, under the
+#' default range, cold-started at no Bayesian budget
 #' @noRd
 build_nonneg_fit <- function() {
 
@@ -181,16 +180,9 @@ describe("outcome_range_setting()", {
 
   })
 
-  it("gives an object configured before the range existed the zero floor", {
-
-    expect_identical(outcome_range_setting(list(config = list(configs = NULL))),
-                     DEFAULT_OUTCOME_RANGE)
-    expect_identical(DEFAULT_OUTCOME_RANGE, c(0, Inf))
-
-  })
-
-  ## A stored range configure() could not have written is refused at every
-  ## verb's door (config_findings(), test-class-core.R), so this only reads.
+  ## A missing range, or one configure() could not have written, is refused
+  ## at every verb's door (config_findings(), test-class-core.R), so this
+  ## only reads.
 
 })
 
@@ -399,7 +391,7 @@ describe("compute_response_bound()", {
 
 describe("configure() - outcome_range", {
 
-  it("records the non-negative default, the value an older object reads as", {
+  it("records the non-negative default, configure()'s formal, under a key the constructor declares", {
 
     res <- configure_small(make_range_hd())
 
@@ -657,10 +649,9 @@ describe("a d13C-like outcome with outcome_range = c(-Inf, Inf)", {
 
 describe("a negative outcome under the default range", {
 
-  ## make_eval_object() sets no config$outcome_range, like an object
-  ## configured before the range existed. configure() would have refused the
-  ## outcome; evaluate() and a cold-start fit() must refuse it before they
-  ## draw or tune anything.
+  ## make_eval_object() carries configure()'s default range. configure()
+  ## would have refused the outcome; evaluate() and a cold-start fit() must
+  ## refuse it before they draw or tune anything.
   obj <- make_eval_object(n = 60, n_configs = 1)
   obj$data$analysis$SOC <- to_d13c(obj$data$analysis$SOC)
 
@@ -717,23 +708,30 @@ describe("a negative outcome under the default range", {
 
 describe("a non-negative outcome under the default range", {
 
-  ## make_eval_object() carries no config$outcome_range: an object from
-  ## before the range existed. The bound and the floor must be what they were.
-  ## The bound, max * RESPONSE_BOUND_MARGIN, is tested to the bit in
+  ## make_eval_object() carries configure()'s default range. The bound and
+  ## the floor must be what they were before the range existed. The bound,
+  ## max * RESPONSE_BOUND_MARGIN, is tested to the bit in
   ## compute_response_bound()'s tests above, and over the fit rows end to end
   ## in test-pipeline-fit.R (#68). The fit is nonneg_fit(), shared with the
   ## malformed-range block below.
 
-  it("validates without the key, and with it removed from a fitted object", {
+  it("refuses a configured object without the key, naming it", {
 
-    fitted <- nonneg_fit()$fitted
+    fx     <- nonneg_fit()
+    fitted <- fx$fitted
 
     expect_no_error(validate_horizons_fit(fitted))
 
-    ## the constructor's shape with the key present but NULL
+    ## the constructor's shape with the key present but NULL, at predict()'s
+    ## door
     keyed <- fitted
     keyed$config["outcome_range"] <- list(NULL)
-    expect_no_error(validate_horizons_fit(keyed))
+    new_data <- fx$obj$data$analysis[1:5, setdiff(names(fx$obj$data$analysis), "SOC")]
+
+    err <- expect_error(predict(keyed, new_data, interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("config$outcome_range is not a usable range (two numbers, lower below upper): it is `NULL`",
+                          err$findings, fixed = TRUE)))
 
   })
 
@@ -954,44 +952,40 @@ describe("checkpoint rows and the outcome range", {
 
 describe("check_evaluated_outcome_range()", {
 
-  ## An evaluation's results rows, as stamped before and after #76
+  ## An evaluation's results rows, each with the settings evaluate() stamped
   results_with <- function(stamps) {
     tibble::tibble(config_id = paste0("c", seq_along(stamps)), settings = stamps)
   }
 
   x_with <- function(results) list(evaluation = list(results = results))
 
-  it("passes rows that record this range, and unrecorded rows under the default", {
+  it("passes rows that record this range", {
 
     signed <- results_with(list(eval_settings(outcome_range = c(-Inf, Inf))))
     expect_null(check_evaluated_outcome_range(x_with(signed), c(-Inf, Inf)))
 
-    old <- results_with(list(eval_settings(seed = 1L)))
-    expect_null(check_evaluated_outcome_range(x_with(old), DEFAULT_OUTCOME_RANGE))
-
-    ## Evaluations from before the settings stamp carry no settings column
-    bare <- tibble::tibble(config_id = "c1")
-    expect_null(check_evaluated_outcome_range(x_with(bare), DEFAULT_OUTCOME_RANGE))
+    default <- results_with(list(eval_settings(outcome_range = DEFAULT_OUTCOME_RANGE)))
+    expect_null(check_evaluated_outcome_range(x_with(default), DEFAULT_OUTCOME_RANGE))
 
   })
 
-  it("refuses a recorded range that differs, and unrecorded rows under another range", {
+  it("refuses a recorded range that differs, and a row that records none under every range", {
 
     signed <- results_with(list(eval_settings(outcome_range = c(-Inf, Inf))))
     expect_error(check_evaluated_outcome_range(x_with(signed), DEFAULT_OUTCOME_RANGE),
                  class = "horizons_error_input")
 
+    ## A results table without the settings column is the eval validator's
+    ## finding (test-class-core.R), so a row reaches this only with a record
     old <- results_with(list(eval_settings(seed = 1L)))
-    err <- expect_error(check_evaluated_outcome_range(x_with(old), c(-Inf, Inf)),
-                        class = "horizons_error_input")
-    expect_match(flat_message(err), "unrecorded", fixed = TRUE)
 
-    ## Evaluations from before the settings stamp carry no settings column;
-    ## they count as the default too
-    bare <- tibble::tibble(config_id = "c1")
-    expect_error(check_evaluated_outcome_range(x_with(bare), c(-Inf, Inf)),
-                 "recorded unrecorded (the zero floor) on 1 results row",
-                 fixed = TRUE, class = "horizons_error_input")
+    for (range in list(DEFAULT_OUTCOME_RANGE, c(-Inf, Inf))) {
+
+      expect_error(check_evaluated_outcome_range(x_with(old), range),
+                   "recorded no outcome range on 1 results row",
+                   fixed = TRUE, class = "horizons_error_input")
+
+    }
 
   })
 

@@ -44,21 +44,37 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
   ## among them) arrives on its own; only what the tests set is written here.
   obj <- new_horizons_data(analysis = df, role_map = roles)
 
-  obj$config$configs   <- configs
-  obj$config$n_configs <- 1L
-  obj$config$tuning    <- list(cv_folds = 3L, grid_size = 3L,
-                               bayesian_iter = 0L, final_bayesian_iter = 0L)
+  obj$config$configs       <- configs
+  obj$config$n_configs     <- 1L
+  obj$config$tuning        <- list(cv_folds = 3L, grid_size = 3L,
+                                   bayesian_iter = 0L, final_bayesian_iter = 0L)
+
+  ## What configure() writes beside the grid, at its defaults
+  obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
+                                   pca_threshold = DEFAULT_PCA_THRESHOLD)
+  obj$config$outcome_range <- DEFAULT_OUTCOME_RANGE
 
   obj$validation$passed <- TRUE
 
   evaluation <- list(
     results     = tibble::tibble(config_id = "cfg_001", status = "success",
+                                 ## the prune gate's reading, as prune = FALSE writes it
+                                 below_prune_threshold = NA, prune_threshold = NA_real_,
                                  rmse = 0.4, rrmse = 0.1, rsq = 0.8,
                                  ccc = 0.85, rpd = 1.5, mae = 0.3,
                                  ## fit() ranks on the CV panel (#50)
                                  cv_rmse = 0.45, cv_rrmse = 0.11, cv_rsq = 0.78,
                                  cv_ccc = 0.83, cv_rpd = 1.4, cv_mae = 0.33,
-                                 class = NA_character_),
+                                 class = NA_character_,
+                                 ## the settings evaluate() stamps on every row
+                                 settings = list(eval_settings(
+                                   cv_folds = 3L, grid_size = 3L, bayesian_iter = 0L,
+                                   prune = FALSE, prune_threshold = NA_real_, seed = seed,
+                                   sg_window = DEFAULT_SG_WINDOW,
+                                   pca_threshold = DEFAULT_PCA_THRESHOLD,
+                                   outcome_range = DEFAULT_OUTCOME_RANGE,
+                                   response_threshold = NA_real_
+                                 ))),
     best_config = "cfg_001",
     rank_metric = "rpd",
     screened    = TRUE,
@@ -434,6 +450,19 @@ describe("predict.horizons_fit() - input validation", {
     err <- expect_error(predict(fitted_fixture, hd), class = "horizons_error_input")
     expect_identical(rlang::call_name(err$call), "predict")
     expect_snapshot(predict(fitted_fixture, hd), error = TRUE)
+
+  })
+
+  it("refuses at its door a fit whose transformation it does not know, serving nothing (#234)", {
+
+    ## An object edited out of shape: an unknown transformation once reached
+    ## the back-transform, which served the predictions untransformed
+    broken <- fitted_fixture
+    broken$config$configs$transformation <- "bogus"
+
+    err <- expect_error(predict(broken, make_new_spectra(), interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true(any(grepl("unknown transformation value \"bogus\"", err$findings, fixed = TRUE)))
 
   })
 
@@ -1133,6 +1162,38 @@ describe("predict.horizons_fit() - applicability domain", {
     expect_length(flagged, 1L)
     expect_s3_class(flagged[[1]], "horizons_warning_flagged")
     expect_identical(flagged[[1]]$log$ids[[1]], bad_df$sample_id[3])
+
+  })
+
+  it("flags every row when the stored thresholds tie, and abstains on exactly the rows past the cutoff (#240)", {
+
+    expect_true(has_ad(fitted_fixture))
+
+    ## Duplicate calibration spectra tie the quartiles. The bundle still
+    ## passes the door, whose thresholds need only be non-decreasing.
+    tied   <- fitted_fixture
+    cid    <- names(tied$models$ad)[1]
+    thr    <- tied$models$ad[[cid]]$ad_thresholds
+    thr[2] <- thr[1]
+    tied$models$ad[[cid]]$ad_thresholds <- thr
+
+    ## Half the batch shifted far off the training axis, so both sides of the
+    ## cutoff are present
+    ood_df <- new_df
+    wn     <- grep("^wn_", names(ood_df))
+    ood_df[1:6, wn] <- ood_df[1:6, wn] + 10
+
+    expect_no_warning(p <- predict(tied, ood_df, interval = FALSE))
+
+    expect_false(anyNA(p$.ad_flag))
+    expect_false(any(p$.ad_flag == "Q2"))
+
+    ood <- p$.ad_flag == "OOD"
+    expect_true(any(ood) && any(!ood))
+    expect_identical(ood, p$.ad_distance > thr[4])
+
+    abstained <- predict(tied, ood_df, interval = FALSE, abstain_ood = TRUE)
+    expect_identical(is.na(abstained$.pred), ood)
 
   })
 

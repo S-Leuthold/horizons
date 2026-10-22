@@ -648,7 +648,7 @@ describe("step_select_cars() and near-constant bands", {
     expect_true(step$cars$clustered)
     expect_false("wn_3900" %in% step$selected_vars)
     expect_gt(length(step$selected_vars), 0L)
-    expect_output(print(step), "1 near-constant band dropped before clustering", fixed = TRUE)
+    expect_output(print(step), "1 near-constant band dropped before selection", fixed = TRUE)
 
   })
 
