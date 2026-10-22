@@ -116,9 +116,12 @@ console tree when \code{verbose = TRUE}. With UQ or AD on, the calibration set
 is carved out of Split F's training part. After a response trim it is
 carved out of the untrimmed training part (the trimmed rows are training
 rows too, never test rows), and the trimmed rows are then dropped from the
-fit rows only: split conformal needs calibration rows exchangeable with
-the rows it will be asked about, extremes included, and a trimmed pool
-undercovered them. AD shares that calibration set (D7). Calibration rows
+fit rows only. They calibrate the intervals, so the calibration rows are
+exchangeable with new data, extremes included, and coverage over new data
+as a whole is at the level, where a pool of kept rows alone fell below it.
+The coverage is marginal: a sample whose outcome lies far outside the
+fences is rarely inside its interval. AD shares that calibration set (D7).
+Calibration rows
 never train, and test rows never calibrate. The degradation check then
 compares the CV RPD with the test RPD over the test rows inside the
 trim's fences, since the CV ran inside them; the reported test metrics

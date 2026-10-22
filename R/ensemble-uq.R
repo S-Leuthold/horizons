@@ -255,6 +255,7 @@ cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
 #'   plus `.truth` (original scale).
 #' @param oof_row Integer vector: the object's true `.row` ids, aligned to
 #'   `meta_frame` rows.
+#' @param oof_sample_id The rows' `sample_id`s, aligned to `meta_frame` rows.
 #' @param folds An `rsample` vfold_cv over `meta_frame`.
 #' @param contract The `$ensemble` contract list (for `method` and `model`).
 #' @param optimize Logical. The build-time optimize flag (drives the weighted
@@ -266,13 +267,14 @@ cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
 #'   \describe{
 #'     \item{fold_models}{List, one per fold: a fitted workflow
 #'       (penalized/xgb) or a weights tibble (weighted).}
-#'     \item{calib}{Tibble: `.row`, `fold`, `.pred_oof`, `truth`, `residual`
-#'       (signed, original scale), one row per meta-frame sample.}
+#'     \item{calib}{Tibble: `.row`, `sample_id`, `fold`, `.pred_oof`,
+#'       `truth`, `residual` (signed, original scale), one row per meta-frame
+#'       sample.}
 #'   }
 #'
 #' @noRd
-fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
-                               outcome_range = DEFAULT_OUTCOME_RANGE) {
+fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contract,
+                               optimize, outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   method      <- contract$method
   members     <- contract$weights$member
@@ -333,6 +335,7 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
 
     calib_rows[[k]] <- tibble::tibble(
       .row      = oof_row[assess_idx],
+      sample_id = oof_sample_id[assess_idx],
       fold      = k,
       .pred_oof = fold_pred,
       truth     = assessment$.truth,
@@ -371,6 +374,20 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
 #' residual is evaluated on the exact fold split the hyperparameters were
 #' optimized against — the direct selection-bias mechanism is broken.
 #'
+#' **The rows a response trim set aside** calibrate too, as they calibrate a
+#' single fit's intervals (#99): without them the calibration set holds only
+#' rows inside the training fences, while the test set and new data keep
+#' their extremes, and coverage over new data falls below the level (#103).
+#' With them the calibration rows are exchangeable with new data, extremes
+#' included, and coverage over new data as a whole is at the level. The
+#' coverage is marginal: a sample whose outcome lies far outside the fences
+#' is rarely inside its interval. Their member
+#' predictions come from the final members, which never trained on them, and
+#' each is given a fold at random, balanced across the folds, whose model
+#' scores it. No fold model trained on any of them, so each residual is out
+#' of sample, as a meta row's is. They are drawn into folds only when there
+#' are some, so an ensemble without a trim calibrates exactly as before.
+#'
 #' @param oof The out-of-fold matrix list from [build_oof_matrix()].
 #' @param contract The `$ensemble` contract list.
 #' @param optimize Logical. Build-time optimize flag.
@@ -381,6 +398,9 @@ fit_uq_fold_models <- function(meta_frame, oof_row, folds, contract, optimize,
 #'   clamped to. Default `DEFAULT_OUTCOME_RANGE`.
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
+#' @param trimmed The trimmed rows from [ensemble_trimmed_rows()]
+#'   (`predictors`, `truth`, `sample_id`), or `NULL` when there are none.
+#'   Default `NULL`.
 #'
 #' @return The uq bundle list (see [fit_ensemble_uq()]). Aborts with class
 #'   `horizons_error_run` when a size gate fails.
@@ -392,7 +412,8 @@ compute_ensemble_uq <- function(oof,
                                 conformal_seed,
                                 level          = DEFAULT_UQ_LEVEL,
                                 outcome_range  = DEFAULT_OUTCOME_RANGE,
-                                min_calib_rows = N_CALIB_MIN) {
+                                min_calib_rows = N_CALIB_MIN,
+                                trimmed        = NULL) {
 
   meta_frame        <- oof$predictors
   meta_frame$.truth <- oof$truth
@@ -414,16 +435,25 @@ compute_ensemble_uq <- function(oof,
 
   }
 
-  ## Gate 1: enough rows to calibrate at all.
-  if (nrow(meta_frame) < min_calib_rows) {
+  ## Gate 1: enough rows to calibrate at all. The rows that calibrate are the
+  ## meta frame's and the trimmed rows, as fit()'s gate counts its
+  ## calibration rows, trimmed rows included, and as the gate after the drop
+  ## below counts them.
+  n_meta    <- nrow(meta_frame)
+  n_trimmed <- if (is.null(trimmed)) 0L else length(trimmed$truth)
+  n_rows    <- n_meta + n_trimmed
 
-    n_rows <- nrow(meta_frame)
+  if (n_rows < min_calib_rows) {
+
     n_have <- n_rows
 
-    abort_horizons(c(
-      "The meta frame has {n_rows} row{?s} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows}).",
-      "i" = remedy(n_rows)
-    ), kind = "run")
+    what <- if (n_trimmed > 0) {
+      "The meta frame's {n_meta} row{?s} and the {n_trimmed} training row{?s} the response trim set aside give {n_rows} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows})."
+    } else {
+      "The meta frame has {n_rows} row{?s} to calibrate on, fewer than {.code min_calib_rows} ({min_calib_rows})."
+    }
+
+    abort_horizons(c(what, "i" = remedy(n_rows)), kind = "run")
 
   }
 
@@ -437,6 +467,7 @@ compute_ensemble_uq <- function(oof,
   fold_fit <- unit_step("cv_plus_fold_models", fit_uq_fold_models(
     meta_frame    = meta_frame,
     oof_row       = oof$row,
+    oof_sample_id = oof$sample_id,
     folds         = folds_cal,
     contract      = contract,
     optimize      = optimize,
@@ -446,13 +477,37 @@ compute_ensemble_uq <- function(oof,
   fold_models <- fold_fit$fold_models
   calib       <- fold_fit$calib
 
+  ## Every calibration row's member predictions, for the leave-self-out
+  ## diagnostic below: the meta frame's rows, then the trimmed rows'.
+  ## calib_pos is each calibration row's position among them.
+  member_cols <- paste0("member_", contract$weights$member)
+  members_all <- meta_frame[, member_cols, drop = FALSE]
+  calib_pos   <- match(calib$.row, oof$row)
+
+  ## The rows the response trim set aside, scored by fold models that never
+  ## trained on them (#103). Drawn after the fold models, in the same
+  ## stream, and only when there are some.
+  if (!is.null(trimmed)) {
+
+    trimmed_calib <- unit_step("cv_plus_trimmed", calibrate_trimmed_rows(
+      trimmed, fold_models, contract$method, outcome_range
+    ))
+
+    calib_pos   <- c(calib_pos, nrow(members_all) + seq_len(nrow(trimmed_calib)))
+    members_all <- dplyr::bind_rows(members_all, trimmed$predictors[, member_cols, drop = FALSE])
+    calib       <- dplyr::bind_rows(calib, trimmed_calib)
+
+  }
+
   ## Drop rows whose residual is not finite, then re-gate: both the size
   ## minimum and the order-statistic indices must survive the drop. The index
   ## validity check shares its formula with cv_plus_bounds() via
   ## cv_plus_indices() — gate and aggregator cannot disagree.
-  n_rows  <- nrow(calib)
-  calib   <- calib[is.finite(calib$residual), ]
-  n_calib <- nrow(calib)
+  n_rows    <- nrow(calib)
+  finite    <- is.finite(calib$residual)
+  calib     <- calib[finite, ]
+  calib_pos <- calib_pos[finite]
+  n_calib   <- nrow(calib)
   needed  <- max(min_calib_rows, floor_rows)
 
   if (n_calib < needed || is.null(cv_plus_indices(n_calib, level))) {
@@ -473,12 +528,9 @@ compute_ensemble_uq <- function(oof,
 
   ## Leave-self-out diagnostics: for each calibration row i, form the CV+
   ## bound over the other n-1 rows and check whether i's truth is covered.
-  ## Every fold model predicts the full meta frame once (n x K, shared
+  ## Every fold model predicts every calibration row's members once (shared
   ## fold-prediction primitive); row lookups then index into that matrix by
-  ## meta-frame position.
-  meta_pos    <- match(calib$.row, oof$row)
-  member_cols <- paste0("member_", contract$weights$member)
-
+  ## calib_pos.
   covered <- rep(NA, n_calib)
   widths  <- rep(NA_real_, n_calib)
 
@@ -487,11 +539,9 @@ compute_ensemble_uq <- function(oof,
     P_full <- vapply(
       fold_models,
       function(fm) {
-        predict_fold_model(fm, contract$method,
-                           meta_frame[, member_cols, drop = FALSE],
-                           outcome_range)
+        predict_fold_model(fm, contract$method, members_all, outcome_range)
       },
-      numeric(nrow(meta_frame))
+      numeric(nrow(members_all))
     )
 
     ## Indices for the leave-self-out set: row i stands in for the new point,
@@ -506,7 +556,7 @@ compute_ensemble_uq <- function(oof,
 
       for (i in seq_len(n_calib)) {
 
-        v          <- P_full[meta_pos[i], calib$fold[-i]] + calib$residual[-i]
+        v          <- P_full[calib_pos[i], calib$fold[-i]] + calib$residual[-i]
         s          <- sort(v)
         covered[i] <- calib$truth[i] >= s[idx_loo$l] && calib$truth[i] <= s[idx_loo$u]
         widths[i]  <- s[idx_loo$u] - s[idx_loo$l]
@@ -534,6 +584,125 @@ compute_ensemble_uq <- function(oof,
 }
 
 ## ---------------------------------------------------------------------------
+## The rows the response trim set aside (#103)
+## ---------------------------------------------------------------------------
+
+#' The members' predictions for the training rows a response trim set aside
+#'
+#' @description
+#' `evaluate()`'s response trim (#77) keeps the training rows outside the
+#' fences out of every fit, so they are in no member's out-of-fold
+#' predictions and no fold model's training rows. The final members predict
+#' them here, as they predict the test rows ([predict_members_on_test()]):
+#' the response bound off, the outcome's range applied, which is how the
+#' out-of-fold predictions the meta frame holds were made. A member that
+#' cannot predict them aborts with `horizons_error_prediction_failed`, which
+#' `ensemble()`'s CV+ unit records. A row any member could not use (not
+#' finite after its recipe) is left out, as `predict()` leaves it out.
+#'
+#' @param x A `horizons_ensemble`.
+#' @param members Character vector of member `config_id`s.
+#' @param call The frame a member's failure reports.
+#' @return `NULL` when the trim set no row aside, or no member could use
+#'   one; otherwise a list with
+#'   `predictors` (one `member_<config_id>` column per member, in `members`
+#'   order), `truth` and `sample_id`, aligned by row.
+#' @keywords internal
+#' @noRd
+ensemble_trimmed_rows <- function(x, members, call = rlang::caller_env()) {
+
+  trimmed_ids <- x$evaluation$response_trim$trimmed_ids %||% character(0)
+
+  if (length(trimmed_ids) == 0) return(NULL)
+
+  ensure_predict_namespaces(x, members)
+
+  role_map    <- x$data$role_map
+  id_col      <- id_column(role_map)
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
+
+  ## The rows themselves, as fit() reads them: training rows, never test
+  ## rows, each with its outcome
+  rows <- x$data$analysis[x$data$analysis[[id_col]] %in% trimmed_ids, , drop = FALSE]
+
+  member_pred <- predict_members(
+    x, members, rows,
+    header = "The ensemble's intervals could not be calibrated: {n_failed} of its {n_total} member{?s} could not predict the training rows the response trim set aside.",
+    call   = call
+  )
+
+  ## A row any member could not use is left out, as predict() leaves it out:
+  ## an xgb meta-model would read the member's NA as missing and give the
+  ## row a residual from a combination predict() never serves
+  bad         <- unique(unlist(attr(member_pred, "flagged")))
+  member_pred <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+
+  if (nrow(member_pred) == 0) return(NULL)
+
+  wide <- member_pred |>
+    dplyr::select("sample_id", "config_id", ".pred") |>
+    tidyr::pivot_wider(names_from   = "config_id",
+                       values_from  = ".pred",
+                       names_prefix = "member_")
+
+  list(
+    predictors = wide[, paste0("member_", members), drop = FALSE],
+    truth      = rows[[outcome_col]][match(wide$sample_id, rows$sample_id)],
+    sample_id  = wide$sample_id
+  )
+
+}
+
+#' Score the trimmed rows with the CV+ fold models
+#'
+#' @description
+#' Each trimmed row is given a fold, at random and balanced across the folds
+#' (`sample(rep_len(seq_len(K), n))`, from the stream as the caller left it),
+#' and its residual is its truth less that fold model's prediction of its
+#' member predictions. No fold model trained on a trimmed row, so whichever
+#' fold scores it, the residual is out of sample; the CV+ bounds then pair
+#' the row's residual with the same fold model's prediction of a new point,
+#' as they do for a meta row.
+#'
+#' @param trimmed The list from [ensemble_trimmed_rows()].
+#' @param fold_models The retained fold models.
+#' @param method Character. The ensemble method.
+#' @param outcome_range Numeric length-2 vector the fold predictions are
+#'   clamped to.
+#' @return Tibble shaped as `fit_uq_fold_models()`'s `calib`, with `.row`
+#'   `NA`: a trimmed row has no position among the rows the members were fit
+#'   on.
+#' @keywords internal
+#' @noRd
+calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) {
+
+  n_trim <- length(trimmed$truth)
+  n_fold <- length(fold_models)
+  fold   <- sample(rep_len(seq_len(n_fold), n_trim))
+
+  preds <- vapply(
+    fold_models,
+    function(fm) predict_fold_model(fm, method, trimmed$predictors, outcome_range),
+    numeric(n_trim)
+  )
+
+  ## vapply() drops a one-row result to a vector, one value per fold model
+  dim(preds) <- c(n_trim, n_fold)
+
+  pred_oof <- preds[cbind(seq_len(n_trim), fold)]
+
+  tibble::tibble(
+    .row      = NA_integer_,
+    sample_id = trimmed$sample_id,
+    fold      = fold,
+    .pred_oof = pred_oof,
+    truth     = trimmed$truth,
+    residual  = trimmed$truth - pred_oof
+  )
+
+}
+
+## ---------------------------------------------------------------------------
 ## fit_ensemble_uq()
 ## ---------------------------------------------------------------------------
 
@@ -544,7 +713,9 @@ compute_ensemble_uq <- function(oof,
 #' meta-learner's honest out-of-fold residuals: a fresh 5-fold partition of
 #' the meta frame (drawn at `ensemble seed + 1000`, disjoint from the tuning
 #' folds), per-fold refits of the finalized combiner with the fold models
-#' retained, and the signed residuals CQR-style. Consumed by
+#' retained, and the signed residuals CQR-style. After a response trim, the
+#' training rows it set aside calibrate as well (see
+#' `compute_ensemble_uq()`, #103). Consumed by
 #' [predict.horizons_ensemble()] unless `interval = FALSE`.
 #'
 #' Runs inside [ensemble()] when `compute_uq = TRUE`, at `level`
@@ -581,9 +752,12 @@ compute_ensemble_uq <- function(oof,
 #' @param min_calib_rows Integer. The fewest rows the bundle calibrates on;
 #'   `control_horizons(min_calib_rows = )`. Default `N_CALIB_MIN`.
 #'
-#' @return `x` with `$ensemble$uq` populated. The bundle carries: `method`
+#' @return `x` with `$ensemble$uq` populated. [ensemble()] then adds the
+#'   measured coverage on the test rows, `test_coverage`, `test_mean_width`
+#'   and `n_test` (`ensemble_test_coverage()`). The bundle carries: `method`
 #'   (`"cv_plus"`), `ensemble_method`, `members`, `fold_models`, `calib`
-#'   (`.row`, `fold`, `.pred_oof`, `truth`, `residual`), `n_calib`,
+#'   (`.row`, `sample_id`, `fold`, `.pred_oof`, `truth`, `residual`; `.row`
+#'   is `NA` for a trimmed row), `n_calib`,
 #'   `level_default`, `seed`, `oof_coverage`, `mean_width`, `timestamp`.
 #'
 #' @keywords internal
@@ -595,6 +769,8 @@ fit_ensemble_uq <- function(x,
   members <- x$ensemble$weights$member
 
   oof <- unit_step("oof_matrix", build_oof_matrix(x, members))
+
+  trimmed <- unit_step("cv_plus_trimmed", ensemble_trimmed_rows(x, members))
 
   base_seed      <- seed %||% x$ensemble$seed %||% DEFAULT_ENSEMBLE_SEED
   conformal_seed <- base_seed + 1000L
@@ -615,7 +791,8 @@ fit_ensemble_uq <- function(x,
     conformal_seed = conformal_seed,
     level          = level,
     outcome_range  = outcome_range,
-    min_calib_rows = min_calib_rows
+    min_calib_rows = min_calib_rows,
+    trimmed        = trimmed
   )
 
   ## Guardrail on the diagnostic itself: a bundle whose leave-self-out
@@ -636,6 +813,46 @@ fit_ensemble_uq <- function(x,
   x$ensemble$uq <- bundle
 
   x
+
+}
+
+## ---------------------------------------------------------------------------
+## ensemble_test_coverage()
+## ---------------------------------------------------------------------------
+
+#' Measure the ensemble's interval coverage on the held-out test rows
+#'
+#' @description
+#' The members predict the test rows `fit()` held out ([predict_members_on_test()]),
+#' and [predict_ensemble_intervals()], the function `predict()` serves an
+#' ensemble's intervals with, builds the CV+ bounds over the rows every member
+#' could use. The share of the test outcomes inside them is the coverage a
+#' user of the ensemble gets on data it never saw: no test row took part in
+#' the members' fits, the meta-learner or the calibration. Scored as a
+#' member's coverage is ([interval_coverage()]).
+#'
+#' Run by [ensemble()] as a unit of its own, after the CV+ unit and only when
+#' it succeeded, as `fit()`'s coverage unit follows its UQ unit: a failure
+#' leaves the figures `NA` and is named in a `skipped` warning.
+#'
+#' @param x A `horizons_ensemble` whose `ensemble$uq` holds a CV+ bundle.
+#' @param call The frame a member's failure to predict the test rows reports.
+#' @return List with `test_coverage`, `test_mean_width` and `n_test`.
+#' @keywords internal
+#' @noRd
+ensemble_test_coverage <- function(x, call = rlang::caller_env()) {
+
+  uq <- x$ensemble$uq
+
+  member_pred <- unit_step("test_predict", predict_members_on_test(x, uq$members, call = call))
+
+  ## The rows every member could use, as predict() combines them
+  bad    <- unique(unlist(attr(member_pred, "flagged")))
+  usable <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+
+  intervals <- predict_ensemble_intervals(uq, usable, outcome_range_setting(x))
+
+  interval_coverage(usable$truth[match(intervals$sample_id, usable$sample_id)], intervals)
 
 }
 

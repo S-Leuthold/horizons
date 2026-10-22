@@ -22,12 +22,12 @@ default): intervals when the bundle exists, and none, silently, when it
 does not. \code{TRUE}: intervals asked for; without a bundle the bounds are
 \code{NA}, with one warning of class \code{horizons_warning_skipped}. \code{FALSE}:
 none. The intervals are at the level they were calibrated at in
-\code{\link[=ensemble]{ensemble()}}, 0.90 by default (see Details). When the
-members were fit on a response-trimmed training partition
-(\code{validate(remove_outliers = "response")}, #77), the intervals come from out-of-fold predictions on
-the rows inside the training fences, so this warns once, with class
-\code{horizons_warning_quality}, that they were calibrated within those
-fences and can undercover samples outside them.}
+\code{\link[=ensemble]{ensemble()}}, 0.90 by default (see Details). When the members were fit
+on a response-trimmed training partition (\code{validate(remove_outliers = "response")}, #77), the training rows the trim set aside calibrate the
+intervals too (#103), so the calibration rows are exchangeable with new
+data, extremes included, and coverage over new data as a whole is at the
+level. The coverage is marginal: a sample whose outcome lies far outside
+the training fences is rarely inside its interval.}
 
 \item{...}{Not used; present for S3 method consistency. A \code{level} passed
 here is ignored with a warning (see Details), and any other argument is

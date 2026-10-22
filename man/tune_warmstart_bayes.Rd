@@ -13,7 +13,8 @@ tune_warmstart_bayes(
   metric_set,
   allow_par = FALSE,
   recipe = NULL,
-  debug = FALSE
+  debug = FALSE,
+  seed = 42L
 )
 }
 \arguments{
@@ -35,6 +36,9 @@ tune_warmstart_bayes(
 inside tune with its class; \code{NULL} when it was prepped before tuning.}
 
 \item{debug}{Logical. Stop at the first failure rather than fall back.}
+
+\item{seed}{Integer. The member's seed, set before the Bayesian search.
+Default 42.}
 }
 \value{
 List with \code{tune_results} (the result the hyperparameters were
@@ -50,8 +54,11 @@ The re-tuning sequence of a \code{fit()} member, run inside its unit:
 \code{tune::tune_grid()}. A result in which every model failed fails the
 member, with tune's cause (\code{check_tune_result()}), and so does a grid
 with no candidate scored on every fold (#101).
-\item If \code{bayesian_iter > 0}, refine with \code{bayes_search()}, which keeps what
-it finished when it fails, and says so (#209).
+\item If \code{bayesian_iter > 0}, re-pin the random stream to \code{seed} and refine
+with \code{bayes_search()}, which keeps what it finished when it fails, and
+says so (#209). The re-pin makes the search independent of where the
+grid stage left the stream, which differs between the sequential and
+parallel paths (#151).
 \item Choose the hyperparameters by RMSE among the candidates scored on every
 fold (\code{select_complete()}).
 }

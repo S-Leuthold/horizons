@@ -122,14 +122,6 @@ describe("generate_candidates()", {
 
   })
 
-  it("spreads five points across the range when the best value is missing", {
-
-    expect_equal(generate_candidates(NA, dials::learn_rate()), 10^seq(-10, -1, length.out = 5))
-    expect_identical(generate_candidates(NA, dials::mtry(c(1L, 20L))), c(1L, 6L, 10L, 15L, 20L))
-    expect_equal(generate_candidates(NA, dials::sample_prop()), seq(0.1, 1, length.out = 5))
-
-  })
-
 })
 
 
@@ -298,6 +290,22 @@ describe("build_warmstart_grid() - NULL/NA fallback", {
 
   })
 
+  it("starts from the space-filling grid when one value of best_params is missing (#229)", {
+
+    ## A partly missing row errored in point_in_grid(), with and without
+    ## overflow; it is not a warm start, so it goes where an all-missing row goes
+    partial <- tibble::tibble(mtry = 10L, trees = NA_integer_, min_n = 5L)
+
+    expect_false(usable_best_params(partial, param_set))
+
+    for (n in c(25L, 200L)) {
+      grid <- build_warmstart_grid(partial, param_set, max_points = n)
+      expect_identical(grid, dials::grid_space_filling(param_set, size = n), info = n)
+      expect_identical(nrow(grid), n, info = n)
+    }
+
+  })
+
   it("returns a grid when best_params has wrong columns", {
 
     wrong_params <- tibble::tibble(alpha = 0.5, lambda = 0.01)
@@ -368,6 +376,102 @@ describe("build_warmstart_grid() - max_points truncation", {
     xgb_grid <- build_warmstart_grid(xgb_best, make_xgb_param_set(), max_points = 25)
 
     expect_identical(as.list(xgb_grid[1, names(xgb_best)]), as.list(xgb_best))
+
+  })
+
+  it("holds max_points rows, the best point once, when the sample would have drawn it (#228)", {
+
+    ## The issue's case: 25 candidate combinations against 24 points, where
+    ## the seeded sample of 23 drew the best point and the grid came out 23
+    wf <- workflows::workflow(
+      SOC ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    enet <- workflows::extract_parameter_set_dials(wf)
+    best <- tibble::tibble(penalty = 0.01, mixture = 0.5)
+
+    grid <- build_warmstart_grid(best, enet, max_points = 24L)
+
+    expect_identical(nrow(grid), 24L)
+    expect_identical(sum(point_matches(best, grid)), 1L)
+
+  })
+
+  it("holds max_points rows for every best point whose grid overflows (#228)", {
+
+    ## About one best point in ten lost a row at configure()'s default
+    ## grid_size of 10, the max_points fit()'s re-tune passes
+    wf <- workflows::workflow(
+      SOC ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    spaces <- list(rf = param_set, enet = workflows::extract_parameter_set_dials(wf))
+
+    for (model in names(spaces)) {
+
+      ps     <- spaces[[model]]
+      points <- withr::with_seed(228, dials::grid_random(ps, size = 100))
+
+      for (i in seq_len(nrow(points))) {
+
+        best   <- points[i, ps$name]
+        n_full <- prod(vapply(seq_len(nrow(ps)), function(j) {
+          length(generate_candidates(best[[ps$name[j]]], ps$object[[j]]))
+        }, integer(1)))
+
+        if (n_full <= 10) next
+
+        grid <- build_warmstart_grid(best, ps, max_points = 10L)
+
+        expect_identical(nrow(grid), 10L, info = paste(model, i))
+        expect_identical(sum(point_matches(best, grid)), 1L, info = paste(model, i))
+
+      }
+
+    }
+
+  })
+
+  it("holds max_points rows at a best penalty near 1e-9, whose log-scale neighbours are other points", {
+
+    ## Matched at an absolute tolerance of 1.5e-8, every candidate penalty
+    ## from 10^-9.5 to 10^-8.5 was taken for the best point, so five rows
+    ## left the grid before sampling and it came out 21
+    wf <- workflows::workflow(
+      SOC ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    enet <- workflows::extract_parameter_set_dials(wf)
+    best <- tibble::tibble(penalty = 1e-9, mixture = 0.5)
+
+    full <- tidyr::expand_grid(
+      penalty = generate_candidates(1e-9, enet$object[[which(enet$name == "penalty")]]),
+      mixture = generate_candidates(0.5, enet$object[[which(enet$name == "mixture")]])
+    )
+
+    expect_identical(sum(point_matches(best, full)), 1L)
+
+    grid <- build_warmstart_grid(best, enet, max_points = 24L)
+
+    expect_identical(nrow(grid), 24L)
+    expect_identical(sum(point_matches(best, grid)), 1L)
+
+  })
+
+  it("matches a value that differs from the best point only in its last bits", {
+
+    ## A transformed parameter's candidate at offset 0 is the best value's
+    ## round trip through its scale
+    best   <- tibble::tibble(penalty = 1e-9, mixture = 0.5, trees = 500L)
+    nudged <- tibble::tibble(penalty = 1e-9 * (1 + 4 * .Machine$double.eps),
+                             mixture = 0.5 * (1 - 4 * .Machine$double.eps),
+                             trees   = 500L)
+
+    expect_true(point_matches(best, nudged))
+    expect_true(point_in_grid(best, nudged))
 
   })
 
@@ -693,6 +797,53 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
+
+  })
+
+  it("does not depend on the caller's random stream (#151)", {
+
+    ## About 4 s at its smallest budget that still shows the defect
+    skip_unless_slow_tier()
+
+    ## An elastic net with an interior optimum, which glmnet fits
+    ## deterministically, so only the search's own draws can differ. Without
+    ## the re-pin the search reads whatever stream the grid stage left, which
+    ## differs between the sequential and parallel paths; here two caller
+    ## seeds stand in for that, and choose two different points.
+    dat <- withr::with_seed(11, {
+      x <- matrix(stats::rnorm(120 * 30), 120)
+      colnames(x) <- paste0("x", 1:30)
+      d <- tibble::as_tibble(x)
+      d$y <- x[, 1] + 0.5 * x[, 2] + 0.3 * x[, 3] + stats::rnorm(120)
+      d
+    })
+    folds <- withr::with_seed(12, rsample::vfold_cv(dat, v = 3))
+
+    wf <- workflows::workflow(
+      y ~ .,
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet")
+    )
+    ps   <- workflows::extract_parameter_set_dials(wf)
+    grid <- build_warmstart_grid(NULL, ps, max_points = 3L)
+    ms   <- tuning_metric_set("none", metrics = c("rmse", "rsq"))
+
+    run <- function(caller_seed) {
+
+      withr::local_seed(caller_seed)
+      r <- tune_warmstart_bayes(wf, folds, grid, ps, bayesian_iter = 3L,
+                                metric_set = ms, seed = 42L)
+      scored <- tune::collect_metrics(r$tune_results)
+
+      list(best     = r$best_params[c("penalty", "mixture")],
+           proposed = scored[scored$.metric == "rmse" & scored$.iter > 0, c("penalty", "mixture")])
+
+    }
+
+    runs <- lapply(1:2, run)
+
+    expect_equal(nrow(runs[[1]]$proposed), 3L)
+    expect_identical(runs[[2]], runs[[1]])
 
   })
 

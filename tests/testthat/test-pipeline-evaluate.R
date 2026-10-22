@@ -1594,6 +1594,9 @@ describe("checkpoint scoring schema", {
     candidates <- list(
       variant("keep",        identity),
       variant("schema_1",    function(r) { r$scoring_schema <- 1L; r }),
+      ## Schema 4 scored a "none" configuration's cv_* on unclamped
+      ## predictions, so its rows are not ranked beside clamped ones (#104)
+      variant("schema_4",    function(r) { r$scoring_schema <- 4L; r }),
       variant("schema_na",   function(r) { r$scoring_schema <- NA_integer_; r }),
       variant("schema_none", function(r) { r$scoring_schema <- NULL; r }),
       variant("no_hash",     function(r) { r$data_hash <- NULL; r }),
@@ -1606,7 +1609,7 @@ describe("checkpoint scoring schema", {
     gated <- gate_checkpoint_rows(candidates, run_fp, settings)
 
     expect_named(gated$kept, "keep")
-    expect_equal(gated$n_foreign, 8L)
+    expect_equal(gated$n_foreign, 9L)
     expect_length(gated$refused, 0)
 
     ## A run with no fingerprint of its own resumes nothing

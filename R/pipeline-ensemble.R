@@ -50,8 +50,9 @@
 #' tune's for the chosen candidate, a member's while predicting the test
 #' rows) are kept in `ensemble$warnings`, as a member's are in
 #' `models$results$warnings`, with the package's own lines about the
-#' ensemble: the meta-learner's candidates left out for a missing fold, and
-#' the CV+ intervals not computed. horizons' own warnings are written to the
+#' ensemble: the meta-learner's candidates left out for a missing fold, the
+#' CV+ intervals not computed, and their measured test coverage not
+#' computed. horizons' own warnings are written to the
 #' log and raised once at the end.
 #'
 #' @param x A `horizons_fit` object (output of [fit()]).
@@ -72,7 +73,11 @@
 #'   `min_calib_rows` rows, too few finite residuals for CV+ at its level, or
 #'   a fold refit that fails), the ensemble is returned point-only with one
 #'   warning of class `horizons_warning_skipped` saying why, whatever
-#'   `verbose` is (#145). Mirrors the `compute_uq`
+#'   `verbose` is (#145). Their coverage is then measured on the test rows
+#'   `fit()` held out and stored on the bundle as `test_coverage`,
+#'   `test_mean_width` and `n_test`, as a member's is; when it cannot be
+#'   measured they are `NA` (`n_test` 0), with one `skipped` warning saying
+#'   why. Mirrors the `compute_uq`
 #'   argument of [fit()]. Placed after `seed` so pre-existing positional
 #'   callers (`method`, `optimize`, `seed`) are unaffected. Default `TRUE`.
 #' @param control A [control_horizons()] object: how the run goes, not what
@@ -316,10 +321,38 @@ ensemble <- function(x,
 
   }
 
+  ## Measured coverage on the held-out test rows, a unit of its own after the
+  ## intervals', run when they were calibrated, as fit()'s follows a member's
+  ## UQ (#118): the intervals predict() serves, scored on rows that took no
+  ## part in the fit. A failure leaves the figures NA and says why.
+  if (!is.null(x$ensemble$uq)) {
+
+    coverage <- run_unit(
+      ensemble_test_coverage(x),
+      unit = "coverage", id = "ensemble", debug = debug
+    )
+
+    records <- dplyr::bind_rows(records, coverage$records[coverage$records$type != "failure", , drop = FALSE])
+
+    if (coverage$failed) {
+
+      cause <- unit_failure_message(coverage$records, outside = NULL)
+      line  <- paste0("Measured test coverage was not computed: ", cause)
+
+      log_warning(collector, "skipped", "{line}")
+      warning_log <- dplyr::bind_rows(warning_log, text_records(line, pinned = TRUE))
+
+    }
+
+    x$ensemble$uq <- c(x$ensemble$uq, coverage$value %||% test_interval_coverage_missing())
+
+  }
+
   ## The ensemble's own warnings, as a member's are kept: another package's
   ## (an engine's, tune's notes for the chosen candidate) and the package's
   ## own lines, pinned (the candidates left out, the CV+ intervals not
-  ## computed). horizons' topic warnings go to the log as well, once.
+  ## computed, their measured coverage not computed). horizons' topic
+  ## warnings go to the log as well, once.
   warning_log <- dplyr::bind_rows(unit_warning_records(records), warning_log)
   x$ensemble["warnings"] <- list(render_warning_log(warning_log))
 
@@ -359,8 +392,9 @@ ensemble <- function(x,
 #'
 #' @description
 #' Render layer for [ensemble()]: prints member weights, the ensemble's
-#' performance on the rank metric, and the improvement over the best single
-#' member. A non-positive improvement is surfaced in yellow rather than hidden,
+#' performance on the rank metric, the improvement over the best single
+#' member, and the CV+ intervals' measured coverage on the held-out test rows
+#' beside their nominal level. A non-positive improvement is surfaced in yellow rather than hidden,
 #' because an ensemble that does not beat its best member is a real outcome.
 #'
 #' @param contract The ensemble contract list.
@@ -417,20 +451,21 @@ render_ensemble_summary <- function(contract, rank_metric) {
 
   ## UQ status ---------------------------------------------------------------
 
+  ## The intervals' measured coverage on the held-out test rows, as fit()'s
+  ## tree gives a member's (format_test_coverage())
+
   uq <- contract$uq
 
-  uq_line <- if (!is.null(uq)) {
+  if (!is.null(uq)) {
 
-    paste0("UQ: CV+ conformal (level ", uq$level_default,
-           ", n_calib = ", uq$n_calib, ")")
+    cat(paste0("\u2502  \u251c\u2500 UQ: CV+ conformal (n_calib = ", uq$n_calib, ")\n"))
+    cat(paste0("\u2502  \u2502  \u2514\u2500 ", format_test_coverage(uq), "\n"))
 
   } else {
 
-    "UQ: not computed"
+    cat(paste0("\u2502  \u251c\u2500 UQ: not computed\n"))
 
   }
-
-  cat(paste0("\u2502  \u251c\u2500 ", uq_line, "\n"))
 
   ## Runtime -----------------------------------------------------------------
 

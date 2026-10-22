@@ -910,6 +910,12 @@ describe("fit() - allow_par without a usable backend", {
 ## stochastic stage so the result does not depend on that; without the
 ## re-pin before the OOF fits, the rf member's CV metrics differ between the
 ## two runs. The sequential run is the shared fit60().
+##
+## The re-pin before the warm-start Bayesian search (#151) cannot be seen
+## here on tune 2.1.0: tune_bayes() seeds each iteration from its control
+## seed, and the two paths reach the search with the same one, so the two
+## runs agree with or without it. test-fit-warmstart.R's "does not depend on the caller's
+## random stream" is the test that fails without it.
 
 describe("fit() - on a two-worker plan", {
 

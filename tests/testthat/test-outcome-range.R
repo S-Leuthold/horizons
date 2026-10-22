@@ -298,6 +298,60 @@ describe("tuning_metric_set() - outcome_range", {
 })
 
 
+describe("evaluate() - an untransformed response's tuning metrics (#104)", {
+
+  it("scores the cross-validation on the clamped fold predictions, as the test set is scored", {
+
+    ## An outcome that is zero for half the rows and rises linearly with a
+    ## band the raw step keeps (it trims four of the ten from each edge): a
+    ## linear model's fold predictions go below the default range's floor at
+    ## the low end
+    hd <- make_range_hd(n = 60)
+    hd$data$analysis$SOC <- pmax(2 * hd$data$analysis$wn_3992, 0)
+    invisible(utils::capture.output(
+      cfg <- configure(hd, models = "plsr", cv_folds = 3L, grid_size = 2L,
+                       bayesian_iter = 0L, final_bayesian_iter = 0L)
+    ))
+
+    ## tune's own result, with its fold predictions kept
+    real_tune_grid <- tune::tune_grid
+    tuned <- NULL
+    local_mocked_bindings(tune_grid = function(object, ..., control) {
+      control$save_pred <- TRUE
+      tuned <<- real_tune_grid(object, ..., control = control)
+      tuned
+    }, .package = "tune")
+
+    ev <- suppressWarnings(evaluate(cfg, prune = FALSE, seed = 42L))
+
+    preds <- tune::collect_predictions(tuned, summarize = FALSE)
+    expect_true(any(preds$.pred < 0))
+
+    per_fold <- dplyr::summarise(
+      preds,
+      clamped = yardstick::rmse_vec(.data$SOC, pmax(.data$.pred, 0)),
+      raw     = yardstick::rmse_vec(.data$SOC, .data$.pred),
+      .by     = c("id", ".config")
+    )
+
+    scored <- tune::collect_metrics(tuned, summarize = FALSE)
+    scored <- scored[scored$.metric == "rmse", c("id", ".config", ".estimate")]
+    joined <- dplyr::inner_join(per_fold, scored, by = c("id", ".config"))
+
+    ## Every candidate on every fold is scored on its clamped predictions
+    expect_equal(nrow(joined), nrow(per_fold))
+    expect_equal(joined$.estimate, joined$clamped, tolerance = 1e-12)
+    expect_true(any(abs(joined$raw - joined$clamped) > 1e-6))
+
+    ## and the configuration's cv_rmse is one candidate's clamped mean
+    means <- dplyr::summarise(joined, clamped = mean(.data$clamped), .by = ".config")
+    expect_equal(sum(abs(means$clamped - ev$evaluation$results$cv_rmse) < 1e-10), 1L)
+
+  })
+
+})
+
+
 ## ===========================================================================
 ## compute_response_bound(): above the maximum for any sign, unchanged by default
 ## ===========================================================================

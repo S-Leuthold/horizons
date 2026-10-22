@@ -79,7 +79,12 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
 
   if (nrow(full_grid) > max_points) {
 
-    ## Sample (max_points - 1) rows, then bind the best point.
+    ## Sample (max_points - 1) rows from the grid without the best point, then
+    ## bind it, so the grid holds max_points rows whether or not the sample
+    ## would have drawn it (#228). The best point is matched at
+    ## point_matches()'s tolerance rather than exactly: a transformed
+    ## parameter's candidate at offset 0 is the best value's round trip
+    ## through its scale, and can differ from it in the last bits.
     ##
     ## The seed is scoped and the caller's stream restored. A bare set.seed(1)
     ## here clobbered it partway through fit_single_config(), so everything
@@ -99,11 +104,11 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
       }
 
       set.seed(1, kind = "Mersenne-Twister")
-      dplyr::slice_sample(full_grid, n = max_points - 1L)
+      others <- full_grid[!point_matches(best_row, full_grid), , drop = FALSE]
+      dplyr::slice_sample(others, n = max_points - 1L)
 
     })
-    full_grid <- dplyr::bind_rows(best_row, sampled) |>
-      dplyr::distinct()
+    full_grid <- dplyr::bind_rows(best_row, sampled)
 
   }
 
@@ -131,6 +136,13 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
 ## ---------------------------------------------------------------------------
 
 #' Check whether best_params is usable
+#'
+#' A row is usable when it holds every tuned parameter with a value. A row
+#' with any value missing starts from the space-filling grid, as one with
+#' none does: a warm start centred on some parameters and spread across the
+#' whole range of another would record `warm_start = TRUE` for a search that
+#' was not one (#229).
+#'
 #' @keywords internal
 usable_best_params <- function(best_params, param_set) {
 
@@ -142,9 +154,9 @@ usable_best_params <- function(best_params, param_set) {
   needed <- param_set$name
   if (!all(needed %in% names(best_params))) return(FALSE)
 
-  ## Must have at least one non-NA value
+  ## Must have every value
   vals <- unlist(best_params[1, needed])
-  if (all(is.na(vals))) return(FALSE)
+  if (anyNA(vals)) return(FALSE)
 
   TRUE
 
@@ -165,30 +177,8 @@ generate_candidates <- function(best_val, param_obj) {
   is_int <- isTRUE(param_obj$type == "integer")
   has_trans <- !is.null(trans)
 
-  ## Handle NA best_val: generate evenly-spaced candidates across full range
-  if (is.na(best_val)) {
-
-    if (has_trans) {
-
-      t_candidates <- seq(lower, upper, length.out = 5)
-      candidates   <- trans$inverse(t_candidates)
-
-    } else if (is_int) {
-
-      candidates <- as.integer(round(seq(lower, upper, length.out = 5)))
-
-    } else {
-
-      candidates <- seq(lower, upper, length.out = 5)
-
-    }
-
-    candidates <- pmax(candidates, if (has_trans) trans$inverse(lower) else lower)
-    candidates <- pmin(candidates, if (has_trans) trans$inverse(upper) else upper)
-
-    return(unique(candidates))
-
-  }
+  ## best_val is never missing: usable_best_params() sends a row with a
+  ## missing value to the space-filling grid
 
   if (has_trans) {
 
@@ -263,7 +253,24 @@ clamp_to_range <- function(value, param_obj) {
 #' @keywords internal
 point_in_grid <- function(point, grid) {
 
-  if (nrow(grid) == 0) return(FALSE)
+  any(point_matches(point, grid))
+
+}
+
+#' Which rows of a grid match a single-row tibble
+#'
+#' Numeric columns match within `sqrt(.Machine$double.eps)` relative to the
+#' point's value, others exactly. The tolerance is relative so that a value
+#' differing only in its last bits matches at any magnitude, while a penalty
+#' near 1e-9 does not match its neighbours on the log scale, which an
+#' absolute tolerance of 1.5e-8 would take for the same point.
+#'
+#' @param point Single-row tibble, with no missing value.
+#' @param grid Tibble holding `point`'s columns.
+#' @return Logical, one per row of `grid`.
+#' @keywords internal
+#' @noRd
+point_matches <- function(point, grid) {
 
   cols <- names(point)
   matches <- rep(TRUE, nrow(grid))
@@ -272,8 +279,9 @@ point_in_grid <- function(point, grid) {
 
     if (is.numeric(point[[col]])) {
 
+      p       <- point[[col]]
       matches <- matches &
-        (abs(grid[[col]] - point[[col]]) < .Machine$double.eps^0.5)
+        (abs(grid[[col]] - p) <= sqrt(.Machine$double.eps) * pmax(abs(p), .Machine$double.xmin))
 
     } else {
 
@@ -283,7 +291,7 @@ point_in_grid <- function(point, grid) {
 
   }
 
-  any(matches)
+  matches
 
 }
 
@@ -299,8 +307,11 @@ point_in_grid <- function(point, grid) {
 #'    `tune::tune_grid()`. A result in which every model failed fails the
 #'    member, with tune's cause (`check_tune_result()`), and so does a grid
 #'    with no candidate scored on every fold (#101).
-#' 2. If `bayesian_iter > 0`, refine with `bayes_search()`, which keeps what
-#'    it finished when it fails, and says so (#209).
+#' 2. If `bayesian_iter > 0`, re-pin the random stream to `seed` and refine
+#'    with `bayes_search()`, which keeps what it finished when it fails, and
+#'    says so (#209). The re-pin makes the search independent of where the
+#'    grid stage left the stream, which differs between the sequential and
+#'    parallel paths (#151).
 #' 3. Choose the hyperparameters by RMSE among the candidates scored on every
 #'    fold (`select_complete()`).
 #'
@@ -314,6 +325,8 @@ point_in_grid <- function(point, grid) {
 #' @param recipe The member's untrained recipe, to reproduce a step's failure
 #'   inside tune with its class; `NULL` when it was prepped before tuning.
 #' @param debug Logical. Stop at the first failure rather than fall back.
+#' @param seed Integer. The member's seed, set before the Bayesian search.
+#'   Default 42.
 #'
 #' @return List with `tune_results` (the result the hyperparameters were
 #'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
@@ -330,7 +343,8 @@ tune_warmstart_bayes <- function(workflow,
                                  metric_set,
                                  allow_par = FALSE,
                                  recipe    = NULL,
-                                 debug     = FALSE) {
+                                 debug     = FALSE,
+                                 seed      = 42L) {
 
   n_folds <- nrow(cv_resamples)
 
@@ -371,6 +385,13 @@ tune_warmstart_bayes <- function(workflow,
   n_dropped    <- 0L
 
   if (bayesian_iter > 0) {
+
+    ## Re-pinned before the stochastic stage, as evaluate_single_config()
+    ## re-pins before its search: tune's future path advances the parent
+    ## stream past where the sequential loop leaves it, so a search seeded
+    ## only by what came before could differ between allow_par = TRUE and
+    ## FALSE (#151).
+    set.seed(seed, kind = "Mersenne-Twister")
 
     search <- unit_step("warm_start_bayes", bayes_search(
       workflow      = workflow,

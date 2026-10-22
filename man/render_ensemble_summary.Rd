@@ -16,8 +16,9 @@ Invisibly NULL; called for its console output.
 }
 \description{
 Render layer for \code{\link[=ensemble]{ensemble()}}: prints member weights, the ensemble's
-performance on the rank metric, and the improvement over the best single
-member. A non-positive improvement is surfaced in yellow rather than hidden,
+performance on the rank metric, the improvement over the best single
+member, and the CV+ intervals' measured coverage on the held-out test rows
+beside their nominal level. A non-positive improvement is surfaced in yellow rather than hidden,
 because an ensemble that does not beat its best member is a real outcome.
 }
 \keyword{internal}

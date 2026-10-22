@@ -116,7 +116,7 @@ describe("fit_ensemble_uq() - bundle contract", {
       names(uq),
       c("method", "ensemble_method", "members", "fold_models", "calib",
         "n_calib", "level_default", "seed", "oof_coverage", "mean_width",
-        "timestamp")
+        "timestamp", "test_coverage", "test_mean_width", "n_test")
     )
 
   })
@@ -140,7 +140,7 @@ describe("fit_ensemble_uq() - bundle contract", {
     uq <- ens_built("weighted")$ensemble$uq
 
     expect_setequal(names(uq$calib),
-                    c(".row", "fold", ".pred_oof", "truth", "residual"))
+                    c(".row", "sample_id", "fold", ".pred_oof", "truth", "residual"))
     expect_equal(uq$n_calib, nrow(uq$calib))
     expect_true(any(uq$calib$residual < 0) && any(uq$calib$residual > 0))
     expect_equal(uq$calib$residual, uq$calib$truth - uq$calib$.pred_oof)
@@ -259,8 +259,214 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
 
 ## ---------------------------------------------------------------------------
+## The rows a response trim set aside (#103)
+## ---------------------------------------------------------------------------
+## The trim keeps the training rows outside the fences out of every member's
+## fit and out-of-fold predictions, so the meta frame holds none of them. They
+## calibrate the CV+ intervals as well, as they calibrate a single fit's
+## (#99): the final members predict them, and a fold model that never trained
+## on them scores each.
+
+#' A weighted ensemble with CV+ intervals over a fit whose evaluation trimmed
+#' eight training rows far above the rest. plsr and elastic net keep it fast.
+#' @noRd
+build_trimmed_ens <- function() {
+
+  obj <- make_eval_object(n = 80, n_configs = 2)
+  obj$config$configs$model <- c("plsr", "elastic_net")
+  obj$config$tuning$final_bayesian_iter <- 0L
+  obj$data$analysis$SOC[1:8] <- seq(20, 55, by = 5)
+
+  utils::capture.output(
+    v <- suppressWarnings(validate(obj, remove_outliers = "response"))
+  )
+
+  ev  <- suppressWarnings(evaluate(v, prune = FALSE, seed = 307L))
+  fx  <- suppressWarnings(fit(ev, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 307L))
+
+  suppressWarnings(ensemble(fx, method = "weighted", compute_uq = TRUE))
+
+}
+
+trimmed_ens <- function() memo_fixture("trimmed_ens", build_trimmed_ens)
+
+describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
+
+  it("calibrates on every trimmed row, each in one fold, beside every meta row", {
+
+    ens <- trimmed_ens()
+    uq  <- ens$ensemble$uq
+    ids <- ens$evaluation$response_trim$trimmed_ids
+    oof <- build_oof_matrix(ens, uq$members)
+
+    expect_length(ids, 8L)
+
+    at <- match(ids, uq$calib$sample_id)
+
+    expect_false(anyNA(at))
+    expect_identical(which(is.na(uq$calib$.row)), sort(at))
+    expect_true(all(uq$calib$fold[at] %in% seq_along(uq$fold_models)))
+
+    ## Balanced across the five folds: eight rows give 2, 2, 2, 1, 1
+    expect_identical(sort(as.integer(table(factor(uq$calib$fold[at], levels = 1:5)))),
+                     c(1L, 1L, 2L, 2L, 2L))
+
+    ## The meta rows are all there, each once, with their sample_ids
+    expect_setequal(uq$calib$.row[-at], oof$row)
+    expect_identical(anyDuplicated(uq$calib$sample_id), 0L)
+    expect_identical(uq$calib$sample_id[-at], oof$sample_id[match(uq$calib$.row[-at], oof$row)])
+    expect_identical(uq$n_calib, length(oof$row) + length(ids))
+
+  })
+
+  it("scores each trimmed row with its fold model's prediction of the members' predictions", {
+
+    ens  <- trimmed_ens()
+    uq   <- ens$ensemble$uq
+    ids  <- ens$evaluation$response_trim$trimmed_ids
+    rows <- ens$data$analysis[ens$data$analysis$sample_id %in% ids, , drop = FALSE]
+
+    ## The final members, which never trained on these rows (#77)
+    member_pred <- predict_members(ens, uq$members, rows)
+    wide <- tidyr::pivot_wider(member_pred[, c("sample_id", "config_id", ".pred")],
+                               names_from = "config_id", values_from = ".pred",
+                               names_prefix = "member_")
+
+    calib <- uq$calib[match(wide$sample_id, uq$calib$sample_id), ]
+    truth <- rows$SOC[match(wide$sample_id, rows$sample_id)]
+
+    scored <- vapply(seq_len(nrow(wide)), function(i) {
+      predict_fold_model(uq$fold_models[[calib$fold[i]]], "weighted",
+                         wide[i, paste0("member_", uq$members), drop = FALSE])
+    }, numeric(1))
+
+    expect_equal(calib$.pred_oof, scored)
+    expect_equal(calib$truth, truth)
+    expect_equal(calib$residual, truth - scored)
+    expect_true(all(truth > ens$evaluation$response_trim$upper))
+
+  })
+
+  it("trains no fold model on a trimmed row", {
+
+    ## A weighted fold model is the member weights re-derived on its fold's
+    ## training rows. Re-derived from the meta rows outside the fold alone,
+    ## they are the same, so no trimmed row entered any fold model.
+    ens  <- trimmed_ens()
+    uq   <- ens$ensemble$uq
+    oof  <- build_oof_matrix(ens, uq$members)
+    meta <- uq$calib[!is.na(uq$calib$.row), ]
+
+    for (k in seq_along(uq$fold_models)) {
+
+      pos <- match(meta$.row[meta$fold != k], oof$row)
+
+      expect_equal(
+        derive_member_weights(oof$predictors[pos, , drop = FALSE], oof$truth[pos],
+                              members = uq$members, optimize = ens$ensemble$optimize),
+        uq$fold_models[[k]],
+        info = k
+      )
+
+    }
+
+  })
+
+  it("leaves out a trimmed row a member could not use, as predict() does", {
+
+    ## An xgb meta-model would read the member's NA as missing and give the
+    ## row a finite residual from a combination predict() never serves
+    ens     <- trimmed_ens()
+    members <- ens$ensemble$uq$members
+    ids     <- ens$evaluation$response_trim$trimmed_ids
+    real    <- predict_members
+    flag    <- ids[1]
+
+    local_mocked_bindings(predict_members = function(object, members, new_spectra, ...) {
+
+      out     <- real(object, members, new_spectra, ...)
+      records <- attr(out, "unit_records")
+      flagged <- attr(out, "flagged")
+
+      ## The first member could not use the rows in flag
+      out$.pred[out$config_id == members[1] & out$sample_id %in% flag] <- NA_real_
+      flagged[[members[1]]] <- flag
+
+      attr(out, "unit_records") <- records
+      attr(out, "flagged")      <- flagged
+      out
+
+    })
+
+    trimmed <- ensemble_trimmed_rows(ens, members)
+
+    expect_setequal(trimmed$sample_id, ids[-1])
+    expect_length(trimmed$truth, length(ids) - 1L)
+    expect_false(anyNA(trimmed$predictors))
+
+    ## With none usable there are no trimmed rows to calibrate, and no fold
+    ## is drawn for them
+    flag <- ids
+    expect_null(ensemble_trimmed_rows(ens, members))
+
+  })
+
+  it("calibrates an ensemble without a trim on its meta rows alone, as the fold pass at the stored seed does", {
+
+    ## The trimmed rows' folds are drawn only when there are some, after the
+    ## fold models, so an ensemble without a trim calibrates as it always has
+    ens_ref <- ens_built("weighted")
+    uq      <- ens_ref$ensemble$uq
+    oof     <- build_oof_matrix(ens_ref, uq$members)
+
+    meta_frame        <- oof$predictors
+    meta_frame$.truth <- oof$truth
+
+    set.seed(uq$seed)
+    folds <- suppressWarnings(rsample::vfold_cv(meta_frame, v = 5, strata = ".truth"))
+    plain <- fit_uq_fold_models(meta_frame, oof$row, oof$sample_id, folds,
+                                ens_ref$ensemble, ens_ref$ensemble$optimize)
+
+    expect_false(anyNA(uq$calib$.row))
+    expect_identical(uq$calib, plain$calib)
+    expect_identical(uq$fold_models, plain$fold_models)
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## Coverage
 ## ---------------------------------------------------------------------------
+
+describe("ensemble() - measured coverage on the held-out test rows", {
+
+  it("is the share of the test outcomes inside the intervals predict() serves, for each method", {
+
+    test_set    <- ens_test_set()
+    outcome_col <- ens_fitted()$data$role_map$variable[ens_fitted()$data$role_map$role == "outcome"]
+
+    for (method in c("weighted", "penalized", "xgb")) {
+
+      ens <- ens_built(method)
+      uq  <- ens$ensemble$uq
+
+      served <- predict(ens, test_set, interval = TRUE)
+      truth  <- test_set[[outcome_col]][match(served$sample_id, test_set$sample_id)]
+      inside <- truth >= served$.pred_lower & truth <= served$.pred_upper
+
+      ## The fixture's 12 test rows, every one with both bounds
+      expect_identical(uq$n_test, 12L, info = method)
+      expect_identical(uq$n_test, sum(!is.na(inside)), info = method)
+      expect_equal(uq$test_coverage, mean(inside), info = method)
+      expect_equal(uq$test_mean_width, mean(served$.interval_width), info = method)
+
+    }
+
+  })
+
+})
 
 describe("fit_ensemble_uq() - coverage", {
 
@@ -619,6 +825,41 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
+  it("compute_ensemble_uq counts the trimmed rows among the rows that calibrate (#103)", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+
+    ## 25 meta rows, under the 30 the gate asks for, and rows outside the
+    ## meta frame standing in for the training rows a trim set aside
+    keep  <- seq_len(N_CALIB_MIN - 5L)
+    small <- list(predictors = oof$predictors[keep, , drop = FALSE], truth = oof$truth[keep],
+                  row = oof$row[keep], sample_id = oof$sample_id[keep], members = oof$members)
+    aside <- function(at) list(predictors = oof$predictors[at, , drop = FALSE],
+                               truth = oof$truth[at], sample_id = oof$sample_id[at])
+
+    run <- function(trimmed) {
+      ## suppressWarnings(): rsample's note that 25 rows are too few for its
+      ## default strata breaks
+      suppressWarnings(compute_ensemble_uq(oof = small, contract = ens_ref$ensemble,
+                                           optimize = FALSE, conformal_seed = 1307L,
+                                           trimmed = trimmed))
+    }
+
+    ## Eight of them make 33 rows that calibrate, enough
+    uq <- run(aside(26:33))
+    expect_identical(uq$n_calib, 33L)
+    expect_identical(sum(is.na(uq$calib$.row)), 8L)
+
+    ## Three make 28, and the refusal names both counts
+    err <- expect_error(run(aside(26:28)), class = "horizons_error_run")
+    expect_match(conditionMessage(err),
+                 "The meta frame's 25 rows and the 3 training rows the response trim set aside give 28 to calibrate on, fewer than `min_calib_rows` (30).",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "lower `control_horizons(min_calib_rows = )` to 28 or fewer", fixed = TRUE)
+
+  })
+
   it("compute_ensemble_uq drops non-finite residuals, and refuses when too few are left", {
 
     ens_ref <- ens_built("weighted")
@@ -711,6 +952,38 @@ describe("ensemble UQ - degradation and gates", {
     expect_true(out$failed)
     expect_identical(unit_failure_message(out$records, outside = NULL),
                      "CV+ fold models failed: a fold refit failed")
+
+  })
+
+  it("leaves the measured coverage NA and says why once when it cannot be measured, keeping the intervals", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(ensemble_test_coverage = function(...) stop("the test rows broke"))
+
+    run <- collect_warnings(
+      ensemble(fitted, method = "weighted", optimize = FALSE),
+      "Measured test coverage was not computed"
+    )
+
+    ens <- run$value
+    uq  <- ens$ensemble$uq
+
+    expect_identical(uq$method, "cv_plus")
+    expect_identical(uq$test_coverage, NA_real_)
+    expect_identical(uq$test_mean_width, NA_real_)
+    expect_identical(uq$n_test, 0L)
+
+    expect_length(run$warnings, 1L)
+    expect_s3_class(run$warnings[[1]], "horizons_warning_skipped")
+    expect_match(conditionMessage(run$warnings[[1]]),
+                 "Measured test coverage was not computed: the test rows broke", fixed = TRUE)
+
+    skipped <- ens$log[ens$log$verb == "ensemble" & ens$log$topic %in% "skipped", , drop = FALSE]
+    expect_identical(nrow(skipped), 1L)
+    expect_identical(
+      sum(grepl("Measured test coverage was not computed: ", ens$ensemble$warnings, fixed = TRUE)), 1L
+    )
 
   })
 

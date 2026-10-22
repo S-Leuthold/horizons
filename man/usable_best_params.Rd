@@ -7,6 +7,10 @@
 usable_best_params(best_params, param_set)
 }
 \description{
-Check whether best_params is usable
+A row is usable when it holds every tuned parameter with a value. A row
+with any value missing starts from the space-filling grid, as one with
+none does: a warm start centred on some parameters and spread across the
+whole range of another would record \code{warm_start = TRUE} for a search that
+was not one (#229).
 }
 \keyword{internal}

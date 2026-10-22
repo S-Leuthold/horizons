@@ -2880,19 +2880,29 @@ test_that("print() reports models$best_config, not the lowest test RMSE", {
 })
 
 
-test_that("summary() reports models$best_config, its test and CV metrics, and its interval coverage", {
+## UQ bundles for the fixture's selected member and its rival, the rival's
+## listed first, so the coverage shown is the selected member's and not
+## simply the first bundle's
+with_two_uq_bundles <- function(case) {
 
-  ## Arrange: UQ bundles for both, the rival's listed first, so the coverage
-  ## shown is the selected member's and not simply the first bundle's
-  case     <- make_fit_with_lower_test_rival()
-  fx       <- case$fit
-  best_row <- fx$models$results[fx$models$results$config_id == fx$models$best_config, ]
+  fx <- case$fit
 
   fx$models$uq <- stats::setNames(
-    list(list(test_coverage = 0.5, n_test = 40L),
-         list(test_coverage = 0.915, n_test = 40L)),
+    list(list(level_default = 0.9, test_coverage = 0.5, test_mean_width = 1.2, n_test = 40L),
+         list(level_default = 0.9, test_coverage = 0.915, test_mean_width = 3.04, n_test = 40L)),
     c(case$rival, fx$models$best_config)
   )
+
+  fx
+
+}
+
+test_that("summary() reports models$best_config, its test and CV metrics, and its interval coverage", {
+
+  ## Arrange
+  case     <- make_fit_with_lower_test_rival()
+  fx       <- with_two_uq_bundles(case)
+  best_row <- fx$models$results[fx$models$results$config_id == fx$models$best_config, ]
 
   ## Act
   section <- models_section(utils::capture.output(summary(fx)), "Models (fit)")
@@ -2908,9 +2918,54 @@ test_that("summary() reports models$best_config, its test and CV metrics, and it
       paste0("   │     └─ CV RMSE = ", round(best_row$cv_rmse_mean, 3),
              " ± ", round(best_row$cv_rmse_se, 3)))
   )
-  expect_true(paste0("   ├─ UQ: enabled (2 configs, test coverage for ",
-                     fx$models$best_config, " = 91.5% on 40 rows)") %in% section)
+  ## Measured coverage beside nominal, through the one formatter every
+  ## place that reports intervals uses (its wording is tested with it)
+  at <- which(section == "   ├─ UQ: enabled (2 configs)")
+  expect_length(at, 1)
+  expect_identical(section[at + 1],
+                   paste0("   │     └─ ", fx$models$best_config, ": ",
+                          format_test_coverage(fx$models$uq[[fx$models$best_config]])))
   expect_false(any(grepl(case$rival, section, fixed = TRUE)))
+
+})
+
+test_that("print() reports the selected member's measured interval coverage beside nominal", {
+
+  case <- make_fit_with_lower_test_rival()
+  fx   <- with_two_uq_bundles(case)
+
+  section <- models_section(utils::capture.output(print(fx)), "Models")
+  at      <- which(section == "   └─ UQ: enabled (2 configs)")
+
+  expect_length(at, 1)
+  expect_identical(section[at + 1],
+                   paste0("         └─ ", fx$models$best_config, ": ",
+                          format_test_coverage(fx$models$uq[[fx$models$best_config]])))
+  expect_false(any(grepl(case$rival, section, fixed = TRUE)))
+
+  ## A bundle made before coverage was measured says so, with nominal
+  fx$models$uq[[fx$models$best_config]][c("test_coverage", "test_mean_width", "n_test")] <- NULL
+  section <- models_section(utils::capture.output(print(fx)), "Models")
+
+  expect_true(paste0("         └─ ", fx$models$best_config, ": ",
+                     format_test_coverage(fx$models$uq[[fx$models$best_config]])) %in% section)
+
+})
+
+
+test_that("print() and summary() report the first member with a bundle when the selected one has none", {
+
+  ## The selected member's UQ failed and the rival's ran: the coverage shown
+  ## is the rival's, named, rather than an unmeasured line for a bundle that
+  ## does not exist
+  case <- make_fit_with_lower_test_rival()
+  fx   <- with_two_uq_bundles(case)
+  fx$models$uq[[fx$models$best_config]] <- NULL
+
+  line <- paste0(case$rival, ": ", format_test_coverage(fx$models$uq[[case$rival]]))
+
+  expect_true(paste0("         └─ ", line) %in% models_section(utils::capture.output(print(fx)), "Models"))
+  expect_true(paste0("   │     └─ ", line) %in% models_section(utils::capture.output(summary(fx)), "Models (fit)"))
 
 })
 

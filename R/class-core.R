@@ -2850,6 +2850,45 @@ selected_member <- function(x) {
 }
 
 
+#' The member whose measured interval coverage print() and summary() report
+#'
+#' @description
+#' The figure belongs to one member, so it is named: the member `fit()`
+#' selected when it has a UQ bundle, else the first that does.
+#'
+#' @param x A `horizons_fit` with at least one UQ bundle.
+#' @return Character(1), a `config_id` among `names(x$models$uq)`.
+#' @keywords internal
+#' @noRd
+uq_report_member <- function(x) {
+
+  best_id <- x$models$best_config
+
+  if (!is.null(best_id) && best_id %in% names(x$models$uq)) best_id else names(x$models$uq)[1]
+
+}
+
+#' The line print() and summary() report an ensemble's own intervals with
+#'
+#' @description
+#' The CV+ intervals `predict()` serves for an ensemble are its own, not its
+#' members', so they get a line of their own, with their measured coverage
+#' on the held-out test rows ([format_test_coverage()]), as a member's has.
+#'
+#' @param x A `horizons_ensemble`.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+ensemble_uq_line <- function(x) {
+
+  uq <- x$ensemble$uq
+
+  paste0("Ensemble intervals (CV+): ",
+         if (is.null(uq)) cli::col_silver("disabled") else format_test_coverage(uq))
+
+}
+
+
 #' The source an object was read from, on one line
 #'
 #' @description
@@ -3161,20 +3200,29 @@ print.horizons_data <- function(x, ...) {
 
     }
 
-    ## UQ status
-    uq_present <- has_uq(x)
-    branch     <- "\u2514\u2500"
+    ## UQ status, with the measured coverage of one member's intervals, and
+    ## an ensemble's own intervals after it
+    uq_present  <- has_uq(x)
+    is_ensemble <- inherits(x, "horizons_ensemble")
+    branch      <- if (is_ensemble) "\u251C\u2500" else "\u2514\u2500"
+    stem        <- if (is_ensemble) "\u2502" else " "
 
     if (uq_present) {
 
+      uq_id <- uq_report_member(x)
+
       cat(paste0("   ", branch, " UQ: ", cli::col_green("enabled"),
                  " (", length(x$models$uq), " configs)\n"))
+      cat(paste0("   ", stem, "     \u2514\u2500 ", uq_id, ": ",
+                 format_test_coverage(x$models$uq[[uq_id]]), "\n"))
 
     } else {
 
       cat(paste0("   ", branch, " UQ: ", cli::col_silver("disabled"), "\n"))
 
     }
+
+    if (is_ensemble) cat(paste0("   \u2514\u2500 ", ensemble_uq_line(x), "\n"))
 
     cat("\n")
 
@@ -3601,30 +3649,25 @@ summary.horizons_data <- function(object, ...) {
 
     if (uq_present) {
 
-      ## The best config's measured coverage when it has a UQ bundle, named,
-      ## since the figure belongs to one config and not to all of them
-      best_id    <- x$models$best_config
-      uq_id      <- if (!is.null(best_id) && best_id %in% names(x$models$uq)) {
-        best_id
-      } else {
-        names(x$models$uq)[1]
-      }
-      uq_bundle  <- x$models$uq[[uq_id]]
-      coverage   <- if (!is.null(uq_bundle$test_coverage) &&
-                        is.finite(uq_bundle$test_coverage)) {
-        paste0(", test coverage for ", uq_id, " = ",
-               round(uq_bundle$test_coverage * 100, 1), "% on ",
-               uq_bundle$n_test, " rows")
-      } else {
-        ""
-      }
+      ## One member's measured coverage, named, since the figure belongs to
+      ## one config and not to all of them
+      uq_id <- uq_report_member(x)
 
       cat(paste0("   \u251C\u2500 UQ: ", cli::col_green("enabled"),
-                 " (", length(x$models$uq), " configs", coverage, ")\n"))
+                 " (", length(x$models$uq), " configs)\n"))
+      cat(paste0("   \u2502     \u2514\u2500 ", uq_id, ": ",
+                 format_test_coverage(x$models$uq[[uq_id]]), "\n"))
 
     } else {
 
       cat(paste0("   \u251C\u2500 UQ: ", cli::col_silver("disabled"), "\n"))
+
+    }
+
+    ## An ensemble's own intervals, which are what predict() serves for it
+    if (inherits(x, "horizons_ensemble")) {
+
+      cat(paste0("   \u251C\u2500 ", ensemble_uq_line(x), "\n"))
 
     }
 

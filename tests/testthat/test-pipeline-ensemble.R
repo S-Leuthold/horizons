@@ -1274,19 +1274,21 @@ describe("predict.horizons_ensemble() - selected training set", {
 ## =========================================================================
 ## predict.horizons_ensemble() - members fit on a response-trimmed partition
 ## =========================================================================
-## The ensemble's CV+ intervals come from the members' out-of-fold
-## predictions, which after a response trim (#77) cover only the rows inside
-## the training fences. The mechanism is a follow-up; predict() says so.
+## The ensemble's CV+ intervals were built from the members' out-of-fold
+## predictions only, which after a response trim (#77) cover only the rows
+## inside the training fences, and predict() warned so. The trimmed rows now
+## calibrate the intervals too (#103, test-ensemble-uq.R), and the warning
+## is gone.
 
-describe("predict.horizons_ensemble() - trimmed members (#77)", {
+describe("predict.horizons_ensemble() - trimmed members (#77, #103)", {
 
-  trimmed_ensemble <- function(uq = TRUE, trimmed_ids = c("S001", "S002")) {
+  trimmed_ensemble <- function(uq = TRUE) {
 
     ens <- ens_built("weighted", compute_uq = uq)
 
     ens$evaluation$response_trim <- list(
       outcome = "SOC", method = "iqr", threshold = 1.5, fences_from = "training",
-      lower = 0.5, upper = 4.5, n_training = 40L, trimmed_ids = trimmed_ids,
+      lower = 0.5, upper = 4.5, n_training = 40L, trimmed_ids = c("S001", "S002"),
       skipped = NA_character_
     )
 
@@ -1294,41 +1296,97 @@ describe("predict.horizons_ensemble() - trimmed members (#77)", {
 
   }
 
-  it("warns once that the intervals were calibrated within the training fences", {
+  it("says nothing about the fences: the trimmed rows calibrate the intervals", {
 
     test_set <- ens_test_set()
-    caught   <- list()
 
-    withCallingHandlers(
-      predict(trimmed_ensemble(), test_set, interval = TRUE),
-      warning = function(w) {
-        caught[[length(caught) + 1L]] <<- w
-        invokeRestart("muffleWarning")
-      }
-    )
+    warns <- function(ens, interval) {
+      testthat::capture_warnings(predict(ens, test_set, interval = interval))
+    }
 
-    trim_warnings <- Filter(function(w) inherits(w, "horizons_warning_quality"), caught)
-
-    expect_length(trim_warnings, 1L)
-    expect_match(conditionMessage(trim_warnings[[1]]),
-                 "calibrated within the training fences [0.5, 4.5]", fixed = TRUE)
+    ## With intervals, and with intervals asked of an ensemble without UQ,
+    ## whose one warning is that there are none
+    expect_length(warns(trimmed_ensemble(), interval = TRUE), 0L)
+    expect_false(any(grepl("training fences", warns(trimmed_ensemble(uq = FALSE), interval = TRUE))))
 
   })
 
-  it("is silent without intervals, without ensemble UQ, or without a trim", {
+})
 
-    test_set <- ens_test_set()
+## =========================================================================
+## ensemble() - CV+ coverage after a response trim (#103)
+## =========================================================================
+## Empirical. An outcome with heavy tails (t, 2 df), so the training fences
+## trim real extremes (16 to 24 of the 300 training rows here); two fast
+## members; a weighted ensemble with CV+; and coverage on 2,000 fresh,
+## untrimmed rows from the same generator, pooled over three seeds. At these
+## seeds the intervals cover 0.891 of them; calibrated on the kept rows alone
+## they covered 0.843. Over 20 seeds, pooled three at a time, they cover 0.875
+## to 0.924, so the bounds leave 0.015 below the worst case and 0.016 above
+## the best.
 
-    quiet <- function(ens, interval) {
-      warns <- testthat::capture_warnings(
-        predict(ens, test_set, interval = interval)
-      )
-      !any(grepl("training fences", warns))
+describe("ensemble() - CV+ coverage after a response trim (#103)", {
+
+  it("covers fresh untrimmed rows at about the nominal level, pooled over three seeds", {
+
+    skip_unless_slow_tier()
+
+    wn <- paste0("wn_", seq(4000, by = -2, length.out = 30))
+
+    ## The raw step keeps bands 5 to 26; the signal is in three of them
+    draw <- function(n, seed) {
+      withr::with_seed(seed, {
+        x <- matrix(stats::rnorm(n * 30), n)
+        colnames(x) <- wn
+        d <- tibble::as_tibble(x)
+        d$SOC <- 10 + 0.8 * x[, 10] + 0.6 * x[, 14] + 0.4 * x[, 18] + 1.5 * stats::rt(n, df = 2)
+        d
+      })
     }
 
-    expect_true(quiet(trimmed_ensemble(), interval = FALSE))
-    expect_true(quiet(trimmed_ensemble(uq = FALSE), interval = TRUE))
-    expect_true(quiet(trimmed_ensemble(trimmed_ids = character(0)), interval = TRUE))
+    covered_at <- function(seed) {
+
+      d <- draw(400L, seed)
+      d$sample_id <- sprintf("S%04d", seq_len(nrow(d)))
+
+      obj <- new_horizons_data(
+        analysis = d,
+        role_map = tibble::tibble(variable = c("sample_id", wn, "SOC"),
+                                  role     = c("id", rep("predictor", length(wn)), "outcome"))
+      )
+      obj$config$configs <- tibble::tibble(
+        config_id = c("cfg_001", "cfg_002"), model = c("elastic_net", "plsr"),
+        transformation = "none", preprocessing = "raw", feature_selection = "none"
+      )
+      obj$config$n_configs     <- 2L
+      obj$config$tuning        <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L,
+                                       final_bayesian_iter = 0L)
+      obj$config$outcome_range <- c(-Inf, Inf)
+
+      utils::capture.output(
+        v <- suppressWarnings(validate(obj, remove_outliers = "response"))
+      )
+      ev  <- suppressWarnings(evaluate(v, prune = FALSE, seed = seed))
+      fx  <- suppressWarnings(fit(ev, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = seed))
+      ens <- suppressWarnings(ensemble(fx, method = "weighted", compute_uq = TRUE))
+
+      expect_gt(length(ev$evaluation$response_trim$trimmed_ids), 10L)
+
+      fresh <- draw(2000L, seed + 10000L)
+      fresh$sample_id <- sprintf("F%04d", seq_len(nrow(fresh)))
+
+      p <- predict(ens, fresh[, c("sample_id", wn)], interval = TRUE)
+      p <- p[match(fresh$sample_id, p$sample_id), ]
+
+      fresh$SOC >= p$.pred_lower & fresh$SOC <= p$.pred_upper
+
+    }
+
+    covered <- unlist(lapply(1:3, covered_at))
+
+    expect_false(anyNA(covered))
+    expect_gte(mean(covered), 0.86)
+    expect_lte(mean(covered), 0.94)
 
   })
 
@@ -1687,6 +1745,51 @@ describe("combine_ensemble_metamodel() - row alignment", {
 ## The summary ensemble() prints
 ## ---------------------------------------------------------------------------
 
+describe("print() and summary() of an ensemble - its own intervals", {
+
+  ## The intervals predict() serves for an ensemble are its CV+ ones, not its
+  ## members', so they get a line of their own with their measured coverage
+  ## on the held-out test rows beside nominal, through the one formatter
+  ## (its wording is tested with it)
+  line_of <- function(uq) paste0("Ensemble intervals (CV+): ", format_test_coverage(uq))
+
+  it("reports the CV+ intervals' measured coverage beside nominal, after the members' UQ line", {
+
+    ens <- ens_built("weighted")
+    uq  <- ens$ensemble$uq
+
+    printed <- utils::capture.output(print(ens))
+    summed  <- utils::capture.output(summary(ens))
+
+    expect_identical(uq$n_test, 12L)
+    expect_identical(which(printed == paste0("   └─ ", line_of(uq))),
+                     which(grepl("├─ UQ: ", printed, fixed = TRUE)) + 1L)
+    expect_identical(which(summed == paste0("   ├─ ", line_of(uq))),
+                     which(grepl("├─ UQ: ", summed, fixed = TRUE)) + 1L)
+
+  })
+
+  it("says the ensemble's intervals are disabled when it has none", {
+
+    ens0 <- ens_built("weighted", compute_uq = FALSE)
+
+    expect_true("   └─ Ensemble intervals (CV+): disabled" %in% utils::capture.output(print(ens0)))
+    expect_true("   ├─ Ensemble intervals (CV+): disabled" %in% utils::capture.output(summary(ens0)))
+
+  })
+
+  it("reports a fit's members without an ensemble line", {
+
+    fitted <- ens_fitted()
+
+    expect_false(any(grepl("Ensemble intervals", utils::capture.output(print(fitted)), fixed = TRUE)))
+    expect_false(any(grepl("Ensemble intervals", utils::capture.output(summary(fitted)), fixed = TRUE)))
+
+  })
+
+})
+
+
 describe("ensemble() - the summary it prints", {
 
   ## render_ensemble_summary() is what ensemble(verbose = TRUE) ends with. It
@@ -1702,7 +1805,8 @@ describe("ensemble() - the summary it prints", {
       metrics      = tibble::tibble(.metric = c("rmse", "rpd"), .estimator = "standard",
                                     .estimate = c(2.31, 1.87)),
       improvement  = improvement,
-      uq           = if (uq) list(level_default = 0.9, n_calib = 24L),
+      uq           = if (uq) list(level_default = 0.9, n_calib = 24L, test_coverage = 0.8333,
+                                  test_mean_width = 3.04, n_test = 12L),
       runtime_secs = runtime_secs
     )
   }

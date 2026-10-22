@@ -1242,24 +1242,22 @@ describe("fit_single_config() - UQ and AD as units of their own (#145)", {
 
   })
 
-  it("records the AD covariance's warning for fewer samples than features on the member's row", {
+  it("a member at p > n carries no AD warning on its row", {
 
     ## 60 wavenumbers keep 52 predictors past the raw step's edge trim, more
     ## than the 45 training rows
-    setup  <- make_fit_setup(n_wn = 60)
-    result <- run_addons(setup, compute_ad = TRUE, min_calib_rows = 5L, min_ad_rows = 5L)
+    setup   <- make_fit_setup(n_wn = 60)
+    result  <- run_addons(setup, compute_ad = TRUE, min_calib_rows = 5L, min_ad_rows = 5L)
+    without <- run_addons(setup, min_calib_rows = 5L, min_ad_rows = 5L)
 
     expect_equal(result$status, "success")
     expect_false(is.null(result$ad))
-    expect_true(any(grepl("AD covariance estimated with fewer samples than features",
-                          result$warnings, fixed = TRUE)))
+    expect_gt(length(result$ad$centroid), 45L)
 
-    ## Not a horizons topic, so it stays on the row and is not lifted; it is
-    ## the member's record, as every add-on record the member keeps is
-    records <- attr(result, "unit_records")
-    covariance <- grepl("fewer samples than features", records$message, fixed = TRUE)
-    expect_false(any(startsWith(records$class[covariance], "horizons_warning_")))
-    expect_identical(unique(records$unit[covariance]), "member")
+    ## The domain adds nothing to the member's warnings or its records
+    expect_identical(result$warnings, without$warnings)
+    expect_identical(attr(result, "unit_records")$message,
+                     attr(without, "unit_records")$message)
 
   })
 
@@ -1277,13 +1275,24 @@ describe("fit_single_config() - the RNG pin", {
     skip_unless_slow_tier()
 
     ## A worker started under furrr_options(seed = TRUE) is on L'Ecuyer-CMRG.
-    ## The runner pins kind and seed on entry. The OOF fits and the final fit
-    ## re-pin, so the pin shows only through the re-tune's choice: a cold
-    ## start's Bayesian stage draws its candidates from the stream.
-    setup <- fsc()$setup
+    ## The runner pins kind and seed on entry. The Bayesian search, the OOF
+    ## fits and the final fit re-pin (#151), so the entry pin shows in the
+    ## warm-start grid stage, whose forests draw their seeds from the stream:
+    ## its scores, read from tune's result for that stage (the first
+    ## tune_grid() call), differ between the two callers without the pin.
+    setup     <- fsc()$setup
+    real_grid <- tune::tune_grid
 
     run <- function() {
-      fit_single_config(
+
+      grid_stage <- NULL
+      local_mocked_bindings(tune_grid = function(...) {
+        result <- real_grid(...)
+        if (is.null(grid_stage)) grid_stage <<- result
+        result
+      }, .package = "tune")
+
+      fit <- fit_single_config(
         config_row          = make_fit_config(),
         split_F             = setup$split_F,
         cv_resamples        = setup$folds,
@@ -1296,15 +1305,17 @@ describe("fit_single_config() - the RNG pin", {
         allow_par           = FALSE,
         seed                = 42L
       )
+
+      list(fit = fit, grid = tune::collect_metrics(grid_stage))
+
     }
 
     mersenne <- withr::with_seed(1, run())
     lecuyer  <- withr::with_seed(99, .rng_kind = "L'Ecuyer-CMRG", run())
 
-    ## The test sees the pin only if the Bayesian candidate is the one chosen
-    expect_match(mersenne$best_params$.config, "^iter")
-    expect_identical(lecuyer$best_params, mersenne$best_params)
-    expect_identical(lecuyer$cv_predictions, mersenne$cv_predictions)
+    expect_identical(lecuyer$grid, mersenne$grid)
+    expect_identical(lecuyer$fit$best_params, mersenne$fit$best_params)
+    expect_identical(lecuyer$fit$cv_predictions, mersenne$fit$cv_predictions)
 
   })
 

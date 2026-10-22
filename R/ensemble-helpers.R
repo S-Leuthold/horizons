@@ -92,6 +92,7 @@ gather_members <- function(object) {
 #'     \item{truth}{Numeric vector of observed values, aligned to
 #'       `predictors` row order.}
 #'     \item{row}{Integer vector of `.row` ids, aligned to `predictors`.}
+#'     \item{sample_id}{The rows' `sample_id`s, aligned to `predictors`.}
 #'     \item{members}{The member `config_id`s, in column order.}
 #'   }
 #'
@@ -100,7 +101,7 @@ build_oof_matrix <- function(object, members) {
 
   cv <- object$models$cv_predictions
 
-  cv <- cv[cv$config_id %in% members, c(".row", "config_id", ".pred", "truth")]
+  cv <- cv[cv$config_id %in% members, c(".row", "sample_id", "config_id", ".pred", "truth")]
 
   ## Every member covers the same .row set, with no row twice: fit() fails a
   ## member that missed a fold (#101), and the door validator refuses a fit
@@ -112,11 +113,12 @@ build_oof_matrix <- function(object, members) {
   ## pivot_wider() from building list-columns here; inside ensemble() this
   ## runs as the meta-learner unit's first step (oof_matrix).
 
-  ## Carry truth through the pivot — it is constant per .row, so it rides as an
-  ## id column and comes out aligned, avoiding a separate dedup-and-reorder.
+  ## Carry truth and sample_id through the pivot — each is constant per .row,
+  ## so it rides as an id column and comes out aligned, avoiding a separate
+  ## dedup-and-reorder.
 
   wide <- tidyr::pivot_wider(
-    cv[, c(".row", "truth", "config_id", ".pred")],
+    cv[, c(".row", "sample_id", "truth", "config_id", ".pred")],
     names_from   = "config_id",
     values_from  = ".pred",
     names_prefix = "member_"
@@ -131,6 +133,7 @@ build_oof_matrix <- function(object, members) {
     predictors = wide[, member_cols, drop = FALSE],
     truth      = wide$truth,
     row        = wide$.row,
+    sample_id  = wide$sample_id,
     members    = members
   )
 
@@ -170,27 +173,6 @@ meta_tune_control <- function(kind = c("grid", "resamples"), allow_par = FALSE) 
                             parallel_over = "resamples")
 
   }
-
-}
-
-## ---------------------------------------------------------------------------
-## horizons_metric_set()
-## ---------------------------------------------------------------------------
-
-#' The Package Regression Metric Set
-#'
-#' @description
-#' The canonical six-metric panel (rmse, rrmse, rsq, ccc, rpd, mae) used for
-#' regression scoring throughout the package. Returned as a `yardstick`
-#' `metric_set` so it can drive `tune_grid()`; the data-consuming scorer
-#' [compute_original_scale_metrics()] uses the same six metrics.
-#'
-#' @return A `yardstick` metric set.
-#' @keywords internal
-horizons_metric_set <- function() {
-
-  yardstick::metric_set(yardstick::rmse, rrmse, yardstick::rsq, ccc, rpd,
-                        yardstick::mae)
 
 }
 
@@ -309,7 +291,9 @@ with_run_records <- function(contract, member_pred, warning_log = new_warning_lo
 #' performance is honest), refit the winner on the full matrix, then have the
 #' members predict `test_F` and combine those predictions *through* the fitted
 #' meta-model. The engine supplies the model spec, the tuning grid, and a
-#' closure that extracts member weights from the fitted model.
+#' closure that extracts member weights from the fitted model. Candidates are
+#' scored on their combination clamped to the outcome's range, as the served
+#' combination is ([tuning_metric_set()] with `transformation = "none"`).
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s.
@@ -372,6 +356,13 @@ fit_tuned_meta_learner <- function(object,
     workflows::add_model(spec) |>
     workflows::add_formula(.truth ~ .)
 
+  ## Combined predictions are clamped to the outcome's range, as every served
+  ## prediction is (#76); a floor at 0 under the default range. The tuning
+  ## scores the clamped combination too, so the candidate chosen is the one
+  ## best on what is served (#104).
+  outcome_range <- outcome_range_setting(object)
+  meta_metrics  <- tuning_metric_set("none", outcome_range = outcome_range)
+
   ## The warnings tune keeps as notes: the chosen candidate's (#109) and the
   ## out-of-fold pass's. They are the ensemble's own, for its `warnings`.
   warning_log <- new_warning_log()
@@ -403,7 +394,7 @@ fit_tuned_meta_learner <- function(object,
         meta_wflow,
         resamples = folds,
         grid      = grid,
-        metrics   = horizons_metric_set(),
+        metrics   = meta_metrics,
         control   = meta_tune_control("grid", allow_par)
       ))
       check_tune_result(results, "every meta-learner candidate failed", debug = debug)
@@ -489,7 +480,7 @@ fit_tuned_meta_learner <- function(object,
     oof_res <- suppressMessages(tune::fit_resamples(
       final_wflow,
       resamples = folds,
-      metrics   = horizons_metric_set(),
+      metrics   = meta_metrics,
       control   = meta_tune_control("resamples", allow_par)
     ))
 
@@ -528,10 +519,6 @@ fit_tuned_meta_learner <- function(object,
     n          = length(oof_by_pos),
     n_expected = length(oof$row)
   )
-
-  ## Combined predictions are clamped to the outcome's range, as every served
-  ## prediction is (#76); a floor at 0 under the default range.
-  outcome_range <- outcome_range_setting(object)
 
   oof_pred <- tibble::tibble(
     .row  = oof$row,
@@ -759,13 +746,13 @@ build_ensemble_contract <- function(method,
 #'   does not. `TRUE`: intervals asked for; without a bundle the bounds are
 #'   `NA`, with one warning of class `horizons_warning_skipped`. `FALSE`:
 #'   none. The intervals are at the level they were calibrated at in
-#'   [ensemble()], 0.90 by default (see Details). When the
-#'   members were fit on a response-trimmed training partition
-#'   (`validate(remove_outliers =
-#'   "response")`, #77), the intervals come from out-of-fold predictions on
-#'   the rows inside the training fences, so this warns once, with class
-#'   `horizons_warning_quality`, that they were calibrated within those
-#'   fences and can undercover samples outside them.
+#'   [ensemble()], 0.90 by default (see Details). When the members were fit
+#'   on a response-trimmed training partition (`validate(remove_outliers =
+#'   "response")`, #77), the training rows the trim set aside calibrate the
+#'   intervals too (#103), so the calibration rows are exchangeable with new
+#'   data, extremes included, and coverage over new data as a whole is at the
+#'   level. The coverage is marginal: a sample whose outcome lies far outside
+#'   the training fences is rarely inside its interval.
 #' @param ... Not used; present for S3 method consistency. A `level` passed
 #'   here is ignored with a warning (see Details), and any other argument is
 #'   an error.
@@ -1013,9 +1000,8 @@ predict.horizons_ensemble <- function(object,
 
   log_prediction_reports(collector, records, flagged, list(winsorized))
 
-  ## Conformal coverage on a selected training set, and CV+ intervals
-  ## calibrated within the training fences, said only when intervals came
-  ## back (#145)
+  ## Conformal coverage on a selected training set, said only when intervals
+  ## came back (#145)
   log_interval_quality(collector, object, intervals_returned(out))
 
   finish_predict(collector, out)

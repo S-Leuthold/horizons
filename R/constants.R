@@ -287,7 +287,9 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      candidate scored on fewer folds than were drawn is not chosen, a cv_*
 #      mean is kept only over every fold (#101), and a failed final fit
 #      fails the configuration (#102).
-SCORING_SCHEMA <- 4L
+#   5  2026-10-21: an untransformed response's tuning metrics score the
+#      estimate clamped to outcome_range, as every other score is (#104).
+SCORING_SCHEMA <- 5L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

@@ -195,6 +195,16 @@ describe("ccc_vec()", {
 
   })
 
+  it("returns NA when na_rm = FALSE and NAs present, as rpd_vec() and rrmse_vec() do (#176)", {
+
+    truth    <- c(1, 2, NA, 4, 5)
+    estimate <- c(1.1, 2.2, 2.8, 4.1, 4.9)
+
+    expect_identical(ccc_vec(truth, estimate, na_rm = FALSE), NA_real_)
+    expect_identical(ccc_vec(estimate, truth, na_rm = FALSE), NA_real_)
+
+  })
+
 })
 
 ## ===========================================================================
@@ -223,19 +233,25 @@ describe("tuning_metric_set()", {
     vapply(attributes(ms)$metrics, function(m) attr(m, "direction"), character(1))
   }
 
-  it("returns the plain metric set for transformation = 'none'", {
+  it("clamps the estimate to outcome_range for transformation = 'none' (#104)", {
 
-    ## One estimate below zero: the plain set scores it as it is, with no
-    ## clamp to the outcome range
-    ms   <- tuning_metric_set("none")
-    df   <- tibble::tibble(truth = truth, estimate = c(-0.5, (truth + noise)[-1]))
-    got  <- ms(df, truth = truth, estimate = estimate)
-    want <- yardstick::metric_set(yardstick::rmse, rrmse, yardstick::rsq,
-                                  yardstick::mae, rpd, ccc)(df, truth = truth,
-                                                            estimate = estimate)
+    ## Estimates below and above the range are scored as they are served,
+    ## clamped, as every transformed set and every reported metric is
+    est <- c(-0.5, 12, (truth + noise)[-(1:2)])
+    df  <- tibble::tibble(truth = truth, estimate = est)
 
-    expect_equal(got, want)
+    got  <- tuning_metric_set("none", outcome_range = c(0, 10))(df, truth = truth, estimate = estimate)
+    want <- compute_original_scale_metrics(truth = truth, estimate = pmin(pmax(est, 0), 10))
+
     expect_equal(got$.metric, all_metric_names)
+
+    for (m in all_metric_names) {
+      expect_equal(got$.estimate[got$.metric == m], want$.estimate[want$.metric == m],
+                   tolerance = 1e-12, info = m)
+    }
+
+    ## The clamp binds here: scored unclamped, the rmse is another number
+    expect_gt(abs(got$.estimate[got$.metric == "rmse"] - yardstick::rmse_vec(truth, est)), 0.01)
 
   })
 
@@ -272,8 +288,12 @@ describe("tuning_metric_set()", {
 
   it("preserves metric names and directions so select_best()/show_best() keep working", {
 
-    ## For "none" the set holds the plain rpd, rrmse and ccc objects, so this
-    ## reads their own directions.
+    ## The exported rrmse, rpd and ccc objects, which
+    ## compute_original_scale_metrics() scores through, carry the same
+    ## directions as the wrapped set
+    expect_identical(vapply(list(rrmse, rpd, ccc), attr, character(1), "direction"),
+                     c("minimize", "maximize", "maximize"))
+
     for (trans in c("none", "log", "log10", "sqrt")) {
 
       ms <- tuning_metric_set(trans)

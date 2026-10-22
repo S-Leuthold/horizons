@@ -19,22 +19,21 @@ validators refuse any other.}
 Any of \code{"rmse"}, \code{"rrmse"}, \code{"rsq"}, \code{"mae"}, \code{"rpd"}, \code{"ccc"}.}
 
 \item{outcome_range}{Numeric length-2 vector. The outcome's physical range,
-which the back-transformed estimate is clamped to, as
-\code{\link[=back_transform_predictions]{back_transform_predictions()}} clamps every scored prediction. Read only
-for a transformed response; the \code{"none"} set scores the estimate as tune
-produced it, as it did before the range existed. Default \code{c(0, Inf)}.}
+which the estimate is clamped to, as \code{\link[=back_transform_predictions]{back_transform_predictions()}} clamps
+every scored prediction, whatever the transformation. Default \code{c(0, Inf)}.}
 }
 \value{
 A \code{yardstick} metric set.
 }
 \description{
 Returns the \code{yardstick::metric_set()} that \code{evaluate_single_config()} and
-\code{fit_single_config()} hand to \code{tune::tune_grid()} and \code{tune::tune_bayes()}.
-For \code{transformation = "none"} it is the plain set of the requested metrics.
-For \code{"log"}, \code{"log10"} and \code{"sqrt"} every metric is wrapped so that the
-estimate is back-transformed with \code{\link[=back_transform_predictions]{back_transform_predictions()}} before it
-is compared to the truth, and the whole set is therefore scored on the
-original response scale.
+\code{fit_single_config()} hand to \code{tune::tune_grid()} and \code{tune::tune_bayes()},
+and that the ensemble's meta-learner tunes with. Every metric is wrapped so
+that the estimate goes through \code{\link[=back_transform_predictions]{back_transform_predictions()}} before it is
+compared to the truth: for \code{"log"}, \code{"log10"} and \code{"sqrt"} it is
+back-transformed and clamped to \code{outcome_range}, and for \code{"none"} it is
+clamped only. The whole set is therefore scored on the original response
+scale, on the predictions horizons serves.
 }
 \details{
 \strong{Why this exists.} \code{build_recipe()} applies the response transformation

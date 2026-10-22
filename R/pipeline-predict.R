@@ -777,24 +777,20 @@ resolve_new_data <- function(new_data, call = rlang::caller_env()) {
 ## log_interval_quality() — intervals weaker than they look
 ## ---------------------------------------------------------------------------
 
-#' Collect the warnings that the returned intervals are weaker than they look
+#' Collect the warning that the returned intervals are weaker than they look
 #'
-#' Two cases, each a `quality` warning raised once per `predict()` call, and
-#' only when intervals came back (#145): a call that returns none has no
-#' coverage claim to qualify.
+#' A `quality` warning raised once per `predict()` call, and only when
+#' intervals came back (#145): a call that returns none has no coverage claim
+#' to qualify.
 #'
-#' - **A selected training set.** `fit()`'s calibration rows are drawn from
-#'   the training object; when it came from [select_training()] they were
-#'   chosen for proximity to the targets, so they are not exchangeable with
-#'   arbitrary prediction data and the conformal guarantee does not transfer.
-#'   The ensemble's CV+ intervals inherit the same rows.
-#' - **An ensemble over a response-trimmed fit.** When `validate()` asked for
-#'   a response trim, `fit()` trains its members without the training rows
-#'   outside the fences (#77), so the out-of-fold predictions the CV+
-#'   intervals are built from cover only the rows inside them, and the
-#'   intervals can undercover samples like those set aside (#103). A single
-#'   fit draws its conformal calibration set from the untrimmed training
-#'   part, so it is not affected.
+#' **A selected training set.** `fit()`'s calibration rows are drawn from the
+#' training object; when it came from [select_training()] they were chosen
+#' for proximity to the targets, so they are not exchangeable with arbitrary
+#' prediction data and the conformal guarantee does not transfer. The
+#' ensemble's CV+ intervals inherit the same rows.
+#'
+#' A response trim is not such a case: the rows it set aside calibrate a
+#' single fit's intervals (#99) and an ensemble's (#103).
 #'
 #' @param collector The call's collector.
 #' @param object A `horizons_fit` or `horizons_ensemble`.
@@ -812,21 +808,6 @@ log_interval_quality <- function(collector, object, returned) {
       "Conformal coverage is not guaranteed: this model was fit on a selected training set.",
       "i" = "{.fn select_training} chose the calibration rows for proximity to the targets, so exchangeability with {.arg new_data} does not hold.",
       "i" = "Use {.code $selection$target_distances} as the applicability signal for these predictions."
-    ))
-
-  }
-
-  trim      <- object$evaluation$response_trim
-  n_trimmed <- length(trim$trimmed_ids)
-
-  if (inherits(object, "horizons_ensemble") && n_trimmed > 0) {
-
-    fences <- paste0("[", signif(trim$lower, 4), ", ", signif(trim$upper, 4), "]")
-
-    log_warning(collector, "quality", c(
-      "The ensemble's intervals were calibrated within the training fences {fences}.",
-      "i" = "{n_trimmed} training row{?s} outside them {cli::qty(n_trimmed)}{?was/were} trimmed as response outliers, so the members' out-of-fold predictions, which the CV+ intervals are built from, cover only the rows inside.",
-      "i" = "The intervals can undercover samples outside the fences."
     ))
 
   }
