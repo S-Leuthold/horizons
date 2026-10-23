@@ -112,7 +112,8 @@ test_that("first use builds and caches; later uses read the cache", {
   cache <- file.path(withr::local_tempdir(), "a", "b")
   withr::local_options(horizons.library_download = TRUE, horizons.cache_dir = cache)
 
-  res <- suppressMessages(resolve_source("mini", verbose = FALSE))
+  ## Built quietly: the consent is a message, and nothing is printed
+  expect_silent(res <- suppressMessages(resolve_source("mini", verbose = FALSE)))
 
   expect_true(file.exists(file.path(cache, "mini_v0.qs2")))
   ## The library and its default similarity space, and nothing left over
@@ -136,8 +137,15 @@ test_that("first use builds and caches; later uses read the cache", {
     "Data: USDA NRCS KSSL mid-infrared library, from the Open Soil Spectral Library v1.2. ",
     "Cite: Safanelli et al. 2025, CC-BY-4.0."), fixed = TRUE)
 
-  ## A cache file that holds another version of the library is refused, not read
+  ## The cached library records the files it was built from, where they came
+  ## from and their checksums
   lib <- qs2::qs_read(file.path(cache, "mini_v0.qs2"))
+  expect_s3_class(lib, "horizons_library")
+  expect_named(lib$sources, c("file", "url", "bytes", "md5"))
+  expect_identical(lib$sources$url, entry$sources$url)
+  expect_identical(lib$sources$md5, entry$sources$md5)
+
+  ## A cache file that holds another version of the library is refused, not read
   lib$record$version <- "v9"
   qs2::qs_save(lib, file.path(cache, "mini_v0.qs2"))
 
@@ -874,6 +882,42 @@ test_that("a build clears what a killed build left, and only when it is old", {
   expect_false(file.exists(old_tmp))
   expect_true(dir.exists(new_raw))
   expect_true(file.exists(keep))
+
+  ## The directory a build downloads into is one a later build clears: the
+  ## download stops this build, and its directory is put back, old, as a
+  ## killed build would leave it
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  raw_dir <- NULL
+  local_mocked_bindings(download_sources = function(entry, dir, ...) {
+    raw_dir <<- dir
+    stop("killed during the download")
+  })
+
+  expect_error(suppressMessages(resolve_source("mini", verbose = FALSE)),
+               "killed during the download", fixed = TRUE)
+  expect_false(dir.exists(raw_dir))
+
+  dir.create(raw_dir)
+  Sys.setFileTime(raw_dir, day_ago)
+
+  expect_identical(basename(clear_stale_builds(entry, cache)), basename(raw_dir))
+  expect_false(dir.exists(raw_dir))
+
+})
+
+test_that("decompressing a source closes the connections it opened", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  gz    <- sub("^file://", "", entry$sources$url[entry$sources$table == "site"])
+
+  open <- getAllConnections()
+  csv  <- decompress_gz(gz)
+
+  expect_identical(getAllConnections(), open)
+  expect_identical(csv, sub("\\.gz$", "", gz))
+  expect_true(file.exists(csv))
 
 })
 
