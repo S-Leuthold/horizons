@@ -1242,6 +1242,29 @@ describe("fit_single_config() - UQ and AD as units of their own (#145)", {
 
   })
 
+  it("keeps an add-on's own warning on the member's records and its row", {
+
+    ## The domain is computed, and warns on the way
+    real_fit_ad <- fit_ad
+    local_mocked_bindings(fit_ad = function(...) {
+      warning("the domain is thin")
+      real_fit_ad(...)
+    })
+
+    result <- run_addons(compute_ad = TRUE, min_calib_rows = 5L, min_ad_rows = 5L)
+
+    expect_equal(result$status, "success")
+    expect_false(is.null(result$ad))
+
+    records <- attr(result, "unit_records")
+    thin    <- records[records$message %in% "the domain is thin", , drop = FALSE]
+    expect_equal(nrow(thin), 1L)
+    expect_equal(thin$unit, "member")
+    expect_equal(thin$type, "warning")
+    expect_true(any(grepl("the domain is thin", result$warnings, fixed = TRUE)))
+
+  })
+
   it("a member at p > n carries no AD warning on its row", {
 
     ## 60 wavenumbers keep 52 predictors past the raw step's edge trim, more
