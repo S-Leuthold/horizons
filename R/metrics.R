@@ -275,7 +275,11 @@ tuning_metric_set <- function(transformation,
                               outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   ### The transformation comes from the configuration grid, which the door
-  ### validators check against VALID_TRANSFORMATIONS (#234).
+  ### validators check against VALID_TRANSFORMATIONS (#234). The rebinding
+  ### must stay, for the reason outcome_range is forced below: the wrapped
+  ### metrics close over the transformation, and the unforced promise it
+  ### replaces would carry the caller's frame, training data and all, into
+  ### every copy tune serializes to a worker.
   transformation <- tolower(as.character(transformation))
 
   registry <- list(
