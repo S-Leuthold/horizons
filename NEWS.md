@@ -2,6 +2,9 @@
 
 ## Changes
 
+* `step_select_correlation()`, `step_select_cars()` and `step_select_boruta()` no longer fail at `prep()` when every band they are given is near-constant: they keep no band, as their warning says, and `bake()` returns the other columns.
+* `add_response()` and `parse_ids()` refuse a column named `.flag`, the column horizons reserves for the rows its steps flag, as an input error at their doors, as `spectra()` does; before, a `parse_ids()` token of that name marked every row as flagged.
+* At the smallest calibration set CV+ accepts, `ensemble()` reports its in-sample interval diagnostics (`oof_coverage`, `mean_width`) as `NA`, with a note on the log saying why, as `fit()` does, rather than `NaN` with no word.
 * The custom recipe steps (`step_transform_spectra()`, `step_select_boruta()`, `step_select_cars()`, `step_select_correlation()`) declare the packages a parallel worker needs, so resampling them on a multisession plan no longer fails every fold with "no applicable method" (#238).
 * Breaking: fifteen internal helpers are no longer exported, among them `safely_execute()`, `build_recipe()` and `fit_uq()`. Reach one with `horizons:::` if you relied on it.
 * `?horizons_conditions` documents the classes of horizons' errors and warnings: every error carries `horizons_error` and one kind (`input`, `validation`, `dependency`, `run`, `internal`), and every warning `horizons_warning` and one topic. The row-alignment check, a broken internal invariant, now raises `horizons_error_internal`.
