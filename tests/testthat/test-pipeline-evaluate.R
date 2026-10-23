@@ -536,6 +536,10 @@ describe("rank_configs_by_cv()", {
     expect_no_warning(ranked <- rank_configs_by_cv(unranked, "rpd"))
     expect_equal(ranked$config_id, c("b", "c"))
 
+    ## The eval validator takes results as any data frame, so a plain one
+    ## ranks the same
+    expect_identical(rank_configs_by_cv(as.data.frame(unranked), "rpd")$config_id, c("b", "c"))
+
     ## Nothing to rank: no rows, and the caller decides what that means
     all_na <- rows
     all_na$cv_rpd <- NA_real_
@@ -1004,6 +1008,24 @@ describe("evaluate() - response outliers are trimmed from the training partition
     expect_identical(rsample::testing(b$split)$sample_id,
                      rsample::testing(drawn$split)$sample_id)
     expect_identical(rsample::testing(b$split)$SOC, relabelled$data$SOC[is_test])
+
+  })
+
+  it("trims a split drawn on a plain data frame as it trims a tibble's", {
+
+    ## The validator takes the analysis table as any data frame, and the
+    ## split is drawn on it as it is
+    base_df      <- plain
+    base_df$data <- as.data.frame(plain$data)
+
+    a <- trim_training_responses(plain, "SOC", request, "sample_id")
+    b <- trim_training_responses(base_df, "SOC", request, "sample_id")
+
+    expect_gt(length(a$record$trimmed_ids), 0)
+    expect_identical(b$record, a$record)
+    expect_s3_class(b$split$data, "data.frame")
+    expect_identical(rsample::training(b$split)$sample_id, rsample::training(a$split)$sample_id)
+    expect_identical(rsample::testing(b$split)$sample_id, test_plain$sample_id)
 
   })
 
@@ -2919,7 +2941,15 @@ describe("evaluate() - the circuit breaker", {
 
     template <- ev60()$evaluation$results[1, ]
     ran      <- new.env()
-    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran, succeed = "cfg_003"))
+    written  <- character(0)
+    real     <- write_checkpoint_row
+    local_mocked_bindings(
+      evaluate_single_config = failing_runner(template, ran, succeed = "cfg_003"),
+      write_checkpoint_row   = function(row, checkpoint_dir) {
+        written <<- c(written, row$config_id)
+        real(row, checkpoint_dir)
+      }
+    )
 
     dir <- withr::local_tempdir()
     ev  <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 5), seed = 42L,
@@ -2928,6 +2958,10 @@ describe("evaluate() - the circuit breaker", {
     expect_length(ran$ids, 5L)
     expect_identical(ev$evaluation$best_config, "cfg_003")
     expect_length(list.files(file.path(dir, "checkpoints")), 5L)
+
+    ## Each row is written once, in the order run: the held rows go with the
+    ## success that disarms the breaker, and not again when the loop ends
+    expect_identical(written, sprintf("cfg_%03d", 1:5))
 
   })
 
@@ -3293,6 +3327,8 @@ describe("evaluate() - the ranking report when pruned configurations hold the me
     msg <- gsub("\\s+", " ", conditionMessage(skipped[[1]]))
     expect_match(msg, "1 succeeded, but none has a cv_rsq value.", fixed = TRUE)
     expect_match(msg, "1 pruned configuration has one, but pruned configurations are ranked only when none succeeded.",
+                 fixed = TRUE)
+    expect_match(msg, "Rank by a metric the results hold: `evaluate(metric = )` or `fit(metric = )` with one of",
                  fixed = TRUE)
     expect_no_match(msg, "\"rsq\"", fixed = TRUE)
     expect_identical(ev$log$ids[ev$log$topic %in% "skipped"][[1]], "cfg_001")

@@ -162,6 +162,44 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("runs its configuration with data.table and ranger on one thread", {
+
+    skip_if_not_installed("RhpcBLASctl")
+    skip_if_not_installed("data.table")
+
+    ## Both counts are raised first: a session started with the thread
+    ## variables at 1 would pass before the worker set anything. data.table
+    ## caps at OMP_NUM_THREADS and at OpenMP's count, so both go first.
+    withr::local_envvar(OMP_NUM_THREADS = NA)
+    withr::local_options(ranger.num.threads = 7L)
+
+    old_omp <- RhpcBLASctl::omp_get_max_threads()
+    old_dt  <- data.table::getDTthreads()
+    withr::defer({
+      RhpcBLASctl::omp_set_num_threads(old_omp)
+      data.table::setDTthreads(old_dt)
+    })
+
+    RhpcBLASctl::omp_set_num_threads(2L)
+    data.table::setDTthreads(2L)
+    skip_if_not(data.table::getDTthreads() == 2L, "data.table's threads cannot be raised here")
+
+    seen <- NULL
+
+    testthat::local_mocked_bindings(
+      evaluate_single_config = function(...) {
+        seen <<- c(dt = data.table::getDTthreads(), ranger = getOption("ranger.num.threads"))
+        tibble::tibble(config_id = "cfg_001", status = "failed")
+      },
+      .package = "horizons"
+    )
+
+    horizons:::evaluate_config_worker(1L, worker_payload())
+
+    expect_identical(seen, c(dt = 1L, ranger = 1L))
+
+  })
+
   it("writes the checkpoint of the row it returns, stamped, and refuses a worker on another version", {
 
     shared <- worker_payload()
