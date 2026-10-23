@@ -509,8 +509,10 @@ test_that("targets on kssl's native grid reach its first-use consent, which cred
   withr::local_options(horizons.cache_dir = withr::local_tempdir(),
                        horizons.library_download = NULL)
   ## A non-interactive run is refused without asking; an interactive one
-  ## declines rather than prompting
+  ## declines rather than prompting. Should consent ever pass by mistake, the
+  ## download fails at once rather than fetching the 436 MB
   local_mocked_bindings(askYesNo = function(...) FALSE, .package = "utils")
+  local_mocked_bindings(download_sources = function(...) stop("consent was passed: the download would start"))
 
   m <- expect_message(
     expect_error(select_training(select_fixture()$targets, "kssl", k = 5),

@@ -606,14 +606,23 @@ describe("step_select_boruta() with too few bands to select from", {
     d$SOC <- withr::with_seed(1, stats::rnorm(20))
     rec   <- boruta_recipe(d)
 
-    ## The recipe's prep() bakes the training data once the step is trained,
-    ## so this runs the step's bake() on its empty selection too
-    w <- testthat::capture_warnings(prepped <- recipes::prep(rec, training = d))
+    ## One prep(): the recipe's prep() bakes the training data once the step
+    ## is trained, so this runs the step's bake() on its empty selection too
+    warnings <- list()
+    prepped  <- withCallingHandlers(
+      recipes::prep(rec, training = d),
+      warning = function(w) {
+        warnings[[length(warnings) + 1L]] <<- w
+        invokeRestart("muffleWarning")
+      }
+    )
 
-    expect_length(w, 1L)
-    expect_warning(recipes::prep(rec, training = d),
-                   "`step_select_boruta()` had no band to select from, every one being near-constant, so it keeps none.",
-                   fixed = TRUE, class = "horizons_warning_skipped")
+    expect_length(warnings, 1L)
+    expect_s3_class(warnings[[1]], "horizons_warning_skipped")
+    expect_identical(warnings[[1]]$step, "step_select_boruta")
+    expect_match(conditionMessage(warnings[[1]]),
+                 "`step_select_boruta()` had no band to select from, every one being near-constant, so it keeps none.",
+                 fixed = TRUE)
 
     step <- prepped$steps[[1]]
 
