@@ -658,6 +658,12 @@ describe("note_in_unit()", {
     ## Outside a unit nothing handles it: no message, no warning
     expect_silent(note_in_unit("Nobody listens."))
 
+    ## The same text whatever colours the session reports: cli quotes a file
+    ## name only when it cannot colour it
+    withr::local_envvar(R_CLI_NUM_COLORS = "256")
+    coloured <- run_unit(note_in_unit("Read {.file notes.txt}."), "member", "cfg_1")
+    expect_identical(coloured$records$message, "Read 'notes.txt'.")
+
   })
 
   it("is recorded once, by the innermost unit, not again by an enclosing one", {

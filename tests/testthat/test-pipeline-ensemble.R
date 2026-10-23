@@ -147,13 +147,17 @@ describe("ensemble() - no double back-transformation", {
 
 describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 
-  it("penalized fixed-spec path completes and yields genuine OOF", {
+  it("penalized fixed-spec path completes and yields genuine OOF, with its fixed settings", {
 
     fitted <- ens_fitted()
     ens    <- ens_built("penalized")
     expect_true(inherits(ens, "horizons_ensemble"))
     expect_equal(nrow(ens$ensemble$oof_predictions),
                  length(unique(fitted$models$cv_predictions$.row)))
+
+    args <- workflows::extract_spec_parsnip(ens$ensemble$model)$args
+    expect_identical(rlang::eval_tidy(args$penalty), 0.01)
+    expect_identical(rlang::eval_tidy(args$mixture), 1)
 
   })
 
