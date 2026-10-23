@@ -170,6 +170,14 @@ test_that("axes_aligned() passes grids standardize() makes and refuses an instru
   ## an instrument's axis
   expect_false(axes_aligned(seq(4000, 600, by = -4), coincident))
 
+  ## A 7 cm-1 grid with one stray column at either end of the library's
+  ## range is not a grid standardize() makes: the library's end columns are
+  ## inside its range, so the stray one is read
+  seventh <- seq(3997, 602, by = -7)
+  expect_true(axes_aligned(seventh, lib))
+  expect_false(axes_aligned(c(seventh, 600), lib))
+  expect_false(axes_aligned(c(4000, seventh), lib))
+
 })
 
 
@@ -202,6 +210,31 @@ test_that("check_shared_columns() refuses targets that share no column, naming t
 
   ## Anything shared on an aligned grid passes, with the split
   expect_identical(check_shared_columns(lib[1:3], lib)$shared, lib[1:3])
+
+})
+
+
+test_that("check_shared_columns() names the library's call when it is off its grid, keeping an end on the step", {
+
+  ## A library on an instrument's axis whose top column is exactly 4000: the
+  ## trim it is named keeps 4000, a whole multiple of the step
+  lib <- paste0("wn_", 4000 - 1.928571 * (0:1762))
+
+  ## Targets on a 4 cm-1 grid of their own: the library's call alone, on
+  ## their step
+  err <- expect_error(check_shared_columns(paste0("wn_", seq(4000, 600, by = -4)), lib),
+                      class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               "Put it on one: `standardize(library, resample = 4, trim = c(604, 4000))`.", fixed = TRUE)
+
+  ## Targets on no grid either, and standardized already: both calls, the
+  ## targets' with force = TRUE
+  off <- paste0("wn_", rev(599.74 + 1.93 * (0:1761)))
+  err <- expect_error(check_shared_columns(off, lib, restandardize = TRUE), class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               paste("Put it and the targets on one: `standardize(library, resample = 2, trim = c(602, 4000))`",
+                     "and `standardize(x, resample = 2, trim = c(602, 4000), force = TRUE)`."),
+               fixed = TRUE)
 
 })
 
@@ -313,6 +346,14 @@ test_that("search_axis() records each coverage tier with its shortfall and its g
   expect_identical(out$record$mode, "full")
   expect_identical(out$record$operation, "resampled")
   expect_identical(out$record$missing, c(low = 0, high = 0.5))
+
+  ## Reaching past the high end: nothing missing there, not a negative
+  ## shortfall
+  wn  <- seq(704, 600, by = -2)
+  out <- search_axis(lib_wn, on(wn), wn)
+
+  expect_identical(out$record$mode, "full")
+  expect_identical(out$record$missing, c(low = 0, high = 0))
 
   ## 30 cm-1 short at the high end: the overlap, the library's columns inside
   ## the targets' range only. The verb warns from the record; the helper
