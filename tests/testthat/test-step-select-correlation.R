@@ -264,6 +264,32 @@ describe("step_select_correlation() with too few bands to select from", {
 
   })
 
+  it("records no band left when every one is near-constant, and says so in the warning and print()", {
+
+    d     <- tibble::tibble(wn_4000 = rep(1, 30), wn_3998 = rep(2, 30), wn_3996 = rep(3, 30))
+    d$SOC <- withr::with_seed(1, stats::rnorm(30))
+    rec   <- correlation_recipe(d)
+
+    ## The step is prepped on its own, so the test reads what its prep()
+    ## records and raises, apart from the bake the recipe's prep() runs next
+    w <- expect_warning(
+      step <- recipes::prep(rec$steps[[1]], training = d, info = rec$term_info),
+      "`step_select_correlation()` had no band to select from, every one being near-constant, so it keeps none.",
+      fixed = TRUE, class = "horizons_warning_skipped"
+    )
+
+    expect_identical(w$step, "step_select_correlation")
+    expect_true(step$trained)
+    expect_true(step$correlation$skipped)
+    expect_identical(step$correlation$n_bands, 0L)
+    expect_identical(step$correlation$n_constant, 3L)
+    expect_length(step$selected_vars, 0L)
+    expect_output(print(step),
+                  "`step_select_correlation()` had no band to select from, every one being near-constant, so it keeps none.",
+                  fixed = TRUE)
+
+  })
+
 })
 
 
