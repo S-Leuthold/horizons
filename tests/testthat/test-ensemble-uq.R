@@ -976,7 +976,7 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
-  it("compute_ensemble_uq calibrates at CV+'s floor, with no leave-self-out diagnostic", {
+  it("compute_ensemble_uq calibrates at CV+'s floor, and notes that it has no leave-self-out diagnostic", {
 
     ens_ref <- ens_built("weighted")
     oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
@@ -986,19 +986,29 @@ describe("ensemble UQ - degradation and gates", {
 
     ## suppressWarnings(): rsample's note that so few rows are too few for
     ## its default strata breaks
-    uq <- suppressWarnings(compute_ensemble_uq(oof = oof19, contract = ens_ref$ensemble,
-                                               optimize = FALSE, conformal_seed = 1307L,
-                                               min_calib_rows = 19L))
+    notes <- character()
+    uq <- withCallingHandlers(
+      suppressWarnings(compute_ensemble_uq(oof = oof19, contract = ens_ref$ensemble,
+                                           optimize = FALSE, conformal_seed = 1307L,
+                                           min_calib_rows = 19L)),
+      horizons_note = function(n) notes <<- c(notes, conditionMessage(n))
+    )
 
     ## The 19 rows CV+ needs at 0.90 calibrate the bundle
     expect_identical(uq$n_calib, 19L)
     expect_false(is.null(cv_plus_indices(uq$n_calib, uq$level_default)))
 
     ## Each leave-self-out set holds 18, too few for a bound, so neither
-    ## figure is computed: both are the mean of nothing
+    ## figure is computed, and the unit says so, as fit_uq() does
     expect_null(cv_plus_indices(uq$n_calib - 1L, uq$level_default))
-    expect_identical(uq$oof_coverage, NaN)
-    expect_identical(uq$mean_width, NaN)
+    expect_identical(uq$oof_coverage, NA_real_)
+    expect_identical(uq$mean_width, NA_real_)
+
+    diagnostics <- notes[startsWith(notes, "The in-sample interval diagnostics (oof_coverage, mean_width) were not computed:")]
+    expect_identical(diagnostics, paste(
+      "The in-sample interval diagnostics (oof_coverage, mean_width) were not computed:",
+      "each leave-self-out set holds 18 rows, too few for a bound at the 0.9 level."
+    ))
 
   })
 

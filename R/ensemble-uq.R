@@ -577,6 +577,15 @@ compute_ensemble_uq <- function(oof,
 
   })
 
+  ## At CV+'s floor each leave-self-out set is too few for a bound, so
+  ## neither diagnostic is computed, and the unit says so, as fit_uq() does
+  ## for its own
+  if (is.null(idx_loo)) {
+
+    note_in_unit("The in-sample interval diagnostics (oof_coverage, mean_width) were not computed: each leave-self-out set holds {n_calib - 1L} row{?s}, too few for a bound at the {level} level.")
+
+  }
+
   ## The tree's line for the folds travels on the bundle, for ensemble() to
   ## read and drop
   bundle <- list(
@@ -588,8 +597,8 @@ compute_ensemble_uq <- function(oof,
     n_calib         = n_calib,
     level_default   = level,
     seed            = conformal_seed,
-    oof_coverage    = mean(covered, na.rm = TRUE),
-    mean_width      = mean(widths, na.rm = TRUE),
+    oof_coverage    = if (is.null(idx_loo)) NA_real_ else mean(covered, na.rm = TRUE),
+    mean_width      = if (is.null(idx_loo)) NA_real_ else mean(widths, na.rm = TRUE),
     timestamp       = Sys.time()
   )
 
