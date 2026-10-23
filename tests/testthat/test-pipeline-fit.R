@@ -1484,11 +1484,21 @@ describe("check_degradation()", {
 
   })
 
-  it("is reproducible and leaves the caller's random stream untouched", {
+  it("draws from its seed alone, whatever the caller's RNG kind and state, and leaves the caller's random stream untouched", {
 
-    first  <- check_degradation(cv_4, truth, poor, seed = 7L)
-    second <- check_degradation(cv_4, truth, poor, seed = 7L)
-    expect_identical(first, second)
+    ## A caller at another point of its stream, or on the L'Ecuyer-CMRG kind
+    ## a parallel worker runs, gets the same interval; another seed gets
+    ## another
+    first  <- withr::with_seed(1, check_degradation(cv_4, truth, poor, seed = 7L))
+    second <- withr::with_seed(2, check_degradation(cv_4, truth, poor, seed = 7L))
+    worker <- withr::with_seed(3, .rng_kind = "L'Ecuyer-CMRG",
+                               check_degradation(cv_4, truth, poor, seed = 7L))
+    other  <- withr::with_seed(1, check_degradation(cv_4, truth, poor, seed = 8L))
+
+    expect_true(first$degraded)
+    expect_identical(second, first)
+    expect_identical(worker, first)
+    expect_false(identical(other$reason, first$reason))
 
     set.seed(9); a <- stats::runif(1)
     set.seed(9); invisible(check_degradation(cv_4, truth, poor)); b <- stats::runif(1)

@@ -521,6 +521,33 @@ describe("fit_single_config() - failure paths", {
 
   })
 
+  it("names the recipe preparation when the prepped recipe cannot be baked", {
+
+    ## rf's mtry bounds are read from the prepped recipe's training frame.
+    ## That bake is the only one handed a whole recipe: prep() bakes its steps
+    ## one at a time.
+    setup     <- fsc()$setup
+    real_bake <- recipes::bake
+    local_mocked_bindings(bake = function(object, ...) {
+      if (inherits(object, "recipe")) stop("the prepped recipe could not be baked")
+      real_bake(object, ...)
+    }, .package = "recipes")
+
+    expect_failed_at(run_on_shared(setup), "Recipe preparation",
+                     "the prepped recipe could not be baked", warm_start = NA)
+
+  })
+
+  it("names the parameter finalization when the bounds cannot be set", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(cap_pls_components = function(...) stop("the bounds could not be set"))
+
+    expect_failed_at(run_on_shared(setup), "Parameter finalization",
+                     "the bounds could not be set", warm_start = NA)
+
+  })
+
   it("names the re-tune when the warm-start search errors", {
 
     setup <- fsc()$setup
@@ -528,6 +555,37 @@ describe("fit_single_config() - failure paths", {
 
     ## Its starting grid was built, so how the re-tune started is recorded
     expect_failed_at(run_on_shared(setup), "Warm-start tuning", "the search broke",
+                     warm_start = TRUE)
+
+  })
+
+  it("names the parameter selection when the chosen candidate cannot be read", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(candidate_of = function(...) stop("the chosen candidate could not be read"))
+
+    expect_failed_at(run_on_shared(setup), "Parameter selection",
+                     "the chosen candidate could not be read", warm_start = TRUE)
+
+  })
+
+  it("names the parameter selection when the left-out candidates cannot be counted", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(incomplete_note = function(...) stop("the left-out candidates could not be counted"))
+
+    expect_failed_at(run_on_shared(setup), "Parameter selection",
+                     "the left-out candidates could not be counted", warm_start = TRUE)
+
+  })
+
+  it("names the workflow finalization when it errors", {
+
+    setup <- fsc()$setup
+    local_mocked_bindings(finalize_workflow = function(...) stop("cannot finalize"),
+                          .package = "tune")
+
+    expect_failed_at(run_on_shared(setup), "Workflow finalization", "cannot finalize",
                      warm_start = TRUE)
 
   })
@@ -603,6 +661,23 @@ describe("fit_single_config() - failure paths", {
     })
 
     expect_failed_at(run_on_shared(setup), "Test back-transformation", "the test inverse broke",
+                     warm_start = TRUE)
+
+  })
+
+  it("names the test metrics when the test rows cannot be scored", {
+
+    ## The folds are scored by the same function; only the test rows' call
+    ## fails
+    setup        <- fsc()$setup
+    test_truth   <- rsample::testing(setup$split_F)$SOC
+    real_metrics <- compute_original_scale_metrics
+    local_mocked_bindings(compute_original_scale_metrics = function(truth, estimate) {
+      if (identical(truth, test_truth)) stop("the test rows could not be scored")
+      real_metrics(truth, estimate)
+    })
+
+    expect_failed_at(run_on_shared(setup), "Test metrics", "the test rows could not be scored",
                      warm_start = TRUE)
 
   })
@@ -1018,6 +1093,20 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
   })
 
+  it("scores only the rows with an outcome and both bounds", {
+
+    ## Of five rows, one lacks its outcome, one its lower bound and one its
+    ## upper bound; of the two scored, the first is covered and the second
+    ## is not
+    intervals <- tibble::tibble(.pred_lower     = c(0, 0, 0, NA, 1),
+                                .pred_upper     = c(2, 2, 4, 3, NA),
+                                .interval_width = c(2, 2, 4, NA, NA))
+
+    expect_identical(interval_coverage(c(1, NA, 5, 2, 3), intervals),
+                     list(test_coverage = 0.5, test_mean_width = 3, n_test = 2L))
+
+  })
+
 })
 
 
@@ -1339,6 +1428,41 @@ describe("fit_single_config() - the RNG pin", {
     expect_identical(lecuyer$grid, mersenne$grid)
     expect_identical(lecuyer$fit$best_params, mersenne$fit$best_params)
     expect_identical(lecuyer$fit$cv_predictions, mersenne$fit$cv_predictions)
+
+  })
+
+  it("fits the final model from its seed, however much of the stream the out-of-fold fits drew", {
+
+    ## The forest draws its seed from the stream, which the out-of-fold fits
+    ## draw from too, by an amount that depends on where they ran. Here they
+    ## draw five numbers more than the shared fit's did, and the final model,
+    ## read through its test metrics, is the shared fit's.
+    shared        <- fsc()
+    real_resample <- tune::fit_resamples
+    drawn         <- 0L
+    local_mocked_bindings(fit_resamples = function(...) {
+      result <- real_resample(...)
+      drawn  <<- length(stats::runif(5))
+      result
+    }, .package = "tune")
+
+    result <- fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = shared$setup$split_F,
+      cv_resamples        = shared$setup$folds,
+      calib_data          = NULL,
+      role_map            = shared$setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = FALSE,
+      allow_par           = FALSE,
+      seed                = 42L
+    )
+
+    expect_identical(drawn, 5L)
+    expect_identical(result$status, "success")
+    expect_identical(result$test_metrics, shared$result$test_metrics)
 
   })
 
