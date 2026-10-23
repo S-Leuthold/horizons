@@ -154,6 +154,7 @@ describe("resolve_control()", {
 
     fit_ctrl <- resolve_control(NULL, "fit")
     expect_false(fit_ctrl$allow_par)
+    expect_false(fit_ctrl$keep_traces)
     expect_identical(fit_ctrl$breaker, BREAKER_FAILURES)
     expect_identical(fit_ctrl$min_calib_rows, N_CALIB_MIN)
 
@@ -191,7 +192,11 @@ describe("resolve_control()", {
 
   })
 
-  it("reads verbose from horizons.verbose when it is not set", {
+  it("reads verbose from horizons.verbose when it is not set, and is verbose without it", {
+
+    ## The suite's setup sets the option to FALSE
+    withr::local_options(horizons.verbose = NULL)
+    expect_true(resolve_control(NULL, "evaluate")$verbose)
 
     withr::local_options(horizons.verbose = TRUE)
     expect_true(resolve_control(NULL, "evaluate")$verbose)
@@ -208,7 +213,7 @@ describe("resolve_control()", {
 
   })
 
-  it("keeps a larger future.globals.maxSize as the payload limit, and not tune's smaller one", {
+  it("keeps a larger future.globals.maxSize as the payload limit, not tune's smaller one, and reports a bad one as the option's", {
 
     withr::local_options(future.globals.maxSize = NULL)
     expect_identical(resolve_control(NULL, "evaluate")$max_worker_payload, EVAL_WORKER_PAYLOAD_LIMIT)
@@ -220,6 +225,10 @@ describe("resolve_control()", {
     withr::local_options(future.globals.maxSize = 2 * 1024^3)
     expect_identical(resolve_control(NULL, "evaluate")$max_worker_payload, 2 * 1024^3)
 
+    ## A bad option is reported as the option's, and a set field still wins
+    withr::local_options(future.globals.maxSize = NA_real_)
+    expect_error(resolve_control(NULL, "evaluate"), "getOption(\"future.globals.maxSize\")",
+                 fixed = TRUE, class = "horizons_error_input")
     expect_identical(resolve_control(control_horizons(max_worker_payload = 5e8), "evaluate")$max_worker_payload,
                      5e8)
 

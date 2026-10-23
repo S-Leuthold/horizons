@@ -177,6 +177,13 @@ describe("needed_packages()", {
 
   })
 
+  it("needs bonsai, which registers the engine, and lightgbm for model 'lightgbm'", {
+
+    ## The check against parsnip below runs only with bonsai installed
+    expect_identical(needed_packages("lightgbm"), list(bonsai = "lightgbm", lightgbm = "lightgbm"))
+
+  })
+
   it("adds ranger, reasoned as prediction intervals, only when asked", {
 
     without_uq <- needed_packages("elastic_net")
