@@ -296,7 +296,6 @@ spectra <- function(source,
 
     ids    <- result$data$analysis$sample_id
     n_rows <- result$data$n_rows
-    n_pred <- result$data$n_predictors
     n_na   <- sum(is.na(ids))
     n_ids  <- length(unique(ids[!is.na(ids)]))
 
