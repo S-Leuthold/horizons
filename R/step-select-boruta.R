@@ -179,7 +179,7 @@ prep.step_select_boruta <- function(x, training, info = NULL, ...) {
   filtered           <- drop_constant_bands(spectra_mat)
   spectra_mat        <- filtered$spectra
   n_constant         <- filtered$n_constant
-  col_names_filtered <- colnames(spectra_mat)
+  col_names_filtered <- filtered$bands
 
   ## Fewer than two bands left: they cannot be clustered and there is nothing
   ## to select between, so they are kept and the step says the selection did

@@ -598,6 +598,36 @@ describe("step_select_boruta() with too few bands to select from", {
 
   })
 
+  it("keeps no band when every one is near-constant, so the recipe preps and bakes to the other columns", {
+
+    skip_if_not_installed("Boruta")
+
+    d     <- tibble::tibble(spec001 = rep(1, 20), spec002 = rep(2, 20), spec003 = rep(3, 20))
+    d$SOC <- withr::with_seed(1, stats::rnorm(20))
+    rec   <- boruta_recipe(d)
+
+    ## The recipe's prep() bakes the training data once the step is trained,
+    ## so this runs the step's bake() on its empty selection too
+    w <- testthat::capture_warnings(prepped <- recipes::prep(rec, training = d))
+
+    expect_length(w, 1L)
+    expect_warning(recipes::prep(rec, training = d),
+                   "`step_select_boruta()` had no band to select from, every one being near-constant, so it keeps none.",
+                   fixed = TRUE, class = "horizons_warning_skipped")
+
+    step <- prepped$steps[[1]]
+
+    expect_identical(step$selected_vars, character(0))
+    expect_true(step$boruta$skipped)
+    expect_identical(step$boruta$n_bands, 0L)
+    expect_identical(step$boruta$n_constant, 3L)
+    expect_identical(names(recipes::bake(prepped, new_data = NULL)), "SOC")
+    expect_identical(names(recipes::bake(prepped, new_data = d)), "SOC")
+    expect_identical(recipes::tidy(prepped, number = 1)$terms, c("spec001", "spec002", "spec003"))
+    expect_output(print(step), "0 wavenumbers retained", fixed = TRUE)
+
+  })
+
 })
 
 

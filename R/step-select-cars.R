@@ -194,7 +194,7 @@ prep.step_select_cars <- function(x, training, info = NULL, ...) {
   ## are kept and the step says the selection did not run
   if (ncol(spectra_mat) < SELECTION_MIN_BANDS[["step_select_cars"]]) {
 
-    kept <- colnames(spectra_mat)
+    kept <- filtered$bands
 
     return(raise_selection_warning(step_select_cars_new(
       terms         = x$terms,
