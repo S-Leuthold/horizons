@@ -1031,6 +1031,12 @@ describe("monitor_evaluate()", {
     expect_identical(three$best_metric, best$cv_rpd[1])
     expect_setequal(three$recent, c(cv_text("cfg_001"), "cfg_002 failed", cv_text("cfg_003")))
 
+    ## Started half an hour ago: still a rate per hour
+    half <- snapshot_at(Sys.time() - 1800)
+
+    expect_equal(half$rate, 6, tolerance = 0.01)
+    expect_identical(half$eta, "10 min")
+
     ## One done, three to go, so the ETA is in hours; the failed config has
     ## no value to rank
     unlink(file.path(ckpt, c("cfg_001.rds", "cfg_003.rds")))
@@ -1292,6 +1298,17 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
     expect_true(any(grepl("Ignored", output)))
     expect_true(any(grepl("grid_size", output)))
 
+    ## Each under its own reason: without the settings mismatch, the row
+    ## scored on other training rows still counts as other data
+    expect_equal(stats$ignored,
+                 c(other_data = 1, other_settings = 1, earlier_schema = 1, not_in_grid = 1))
+
+    unlink(file.path(ckpt, "cfg_004.rds"))
+    invisible(capture.output(stats <- monitor_evaluate(tmpdir)))
+
+    expect_equal(stats$ignored,
+                 c(other_data = 1, other_settings = 0, earlier_schema = 1, not_in_grid = 1))
+
   })
 
   it("re-reads the manifest on every poll in watch mode", {
@@ -1329,6 +1346,30 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
 
     expect_equal(stats$n_complete, second_run$n_total)
     expect_equal(polls, 2L)
+
+  })
+
+  it("waits the interval between polls in watch mode", {
+
+    tmpdir <- withr::local_tempdir()
+    saveRDS(list(schema_version = EVAL_MANIFEST_SCHEMA, n_total = 2L),
+            file.path(tmpdir, "eval_manifest.rds"))
+
+    ## Incomplete at the first poll, complete at the second
+    polled <- numeric(0)
+
+    local_mocked_bindings(
+      .monitor_snapshot = function(manifest, output_dir) {
+        polled <<- c(polled, proc.time()[["elapsed"]])
+        list(n_complete = length(polled))
+      },
+      .render_monitor = function(stats, manifest) invisible(NULL)
+    )
+
+    invisible(capture.output(monitor_evaluate(tmpdir, watch = TRUE, interval = 0.25)))
+
+    expect_length(polled, 2L)
+    expect_gte(diff(polled), 0.2)
 
   })
 
