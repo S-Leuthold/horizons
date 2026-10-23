@@ -221,6 +221,7 @@ describe("step_select_cars() scores every set after the loop, as carspls does (#
     expect_identical(rec$n_kept, length(tr$step$selected_vars))
     expect_gt(rec$iteration, 1L)
     expect_false(rec$retained_all)
+    expect_false(rec$skipped)
 
   })
 
@@ -722,9 +723,22 @@ describe("step_select_cars() with too few bands to select from", {
     step <- prepped$steps[[1]]
 
     expect_identical(step$selected_vars, "wn_4000")
-    expect_true(step$cars$skipped)
-    expect_identical(step$cars$n_bands, 1L)
     expect_identical(calls, 0L)
+
+    ## The record says the selection did not run: nothing clustered, no
+    ## path or iteration, no substitution. Its counts are the integers a
+    ## trained record holds, missing.
+    expect_identical(step$cars,
+                     list(n_bands           = 1L,
+                          n_constant        = 1L,
+                          clustered         = FALSE,
+                          n_representatives = NA_integer_,
+                          clusters          = NULL,
+                          path              = NULL,
+                          iteration         = NA_integer_,
+                          n_kept            = 1L,
+                          retained_all      = FALSE,
+                          skipped           = TRUE))
     expect_identical(w$step, "step_select_cars")
     expect_match(conditionMessage(w), "had 1 band to select from, fewer than the 2 it needs, so it is kept",
                  fixed = TRUE)
@@ -732,6 +746,29 @@ describe("step_select_cars() with too few bands to select from", {
     ## print() says it in the warning's words
     expect_output(print(step), "`step_select_cars()` had 1 band to select from, fewer than the 2 it needs, so it is kept",
                   fixed = TRUE)
+
+  })
+
+  it("keeps the one band its selector matched, and warns skipped", {
+
+    skip_if_not_installed("pls")
+
+    ## A selector matching a single column: nothing to filter, one band left
+    d     <- withr::with_seed(1, tibble::tibble(wn_4000 = stats::rnorm(30)))
+    d$SOC <- 2 * d$wn_4000 + withr::with_seed(2, stats::rnorm(30, sd = 0.3))
+
+    expect_warning(
+      prepped <- suppressMessages(recipes::prep(cars_recipe(d), training = d)),
+      "had 1 band to select from, fewer than the 2 it needs, so it is kept",
+      fixed = TRUE, class = "horizons_warning_skipped"
+    )
+
+    step <- prepped$steps[[1]]
+
+    expect_identical(step$selected_vars, "wn_4000")
+    expect_true(step$cars$skipped)
+    expect_identical(step$cars$n_constant, 0L)
+    expect_identical(names(recipes::bake(prepped, new_data = NULL)), c("wn_4000", "SOC"))
 
   })
 
