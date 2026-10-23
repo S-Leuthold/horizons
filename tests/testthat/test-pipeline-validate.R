@@ -310,14 +310,17 @@ describe("validate() sample count checks", {
 
   })
 
-  test_that("P001b fails below boundary (n_model=9, folds=5) -> passed=FALSE", {
+  test_that("P001b fails below boundary (n_model=9, folds=5) -> passed=FALSE, and shows it", {
 
-    result <- quiet_validate(make_configured_hd(n_samples = 9, cv_folds = 5L))
+    out <- capture.output(result <- suppressWarnings(
+      validate(make_configured_hd(n_samples = 9, cv_folds = 5L), verbose = TRUE)
+    ))
 
     p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
     expect_equal(p001b$status, "fail")
     expect_equal(p001b$severity, "ERROR")
     expect_false(result$validation$passed)
+    expect_true(any(grepl("\u2717 CV feasibility: 9 \u2265 10", out, fixed = TRUE)))
 
   })
 
