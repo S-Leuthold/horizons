@@ -213,6 +213,28 @@ describe("step_select_boruta() - Boruta's input and its forests", {
 
   })
 
+  it("caps mtry at one less than the representatives when there are five or fewer", {
+
+    skip_if_not_installed("Boruta")
+
+    ## The three signal columns alone, each its own representative.
+    ## round(2 * sqrt(3)) is 3, raised to the floor of 5 and capped at
+    ## 3 - 1 = 2. Boruta hands each run the attributes left plus at least five
+    ## shadows, so no run clamps it lower.
+    d <- boruta_signal_data()[c(boruta_signal_cols, "SOC")]
+
+    set.seed(1)
+    expect_silent(prepped <- recipes::prep(boruta_recipe(d), training = d))
+
+    b <- prepped$steps[[1]]$boruta
+
+    expect_identical(b$n_attributes, 3L)
+    expect_gt(b$runs, 0)
+    expect_identical(b$mtry, 2L)
+    expect_identical(b$mtry_by_run, rep(2L, b$runs))
+
+  })
+
 })
 
 ## =========================================================================
@@ -542,9 +564,13 @@ describe("step_select_boruta() with too few bands to select from", {
     expect_false(step$boruta$retained_all)
     expect_identical(calls, 0L)
     expect_identical(w$step, "step_select_boruta")
-    ## print() says it in the warning's words
-    expect_output(print(step), "`step_select_boruta()` had 1 band to select from, fewer than the 2 it needs, so it is kept",
+    ## print() says it in the warning's words, and returns the step
+    ## invisibly, as print methods do
+    expect_output(shown <- withVisible(print(step)),
+                  "`step_select_boruta()` had 1 band to select from, fewer than the 2 it needs, so it is kept",
                   fixed = TRUE)
+    expect_false(shown$visible)
+    expect_identical(shown$value, step)
 
     ## The record has every field a run's has, its settings among them
     expect_identical(step$boruta$n_kept, 1L)
@@ -552,12 +578,53 @@ describe("step_select_boruta() with too few bands to select from", {
     expect_identical(step$boruta$max_runs, 25L)
     expect_identical(step$boruta$num_trees, 250L)
 
+    ## Nothing ran, so nothing was tested, decided or counted, and no forest
+    ## had an mtry: an integer NA, the type a run records
+    expect_identical(step$boruta$n_attributes, 0L)
+    expect_identical(step$boruta$n_confirmed, 0L)
+    expect_identical(step$boruta$n_tentative, 0L)
+    expect_identical(step$boruta$n_rejected, 0L)
+    expect_null(step$boruta$decision)
+    expect_identical(step$boruta$runs, 0L)
+    expect_identical(step$boruta$mtry, NA_integer_)
+    expect_identical(step$boruta$mtry_by_run, integer(0))
+
     full <- boruta_signal_data()
     local_mocked_bindings(Boruta = mock_boruta_deciding(function(nm) rep("Confirmed", length(nm))),
                           .package = "Boruta")
     ran <- recipes::prep(boruta_recipe(full), training = full)$steps[[1]]$boruta
 
     expect_setequal(names(step$boruta), names(ran))
+
+  })
+
+  it("keeps no band when every one is near-constant, so the recipe preps and bakes to the other columns", {
+
+    skip_if_not_installed("Boruta")
+
+    d     <- tibble::tibble(spec001 = rep(1, 20), spec002 = rep(2, 20), spec003 = rep(3, 20))
+    d$SOC <- withr::with_seed(1, stats::rnorm(20))
+    rec   <- boruta_recipe(d)
+
+    ## The recipe's prep() bakes the training data once the step is trained,
+    ## so this runs the step's bake() on its empty selection too
+    w <- testthat::capture_warnings(prepped <- recipes::prep(rec, training = d))
+
+    expect_length(w, 1L)
+    expect_warning(recipes::prep(rec, training = d),
+                   "`step_select_boruta()` had no band to select from, every one being near-constant, so it keeps none.",
+                   fixed = TRUE, class = "horizons_warning_skipped")
+
+    step <- prepped$steps[[1]]
+
+    expect_identical(step$selected_vars, character(0))
+    expect_true(step$boruta$skipped)
+    expect_identical(step$boruta$n_bands, 0L)
+    expect_identical(step$boruta$n_constant, 3L)
+    expect_identical(names(recipes::bake(prepped, new_data = NULL)), "SOC")
+    expect_identical(names(recipes::bake(prepped, new_data = d)), "SOC")
+    expect_identical(recipes::tidy(prepped, number = 1)$terms, c("spec001", "spec002", "spec003"))
+    expect_output(print(step), "0 wavenumbers retained", fixed = TRUE)
 
   })
 

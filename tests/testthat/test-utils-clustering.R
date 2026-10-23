@@ -129,6 +129,7 @@ describe("drop_constant_bands() judges a band against its spectrum's scale", {
     out <- drop_constant_bands(m)
 
     expect_identical(colnames(out$spectra), c("spec001", "spec005", "spec006"))
+    expect_identical(out$bands, colnames(out$spectra))
     expect_identical(out$n_constant, 3L)
 
     ## A hundred-millionth of the size, as a second derivative is far smaller
@@ -137,6 +138,18 @@ describe("drop_constant_bands() judges a band against its spectrum's scale", {
 
     expect_identical(colnames(scaled$spectra), colnames(out$spectra))
     expect_identical(scaled$n_constant, 3L)
+
+  })
+
+  it("names no band, rather than none at all, when every band is constant", {
+
+    m <- matrix(rep(c(1, 2, 3), each = 20), 20, dimnames = list(NULL, c("wn_1", "wn_2", "wn_3")))
+
+    out <- drop_constant_bands(m)
+
+    expect_identical(ncol(out$spectra), 0L)
+    expect_identical(out$bands, character(0))
+    expect_identical(out$n_constant, 3L)
 
   })
 
