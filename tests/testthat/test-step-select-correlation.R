@@ -52,6 +52,24 @@ describe("step_select_correlation() keeps the windows that score", {
 
   })
 
+  it("scores bands by rank correlation, so a monotone transform of the outcome changes neither the selection nor its record", {
+
+    ## exp() keeps the outcome's ranks. Scored by linear correlation, the
+    ## transformed outcome would set the threshold at 0.173 rather than 0.230.
+    withr::local_seed(1)
+    d         <- correlation_data(n = 100)
+    d_exp     <- d
+    d_exp$SOC <- exp(d$SOC)
+
+    step     <- recipes::prep(correlation_recipe(d), training = d)$steps[[1]]
+    step_exp <- recipes::prep(correlation_recipe(d_exp), training = d_exp)$steps[[1]]
+
+    expect_identical(step$selected_vars, signal_windows)
+    expect_identical(step_exp$selected_vars, signal_windows)
+    expect_identical(step_exp$correlation, step$correlation)
+
+  })
+
   it("scores the windows around a constant band without letting it void the threshold, and drops it as CARS and Boruta do", {
 
     withr::local_seed(1)
@@ -203,8 +221,18 @@ describe("step_select_correlation() with too few bands to select from", {
 
       expect_length(w, 1L)
       expect_identical(unname(step$selected_vars), colnames(d)[seq_len(p)], label = paste(p, "bands"))
-      expect_true(step$correlation$skipped)
-      expect_identical(step$correlation$n_windows, 0L, label = paste(p, "bands"))
+
+      ## The record says the selection did not run: no threshold, no window
+      ## scored or kept, and no substitution
+      expect_identical(step$correlation,
+                       list(n_bands        = p,
+                            n_constant     = 0L,
+                            threshold      = NA_real_,
+                            n_windows      = 0L,
+                            n_windows_kept = 0L,
+                            retained_all   = FALSE,
+                            skipped        = TRUE),
+                       label = paste(p, "bands"))
       expect_warning(recipes::prep(correlation_recipe(d), training = d),
                      "fewer than the 5 it needs", fixed = TRUE,
                      class = "horizons_warning_skipped")
@@ -255,10 +283,14 @@ describe("step_select_correlation()'s tidy() and print() (#109)", {
     expect_setequal(recipes::tidy(prepped, number = 1)$terms,
                     setdiff(grep("^wn_", names(d), value = TRUE), kept))
 
-    lines <- utils::capture.output(print(prepped$steps[[1]]))
+    lines <- utils::capture.output(printed <- withVisible(print(prepped$steps[[1]])))
 
     expect_length(lines, 3L)
     expect_identical(lines[2], "\u2022 Outcome column: SOC")
+
+    ## print() returns the step, invisibly, as print methods do
+    expect_identical(printed$value, prepped$steps[[1]])
+    expect_false(printed$visible)
 
   })
 
