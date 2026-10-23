@@ -1470,6 +1470,19 @@ describe("ensure_predict_namespaces() - per-model coverage", {
 
     expect_identical(needed$ranger, "prediction intervals")
 
+    ## Without a bundle, nothing the configuration predicts needs ranger
+    expect_null(requested_packages(make_ns_probe_fit("elastic_net"), "cfg1")$ranger)
+
+  })
+
+  it("always requires workflows, parsnip and recipes, to dispatch on a stored workflow", {
+
+    needed <- requested_packages(make_ns_probe_fit("plsr"), "cfg1")
+
+    expect_identical(needed$workflows, "predicting from a stored workflow")
+    expect_identical(needed$parsnip,   "predicting from a stored workflow")
+    expect_identical(needed$recipes,   "predicting from a stored workflow")
+
   })
 
   it("does not ask for a selection step's packages, which a trained step's bake does not call", {
@@ -1492,9 +1505,14 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     ## glmnet is a hard Import, so this must succeed regardless of whether
     ## ranger happens to be installed.
     obj <- make_ns_probe_fit("elastic_net", with_uq = TRUE)
+
+    ## As a plain fit, the same bundle asks for ranger
+    expect_identical(requested_packages(obj, "cfg1")$ranger, "prediction intervals")
+
     obj$ensemble <- list(weights = tibble::tibble(member = "cfg1"))
     class(obj) <- c("horizons_ensemble", "horizons_fit")
 
+    expect_false("ranger" %in% names(requested_packages(obj, "cfg1")))
     expect_no_error(ensure_predict_namespaces(obj, config_ids = "cfg1"))
 
   })
