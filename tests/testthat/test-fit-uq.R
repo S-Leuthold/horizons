@@ -60,6 +60,19 @@ describe("compute_c_alpha() - finite-sample correction", {
 
   })
 
+  it("reads only the finite scores, in the quantile and in n", {
+
+    ## The fit validator admits a saved bundle whose scores hold non-finite
+    ## values beside enough finite ones, and predict() hands them over as
+    ## they are. Counted, an Inf would move the order statistic; an NA would
+    ## stop quantile().
+    scores <- seq(0, 1, length.out = 30)
+
+    expect_equal(compute_c_alpha(c(scores, NA, NaN, Inf), level = 0.90),
+                 compute_c_alpha(scores, level = 0.90))
+
+  })
+
 })
 
 
@@ -401,6 +414,36 @@ describe("fit_uq() - too few calibration points", {
 })
 
 
+describe("fit_uq() - a model on a single predictor", {
+
+  it("trains its quantile forest and scores its calibration set when the recipe leaves one predictor", {
+
+    ## A selection step can keep a single column. The out-of-fold features
+    ## taken from the mold must stay a one-column frame for the forest. At
+    ## 10 wavenumbers the raw step leaves spec1 and spec2.
+    setup <- suppressWarnings(make_uq_setup(edit_recipe = function(rec) {
+      recipes::step_rm(rec, spec2)
+    }))
+
+    expect_identical(names(workflows::extract_mold(setup$fitted_wf)$predictors), "spec1")
+
+    result <- fit_uq(
+      fitted_workflow = setup$fitted_wf,
+      oof_predictions = setup$oof_predictions,
+      calib_data      = setup$calib_data,
+      role_map        = setup$role_map
+    )
+
+    expect_s3_class(result$quantile_model, "ranger")
+    expect_identical(result$quantile_model$forest$independent.variable.names, "spec1")
+    expect_equal(result$n_calib, nrow(setup$calib_data))
+    expect_true(is.finite(result$mean_width))
+
+  })
+
+})
+
+
 describe("fit_uq() - prepped recipe can bake new data", {
 
   setup <- make_uq_setup()
@@ -495,6 +538,17 @@ describe("fit_uq() - a prediction step that fails", {
     expect_identical(quantiles$records$step, "uq_calibration_quantiles")
     expect_true(startsWith(unit_failure_message(quantiles$records, NULL),
                            "Calibration quantiles failed: quantile prediction failed"))
+
+    ## The back-transformation of the calibration predictions
+    back <- with_mocked_bindings(
+      run_uq(),
+      back_transform_predictions = function(...) stop("back-transformation failed")
+    )
+
+    expect_true(back$failed)
+    expect_identical(back$records$step, "uq_back_transform")
+    expect_true(startsWith(unit_failure_message(back$records, NULL),
+                           "Calibration back-transformation failed: back-transformation failed"))
 
   })
 
@@ -604,7 +658,8 @@ describe("fit_uq() - row alignment", {
         calib_data      = setup$calib_data,
         role_map        = setup$role_map
       ),
-      "Out-of-fold rows", class = "horizons_error_internal"
+      "Out-of-fold rows do not line up with the rows the model was fit on.",
+      fixed = TRUE, class = "horizons_error_internal"
     )
 
     ## A zero or NA .row indexes no row of the mold, so the forest's features
