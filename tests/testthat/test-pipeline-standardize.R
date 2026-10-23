@@ -178,6 +178,11 @@ test_that("standardize() refuses water-band removal that would leave nothing, an
                        class = "horizons_error_input")
   expect_match(conditionMessage(err), "Use `resample = NULL`, or a wider `trim`", fixed = TRUE)
 
+  ## The remedy works: with every operation off, the one column is kept as it is
+  kept <- standardize(one, resample = NULL, trim = NULL)
+  expect_identical(kept$data$analysis, one$data$analysis)
+  expect_identical(kept$data$standardization$wavelength_range, c(2000, 2000))
+
 })
 
 
@@ -1248,6 +1253,21 @@ test_that("a spectrum short of the grid is flagged for that, with the range it c
 
   }
 
+  ## Short at the top end alike: row 2 ends at 3900
+  hd <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 2)
+  hd$data$analysis[2, paste0("wn_", seq(3902, 4000, by = 2))] <- NA_real_
+
+  w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000))),
+                      class = "horizons_warning_flagged")
+
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
+
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+  expect_match(msg, '1 is short of the grid at an end, its own points ending before it does: "s2".',
+               fixed = TRUE)
+  expect_match(msg, "The range it covers is 600 to 3900 cm-1; a `trim` inside it keeps it.", fixed = TRUE)
+  expect_no_match(msg, "not finite", fixed = TRUE)
+
   ## An Inf is a value that is not finite, short of nothing, mid-axis or
   ## at its end
   for (at in c("wn_2000", "wn_4000")) {
@@ -1504,6 +1524,22 @@ test_that("spectrum_holes() tells a missing value from a coarser grid of a spect
   expect_false(holes_in(merged, which(merged == 1998)))
   expect_false(on_own_grid(kssl[-1000], union2(kssl[-1000])))
   expect_true(on_own_grid(kssl[-1000], union2(kssl, off)))
+
+})
+
+test_that("own_points() gives a spectrum the range of its finite points: the whole axis with every one, none with none", {
+
+  axis <- c(4000, 3998, 3996, 3994)
+  M    <- rbind(c(1, 2, 3, 4), c(NA, 2, 3, NA), rep(NA_real_, 4))
+
+  own <- own_points(M, axis)
+
+  expect_identical(own$has, c(TRUE, TRUE, FALSE))
+  expect_identical(own$lo, c(3994, 3996, Inf))
+  expect_identical(own$hi, c(4000, 3998, -Inf))
+
+  ## Every value finite: nothing to read
+  expect_null(own_points(M[1, , drop = FALSE], axis))
 
 })
 
