@@ -204,18 +204,10 @@ add_response <- function(x,
 
   }
 
-  ## 1.5b No variable takes a name horizons reserves ---------------------------
-  ## `.flag` is the steps' record of a row they could not use, so a response
-  ## of that name is refused, as spectra() refuses a source column of it.
+  ## 1.5b No variable takes a name horizons reserves, such as `.flag` ---------
 
-  if (".flag" %in% variable) {
-
-    abort_horizons(c(
-      "The source has a column named {.field .flag}, which horizons reserves for the rows its steps flag.",
-      "i" = "Rename the column before joining it with {.fn add_response}."
-    ), kind = "input")
-
-  }
+  check_reserved_columns(variable,
+                         remedy = "Rename the column before joining it with {.fn add_response}.")
 
   ## 1.5 variable columns are numeric ------------------------------------------
 

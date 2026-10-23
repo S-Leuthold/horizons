@@ -694,6 +694,33 @@ test_that("parse_ids() refuses a token that names an existing column (#135)", {
 
 })
 
+test_that("parse_ids() refuses a token named .flag at its door, as spectra() and add_response() refuse the column", {
+
+  ## Arrange — .flag is the column horizons keeps for the rows its steps flag
+  hd     <- make_test_hd(c("A_S001", "B_S002"))
+  before <- hd
+
+  calls <- list(
+    function() parse_ids(hd, format = "{.flag}_{sampleid}", verbose = FALSE),
+    function() parse_ids(hd, patterns = c(.flag = "[^_]+", "_", sampleid = ".+"), verbose = FALSE)
+  )
+
+  for (call in calls) {
+
+    ## Act & Assert ------------------------------------------------------------
+
+    err <- expect_error(call(), class = "horizons_error_input")
+
+    expect_match(conditionMessage(err),
+                 "The parse would add a column named .flag, which horizons reserves for the rows its steps flag.",
+                 fixed = TRUE)
+
+  }
+
+  expect_identical(hd, before)
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## Helper function tests

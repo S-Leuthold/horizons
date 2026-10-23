@@ -243,12 +243,22 @@ parse_ids <- function(x,
 
   }
 
-  ## Refuse a token named like a column already present ----------------------
-  ## Its values would overwrite the column. The sampleid token writes
-  ## sample_id, as it is meant to.
+  ## The columns the tokens would add ----------------------------------------
+  ## The sampleid token writes sample_id, as it is meant to; every other token
+  ## adds a column of its name.
 
-  tokens   <- names(patterns)[nzchar(names(patterns) %||% character(0))]
-  tokens   <- tokens[!tolower(tokens) %in% tolower(SAMPLEID_VARIANTS)]
+  tokens <- names(patterns)[nzchar(names(patterns) %||% character(0))]
+  tokens <- tokens[!tolower(tokens) %in% tolower(SAMPLEID_VARIANTS)]
+
+  ## Refuse a token named like a column horizons reserves, such as `.flag` ---
+
+  check_reserved_columns(tokens,
+                         subject = "The parse would add",
+                         remedy  = "A token becomes a column of its name, so rename the token.")
+
+  ## Refuse a token named like a column already present ----------------------
+  ## Its values would overwrite the column.
+
   clashing <- intersect(tokens, names(x$data$analysis))
 
   if (length(clashing) > 0) {
