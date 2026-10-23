@@ -686,6 +686,29 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
 
   })
 
+  it("raises what the search raises from its Bayesian step, for the member's unit to name", {
+
+    ts <- make_tune_setup()
+
+    local_mocked_bindings(bayes_search = function(...) stop("the search broke"))
+
+    out <- run_unit(tune_warmstart_bayes(
+      workflow      = ts$wf,
+      cv_resamples  = ts$folds,
+      initial_grid  = build_warmstart_grid(tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
+                                           ts$param_set, max_points = 3L),
+      param_set     = ts$param_set,
+      bayesian_iter = 2L,
+      metric_set    = ts$metric_set,
+      allow_par     = FALSE
+    ), unit = "member", id = "tune_test_001")
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, "Fit"),
+                     "Warm-start Bayesian search failed: the search broke")
+
+  })
+
 })
 
 

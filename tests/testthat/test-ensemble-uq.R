@@ -433,6 +433,21 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
 
   })
 
+  it("fails at its trimmed-row step when the trimmed rows cannot be scored", {
+
+    ## Read before the mock, so the shared ensemble is never built under it
+    ens <- trimmed_ens()
+
+    local_mocked_bindings(calibrate_trimmed_rows = function(...) stop("a trimmed row could not be scored"))
+
+    out <- run_unit(fit_ensemble_uq(ens), unit = "intervals", id = "ensemble")
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, outside = NULL),
+                     "CV+ trimmed-row calibration failed: a trimmed row could not be scored")
+
+  })
+
 })
 
 
@@ -1167,6 +1182,23 @@ describe("ensemble UQ - degradation and gates", {
 
     expect_true(out$failed)
     expect_identical(out$records$step[out$records$type == "failure"], "cv_plus_folds")
+
+  })
+
+  it("predict_ensemble_intervals fails at its bounds step when the bounds cannot be computed", {
+
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+    mp       <- predict_members(ens_ref, ens_ref$ensemble$weights$member,
+                                resolve_new_data(test_set))
+
+    local_mocked_bindings(cv_plus_bounds = function(...) stop("the bounds broke"))
+
+    out <- run_unit(predict_ensemble_intervals(ens_ref$ensemble$uq, mp), "intervals", "ensemble")
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, outside = NULL),
+                     "CV+ bounds failed: the bounds broke")
 
   })
 
