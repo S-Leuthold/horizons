@@ -139,15 +139,17 @@ describe("check_packages() - missing package gate", {
 
   })
 
-  it("does not abort when every needed package is installed", {
+  it("returns NULL invisibly when every needed package is installed", {
 
-    expect_no_error(check_packages(list(ranger = "rf"), "predict"))
+    out <- expect_invisible(check_packages(list(ranger = "rf"), "predict"))
+    expect_null(out)
 
   })
 
-  it("is a no-op for an empty needed list", {
+  it("is a no-op for an empty needed list, returning NULL invisibly", {
 
-    expect_no_error(check_packages(list(), "predict"))
+    out <- expect_invisible(check_packages(list(), "predict"))
+    expect_null(out)
 
   })
 

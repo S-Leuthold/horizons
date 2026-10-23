@@ -934,3 +934,23 @@ test_that("add_response() catches a corrupt input the verb itself never checks (
   )
 
 })
+
+test_that("add_response() refuses to return an object its own join broke (#24)", {
+
+  ## Arrange — a valid input, and a numeric response named .flag: joined, it
+  ## would be a response column where the object keeps its character .flag
+  hd  <- make_test_hd()
+  lab <- tibble::tibble(sample_id = hd$data$analysis$sample_id,
+                        .flag     = c(1.2, 3.4, 5.6))
+
+  ## Act & Assert --------------------------------------------------------------
+
+  err <- expect_error(
+    add_response(hd, lab, variable = ".flag"),
+    class = "horizons_error_validation"
+  )
+
+  expect_match(conditionMessage(err), ".flag must be a character column with the meta role",
+               fixed = TRUE)
+
+})

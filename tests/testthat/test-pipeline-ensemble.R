@@ -183,6 +183,24 @@ describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 ## PREFLIGHT — input validation
 ## =========================================================================
 
+describe("ensemble() - the object it returns", {
+
+  it("is a horizons_ensemble on the documented class chain, its slot carrying none of the run's records as attributes", {
+
+    ens <- ens_built("weighted")
+
+    expect_identical(class(ens), c("horizons_ensemble", "horizons_fit", "horizons_eval",
+                                   "horizons_data", "list"))
+
+    ## The run's records, warnings, flagged rows and strata lines live in the
+    ## object's slots, not on the ensemble slot as attributes
+    expect_identical(names(attributes(ens$ensemble)), "names")
+
+  })
+
+})
+
+
 describe("ensemble() - its control", {
 
   it("records the control it ran with, defaults filled in", {
@@ -554,6 +572,10 @@ describe("ensemble() - the meta-learner as one unit", {
       ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
       class = "horizons_error_systemic"
     )
+
+    expect_match(conditionMessage(err), "A parallel worker stopped while `ensemble()` was running",
+                 fixed = TRUE)
+    expect_s3_class(err$parent, "FutureError")
 
     ## ensemble() has no rows before its meta-learner is built, so it
     ## carries none and promises none

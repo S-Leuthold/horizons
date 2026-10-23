@@ -908,6 +908,35 @@ test_that("the absorbance block is taken by name, ab before ab_no_atm_comp, neve
 
 })
 
+test_that("the absorbance block is read in each form it comes in: a matrix named by its wavenumbers or by placeholders, a data frame, a named vector", {
+
+  ## Arrange ---------------------------------------------------------------
+
+  ## A matrix whose columns carry placeholder names (V1, V2, ...) takes its
+  ## names from the block's wavenumbers
+  files <- local_opus_files(c("a.0", "b.0", "c.0", "d.0"))
+  local_reads(list(
+    a.0 = list(ab = fake_block(FAKE_WN, c(1, 2, 3))),
+    b.0 = list(ab = list(data = matrix(c(4, 5, 6), nrow = 1,
+                                       dimnames = list(NULL, c("V1", "V2", "V3"))),
+                         wavenumbers = FAKE_WN)),
+    c.0 = list(ab = data.frame(`4000` = 7, `3998` = 8, `3996` = 9, check.names = FALSE)),
+    d.0 = list(ab = c(`4000` = 10, `3998` = 11, `3996` = 12))
+  ))
+
+  ## Act -------------------------------------------------------------------
+
+  expect_no_warning(out <- spectra(files))
+
+  ## Assert ----------------------------------------------------------------
+
+  expect_identical(out$data$analysis$sample_id, c("a", "b", "c", "d"))
+  expect_identical(predictor_names(out), paste0("wn_", FAKE_WN))
+  expect_identical(out$data$analysis$wn_4000, c(1, 4, 7, 10))
+  expect_identical(out$data$analysis$wn_3996, c(3, 6, 9, 12))
+
+})
+
 test_that("scans whose wavenumbers drift by a fraction of the step are put on one grid, and average() then runs (#224)", {
 
   ## Arrange ---------------------------------------------------------------
