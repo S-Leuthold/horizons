@@ -1041,7 +1041,7 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
 describe("evaluate_single_config() - each stage's failure exit", {
 
-  run_on_shared <- function() {
+  run_on_shared <- function(prune = FALSE) {
 
     setup <- make_eval_setup()
 
@@ -1052,7 +1052,7 @@ describe("evaluate_single_config() - each stage's failure exit", {
       role_map      = setup$role_map,
       grid_size     = 2,
       bayesian_iter = 0,
-      prune         = FALSE,
+      prune         = prune,
       seed          = 42L
     )
 
@@ -1088,6 +1088,19 @@ describe("evaluate_single_config() - each stage's failure exit", {
 
   })
 
+  it("names the prune check when it errors", {
+
+    ## The grid stage ranks its candidates by RMSE; the prune check, by RPD
+    real_rank <- rank_complete
+    local_mocked_bindings(rank_complete = function(results, metric, ...) {
+      if (identical(metric, "rpd")) stop("the ranking broke")
+      real_rank(results, metric, ...)
+    })
+
+    expect_failed_at(run_on_shared(prune = TRUE), "Prune check", "the ranking broke")
+
+  })
+
   it("names the parameter selection when it errors", {
 
     local_mocked_bindings(select_complete = function(...) stop("nothing to select"))
@@ -1119,6 +1132,14 @@ describe("evaluate_single_config() - each stage's failure exit", {
                           .package = "tune")
 
     expect_failed_at(run_on_shared(), "Test evaluation", "the last fit broke")
+
+  })
+
+  it("names the selection record when it cannot be read from the final fit", {
+
+    local_mocked_bindings(selection_reports = function(...) stop("the record broke"))
+
+    expect_failed_at(run_on_shared(), "Selection record", "the record broke")
 
   })
 

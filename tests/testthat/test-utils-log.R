@@ -498,14 +498,18 @@ describe("run_unit()", {
     )
 
     expect_equal(out$value, "fitted")
+    expect_identical(out$failed, FALSE)
     expect_equal(out$records$step, "fit")
+    expect_identical(out$records$type, "warning")
     expect_equal(out$records$message, "did not converge")
 
   })
 
   it("refuses a unit or id that is not a single string, as a bug in its caller", {
 
-    expect_error(run_unit(1, "configuration", 7L), class = "horizons_error_internal")
+    expect_error(run_unit(1, "configuration", 7L),
+                 "`unit` and `id` must each be a single string.", fixed = TRUE,
+                 class = "horizons_error_internal")
 
     ## Inside an outer unit, the bad inner id is a bug, not the outer unit's failure
     expect_error(run_unit(run_unit(1, "uq", NULL), "member", "m1"),
@@ -667,6 +671,16 @@ describe("note_in_unit()", {
     expect_identical(inner$records$type, "note")
     expect_identical(nrow(outer$records), 0L)
 
+    ## Under debug too, where an add-on's unit runs inside its parent's
+    inner <- NULL
+    outer <- run_unit({
+      inner <- run_unit(note_in_unit("Inner note."), "uq", "cfg_1", debug = TRUE)
+      "done"
+    }, "member", "cfg_1", debug = TRUE)
+
+    expect_identical(inner$records$type, "note")
+    expect_identical(nrow(outer$records), 0L)
+
   })
 
   it("is lifted to the log as a note, one per distinct message, beside the warnings", {
@@ -728,6 +742,15 @@ describe("missing_package_signal() - tune's refusals", {
 
     expect_true(missing_package_signal(err))
     expect_error(run_unit(run(), "configuration", "cfg_1"),
+                 class = "horizons_error_missing_package", inherit = FALSE)
+
+    ## Anywhere in the chain: under a condition that wraps it and says
+    ## something else
+    expect_true(missing_package_signal(
+      rlang::catch_cnd(rlang::abort("The recipe step failed.", parent = err))
+    ))
+    expect_error(run_unit(rlang::abort("The recipe step failed.", parent = err),
+                          "configuration", "cfg_1"),
                  class = "horizons_error_missing_package", inherit = FALSE)
 
   })

@@ -725,3 +725,37 @@ describe("report_strata_in_unit()", {
   })
 
 })
+
+describe("strata_tree_line()", {
+
+  it("gives no line for a draw that stratified as asked", {
+
+    expect_null(strata_tree_line(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                                      strata_warnings = character(0)), "split"))
+
+  })
+
+  it("gives no line for a draw rsample left unstratified, even with its warnings", {
+
+    ## Its own line in the tree says "unstratified"
+    expect_null(strata_tree_line(list(stratified = FALSE, strata_failed = FALSE, strata_error = NA_character_,
+                                      strata_warnings = "Too little data to stratify."), "split"))
+
+  })
+
+  it("names a draw rsample stratified on fewer bins, and one whose stratified draw failed", {
+
+    expect_identical(
+      strata_tree_line(list(stratified = TRUE, strata_failed = FALSE, strata_error = NA_character_,
+                            strata_warnings = "Stratification will use 3 breaks instead."), "CV"),
+      "Stratified CV on fewer strata: too little data for 4"
+    )
+    expect_identical(
+      strata_tree_line(list(stratified = FALSE, strata_failed = TRUE, strata_error = "stratification refused",
+                            strata_warnings = character(0)), "split"),
+      "Stratified split failed, retrying without strata"
+    )
+
+  })
+
+})

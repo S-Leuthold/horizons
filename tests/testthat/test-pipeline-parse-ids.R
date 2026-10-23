@@ -274,6 +274,13 @@ test_that("parse_ids() patterns mode ignores unnamed patterns", {
 
   expect_false("prefix_" %in% names(result$data$analysis))
 
+  ## With no named pattern at all, nothing is extracted and nothing added ----
+
+  unnamed <- parse_ids(hd, patterns = c("prefix_", "[A-Z]+", "_suffix"))
+
+  expect_identical(names(unnamed$data$analysis), names(hd$data$analysis))
+  expect_identical(unnamed$data$analysis$sample_id, "prefix_VALUE_suffix")
+
 })
 
 

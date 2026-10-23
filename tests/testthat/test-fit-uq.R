@@ -485,7 +485,8 @@ describe("fit_uq() - a prediction step that fails", {
 
     expect_true(point$failed)
     expect_identical(point$records$step, "uq_calibration_predict")
-    expect_true(startsWith(point$records$message, "point prediction failed"))
+    expect_true(startsWith(unit_failure_message(point$records, NULL),
+                           "Calibration prediction failed: point prediction failed"))
 
     ## The quantile prediction on the calibration set
     quantiles <- fail_with("ranger", quantile_prediction_failing_on(nrow(setup$calib_data)))
