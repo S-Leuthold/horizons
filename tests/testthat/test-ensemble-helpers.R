@@ -1,8 +1,10 @@
 ## ---------------------------------------------------------------------------
 ## Tests: ensemble-helpers.R
 ## ---------------------------------------------------------------------------
-## The refusals inside the meta-learner scaffold and the weighted combine, and
-## the engines' parts that the fixture cannot reach: the improvement on a
+## The out-of-fold matrix's row order; the refusals inside the meta-learner
+## scaffold and the weighted combine, the step each of the scaffold's failures
+## is named by, and the scope of the warnings tune noted for it; and the
+## engines' parts that the fixture cannot reach: the improvement on a
 ## metric where lower is better (the fixture ranks by rpd), the weights of the
 ## weighted engine's tuned rule and of a member xgboost never splits on, and
 ## the run time of an engine that runs past a minute. All are called
@@ -11,6 +13,48 @@
 ## in test-pipeline-ensemble.R.
 ##
 ## ens_fitted() comes from helper-ensemble.R.
+
+
+## =========================================================================
+## build_oof_matrix() - row order
+## =========================================================================
+
+describe("build_oof_matrix() - row order", {
+
+  it("orders the matrix by .row, whatever order the out-of-fold predictions were stored in", {
+
+    fitted  <- ens_fitted()
+    members <- gather_members(fitted)$members
+    cv      <- fitted$models$cv_predictions
+
+    ## fit() stores them fold by fold, not in .row order
+    expect_true(is.unsorted(cv$.row[cv$config_id == members[1]]))
+
+    oof <- build_oof_matrix(fitted, members)
+
+    expect_identical(oof$row, sort(unique(cv$.row)))
+
+    ## Each member's column, the truth and the sample ids line up with it
+    for (m in members) {
+
+      mine <- cv[cv$config_id == m, , drop = FALSE]
+      at   <- match(oof$row, mine$.row)
+
+      expect_identical(oof$predictors[[paste0("member_", m)]], mine$.pred[at], info = m)
+      expect_identical(oof$truth, mine$truth[at], info = m)
+      expect_identical(oof$sample_id, mine$sample_id[at], info = m)
+
+    }
+
+    ## The same matrix from the rows stored in another order
+    shuffled <- fitted
+    shuffled$models$cv_predictions <- withr::with_seed(3, cv[sample(nrow(cv)), ])
+
+    expect_identical(build_oof_matrix(shuffled, members), oof)
+
+  })
+
+})
 
 
 ## =========================================================================
@@ -60,6 +104,179 @@ describe("fit_tuned_meta_learner() - refusals", {
     expect_identical(failure$step, "final_fit")
     expect_match(unit_failure_message(failure, "Meta-learner"), "Final model fit failed:", fixed = TRUE)
     expect_match(failure$message, "penalty", fixed = TRUE)
+
+  })
+
+})
+
+
+## =========================================================================
+## fit_tuned_meta_learner() - the step a failure is named by
+## =========================================================================
+
+describe("fit_tuned_meta_learner() - the step a failure is named by", {
+
+  ## Runs it as ensemble() does, inside the meta-learner's unit, and returns
+  ## the unit's failure record. `fitted` is taken before any mock.
+  meta_failure <- function(fitted, optimize) {
+
+    members <- gather_members(fitted)$members
+    oof     <- build_oof_matrix(fitted, members)
+
+    spec <- if (optimize) {
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune())
+    } else {
+      parsnip::linear_reg(penalty = 0.01, mixture = 1)
+    }
+
+    ## suppressWarnings(): rsample's note that the meta rows are too few for
+    ## its default strata breaks, and tune's that every model failed
+    out <- suppressWarnings(run_unit(fit_tuned_meta_learner(
+      fitted, members, oof,
+      rank_metric     = "rpd",
+      optimize        = optimize,
+      method          = "penalized",
+      spec            = parsnip::set_engine(spec, "glmnet"),
+      grid            = tidyr::expand_grid(penalty = c(1e-4, 1e-2), mixture = 1),
+      extract_weights = extract_weights_penalized
+    ), unit = "meta_learner", id = "penalized"))
+
+    expect_true(out$failed)
+
+    out$records[out$records$type == "failure", , drop = FALSE]
+
+  }
+
+  it("names the grid search when every candidate fails", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(glmnet = function(...) stop("the engine broke"), .package = "glmnet")
+
+    failure <- meta_failure(fitted, optimize = TRUE)
+
+    expect_identical(failure$step, "tune_grid")
+    expect_match(unit_failure_message(failure, "Meta-learner"),
+                 "Grid search failed: every meta-learner candidate failed", fixed = TRUE)
+    expect_match(failure$message, "the engine broke", fixed = TRUE)
+
+  })
+
+  it("names the workflow finalization when it errors", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(finalize_workflow = function(...) stop("cannot finalize"),
+                          .package = "tune")
+
+    failure <- meta_failure(fitted, optimize = TRUE)
+
+    expect_identical(failure$step, "finalize_workflow")
+    expect_match(unit_failure_message(failure, "Meta-learner"),
+                 "Workflow finalization failed: cannot finalize", fixed = TRUE)
+
+  })
+
+  it("names the out-of-fold pass when every fold of it fails", {
+
+    fitted <- ens_fitted()
+
+    ## The refit on the whole matrix succeeds; the pass refits a spec parsnip
+    ## refuses (a negative penalty) on every fold
+    real_resamples <- tune::fit_resamples
+    refused        <- parsnip::linear_reg(penalty = -1, mixture = 1) |>
+      parsnip::set_engine("glmnet")
+
+    local_mocked_bindings(fit_resamples = function(object, ...) {
+      real_resamples(workflows::update_model(object, refused), ...)
+    }, .package = "tune")
+
+    failure <- meta_failure(fitted, optimize = FALSE)
+
+    expect_identical(failure$step, "oof_predictions")
+    expect_match(unit_failure_message(failure, "Meta-learner"),
+                 "OOF predictions failed: the meta-learner's out-of-fold pass failed", fixed = TRUE)
+    expect_match(failure$message, "penalty", fixed = TRUE)
+
+  })
+
+  it("names the test metrics when the contract cannot be built", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(build_ensemble_contract = function(...) stop("the contract broke"))
+
+    failure <- meta_failure(fitted, optimize = FALSE)
+
+    expect_identical(failure$step, "test_metrics")
+    expect_match(unit_failure_message(failure, "Meta-learner"),
+                 "Test metrics failed: the contract broke", fixed = TRUE)
+
+  })
+
+})
+
+
+## =========================================================================
+## fit_tuned_meta_learner() - the warnings tune noted
+## =========================================================================
+
+describe("fit_tuned_meta_learner() - the warnings tune noted", {
+
+  it("records the chosen candidate's and the out-of-fold pass's warnings as cross-validation warnings", {
+
+    fitted  <- ens_fitted()
+    members <- gather_members(fitted)$members
+    oof     <- build_oof_matrix(fitted, members)
+
+    ## A warning on the first fold of the grid's one candidate, and one on
+    ## the first fold of the out-of-fold pass
+    noted <- function(real, text) {
+      force(real)
+      function(...) {
+        res <- real(...)
+        res$.notes[[1]] <- dplyr::bind_rows(res$.notes[[1]], tibble::tibble(
+          location = "preprocessor 1/1, model 1/1",
+          type     = "warning",
+          note     = text,
+          trace    = list(NULL)
+        ))
+        res
+      }
+    }
+
+    local_mocked_bindings(
+      tune_grid     = noted(tune::tune_grid, "the tuning warned"),
+      fit_resamples = noted(tune::fit_resamples, "the out-of-fold pass warned"),
+      .package      = "tune"
+    )
+
+    spec <- parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+      parsnip::set_engine("glmnet")
+
+    ## suppressWarnings(): rsample's note that the meta rows are too few for
+    ## its default strata breaks
+    contract <- suppressWarnings(fit_tuned_meta_learner(
+      fitted, members, oof,
+      rank_metric     = "rpd",
+      optimize        = TRUE,
+      method          = "penalized",
+      spec            = spec,
+      grid            = tibble::tibble(penalty = 1e-2, mixture = 1),
+      extract_weights = extract_weights_penalized
+    ))
+
+    log <- attr(contract, "warning_log")
+
+    for (text in c("the tuning warned", "the out-of-fold pass warned")) {
+
+      mine <- log[grepl(text, log$cause, fixed = TRUE), , drop = FALSE]
+
+      expect_identical(nrow(mine), 1L, info = text)
+      expect_identical(mine$scope, "cv", info = text)
+      expect_identical(mine$n_folds, 5L, info = text)
+
+    }
 
   })
 
