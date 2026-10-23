@@ -1584,6 +1584,18 @@ test_that("a property with fewer measured rows than k is skipped when not named,
   g <- suppressWarnings(quiet_select(fx, k = 40, scope = "global"))
   expect_identical(g$selection$settings$properties, c("clay", "oc"))
 
+  ## One measured row is counted in the singular, in the refusal and the warning
+  one <- fx$pool
+  one$data$analysis$oc[-which(!is.na(one$data$analysis$oc))[1]] <- NA_real_
+
+  err <- expect_error(select_training(fx$targets, one, k = 2, properties = c("clay", "oc")),
+                      class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), "oc: 1 measured row, k = 2.", fixed = TRUE)
+
+  w <- collect_warnings(select_training(fx$targets, one, k = 2), class = "horizons_warning_skipped")$warnings
+  expect_length(w, 1L)
+  expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])), "oc: 1 measured row, k = 2.", fixed = TRUE)
+
 })
 
 
@@ -1663,6 +1675,12 @@ test_that("a target flagged by an earlier step gets no training set, and is name
                                               properties = "clay"))
   expect_identical(out$selection$membership, without$selection$membership)
   expect_identical(out$data$analysis$sample_id, without$data$analysis$sample_id)
+
+  ## One target left is still a matrix of one row, drawn for under its own id
+  lone <- suppressWarnings(select_training(with_flag(fx$targets, ids[-3]), fx$pool, k = 5,
+                                           properties = "clay"))
+  expect_identical(unique(lone$selection$membership$target_id), ids[3])
+  expect_identical(lone$selection$target_distances$target_id, ids[3])
 
   ## Past five, the ids are listed as predict()'s flagged warning lists them
   w <- collect_warnings(select_training(with_flag(fx$targets, ids[1:6]), fx$pool, k = 5, properties = "clay"),
@@ -2314,6 +2332,20 @@ test_that("hulls over different ranges name the range both reach, which a librar
   utils::capture.output(pool_both <- standardize(fx$pool, resample = 4, trim = c(604, 3996), baseline = TRUE))
   expect_s3_class(select_training(targets, pool_both, k = 10, properties = "clay"), "horizons_data")
 
+  ## The library's hull inside the targets' at both ends: the range both
+  ## reach is the library's, so only the targets are asked to move
+  utils::capture.output({
+    pool_short <- standardize(fx$pool,    resample = 4, trim = c(1000, 3000), baseline = TRUE)
+    wide       <- standardize(fx$targets, resample = 8, baseline = TRUE)
+  })
+
+  err <- expect_error(select_training(wide, pool_short, k = 10, properties = "clay"), class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_match(msg, "Fit both hulls over the range both reach, 1000 to 3000 cm-1", fixed = TRUE)
+  expect_match(msg, "the targets with `standardize(x, resample = 8, trim = c(1000, 3000), baseline = TRUE)`", fixed = TRUE)
+  expect_false(grepl("the library with", msg, fixed = TRUE))
+
 })
 
 
@@ -2337,6 +2369,18 @@ test_that("a hull carried through standardize(force = TRUE) is compared over the
 
   expect_identical(same$data$standardization$wavelength_range, c(1000, 3000))
   expect_s3_class(suppressWarnings(select_training(same, pool, k = 5)), "horizons_data")
+
+  ## The same on the library's side: hulled over 600 to 4000, then trimmed,
+  ## it still matches targets hulled over 600 to 4000, whose columns past
+  ## its axis are reported, not refused
+  utils::capture.output({
+    cut_pool <- standardize(pool, resample = 4, trim = c(1000, 3000), force = TRUE)
+    full     <- standardize(fx$targets, resample = 8, baseline = TRUE)
+  })
+
+  expect_identical(cut_pool$data$standardization$wavelength_range, c(1000, 3000))
+  expect_warning(out <- select_training(full, cut_pool, k = 5), class = "horizons_warning_coverage")
+  expect_s3_class(out, "horizons_data")
 
 })
 
@@ -2385,7 +2429,7 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
 
   ## derivative = 0 means no filter and so no width
   flat <- suppressWarnings(quiet_select(fx, k = 10, derivative = 0L))
-  expect_true(is.na(flat$selection$settings$window_cm))
+  expect_identical(flat$selection$settings$window_cm, NA_real_)
   expect_true(is.na(flat$selection$settings$window_points))
 
   ## The similarity space's noise floor, as applied
