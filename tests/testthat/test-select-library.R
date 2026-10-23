@@ -128,7 +128,13 @@ test_that("first use builds and caches; later uses read the cache", {
   again <- resolve_source("mini", verbose = FALSE)
 
   expect_equal(again$pool$data$analysis, res$pool$data$analysis)
-  expect_output(resolve_source("mini", verbose = TRUE), "v0 (cached)", fixed = TRUE)
+
+  ## A cached read names the data and how to cite it; the miniature carries
+  ## kssl's title and citation
+  expect_output(resolve_source("mini", verbose = TRUE), paste0(
+    "Library mini v0 (cached). ",
+    "Data: USDA NRCS KSSL mid-infrared library, from the Open Soil Spectral Library v1.2. ",
+    "Cite: Safanelli et al. 2025, CC-BY-4.0."), fixed = TRUE)
 
   ## A cache file that holds another version of the library is refused, not read
   lib <- qs2::qs_read(file.path(cache, "mini_v0.qs2"))
@@ -155,6 +161,25 @@ test_that("the recipe keeps every depth and filters dataset, instrument and comp
   expect_identical(rm$role[rm$variable == "upper_depth_cm"], "meta")
   expect_setequal(rm$variable[rm$role == "response"], c("clay", "oc"))
   expect_length(grep("^wn_", names(a)), 51L)
+
+})
+
+test_that("kssl fetches OSSL v1.2's three tables from its public bucket, against their published sizes and MD5s", {
+
+  ## Every other test here downloads the miniature release; this is the one
+  ## that reads what the registered entry itself fetches and verifies
+  files <- c("ossl_mir_L0_v1.2.csv.gz", "ossl_soillab_L1_v1.2.csv.gz", "ossl_soilsite_L0_v1.2.csv.gz")
+
+  expect_identical(library_registry()$kssl$sources, data.frame(
+    table = c("mir", "lab", "site"),
+    file  = files,
+    url   = paste0("https://storage.googleapis.com/soilspec4gg-public/", files),
+    bytes = c(420088016, 9597417, 6371319),
+    md5   = c("64f8cdfcc28d861f10b608671e4f0421",
+              "e24b94605b0061add400cf3b617f1f18",
+              "e8c640a9e7b6f15c2dec0a7d2e445716"),
+    stringsAsFactors = FALSE
+  ))
 
 })
 
@@ -472,6 +497,48 @@ test_that("select_training() resolves a library name before anything else", {
   ## condition of length two
   expect_error(select_training(select_fixture()$targets, c("kssl", "kssl")),
                class = "horizons_error_input", regexp = "a single name or path")
+
+})
+
+test_that("targets on kssl's native grid reach its first-use consent, which credits and cites the source", {
+
+  ## The registered entry, not the miniature, in a cache that holds nothing:
+  ## targets on 600 to 4000 cm-1 pass the checks made against its grid before
+  ## the download, and the first use stops at consent, having said what it
+  ## would download and whose data it is
+  withr::local_options(horizons.cache_dir = withr::local_tempdir(),
+                       horizons.library_download = NULL)
+  ## A non-interactive run is refused without asking; an interactive one
+  ## declines rather than prompting. Should consent ever pass by mistake, the
+  ## download fails at once rather than fetching the 436 MB
+  local_mocked_bindings(askYesNo = function(...) FALSE, .package = "utils")
+  local_mocked_bindings(download_sources = function(...) stop("consent was passed: the download would start"))
+
+  m <- expect_message(
+    expect_error(select_training(select_fixture()$targets, "kssl", k = 5),
+                 "\"kssl\"", fixed = TRUE, class = "horizons_error_consent"),
+    "is not cached yet", fixed = TRUE)
+  msg <- gsub("\\s+", " ", conditionMessage(m))
+
+  expect_match(msg, "The \"kssl\" library is not cached yet.", fixed = TRUE)
+  expect_match(msg, "horizons will download 436 MB of public source files", fixed = TRUE)
+
+  ## The credit, as approved, and the citation with its licence
+  expect_match(msg, paste0(
+    "horizons builds the kssl library from the Open Soil Spectral Library (OSSL v1.2). ",
+    "This is only possible because of the hard work of the team at Soil Spectroscopy ",
+    "for Global Good: Jos\u00e9 L. Safanelli, Tomislav Hengl, Leandro L. Parente, ",
+    "Robert Minarik, Dellena E. Bloom, Katherine Todd-Brown, Asa Gholizadeh, ",
+    "Wanderson de Sousa Mendes and Jonathan Sanderman. The KSSL spectra and lab data ",
+    "were measured and shared by Rich Ferguson and the team at the USDA NRCS Kellogg ",
+    "Soil Survey Laboratory."), fixed = TRUE)
+  expect_match(msg, paste0(
+    "Please cite: Safanelli, J.L., Hengl, T., Parente, L.L., Minarik, R., Bloom, D.E., ",
+    "Todd-Brown, K., Gholizadeh, A., Mendes, W. de S., Sanderman, J. (2025). ",
+    "Open Soil Spectral Library (OSSL): Building reproducible soil calibration ",
+    "models through open development and community engagement. ",
+    "PLOS ONE 20(1): e0296545. https://doi.org/10.1371/journal.pone.0296545 (CC-BY-4.0)."),
+    fixed = TRUE)
 
 })
 

@@ -150,6 +150,11 @@ describe("ccc_vec()", {
     result <- ccc_vec(truth, estimate)
     expect_true(result > 0 && result <= 1)
 
+    ## Precision times accuracy: Pearson r is below 1 here, so the bias
+    ## correction alone would be another number
+    expect_lt(cor(truth, estimate), 1)
+    expect_equal(result, yardstick::ccc_vec(truth, estimate))
+
   })
 
   it("is less than Pearson r when systematic bias exists", {
@@ -176,12 +181,14 @@ describe("ccc_vec()", {
 
   })
 
-  it("returns NA when SD of either vector is zero", {
+  it("returns NA, without a warning, when SD of either vector is zero", {
 
-    truth    <- c(5, 5, 5, 5)
-    estimate <- c(4, 5, 6, 7)
+    constant <- c(5, 5, 5, 5)
+    varying  <- c(4, 5, 6, 7)
 
-    expect_true(is.na(ccc_vec(truth, estimate)))
+    ## Undefined, so not left to cor(), which warns on a zero SD
+    expect_no_warning(expect_identical(ccc_vec(constant, varying), NA_real_))
+    expect_no_warning(expect_identical(ccc_vec(varying, constant), NA_real_))
 
   })
 
@@ -336,6 +343,25 @@ describe("tuning_metric_set()", {
     expect_lt(fixed_rmse, naive_rmse / 5)
     expect_gt(fixed_rpd, 5)
     expect_lt(naive_rpd, 2)
+
+  })
+
+  it("carries none of its caller's frame, so serializing it sends no training data", {
+
+    ## As the single-config fits call it: the transformation and the range
+    ## are the caller's variables, beside its data
+    build_beside_data <- function() {
+      training_data  <- matrix(0, nrow = 1000, ncol = 1000)
+      transformation <- "log"
+      outcome_range  <- c(0, Inf)
+      list(set       = tuning_metric_set(transformation, outcome_range = outcome_range),
+           data_size = length(serialize(training_data, NULL)))
+    }
+
+    built <- build_beside_data()
+
+    expect_gt(built$data_size, 8e6)
+    expect_lt(length(serialize(built$set, NULL)), built$data_size / 10)
 
   })
 

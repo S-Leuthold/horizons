@@ -204,6 +204,11 @@ add_response <- function(x,
 
   }
 
+  ## 1.5b No variable takes a name horizons reserves, such as `.flag` ---------
+
+  check_reserved_columns(variable,
+                         remedy = "Rename the column before joining it with {.fn add_response}.")
+
   ## 1.5 variable columns are numeric ------------------------------------------
 
   non_numeric <- variable[!vapply(source[variable], is.numeric, logical(1))]

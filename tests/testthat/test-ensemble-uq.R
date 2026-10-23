@@ -433,6 +433,33 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
 
   })
 
+  it("fails at its trimmed-row step when the trimmed rows cannot be predicted or scored", {
+
+    ## Read before the mocks, so the shared ensemble is never built under them
+    ens <- trimmed_ens()
+
+    ## The members' predictions for the trimmed rows
+    local({
+      local_mocked_bindings(ensemble_trimmed_rows = function(...) stop("a trimmed row could not be predicted"))
+
+      out <- run_unit(fit_ensemble_uq(ens), unit = "intervals", id = "ensemble")
+
+      expect_true(out$failed)
+      expect_identical(unit_failure_message(out$records, outside = NULL),
+                       "CV+ trimmed-row calibration failed: a trimmed row could not be predicted")
+    })
+
+    ## The fold models' scores of them
+    local_mocked_bindings(calibrate_trimmed_rows = function(...) stop("a trimmed row could not be scored"))
+
+    out <- run_unit(fit_ensemble_uq(ens), unit = "intervals", id = "ensemble")
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, outside = NULL),
+                     "CV+ trimmed-row calibration failed: a trimmed row could not be scored")
+
+  })
+
 })
 
 
@@ -484,35 +511,50 @@ describe("fit_ensemble_uq() - coverage", {
 
   })
 
-  it("computes the leave-self-out coverage and width from its own calibration set, row by row", {
+  it("computes the leave-self-out coverage and width from its own calibration set, row by row, trimmed rows included", {
 
     ## Each calibration row stands in for a new point: its CV+ bound is
     ## formed from the other rows' fold models and residuals, at the
-    ## n_calib - 1 indices, and the bundle's figures are the means
-    ens_ref <- ens_built("weighted")
-    uq      <- ens_ref$ensemble$uq
-    oof     <- build_oof_matrix(ens_ref, uq$members)
+    ## n_calib - 1 indices, and the bundle's figures are the means. A row the
+    ## response trim set aside is predicted from its own member predictions,
+    ## looked up here by sample_id.
+    ensembles <- list(plain = ens_built("weighted"), trimmed = trimmed_ens())
 
-    member_mat <- oof$predictors[, paste0("member_", uq$members), drop = FALSE]
-    P <- vapply(uq$fold_models, function(fm) {
-      predict_fold_model(fm, uq$ensemble_method, member_mat,
-                         outcome_range_setting(ens_ref))
-    }, numeric(nrow(member_mat)))
+    for (name in names(ensembles)) {
 
-    pos <- match(uq$calib$.row, oof$row)
-    idx <- cv_plus_indices(uq$n_calib - 1L, uq$level_default)
+      ens     <- ensembles[[name]]
+      uq      <- ens$ensemble$uq
+      oof     <- build_oof_matrix(ens, uq$members)
+      trimmed <- ensemble_trimmed_rows(ens, uq$members)
 
-    covered <- logical(uq$n_calib)
-    width   <- numeric(uq$n_calib)
+      ## The trimmed ensemble calibrates on its eight trimmed rows
+      expect_identical(sum(is.na(uq$calib$.row)), c(plain = 0L, trimmed = 8L)[[name]], info = name)
 
-    for (i in seq_len(uq$n_calib)) {
-      s <- sort(P[pos[i], uq$calib$fold[-i]] + uq$calib$residual[-i])
-      covered[i] <- uq$calib$truth[i] >= s[idx$l] && uq$calib$truth[i] <= s[idx$u]
-      width[i]   <- s[idx$u] - s[idx$l]
+      member_mat <- dplyr::bind_rows(oof$predictors, trimmed$predictors)
+      member_mat <- member_mat[, paste0("member_", uq$members), drop = FALSE]
+      P <- vapply(uq$fold_models, function(fm) {
+        predict_fold_model(fm, uq$ensemble_method, member_mat,
+                           outcome_range_setting(ens))
+      }, numeric(nrow(member_mat)))
+
+      pos <- match(uq$calib$sample_id, c(oof$sample_id, trimmed$sample_id))
+      idx <- cv_plus_indices(uq$n_calib - 1L, uq$level_default)
+
+      expect_false(anyNA(pos), info = name)
+
+      covered <- logical(uq$n_calib)
+      width   <- numeric(uq$n_calib)
+
+      for (i in seq_len(uq$n_calib)) {
+        s <- sort(P[pos[i], uq$calib$fold[-i]] + uq$calib$residual[-i])
+        covered[i] <- uq$calib$truth[i] >= s[idx$l] && uq$calib$truth[i] <= s[idx$u]
+        width[i]   <- s[idx$u] - s[idx$l]
+      }
+
+      expect_equal(uq$oof_coverage, mean(covered), info = name)
+      expect_equal(uq$mean_width, mean(width), info = name)
+
     }
-
-    expect_equal(uq$oof_coverage, mean(covered))
-    expect_equal(uq$mean_width, mean(width))
 
   })
 
@@ -934,6 +976,42 @@ describe("ensemble UQ - degradation and gates", {
 
   })
 
+  it("compute_ensemble_uq calibrates at CV+'s floor, and notes that it has no leave-self-out diagnostic", {
+
+    ens_ref <- ens_built("weighted")
+    oof     <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
+    keep    <- seq_len(19L)
+    oof19   <- list(predictors = oof$predictors[keep, , drop = FALSE], truth = oof$truth[keep],
+                    row = oof$row[keep], sample_id = oof$sample_id[keep], members = oof$members)
+
+    ## suppressWarnings(): rsample's note that so few rows are too few for
+    ## its default strata breaks
+    notes <- character()
+    uq <- withCallingHandlers(
+      suppressWarnings(compute_ensemble_uq(oof = oof19, contract = ens_ref$ensemble,
+                                           optimize = FALSE, conformal_seed = 1307L,
+                                           min_calib_rows = 19L)),
+      horizons_note = function(n) notes <<- c(notes, conditionMessage(n))
+    )
+
+    ## The 19 rows CV+ needs at 0.90 calibrate the bundle
+    expect_identical(uq$n_calib, 19L)
+    expect_false(is.null(cv_plus_indices(uq$n_calib, uq$level_default)))
+
+    ## Each leave-self-out set holds 18, too few for a bound, so neither
+    ## figure is computed, and the unit says so, as fit_uq() does
+    expect_null(cv_plus_indices(uq$n_calib - 1L, uq$level_default))
+    expect_identical(uq$oof_coverage, NA_real_)
+    expect_identical(uq$mean_width, NA_real_)
+
+    diagnostics <- notes[startsWith(notes, "The in-sample interval diagnostics (oof_coverage, mean_width) were not computed:")]
+    expect_identical(diagnostics, paste(
+      "The in-sample interval diagnostics (oof_coverage, mean_width) were not computed:",
+      "each leave-self-out set holds 18 rows, too few for a bound at the 0.9 level."
+    ))
+
+  })
+
   it("compute_ensemble_uq fails at its fold step when a fold refit fails", {
 
     ens_ref <- ens_built("weighted")
@@ -952,6 +1030,21 @@ describe("ensemble UQ - degradation and gates", {
     expect_true(out$failed)
     expect_identical(unit_failure_message(out$records, outside = NULL),
                      "CV+ fold models failed: a fold refit failed")
+
+  })
+
+  it("fit_ensemble_uq fails at its out-of-fold step when the matrix cannot be built", {
+
+    ## Read before the mock, so the shared ensemble is never built under it
+    ens_ref <- ens_built("weighted")
+
+    local_mocked_bindings(build_oof_matrix = function(...) stop("the matrix broke"))
+
+    out <- run_unit(fit_ensemble_uq(ens_ref), unit = "intervals", id = "ensemble")
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, outside = NULL),
+                     "Out-of-fold matrix failed: the matrix broke")
 
   })
 
@@ -1167,6 +1260,38 @@ describe("ensemble UQ - degradation and gates", {
 
     expect_true(out$failed)
     expect_identical(out$records$step[out$records$type == "failure"], "cv_plus_folds")
+
+  })
+
+  it("predict_ensemble_intervals fails at its bounds step when the bounds cannot be computed", {
+
+    test_set <- ens_test_set()
+    ens_ref  <- ens_built("weighted")
+    mp       <- predict_members(ens_ref, ens_ref$ensemble$weights$member,
+                                resolve_new_data(test_set))
+
+    local_mocked_bindings(cv_plus_bounds = function(...) stop("the bounds broke"))
+
+    out <- run_unit(predict_ensemble_intervals(ens_ref$ensemble$uq, mp), "intervals", "ensemble")
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, outside = NULL),
+                     "CV+ bounds failed: the bounds broke")
+
+  })
+
+  it("ensemble_test_coverage fails at its test-prediction step when the members cannot predict the test rows", {
+
+    ## Read before the mock, so the shared ensemble is never built under it
+    ens_ref <- ens_built("weighted")
+
+    local_mocked_bindings(predict_members_on_test = function(...) stop("the test rows broke"))
+
+    out <- run_unit(ensemble_test_coverage(ens_ref), unit = "coverage", id = "ensemble")
+
+    expect_true(out$failed)
+    expect_identical(unit_failure_message(out$records, outside = NULL),
+                     "Test prediction failed: the test rows broke")
 
   })
 

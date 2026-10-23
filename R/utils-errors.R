@@ -118,6 +118,52 @@ check_arg <- function(check,
 
 }
 
+#' Refuse a column name horizons reserves
+#'
+#' @description
+#' The one door check behind every verb that adds columns named by the user:
+#' [spectra()] its source's columns, [parse_ids()] its tokens and
+#' [add_response()] its variables. Each calls it with the names it is about
+#' to add, before it changes anything, so the rule is the same at every door.
+#'
+#' The one name reserved is `.flag`, the steps' record of the rows they could
+#' not use (`NA` for a clean row, else the step). The validator lets
+#' non-finite predictors through in a flagged row and the modelling verbs
+#' leave flagged rows out, so a column of that name brought in by the user
+#' would be read as that record.
+#'
+#' @param columns [Character.] The names the verb would add.
+#' @param remedy [Character(1).] The verb's own remedy, a cli string.
+#' @param subject [Character(1).] How the message opens, saying what holds
+#'   the column: `"The source has"` by default, the wording of the verbs
+#'   that read a source.
+#' @param call The frame the error reports, the caller's by default, so the
+#'   message names the verb.
+#'
+#' @return `NULL` invisibly when no name is reserved; otherwise an error of
+#'   class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_reserved_columns <- function(columns,
+                                   remedy,
+                                   subject = "The source has",
+                                   call    = rlang::caller_env()) {
+
+  reserved <- intersect(".flag", columns)
+
+  if (length(reserved) == 0) {
+
+    return(invisible(NULL))
+
+  }
+
+  abort_horizons(c(
+    paste0(subject, " a column named {.field {reserved}}, which horizons reserves for the rows its steps flag."),
+    "i" = remedy
+  ), kind = "input", call = call)
+
+}
+
 ## ---------------------------------------------------------------------------
 ## horizons_conditions: the classes, documented in one place
 ## ---------------------------------------------------------------------------

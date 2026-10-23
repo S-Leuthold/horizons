@@ -70,6 +70,7 @@ test_that("subset_rows() aborts on duplicated ids in keep", {
   fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, c("P001", "P001")),
+               "`keep` contains duplicated ids.", fixed = TRUE,
                class = "horizons_error_internal")
 
 })
@@ -79,8 +80,10 @@ test_that("subset_rows() aborts on a logical keep of the wrong length", {
 
   fx <- select_fixture(n_pool = 40)
 
-  expect_error(subset_rows(fx$pool, c(TRUE, FALSE)),
-               class = "horizons_error_internal")
+  err <- expect_error(subset_rows(fx$pool, c(TRUE, FALSE)),
+                      "A logical `keep` must have one entry per row.", fixed = TRUE,
+                      class = "horizons_error_internal")
+  expect_match(rlang::cnd_message(err), "Got 2 for 40 rows.", fixed = TRUE)
 
 })
 
@@ -90,6 +93,10 @@ test_that("subset_rows() aborts when keep selects no rows", {
   fx <- select_fixture(n_pool = 40)
 
   expect_error(subset_rows(fx$pool, character(0)),
+               "`keep` selects no rows.", fixed = TRUE,
+               class = "horizons_error_internal")
+  expect_error(subset_rows(fx$pool, rep(FALSE, 40)),
+               "`keep` selects no rows.", fixed = TRUE,
                class = "horizons_error_internal")
 
 })

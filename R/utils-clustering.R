@@ -128,8 +128,10 @@ cluster_spectral_predictors <- function(spectra_mat,
 #' the count (`n_constant`) rather than print it.
 #'
 #' @param spectra_mat Numeric matrix, one column per band.
-#' @return List: `spectra`, `spectra_mat` without its near-constant columns,
-#'   and `n_constant`, how many it dropped.
+#' @return List: `spectra`, `spectra_mat` without its near-constant columns;
+#'   `bands`, their names (`character(0)` when none is left, where the
+#'   matrix's own column names are `NULL`); and `n_constant`, how many it
+#'   dropped.
 #' @keywords internal
 #' @noRd
 drop_constant_bands <- function(spectra_mat) {
@@ -142,7 +144,11 @@ drop_constant_bands <- function(spectra_mat) {
   typical <- if (any(varies)) stats::median(variances[varies]) else 0
   keep    <- varies & variances > NEAR_CONSTANT_RATIO * typical
 
+  ### The kept bands are named separately: R drops a matrix's column names at
+  ### zero columns, and a step left with no band is trained with an empty
+  ### selection, where NULL would read as untrained.
   list(spectra    = spectra_mat[, keep, drop = FALSE],
+       bands      = colnames(spectra_mat)[keep],
        n_constant = sum(!keep))
 
 }

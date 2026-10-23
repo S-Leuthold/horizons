@@ -755,6 +755,33 @@ test_that("add_response() errors when variable is non-numeric", {
 
 })
 
+test_that("add_response() refuses a variable named .flag at its door, as spectra() refuses the column", {
+
+  ## Arrange — .flag is the column horizons keeps for the rows its steps flag
+  hd     <- make_test_hd()
+  before <- hd
+
+  for (flag in list(c(1.2, 3.4, 5.6), c("a", "b", "c"))) {
+
+    lab <- tibble::tibble(sample_id = hd$data$analysis$sample_id, .flag = flag)
+
+    ## Act & Assert ------------------------------------------------------------
+
+    err <- expect_error(
+      add_response(hd, lab, variable = ".flag"),
+      class = "horizons_error_input"
+    )
+
+    expect_match(conditionMessage(err),
+                 "The source has a column named .flag, which horizons reserves for the rows its steps flag.",
+                 fixed = TRUE)
+
+  }
+
+  expect_identical(hd, before)
+
+})
+
 test_that("add_response() errors when by column missing from source", {
 
   hd  <- make_test_hd()
@@ -932,5 +959,29 @@ test_that("add_response() catches a corrupt input the verb itself never checks (
     add_response(hd, lab, variable = "SOC"),
     class = "horizons_error_validation"
   )
+
+})
+
+test_that("add_response() refuses to return an object its own join broke (#24)", {
+
+  ## Arrange — a valid input, and a write that appends the response column
+  ## without its role, which the entry checks cannot see
+  hd  <- make_test_hd()
+  lab <- tibble::tibble(sample_id = hd$data$analysis$sample_id,
+                        SOC       = c(1.2, 3.4, 5.6))
+
+  local_mocked_bindings(add_columns = function(x, columns, ...) {
+    x$data$analysis$SOC <- columns$SOC
+    x
+  })
+
+  ## Act & Assert --------------------------------------------------------------
+
+  err <- expect_error(
+    add_response(hd, lab, variable = "SOC"),
+    class = "horizons_error_validation"
+  )
+
+  expect_match(conditionMessage(err), "Columns missing from role_map: SOC", fixed = TRUE)
 
 })

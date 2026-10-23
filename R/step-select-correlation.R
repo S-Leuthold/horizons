@@ -161,7 +161,7 @@ prep.step_select_correlation <- function(x, training, info = NULL, ...) {
   filtered    <- drop_constant_bands(spectra_mat)
   spectra_mat <- filtered$spectra
   n_constant  <- filtered$n_constant
-  bands       <- colnames(spectra_mat)
+  bands       <- filtered$bands
 
   window_size <- 3
 

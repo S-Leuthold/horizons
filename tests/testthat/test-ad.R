@@ -420,6 +420,7 @@ test_that("fit_ad fails at the covariance, the calibration bake or the threshold
   })
   expect_true(covariance$failed)
   expect_identical(covariance$records$step, "ad_covariance")
+  expect_match(unit_failure_message(covariance$records, NULL), "^AD covariance failed: covariance failed")
 
   ## The bake aborts on a missing spectral column
   bake <- run_ad(fx, calib_data = fx$data[, -1])
