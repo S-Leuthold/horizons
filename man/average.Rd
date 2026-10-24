@@ -134,7 +134,8 @@ Metadata columns are checked for uniformity within groups:
 \item Uniform within every sample: preserved in output
 \item Non-uniform within any sample: column dropped from every row, and named
 in a note on the object's log
-\item \code{filename} column: always dropped (not meaningful after averaging)
+\item \code{filename}, the OPUS input's meta column: always dropped (not meaningful
+after averaging). A response of that name is averaged like any other
 }
 
 \strong{The log:}

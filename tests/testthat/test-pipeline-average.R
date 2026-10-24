@@ -843,6 +843,28 @@ test_that("average() writes no .flag column when no sample is flagged", {
 
 })
 
+test_that("average() averages a response named filename when the input has no filename column", {
+
+  ## Arrange: no OPUS filename column, and the clay response renamed, as a
+  ## data frame input with its own column of that name would carry it
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_responses = TRUE)
+  hd$data$analysis$filename <- NULL
+  hd$data$role_map <- hd$data$role_map[hd$data$role_map$variable != "filename", ]
+  names(hd$data$analysis)[names(hd$data$analysis) == "clay"] <- "filename"
+  hd$data$role_map$variable[hd$data$role_map$variable == "clay"] <- "filename"
+
+  ## Act
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert: the response is kept and averaged, 10 to 12 for S1 and 20 to 22
+  ## for S2
+  averaged <- result$data$analysis
+  expect_true("filename" %in% names(averaged))
+  expect_equal(averaged$filename[averaged$sample_id == "S1"], 11)
+  expect_equal(averaged$filename[averaged$sample_id == "S2"], 21)
+
+})
+
 test_that("average() always drops filename column", {
 
   ## Arrange ---------------------------------------------------------------
