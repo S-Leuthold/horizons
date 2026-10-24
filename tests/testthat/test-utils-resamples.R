@@ -269,13 +269,16 @@ describe("rebuild_resamples() fails at the boundary", {
     past_data$train_idx[1] <- idx$n_rows + 1L
 
     expect_error(rebuild_resamples(fx$split$data, past_data),
-                 "max(idx$train_idx) <= idx$n_rows", fixed = TRUE)
+                 sprintf("got a training index past the data (%d of %d rows).", idx$n_rows + 1L, idx$n_rows),
+                 fixed = TRUE, class = "horizons_error_internal")
 
     past_train <- idx
     past_train$fold_idx[[1]][1] <- length(idx$train_idx) + 1L
 
     expect_error(rebuild_resamples(fx$split$data, past_train),
-                 "max(unlist(idx$fold_idx)) <= length(idx$train_idx)", fixed = TRUE)
+                 sprintf("got a fold index past the training rows (%d of %d).",
+                         length(idx$train_idx) + 1L, length(idx$train_idx)),
+                 fixed = TRUE, class = "horizons_error_internal")
 
   })
 
