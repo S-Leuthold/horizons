@@ -139,6 +139,16 @@ test_that("select_training() rejects bad scope, metric and space", {
   expect_error(quiet_select(fx, k = 5, space  = "nope"), regexp = "`space` must be",
                fixed = TRUE, class = "horizons_error_input")
 
+  ## An empty choice is refused too, rather than read as NA past the door
+  expect_error(quiet_select(fx, k = 5, scope  = character(0)), regexp = "`scope` must be",
+               fixed = TRUE, class = "horizons_error_input")
+  expect_error(quiet_select(fx, k = 5, metric = character(0)), regexp = "`metric` must be",
+               fixed = TRUE, class = "horizons_error_input")
+  expect_error(quiet_select(fx, k = 5, space  = character(0)), regexp = "`space` must be",
+               fixed = TRUE, class = "horizons_error_input")
+  expect_error(quiet_select(fx, k = 5, depth  = character(0)), regexp = "`depth` must be",
+               fixed = TRUE, class = "horizons_error_input")
+
 })
 
 
