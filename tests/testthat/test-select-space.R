@@ -287,6 +287,18 @@ test_that("build_similarity_space() refuses a mask that leaves too little to dec
   sp <- build_similarity_space(pm$matrix, pm$wavenumbers, mask = rbind(c(1100, 5000), c(0, 1000)))
   expect_length(sp$wavenumbers, 24L)
 
+  ## A count of one still needs two columns: one column left is refused,
+  ## two run
+  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 1L,
+                                      mask = rbind(c(1006, 5000), c(0, 1002))),
+               "left with 1 column, fewer than the 2", fixed = TRUE,
+               class = "horizons_error_input")
+
+  two <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 1L,
+                                mask = rbind(c(1010, 5000), c(0, 1002)))
+  expect_identical(two$wavenumbers, c(1008, 1004))
+  expect_identical(two$ncomp, 1L)
+
 })
 
 
@@ -369,6 +381,30 @@ test_that("sdev_floor never empties the space and never adds components", {
   expect_identical(sp$ncomp, 1L)
   expect_lte(sp$ncomp, sp$ncomp_variance)
 
+  ## One component's scores and loadings stay one-column matrices
+  expect_identical(dim(sp$scores), c(60L, 1L))
+  expect_identical(dim(sp$rotation), c(50L, 1L))
+
+})
+
+
+test_that("a pool with no spread keeps its component count and records a ratio of one", {
+
+  ## Identical rows centre to zero, so PC1's sd is zero and the ratio to it
+  ## is undefined; the floor then has nothing to cut. Small integers keep
+  ## the centring exact on any platform.
+  M  <- matrix(rep(seq_len(20), each = 10), nrow = 10,
+               dimnames = list(sprintf("D%02d", seq_len(10)), NULL))
+  wn <- seq(4000, by = -4, length.out = ncol(M))
+
+  sp <- build_similarity_space(M, wn, snv = FALSE, derivative = 0L, ncomp = 3L)
+
+  expect_identical(sp$sdev, c(0, 0, 0))
+  expect_identical(sp$ncomp, 3L)
+  expect_identical(sp$ncomp_variance, 3L)
+  expect_identical(sp$sdev_ratio, c(1, 1, 1))
+  expect_identical(dim(sp$scores), c(10L, 3L))
+
 })
 
 
@@ -438,6 +474,9 @@ test_that("build_similarity_space(space = 'pls') fits on measured rows and score
   expect_identical(sp$n_fit, sum(!is.na(y)))
   expect_true(all(is.finite(sp$scores)))
   expect_length(sp$sdev, 4L)
+
+  ## The fit is NIPALS (orthogonal scores), as documented
+  expect_identical(sp$fit$method, "oscorespls")
 
   ## The stored fit holds loadings, not the library's rows
   expect_lt(length(serialize(sp$fit, NULL)), length(serialize(pm$matrix, NULL)))

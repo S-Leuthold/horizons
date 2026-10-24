@@ -447,6 +447,7 @@ test_that("a library narrower than the default window is cached, and its space l
   rows <- log_rows(collector)
   expect_identical(rows$type, "note")
   expect_match(rows$message, "the default `window` of 40 cm-1 is 21 points on its 16 columns, and the filter needs fewer", fixed = TRUE)
+  expect_match(rows$message, "A draw at the default window is refused; pass a narrower `window`.", fixed = TRUE)
 
 })
 
@@ -507,6 +508,8 @@ test_that("a first-use space that fails to build is a note, and stops the call u
   )
   notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
 
+  ## The tree says the build was tried, then that it failed
+  expect_true(any(grepl("Building the library's similarity space at the default settings", txt, fixed = TRUE)))
   expect_true(any(grepl("could not be built now; the first draw will build it", txt, fixed = TRUE)))
 
   expect_identical(nrow(notes), 1L)
