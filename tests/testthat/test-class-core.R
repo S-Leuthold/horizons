@@ -1583,17 +1583,27 @@ test_that("validate_horizons_ensemble tolerates NULL oof_predictions and uq", {
 
 })
 
-test_that("validate_horizons_ensemble refuses a NULL optimize or seed (#130)", {
+test_that("validate_horizons_ensemble refuses an optimize or seed that is NULL or not one value of its type (#130)", {
 
   ## ensemble() always records both, and fit_ensemble_uq() rebuilds the fold
-  ## models from them, so neither may be NULL.
-  for (key in c("optimize", "seed")) {
+  ## models from them, so neither may be NULL, the wrong type or more than
+  ## one value.
+  bad <- list(optimize = list(NULL, "yes", c(TRUE, FALSE)),
+              seed     = list(NULL, "307", c(307, 308)))
 
-    obj <- make_valid_ensemble()
-    obj$ensemble[key] <- list(NULL)
+  for (key in names(bad)) {
 
-    expect_error(suppressMessages(validate_horizons_ensemble(obj)), key,
-                 class = "horizons_error_validation", info = key)
+    for (value in bad[[key]]) {
+
+      obj <- make_valid_ensemble()
+      obj$ensemble[key] <- list(value)
+
+      expect_error(suppressMessages(validate_horizons_ensemble(obj)),
+                   paste(key, "must be a single"), fixed = TRUE,
+                   class = "horizons_error_validation",
+                   info = paste(key, paste(deparse(value), collapse = "")))
+
+    }
 
   }
 
@@ -1792,6 +1802,21 @@ test_that("validate_horizons_ensemble rejects malformed data-frame slots", {
                "predictions must be a data frame with sample_id, .pred, truth",
                fixed = TRUE, class = "horizons_error_validation")
 
+  ## predictions carrying the out-of-fold column in place of .pred, as a
+  ## data frame, where `$.pred` would partially match it
+  no_pred <- make_valid_ensemble()
+  no_pred$ensemble$predictions <- data.frame(sample_id = "S1", .pred_oof = 1, truth = 1)
+  expect_error(validate_horizons_ensemble(no_pred),
+               "predictions must be a data frame with sample_id, .pred, truth",
+               fixed = TRUE, class = "horizons_error_validation")
+
+  ## predictions with every column, one of them not numeric
+  char_pred <- make_valid_ensemble()
+  char_pred$ensemble$predictions$.pred <- as.character(char_pred$ensemble$predictions$.pred)
+  expect_error(validate_horizons_ensemble(char_pred),
+               "predictions columns .pred and truth must be numeric",
+               fixed = TRUE, class = "horizons_error_validation")
+
   ## oof_predictions missing .row
   no_row <- make_valid_ensemble()
   no_row$ensemble$oof_predictions <- tibble::tibble(.pred = 1, truth = 1)
@@ -1806,12 +1831,16 @@ test_that("validate_horizons_ensemble rejects malformed data-frame slots", {
                "member_metrics references non-member config_ids: cfg_zz",
                fixed = TRUE, class = "horizons_error_validation")
 
-  ## metrics and member_metrics each missing the metric name
-  no_metric <- make_valid_ensemble()
-  no_metric$ensemble$metrics$.metric <- NULL
-  expect_error(validate_horizons_ensemble(no_metric),
-               "metrics must be a data frame with .metric, .estimator, .estimate",
-               fixed = TRUE, class = "horizons_error_validation")
+  ## metrics missing each of its columns, and member_metrics the metric name
+  for (col in c(".metric", ".estimator", ".estimate")) {
+
+    no_col <- make_valid_ensemble()
+    no_col$ensemble$metrics[[col]] <- NULL
+    expect_error(validate_horizons_ensemble(no_col),
+                 "metrics must be a data frame with .metric, .estimator, .estimate",
+                 fixed = TRUE, class = "horizons_error_validation", info = col)
+
+  }
 
   no_member_metric <- make_valid_ensemble()
   no_member_metric$ensemble$member_metrics$.metric <- NULL
@@ -1856,7 +1885,7 @@ test_that("validate_horizons_ensemble rejects a malformed uq bundle", {
     level_default = 0.90
   )
 
-  for (key in c("n_calib", "level_default")) {
+  for (key in c("fold_models", "calib", "n_calib", "level_default")) {
 
     obj <- make_valid_ensemble()
     obj$ensemble$uq <- bundle[setdiff(names(bundle), key)]
@@ -2388,13 +2417,20 @@ test_that("validate_horizons_fit requires the six metrics in results and an rspl
 
 })
 
-test_that("validate_horizons_fit rejects an n_models / workflows mismatch", {
+test_that("validate_horizons_fit rejects an n_models that is not the one number of workflows", {
 
-  obj <- make_valid_fit()
-  obj$models$n_models <- 5L
-  expect_error(suppressMessages(validate_horizons_fit(obj)),
-               "n_models must equal",
-               fixed = TRUE, class = "horizons_error_validation")
+  ## Two workflows: a different count, the count as text, more than one
+  ## value and NA are each refused
+  for (n_models in list(5L, "2", c(2, 2), NA_real_)) {
+
+    obj <- make_valid_fit()
+    obj$models$n_models <- n_models
+    expect_error(suppressMessages(validate_horizons_fit(obj)),
+                 "n_models must equal",
+                 fixed = TRUE, class = "horizons_error_validation",
+                 info = paste(deparse(n_models), collapse = ""))
+
+  }
 
 })
 
@@ -3040,6 +3076,66 @@ test_that("print() and summary() name no member when best_config has no results 
 })
 
 
+## ---------------------------------------------------------------------------
+## The header, the best configuration and the member counts
+## ---------------------------------------------------------------------------
+
+test_that("print() heads a fitted object with its class, and gives the best configuration's CV and test metrics", {
+
+  ## A fit is also an eval, so the header names the most derived class
+  fx       <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+  ev       <- fx$evaluation
+  metric   <- ev$rank_metric
+  best_row <- ev$results[ev$results$config_id == ev$best_config, ]
+  expect_identical(class(fx)[1], "horizons_fit")
+
+  out <- utils::capture.output(print(fx))
+
+  expect_identical(out[1], "── horizons_fit ──")
+  expect_identical(
+    models_section(out, "Evaluation"),
+    c(paste0("   ├─ Configs evaluated: ", nrow(ev$results)),
+      paste0("   ├─ Successful: ", nrow(ev$results)),
+      paste0("   └─ Best: ", ev$best_config, " — CV ", toupper(metric), " = ",
+             round(best_row[[paste0("cv_", metric)]], 3),
+             " (test ", toupper(metric), " = ", round(best_row[[metric]], 3), ")"))
+  )
+
+})
+
+test_that("summary() gives the best configuration with its model and test metrics, and counts failed members only when there are some", {
+
+  fx       <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+  ev       <- fx$evaluation
+  best_row <- ev$results[ev$results$config_id == ev$best_config, ]
+  expect_identical(fx$config$configs$model[fx$config$configs$config_id == ev$best_config], "cubist")
+  expect_identical(fx$models$results$status, rep("success", 3))
+
+  ## The best configuration and its test metrics
+  section <- models_section(utils::capture.output(summary(fx)), "Evaluation")
+  at      <- which(section == paste0("   ├─ Best: ", ev$best_config, " (Cubist)"))
+
+  expect_length(at, 1)
+  expect_identical(section[at + 1],
+                   paste0("   │     └─ RMSE = ", round(best_row$rmse, 3),
+                          ", RPD = ", round(best_row$rpd, 3),
+                          ", RSQ = ", round(best_row$rsq, 3),
+                          ", CCC = ", round(best_row$ccc, 3)))
+
+  ## Every member succeeded: no failed count; one failed: counted
+  results_line <- function(obj) {
+    grep("Results:", models_section(utils::capture.output(summary(obj)), "Models (fit)"),
+         value = TRUE, fixed = TRUE)
+  }
+
+  expect_identical(results_line(fx), "   ├─ Results: 3 success")
+
+  fx$models$results$status[3] <- "failed"
+  expect_identical(results_line(fx), "   ├─ Results: 2 success, 1 failed")
+
+})
+
+
 ## ----------------------------------------------------------------------------
 ## The checks every verb's door makes (#234)
 ## ----------------------------------------------------------------------------
@@ -3431,6 +3527,26 @@ describe("the class validators' new checks (#234)", {
 
     expect_true(any(grepl("uq$n_calib (19) does not match the rows of uq$calib (20)",
                           finding_of(validate_horizons_ensemble(obj)), fixed = TRUE)))
+
+  })
+
+  it("refuse an ensemble UQ bundle whose default level is not a single number inside (0, 1)", {
+
+    ## 20 calibration rows support intervals at 0.90, so only the level is
+    ## wrong; a level at or below 0 still yields order-statistic indices
+    for (level in list(0, -0.1, 1, NA_real_)) {
+
+      obj <- make_valid_ensemble()
+      obj$ensemble$uq <- list(method = "cv_plus", members = obj$ensemble$weights$member,
+                              fold_models = list(tibble::tibble(member = "cfg_a", coef = 1)),
+                              calib = tibble::tibble(.row = 1:20, fold = 1L, .pred_oof = 1, truth = 1, residual = 0),
+                              n_calib = 20L, level_default = level)
+
+      expect_true(any(grepl("uq$calib (20 rows) cannot support intervals at level_default",
+                            finding_of(validate_horizons_ensemble(obj)), fixed = TRUE)),
+                  label = paste("level_default", level))
+
+    }
 
   })
 

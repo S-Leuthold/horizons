@@ -690,6 +690,31 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
+  it("tunes xgboost over every combination of three trees, depths and learning rates, its fixed settings among them", {
+
+    fitted <- ens_fitted()
+
+    ## The search is stopped once it has the grid: the full xgboost search
+    ## is the slow tier's, in the test above
+    searched <- NULL
+    local_mocked_bindings(tune_grid = function(..., grid) {
+      searched <<- grid
+      stop("stopped after the grid")
+    }, .package = "tune")
+
+    expect_error(
+      suppressWarnings(ensemble(fitted, method = "xgb", optimize = TRUE, compute_uq = FALSE)),
+      class = "horizons_error_ensemble_failed"
+    )
+
+    expect_identical(searched, tidyr::expand_grid(
+      trees      = c(300, 500, 800),
+      tree_depth = c(2, 3, 4),
+      learn_rate = c(0.01, 0.05, 0.1)
+    ))
+
+  })
+
   it("keeps only the chosen candidate's tune warnings when it tunes, and says when it cannot tell them apart (#109)", {
 
     fitted <- ens_fitted()
