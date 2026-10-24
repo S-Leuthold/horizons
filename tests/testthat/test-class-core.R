@@ -3542,9 +3542,12 @@ describe("the class validators' new checks (#234)", {
                               calib = tibble::tibble(.row = 1:20, fold = 1L, .pred_oof = 1, truth = 1, residual = 0),
                               n_calib = 20L, level_default = level)
 
-      expect_true(any(grepl("uq$calib (20 rows) cannot support intervals at level_default",
-                            finding_of(validate_horizons_ensemble(obj)), fixed = TRUE)),
+      findings <- finding_of(validate_horizons_ensemble(obj))
+
+      expect_true(any(grepl("uq has no level_default in (0, 1)", findings, fixed = TRUE)),
                   label = paste("level_default", level))
+      expect_false(any(grepl("cannot support intervals", findings, fixed = TRUE)),
+                   label = paste("level_default", level))
 
     }
 

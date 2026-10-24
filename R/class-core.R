@@ -1813,8 +1813,12 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
           errors <- c(errors, cli::format_inline("{.field uq$n_calib} ({uq$n_calib}) does not match the rows of {.field uq$calib} ({n_calib})"))
 
         } else if (!(is.numeric(level) && length(level) == 1 && !is.na(level) &&
-                     level > 0 && level < 1) ||
-                   is.null(cv_plus_indices(n_calib, level))) {
+                     level > 0 && level < 1)) {
+
+          ## In the fit validator's words for the same field
+          errors <- c(errors, cli::format_inline("{.field uq} has no {.field level_default} in (0, 1)"))
+
+        } else if (is.null(cv_plus_indices(n_calib, level))) {
 
           errors <- c(errors, cli::format_inline("{.field uq$calib} ({n_calib} row{?s}) cannot support intervals at {.field level_default} {.val {level}}"))
 
