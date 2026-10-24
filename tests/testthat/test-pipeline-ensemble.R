@@ -563,6 +563,25 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
+  it("names a failure outside its labelled steps by the meta-learner itself", {
+
+    fitted <- ens_fitted()
+
+    ## The engine fails before any of its labelled steps begins
+    local_mocked_bindings(fit_ensemble_weighted = function(...) stop("the engine broke"))
+
+    err <- expect_error(
+      suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE)),
+      class = "horizons_error_ensemble_failed"
+    )
+
+    expect_identical(err$results$step, NA_character_)
+    expect_match(err$results$error_message, "^Meta-learner failed: ")
+    expect_match(err$results$error_message, "the engine broke", fixed = TRUE)
+    expect_match(conditionMessage(err), "Meta-learner failed: ", fixed = TRUE)
+
+  })
+
   it("stops as systemic when a parallel worker dies", {
 
     fitted <- ens_fitted()

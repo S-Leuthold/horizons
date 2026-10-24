@@ -2,9 +2,10 @@
 ## Tests: step_transform_spectra()
 ## ---------------------------------------------------------------------------
 ##
-## What the step refuses. Its transforms, window rules, name collisions and
-## unusable-spectrum warning are tested in test-utils-recipes.R. Each test
-## asserts the class and matches the finding's own text.
+## What the step refuses, and the storage type of what it bakes. Its
+## transforms, window rules, name collisions and unusable-spectrum warning are
+## tested in test-utils-recipes.R. Each refusal test asserts the class and
+## matches the finding's own text.
 
 ## Helper: n spectra of p bands named wn_<wavenumber>, and an outcome.
 ## Drawn under the caller's seed.
@@ -75,6 +76,41 @@ describe("step_transform_spectra() refuses input it cannot use", {
     expect_match(msg, "Spectral matrix: 20 x 30", fixed = TRUE)
     expect_match(msg, "Window size: 9", fixed = TRUE)
     expect_match(conditionMessage(run$parent), "convolution failed", fixed = TRUE)
+
+  })
+
+})
+
+describe("step_transform_spectra() bakes doubles", {
+
+  it("returns double spectra from integer columns under every method, raw included", {
+
+    ## Arrange: integer counts, varied enough that no spectrum is flat
+    withr::local_seed(1)
+    d <- transform_data()
+    for (col in grep("^wn_", names(d), value = TRUE)) d[[col]] <- sample.int(1000L, nrow(d))
+
+    for (method in c("raw", "snv", "deriv1")) {
+
+      rec <- recipes::recipe(SOC ~ ., data = d) |>
+        step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = method, window_size = 5)
+
+      ## Act
+      baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
+      spec  <- baked[, grep("^spec", names(baked)), drop = FALSE]
+
+      ## Assert: the step ran, trimming two bands from each edge
+      expect_identical(ncol(spec), 26L, info = method)
+      expect_true(all(vapply(spec, is.double, logical(1))), info = method)
+
+    }
+
+    ## And the raw method keeps the values it was given
+    raw <- recipes::bake(recipes::prep(
+      recipes::recipe(SOC ~ ., data = d) |>
+        step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "raw", window_size = 5)
+    ), new_data = NULL)
+    expect_equal(raw$spec01, as.double(d$wn_3996))
 
   })
 
