@@ -388,22 +388,21 @@ test_that("sdev_floor never empties the space and never adds components", {
 })
 
 
-test_that("a pool with no spread keeps its component count and records a ratio of one", {
+test_that("a pool with no spread is refused, whether ncomp is a count or a proportion", {
 
-  ## Identical rows centre to zero, so PC1's sd is zero and the ratio to it
-  ## is undefined; the floor then has nothing to cut. Small integers keep
-  ## the centring exact on any platform.
+  ## Identical rows centre to zero, so no component has spread. Small
+  ## integers keep the centring exact on any platform.
   M  <- matrix(rep(seq_len(20), each = 10), nrow = 10,
                dimnames = list(sprintf("D%02d", seq_len(10)), NULL))
   wn <- seq(4000, by = -4, length.out = ncol(M))
 
-  sp <- build_similarity_space(M, wn, snv = FALSE, derivative = 0L, ncomp = 3L)
+  for (ncomp in list(3L, 0.99)) {
 
-  expect_identical(sp$sdev, c(0, 0, 0))
-  expect_identical(sp$ncomp, 3L)
-  expect_identical(sp$ncomp_variance, 3L)
-  expect_identical(sp$sdev_ratio, c(1, 1, 1))
-  expect_identical(dim(sp$scores), c(10L, 3L))
+    expect_error(build_similarity_space(M, wn, snv = FALSE, derivative = 0L, ncomp = ncomp),
+                 "Every pool spectrum is the same after the similarity transform",
+                 fixed = TRUE, class = "horizons_error_input")
+
+  }
 
 })
 
