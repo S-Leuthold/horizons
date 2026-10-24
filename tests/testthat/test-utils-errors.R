@@ -103,7 +103,10 @@ describe("distinct_config_errors()", {
   it("is empty when no row has a message", {
 
     expect_length(distinct_config_errors(results[3, ]), 0)
-    expect_length(distinct_config_errors(tibble::tibble(config_id = "a")), 0)
+
+    ## Without the column too, and without tibble's unknown-column warning
+    expect_silent(none <- distinct_config_errors(tibble::tibble(config_id = "a")))
+    expect_length(none, 0)
 
   })
 

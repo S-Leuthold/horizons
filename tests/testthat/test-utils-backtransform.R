@@ -266,7 +266,9 @@ describe("compute_original_scale_metrics()", {
     ## Pairs are dropped before the count, so one complete pair is too few:
     ## six NA metrics, counted, and no warning
     expect_no_warning(short <- compute_original_scale_metrics(c(1, 2, NA), c(1.1, NA, 3)))
+    expect_identical(names(short), names(result))
     expect_identical(short$.metric, result$.metric)
+    expect_identical(short$.estimator, result$.estimator)
     expect_true(all(is.na(short$.estimate)))
     expect_identical(unique(short$n), 1L)
 

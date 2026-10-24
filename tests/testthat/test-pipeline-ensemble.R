@@ -147,13 +147,17 @@ describe("ensemble() - no double back-transformation", {
 
 describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 
-  it("penalized fixed-spec path completes and yields genuine OOF", {
+  it("penalized fixed-spec path completes and yields genuine OOF, with its fixed settings", {
 
     fitted <- ens_fitted()
     ens    <- ens_built("penalized")
     expect_true(inherits(ens, "horizons_ensemble"))
     expect_equal(nrow(ens$ensemble$oof_predictions),
                  length(unique(fitted$models$cv_predictions$.row)))
+
+    args <- workflows::extract_spec_parsnip(ens$ensemble$model)$args
+    expect_identical(rlang::eval_tidy(args$penalty), 0.01)
+    expect_identical(rlang::eval_tidy(args$mixture), 1)
 
   })
 
@@ -556,6 +560,25 @@ describe("ensemble() - the meta-learner as one unit", {
     ## Under debug nothing is contained: the engine's own error
     raw <- expect_error(run(debug = TRUE), "the weights broke", fixed = TRUE)
     expect_false(inherits(raw, "horizons_error"))
+
+  })
+
+  it("names a failure outside its labelled steps by the meta-learner itself", {
+
+    fitted <- ens_fitted()
+
+    ## The engine fails before any of its labelled steps begins
+    local_mocked_bindings(fit_ensemble_weighted = function(...) stop("the engine broke"))
+
+    err <- expect_error(
+      suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE)),
+      class = "horizons_error_ensemble_failed"
+    )
+
+    expect_identical(err$results$step, NA_character_)
+    expect_match(err$results$error_message, "^Meta-learner failed: ")
+    expect_match(err$results$error_message, "the engine broke", fixed = TRUE)
+    expect_match(conditionMessage(err), "Meta-learner failed: ", fixed = TRUE)
 
   })
 

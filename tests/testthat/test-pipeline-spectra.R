@@ -520,6 +520,32 @@ test_that("spectra() refuses a directory with no OPUS files", {
 
 })
 
+test_that("spectra() reads only the .csv files of a directory, and refuses one with none", {
+
+  ## Arrange: a CSV beside a text file, and a directory of the text file alone
+
+  dir <- withr::local_tempdir()
+  readr::write_csv(tibble::tibble(Sample_ID = "A", `4000` = 0.1, `3998` = 0.2),
+                   file.path(dir, "one.csv"))
+  writeLines("not a spectrum", file.path(dir, "notes.txt"))
+
+  empty <- withr::local_tempdir()
+  writeLines("not a spectrum", file.path(empty, "notes.txt"))
+
+  ## Act and assert --------------------------------------------------------
+
+  expect_no_warning(out <- spectra(dir, type = "csv"))
+  expect_identical(out$data$analysis$sample_id, "A")
+  expect_match(read_note(out)$message, "^Read 1 CSV file")
+
+  expect_error(
+    spectra(empty, type = "csv"),
+    "No CSV files found in directory",
+    fixed = TRUE, class = "horizons_error_input"
+  )
+
+})
+
 test_that("spectra() refuses OPUS input when opusreader2 is not installed, saying so", {
 
   ## Arrange ---------------------------------------------------------------

@@ -1673,8 +1673,13 @@ describe("exhaustive_grid()", {
     expect_identical(nrow(exhaustive_grid(two, 4)), 4L)
     expect_null(exhaustive_grid(two, 3))
 
-    ## A continuous parameter, or a range not finalized, has no points to count
+    ## A continuous parameter, transformed or not, an integer one on a
+    ## transformed scale, or a range not finalized, has no points to count
     expect_null(exhaustive_grid(dials::parameters(list(dials::num_comp(c(1L, 4L)), dials::penalty())), 1e6))
+    expect_null(exhaustive_grid(dials::parameters(list(dials::num_comp(c(1L, 4L)), dials::mixture())), 1e6))
+    log_k <- dials::new_quant_param(type = "integer", range = c(0L, 2L), inclusive = c(TRUE, TRUE),
+                                    trans = dials::penalty()$trans, label = c(k = "k"))
+    expect_null(exhaustive_grid(dials::parameters(list(log_k)), 1e6))
     expect_null(exhaustive_grid(dials::parameters(list(dials::mtry())), 1e6))
 
   })

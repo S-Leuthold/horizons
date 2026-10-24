@@ -319,6 +319,10 @@ test_that("average() names every sample whose replicates all failed, on the log,
     expect_setequal(row$ids[[1]], c("S1", "S2"))
     expect_identical(row$type, if (mode == "warn") "warning" else "note", info = mode)
 
+    ## The message names them too, for a reader of the log alone
+    expect_match(row$message, "All replicates failed QC for 2 samples", fixed = TRUE, info = mode)
+    expect_match(row$message, 'Samples: "S1" and "S2".', fixed = TRUE, info = mode)
+
   }
 
 })
@@ -1126,6 +1130,33 @@ test_that("compute_replicate_quality() identifies outliers via iterative removal
   expect_equal(qc$outliers, 4L)
   expect_false(qc$all_fail)
 
+
+})
+
+test_that("compute_replicate_quality() sets aside a replicate that shares no band with the others, rather than failing it", {
+
+  ## Replicates 1 and 2 are read on bands 1-6, replicate 3 only on bands 7-10:
+  ## each has spread, but 3 has no complete pair with either of the others
+  set.seed(625)
+  base <- c(1, 3, 2, 5, 4, 6, 8, 7, 10, 9)
+  spectra <- rbind(base + stats::rnorm(10, 0, 0.01),
+                   base + stats::rnorm(10, 0, 0.01),
+                   base + stats::rnorm(10, 0, 0.01))
+  spectra[1:2, 7:10] <- NA
+  spectra[3, 1:6]    <- NA
+
+  qc <- horizons:::compute_replicate_quality(spectra, threshold = 0.9)
+
+  expect_identical(qc$uncorrelatable, 3L)
+  expect_identical(qc$outliers, integer(0))
+  expect_false(qc$all_fail)
+
+  ## With only one replicate left to correlate, there is no check to run
+  qc <- horizons:::compute_replicate_quality(spectra[c(1, 3), ], threshold = 0.9)
+
+  expect_identical(qc$uncorrelatable, 1:2)
+  expect_identical(qc$outliers, integer(0))
+  expect_false(qc$all_fail)
 
 })
 

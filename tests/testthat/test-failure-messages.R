@@ -344,6 +344,22 @@ describe("condition_summary()", {
 
   })
 
+  it("reports text it cannot read as unreadable rather than failing", {
+
+    ## Rendered text whose characters cannot be read: named as an error
+    local_mocked_s3_method("as.character", "unreadable_note", function(x, ...) stop("no text"))
+    note <- structure("hidden", class = "unreadable_note")
+
+    expect_identical(condition_summary(note), "error (message could not be read)")
+
+    ## A condition whose chain cannot be read: named by its class
+    local_mocked_bindings(condition_cause = function(cnd) stop("chain could not be walked"))
+
+    expect_identical(condition_summary(simpleError("boom")),
+                     "simpleError (message could not be read)")
+
+  })
+
   it("keeps a message whose bytes are not valid in the session encoding", {
 
     ## Invalid UTF-8 in a UTF-8 session, which made strsplit() and nchar()
@@ -1069,6 +1085,12 @@ describe("tune_note_messages() and tune_failure_cause()", {
     expect_identical(tune_failure_cause(results),
                      "e main (2 of 3 folds), plus 1 other distinct error")
 
+    several <- fake_tune_results(fold_notes("error", "e main"), fold_notes("error", "e main"),
+                                 fold_notes("error", "e second"), fold_notes("error", "e third"))
+
+    expect_identical(tune_failure_cause(several),
+                     "e main (2 of 4 folds), plus 2 other distinct errors")
+
   })
 
   it("reads a rendered error chain in a note", {
@@ -1097,6 +1119,11 @@ describe("tune_note_messages() and tune_failure_cause()", {
 
     expect_length(lines, 1L)
     expect_match(lines, "^tune's notes could not be read: ")
+
+    ## The error tune raised reading them is the reason given
+    local_mocked_bindings(collect_notes = function(...) stop("the notes were lost"), .package = "tune")
+    expect_identical(tune_note_messages(list(), type = "warning"),
+                     "tune's notes could not be read: the notes were lost")
 
     ## Notes of another shape are as unreadable
     local_mocked_bindings(collect_notes = function(...) tibble::tibble(x = 1), .package = "tune")
@@ -1173,12 +1200,18 @@ describe("the notes of the chosen candidate (#109)", {
     expect_false(warned(2L, 5L))
     expect_false(warned(3L, 2L))
 
+    ## A mapped candidate adds no line saying its warnings are the grid's
+    expect_null(unmapped_line(candidate_of(res, params(2L, 5L), grid, wf)))
+
     ## A schedule of another shape keeps every grid note, with the reason,
     ## rather than failing: the schedule is tune's developer interface
     local_mocked_bindings(schedule_grid = function(...) tibble::tibble(stage = 1L), .package = "tune")
     cand <- candidate_of(res, params(2L, 5L), grid, wf)
     expect_null(cand$model_stages)
     expect_identical(cand$unmapped, "tune's grid schedule has no model_stage column")
+    expect_identical(unmapped_line(cand),
+                     paste0("The warnings of every grid candidate are shown, not only the chosen one's: ",
+                            "tune's grid schedule has no model_stage column."))
 
     local_mocked_bindings(schedule_grid = function(...) tibble::tibble(model_stage = list(tibble::tibble(mtry = 2L))),
                           .package = "tune")

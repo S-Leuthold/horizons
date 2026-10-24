@@ -238,10 +238,10 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
 
   ## Rows with no reading (NA, as prune = FALSE writes them): a pruned row is
   ## below the threshold all the same, since the gate pruned it, and a
-  ## success is not
+  ## success is not. A member with no cross-validated RPD is listed as NA.
   it("counts a pruned member without a reading as below the threshold, and a success without one as not", {
 
-    unread <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), cv_rpd = c(0.93, 0.88),
+    unread <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), cv_rpd = c(0.93, NA_real_),
                              below_prune_threshold = NA, prune_threshold = NA_real_)
 
     pruned <- unread
@@ -256,6 +256,7 @@ describe("fit() - members below the prune threshold at bayesian_iter = 0 (#38)",
     log <- logged(pruned, fallback = TRUE)
     expect_identical(log$topic, "quality")
     expect_match(log$message, "prune threshold (not recorded on these rows)", fixed = TRUE)
+    expect_match(log$message, "Cross-validated RPD: cfg_001 0.93, cfg_002 NA.", fixed = TRUE)
     expect_identical(log$ids[[1]], c("cfg_001", "cfg_002"))
 
     succeeded <- unread

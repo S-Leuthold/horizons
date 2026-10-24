@@ -307,6 +307,7 @@ describe("validate() sample count checks", {
 
     p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
     expect_equal(p001b$status, "pass")
+    expect_identical(p001b$value, "10 (need >= 10)")
 
   })
 
@@ -437,6 +438,7 @@ describe("validate() outcome checks", {
 
     p004 <- result$validation$checks[result$validation$checks$check_id == "P004", ]
     expect_equal(p004$status, "pass")
+    expect_identical(p004$value, "20/100 (20%)")
 
   })
 
@@ -765,6 +767,17 @@ describe("validate() spectral outlier detection", {
     expect_equal(p007$value, "2")
 
     expect_equal(length(result$validation$outliers$spectral_ids), 0)
+
+    ## One wavenumber is one column that varies: the same skip, nothing near zero
+    one <- make_configured_hd(n_predictors = 1)
+
+    expect_warning(result <- validate(one),
+                   "Spectral outlier detection did not run: fewer than 2 predictor columns vary.",
+                   fixed = TRUE, class = "horizons_warning_skipped")
+
+    p007 <- result$validation$checks[result$validation$checks$check_id == "P007", ]
+    expect_identical(p007$status, "pass")
+    expect_identical(p007$value, "0")
 
   })
 
@@ -1268,10 +1281,11 @@ describe("validate() passed logic and CLI output", {
 
   })
 
-  test_that("passed=TRUE when all checks pass", {
+  test_that("passed=TRUE when all checks pass, in a table with the report's columns in order", {
 
     result <- quiet_validate(make_configured_hd())
     expect_true(result$validation$passed)
+    expect_named(result$validation$checks, c("description", "status", "severity", "value", "check_id"))
 
   })
 
