@@ -350,18 +350,23 @@ describe("tuning_metric_set()", {
 
     ## As the single-config fits call it: the transformation and the range
     ## are the caller's variables, beside its data
-    build_beside_data <- function() {
-      training_data  <- matrix(0, nrow = 1000, ncol = 1000)
+    build_beside_data <- function(n_rows) {
+      training_data  <- matrix(0, nrow = n_rows, ncol = 1000)
       transformation <- "log"
       outcome_range  <- c(0, Inf)
       list(set       = tuning_metric_set(transformation, outcome_range = outcome_range),
            data_size = length(serialize(training_data, NULL)))
     }
 
-    built <- build_beside_data()
+    big   <- build_beside_data(1000)
+    small <- build_beside_data(1)
 
-    expect_gt(built$data_size, 8e6)
-    expect_lt(length(serialize(built$set, NULL)), built$data_size / 10)
+    ## The set's own size depends on how the package was installed (kept
+    ## source references add to it), so it is measured against itself beside
+    ## a one-row frame: the caller's data must add nothing
+    expect_gt(big$data_size, 8e6)
+    expect_lt(length(serialize(big$set, NULL)) - length(serialize(small$set, NULL)),
+              big$data_size / 10)
 
   })
 
