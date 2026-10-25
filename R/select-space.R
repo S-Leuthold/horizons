@@ -230,6 +230,17 @@ build_similarity_space <- function(M, wn,
                              window = window, poly = poly, mask = mask,
                              min_cols = min_cols, call = call)
 
+  ## A pool with no spread has no components to rank neighbours by, however
+  ## many are asked for, so it is refused here rather than decomposed
+  if (all(apply(tr$matrix, 2, stats::var) == 0)) {
+
+    abort_horizons(c(
+      "Every pool spectrum is the same after the similarity transform, so the space has no spread to rank neighbours by.",
+      "i" = "Check the pool: identical spectra give no neighbours to choose between."
+    ), kind = "input", call = call)
+
+  }
+
   out <- list(
     settings = list(snv = snv, derivative = as.integer(derivative),
                     window = as.integer(window), poly = as.integer(poly),
@@ -253,7 +264,7 @@ build_similarity_space <- function(M, wn,
     ## Noise floor on the retained set ----------------------------------------
 
     k_var <- k
-    ratio <- if (pca$sdev[1] > 0) pca$sdev / pca$sdev[1] else rep(1, length(pca$sdev))
+    ratio <- pca$sdev / pca$sdev[1]
 
     ### PC1's ratio is 1 and the floor is below 1, so at least one stays
     if (sdev_floor > 0) k <- sum(ratio[seq_len(k_var)] >= sdev_floor)

@@ -147,13 +147,17 @@ describe("ensemble() - no double back-transformation", {
 
 describe("ensemble() - optimize = FALSE runs (lazy-quosure regression guard)", {
 
-  it("penalized fixed-spec path completes and yields genuine OOF", {
+  it("penalized fixed-spec path completes and yields genuine OOF, with its fixed settings", {
 
     fitted <- ens_fitted()
     ens    <- ens_built("penalized")
     expect_true(inherits(ens, "horizons_ensemble"))
     expect_equal(nrow(ens$ensemble$oof_predictions),
                  length(unique(fitted$models$cv_predictions$.row)))
+
+    args <- workflows::extract_spec_parsnip(ens$ensemble$model)$args
+    expect_identical(rlang::eval_tidy(args$penalty), 0.01)
+    expect_identical(rlang::eval_tidy(args$mixture), 1)
 
   })
 
@@ -559,6 +563,25 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
+  it("names a failure outside its labelled steps by the meta-learner itself", {
+
+    fitted <- ens_fitted()
+
+    ## The engine fails before any of its labelled steps begins
+    local_mocked_bindings(fit_ensemble_weighted = function(...) stop("the engine broke"))
+
+    err <- expect_error(
+      suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE)),
+      class = "horizons_error_ensemble_failed"
+    )
+
+    expect_identical(err$results$step, NA_character_)
+    expect_match(err$results$error_message, "^Meta-learner failed: ")
+    expect_match(err$results$error_message, "the engine broke", fixed = TRUE)
+    expect_match(conditionMessage(err), "Meta-learner failed: ", fixed = TRUE)
+
+  })
+
   it("stops as systemic when a parallel worker dies", {
 
     fitted <- ens_fitted()
@@ -687,6 +710,31 @@ describe("ensemble() - the meta-learner as one unit", {
       expect_identical(nrow(tune::collect_notes(searched)), 0L, info = method)
 
     }
+
+  })
+
+  it("tunes xgboost over every combination of three trees, depths and learning rates, its fixed settings among them", {
+
+    fitted <- ens_fitted()
+
+    ## The search is stopped once it has the grid: the full xgboost search
+    ## is the slow tier's, in the test above
+    searched <- NULL
+    local_mocked_bindings(tune_grid = function(..., grid) {
+      searched <<- grid
+      stop("stopped after the grid")
+    }, .package = "tune")
+
+    expect_error(
+      suppressWarnings(ensemble(fitted, method = "xgb", optimize = TRUE, compute_uq = FALSE)),
+      class = "horizons_error_ensemble_failed"
+    )
+
+    expect_identical(searched, tidyr::expand_grid(
+      trees      = c(300, 500, 800),
+      tree_depth = c(2, 3, 4),
+      learn_rate = c(0.01, 0.05, 0.1)
+    ))
 
   })
 

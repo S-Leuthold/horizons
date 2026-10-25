@@ -84,13 +84,16 @@ describe("the pls engine", {
 
   })
 
-  it("fits pls::plsr() on centred, scaled predictors and predicts at its components", {
+  it("fits pls::plsr() by NIPALS on centred, scaled predictors and predicts at its components", {
 
     d   <- make_pls_data()
     fit <- pls_fit(d$x, d$y, ncomp = 5L)
     ref <- pls::plsr(y ~ x, data = data.frame(y = d$y, x = I(d$x)), ncomp = 5,
                      scale = TRUE, method = "oscorespls")
 
+    ## pls's default kernel algorithm predicts the same to rounding, so only
+    ## the fit's record of its algorithm tells them apart
+    expect_identical(fit$method, "oscorespls")
     expect_identical(fit$horizons_ncomp, 5L)
     expect_equal(pls_predict(fit, d$x[1:10, ]),
                  as.numeric(stats::predict(ref, newdata = data.frame(x = I(d$x[1:10, ])), ncomp = 5)))
@@ -101,7 +104,7 @@ describe("the pls engine", {
 
   })
 
-  it("caps the components at the predictors and at the rows less one, and says so", {
+  it("caps the components at the predictors and at the rows less one, says so, and fits at least one", {
 
     d <- make_pls_data(n = 12, p = 40)
     expect_warning(fit <- pls_fit(d$x, d$y, ncomp = 30L),
@@ -114,6 +117,9 @@ describe("the pls engine", {
     expect_identical(fit$horizons_ncomp, 6L)
 
     expect_no_warning(pls_fit(d$x, d$y, ncomp = 6L))
+
+    ## pls::plsr() refuses zero components
+    expect_identical(pls_fit(d$x, d$y, ncomp = 0L)$horizons_ncomp, 1L)
 
   })
 

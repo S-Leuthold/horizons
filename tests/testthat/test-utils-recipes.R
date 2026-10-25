@@ -103,8 +103,31 @@ describe("build_recipe()", {
   ## -----------------------------------------------------------------------
   ## Response transformation
   ## -----------------------------------------------------------------------
-  ## step_log's presence is asserted by the step-order and case tests below,
-  ## which fail without it.
+  ## step_log's presence for "log" is also asserted by the step-order and case
+  ## tests below.
+
+  it("trains log and log10 on the outcome plus one, and skips the step at bake", {
+
+    withr::local_seed(1)
+    td <- make_test_data()
+
+    for (tr in c("log", "log10")) {
+
+      base <- if (tr == "log10") 10 else exp(1)
+      rec  <- build_recipe(make_config_row(transformation = tr), td$data, td$role_map)
+
+      step <- rec$steps[[which(vapply(rec$steps, function(s) class(s)[1], character(1)) == "step_log")]]
+      expect_identical(step$skip, TRUE)
+
+      ## The training outcome is transformed; new data, which carries no
+      ## outcome at predict time, passes through
+      prepped <- recipes::prep(rec, training = td$data)
+      expect_equal(recipes::bake(prepped, new_data = NULL)$SOC, log(td$data$SOC + 1, base = base))
+      expect_equal(recipes::bake(prepped, new_data = td$data)$SOC, td$data$SOC)
+
+    }
+
+  })
 
   it("adds step_sqrt for sqrt transformation", {
 

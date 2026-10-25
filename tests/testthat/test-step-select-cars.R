@@ -651,6 +651,10 @@ describe("step_select_cars() and near-constant bands", {
     expect_gt(length(step$selected_vars), 0L)
     expect_output(print(step), "1 near-constant band dropped before selection", fixed = TRUE)
 
+    ## It clustered, so print() does not say each band was its own
+    ## representative
+    expect_false(any(grepl("Fewer bands than 150", utils::capture.output(print(step)), fixed = TRUE)))
+
   })
 
   it("keeps a band small in absolute terms but not for its spectrum: second derivatives at a wide window", {

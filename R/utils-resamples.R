@@ -145,10 +145,23 @@ rebuild_resamples <- function(data, idx) {
 
   }
 
-  stopifnot(
-    max(idx$train_idx) <= idx$n_rows,
-    max(unlist(idx$fold_idx)) <= length(idx$train_idx)
-  )
+  if (max(idx$train_idx) > idx$n_rows) {
+
+    abort_horizons(c(
+      "{.fn rebuild_resamples} got a training index past the data ({max(idx$train_idx)} of {idx$n_rows} row{?s}).",
+      "x" = "The data and indices must come from the same split."
+    ), kind = "internal")
+
+  }
+
+  if (max(unlist(idx$fold_idx)) > length(idx$train_idx)) {
+
+    abort_horizons(c(
+      "{.fn rebuild_resamples} got a fold index past the training rows ({max(unlist(idx$fold_idx))} of {length(idx$train_idx)}).",
+      "x" = "The data and indices must come from the same split."
+    ), kind = "internal")
+
+  }
 
   ## `class` is passed so the rebuilt splits keep their subclass. Without it
   ## make_splits() returns a bare rsplit, and rsample::internal_calibration_split()

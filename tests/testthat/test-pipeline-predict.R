@@ -780,7 +780,10 @@ describe("predict.horizons_fit() - flagged rows", {
     expect_length(w, 1L)
     expect_identical(w[[1]]$log$ids[[1]], bad$sample_id[3])
     expect_identical(w[[1]]$log$n, 1L)
-    expect_match(conditionMessage(w[[1]]), "not finite after the recipe of", fixed = TRUE)
+
+    ## Both configurations left it non-finite, and the warning names them
+    msg <- gsub("[[:space:]\u00a0]+", " ", conditionMessage(w[[1]]))
+    expect_match(msg, 'not finite after the recipe of "cfg_001" and "cfg_002"', fixed = TRUE)
 
     row3 <- p[p$sample_id == bad$sample_id[3], ]
     expect_true(all(is.na(as.matrix(row3[, c(".pred", ".pred_lower", ".ad_distance")]))))
@@ -817,7 +820,9 @@ describe("predict.horizons_fit() - flagged rows", {
     expect_length(seen$rows, 0L)
     expect_equal(nrow(p), nrow(new_df))
     expect_true(all(c(".pred", ".pred_lower", ".ad_distance", ".ad_flag") %in% names(p)))
-    expect_true(all(is.na(p$.pred)))
+
+    ## A numeric NA, the type .pred has when anything is predicted
+    expect_identical(p$.pred, rep(NA_real_, nrow(new_df)))
 
   })
 

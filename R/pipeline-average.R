@@ -80,7 +80,8 @@
 #' * Uniform within every sample: preserved in output
 #' * Non-uniform within any sample: column dropped from every row, and named
 #'   in a note on the object's log
-#' * `filename` column: always dropped (not meaningful after averaging)
+#' * `filename`, the OPUS input's meta column: always dropped (not meaningful
+#'   after averaging). A response of that name is averaged like any other
 #'
 #' **The log:**
 #' Every sample whose replicates all failed QC is named on the object's
@@ -259,7 +260,7 @@ average <- function(x,
   ## naming columns the averaged table did not have.
 
   response_cols <- role_map$variable[role_map$role %in% c("response", "outcome")]
-  response_cols <- setdiff(response_cols, c(by, "filename"))
+  response_cols <- setdiff(response_cols, by)
 
   ## -------------------------------------------------------------------------
   ## Step 3: Group analysis data
@@ -495,8 +496,10 @@ average <- function(x,
   retained_meta <- c(retained_meta, intersect(".flag", names(averaged)))
 
   ## filename is always dropped (not in meta_cols already) -------------------
+  ## The OPUS input's meta column, that is: a response of that name is a
+  ## response, kept and averaged like any other
 
-  if ("filename" %in% names(x$data$analysis)) {
+  if ("filename" %in% role_map$variable[role_map$role == "meta"]) {
 
     dropped_meta <- c("filename", dropped_meta)
 

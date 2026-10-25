@@ -395,10 +395,10 @@ select_training <- function(x, library,
 
   }
 
-  scope_ok  <- is.character(scope)  && all(scope  %in% c("batch", "cluster", "sample", "global"))
-  space_ok  <- is.character(space)  && all(space  %in% c("pca", "pls"))
-  metric_ok <- is.character(metric) && all(metric %in% c("mahalanobis", "euclidean", "cosine"))
-  depth_ok  <- is.character(depth) && all(depth %in% c("topsoil", "all"))
+  scope_ok  <- is.character(scope)  && length(scope)  >= 1L && all(scope  %in% c("batch", "cluster", "sample", "global"))
+  space_ok  <- is.character(space)  && length(space)  >= 1L && all(space  %in% c("pca", "pls"))
+  metric_ok <- is.character(metric) && length(metric) >= 1L && all(metric %in% c("mahalanobis", "euclidean", "cosine"))
+  depth_ok  <- is.character(depth)  && length(depth)  >= 1L && all(depth  %in% c("topsoil", "all"))
 
   if (!scope_ok)  errors <- c(errors, cli::format_inline("{.arg scope} must be one of batch, cluster, sample, global"))
   if (!space_ok)  errors <- c(errors, cli::format_inline("{.arg space} must be pca or pls"))

@@ -104,6 +104,23 @@ test_that("nearest_neighbours() cosine matches brute force", {
 })
 
 
+test_that("nearest_neighbours() cosine gives a pool row on the centroid an NA distance, last", {
+
+  ## p3 sits on the centroid and p4 a rounding error off it: neither has a
+  ## defined angle, so both get NA (not NaN, and not the angle p4's direction
+  ## would give, which ties it with p1) and sort after the rows that have one
+  Sp <- rbind(p1 = c(1, 0), p2 = c(0, 1), p3 = c(0, 0), p4 = c(1e-20, 0))
+  St <- rbind(t1 = c(1, 0.1))
+
+  nn <- nearest_neighbours(St, Sp, k = 4L, metric = "cosine")
+
+  expect_identical(unname(nn$ids[1, ]), c("p1", "p2", "p3", "p4"))
+  expect_equal(unname(nn$dist[1, 1:2]), 1 - c(1, 0.1) / sqrt(1.01), tolerance = 1e-12)
+  expect_identical(unname(nn$dist[1, 3:4]), c(NA_real_, NA_real_))
+
+})
+
+
 test_that("nearest_neighbours() chunked equals unchunked", {
 
   s  <- fixture_scores()

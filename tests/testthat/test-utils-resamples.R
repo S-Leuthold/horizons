@@ -146,6 +146,20 @@ describe("resample_indices() / rebuild_resamples()", {
 
   })
 
+  it("round-trips a split that holds out the last row", {
+
+    fx <- make_resample_fixture(n = 60, n_wn = 5, strata = FALSE)
+
+    ## Precondition: the highest training index is below the row count
+    expect_lt(max(fx$split$in_id), nrow(fx$data))
+
+    rb <- rebuild_resamples(fx$split$data, resample_indices(fx$split, fx$folds))
+
+    expect_equal(rsample::training(rb$split), rsample::training(fx$split))
+    expect_equal(rsample::testing(rb$split),  rsample::testing(fx$split))
+
+  })
+
 })
 
 
@@ -243,6 +257,28 @@ describe("rebuild_resamples() fails at the boundary", {
     idx <- resample_indices(fx$split, fx$folds)
 
     expect_error(rebuild_resamples(fx$data[1:100, ], idx), "same split", class = "horizons_error_internal")
+
+  })
+
+  it("rejects a training index past the data, and a fold index past the training rows", {
+
+    fx  <- make_resample_fixture(n = 60, n_wn = 5, strata = FALSE)
+    idx <- resample_indices(fx$split, fx$folds)
+
+    past_data <- idx
+    past_data$train_idx[1] <- idx$n_rows + 1L
+
+    expect_error(rebuild_resamples(fx$split$data, past_data),
+                 sprintf("got a training index past the data (%d of %d rows).", idx$n_rows + 1L, idx$n_rows),
+                 fixed = TRUE, class = "horizons_error_internal")
+
+    past_train <- idx
+    past_train$fold_idx[[1]][1] <- length(idx$train_idx) + 1L
+
+    expect_error(rebuild_resamples(fx$split$data, past_train),
+                 sprintf("got a fold index past the training rows (%d of %d).",
+                         length(idx$train_idx) + 1L, length(idx$train_idx)),
+                 fixed = TRUE, class = "horizons_error_internal")
 
   })
 

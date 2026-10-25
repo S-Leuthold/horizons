@@ -2,8 +2,8 @@
 ## Tests: ensemble-helpers.R
 ## ---------------------------------------------------------------------------
 ## The out-of-fold matrix's row order; the refusals inside the meta-learner
-## scaffold and the weighted combine, the step each of the scaffold's failures
-## is named by, and the scope of the warnings tune noted for it; and the
+## scaffold and the weighted combine, the step each of the scaffold's and the
+## weighted engine's failures is named by, and the scope of the warnings tune noted for it; and the
 ## engines' parts that the fixture cannot reach: the improvement on a
 ## metric where lower is better (the fixture ranks by rpd), the weights of the
 ## weighted engine's tuned rule and of a member xgboost never splits on, and
@@ -207,6 +207,79 @@ describe("fit_tuned_meta_learner() - the step a failure is named by", {
     local_mocked_bindings(build_ensemble_contract = function(...) stop("the contract broke"))
 
     failure <- meta_failure(fitted, optimize = FALSE)
+
+    expect_identical(failure$step, "test_metrics")
+    expect_match(unit_failure_message(failure, "Meta-learner"),
+                 "Test metrics failed: the contract broke", fixed = TRUE)
+
+  })
+
+})
+
+
+## =========================================================================
+## fit_ensemble_weighted() - the step a failure is named by
+## =========================================================================
+
+describe("fit_ensemble_weighted() - the step a failure is named by", {
+
+  ## Runs it as ensemble() does, inside the meta-learner's unit, and returns
+  ## the unit's failure record. `fitted` is taken before any mock.
+  weighted_failure <- function(fitted) {
+
+    members <- gather_members(fitted)$members
+    oof     <- build_oof_matrix(fitted, members)
+
+    out <- run_unit(
+      fit_ensemble_weighted(fitted, members, oof, rank_metric = "rpd", optimize = FALSE),
+      unit = "meta_learner", id = "weighted"
+    )
+
+    expect_true(out$failed)
+
+    out$records[out$records$type == "failure", , drop = FALSE]
+
+  }
+
+  it("names the member weights when they cannot be derived", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(derive_member_weights = function(...) stop("the weights broke"))
+
+    failure <- weighted_failure(fitted)
+
+    expect_identical(failure$step, "member_weights")
+    expect_match(unit_failure_message(failure, "Meta-learner"),
+                 "Member weights failed: the weights broke", fixed = TRUE)
+
+  })
+
+  it("names the combination when the members' test predictions cannot be combined", {
+
+    fitted <- ens_fitted()
+
+    ## Test predictions without the sample ids the combination groups by
+    local_mocked_bindings(predict_members_on_test = function(object, members, ...) {
+      tibble::tibble(config_id = members, .pred = 1, truth = 1)
+    })
+
+    failure <- weighted_failure(fitted)
+
+    expect_identical(failure$step, "combine")
+    expect_match(unit_failure_message(failure, "Meta-learner"),
+                 "Ensemble combination failed:", fixed = TRUE)
+    expect_match(failure$message, "sample_id", fixed = TRUE)
+
+  })
+
+  it("names the test metrics when the contract cannot be built", {
+
+    fitted <- ens_fitted()
+
+    local_mocked_bindings(build_ensemble_contract = function(...) stop("the contract broke"))
+
+    failure <- weighted_failure(fitted)
 
     expect_identical(failure$step, "test_metrics")
     expect_match(unit_failure_message(failure, "Meta-learner"),

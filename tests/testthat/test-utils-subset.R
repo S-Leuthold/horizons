@@ -301,6 +301,15 @@ test_that("subset_rows() filters selection membership to surviving rows", {
   expect_setequal(unique(out$selection$membership$pool_id), keep)
   expect_true(all(out$selection$membership$pool_id %in% out$data$analysis$sample_id))
 
+  ## The record's tables are data frames, not necessarily tibbles: a plain
+  ## data frame is filtered to the same rows
+  obj$selection$membership <- as.data.frame(obj$selection$membership)
+  plain <- subset_rows(obj, keep)
+
+  expect_s3_class(plain$selection$membership, "data.frame")
+  expect_identical(plain$selection$membership$pool_id, out$selection$membership$pool_id)
+  expect_identical(plain$selection$membership$property, out$selection$membership$property)
+
 })
 
 

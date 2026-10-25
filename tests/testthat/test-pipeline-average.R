@@ -319,6 +319,10 @@ test_that("average() names every sample whose replicates all failed, on the log,
     expect_setequal(row$ids[[1]], c("S1", "S2"))
     expect_identical(row$type, if (mode == "warn") "warning" else "note", info = mode)
 
+    ## The message names them too, for a reader of the log alone
+    expect_match(row$message, "All replicates failed QC for 2 samples", fixed = TRUE, info = mode)
+    expect_match(row$message, 'Samples: "S1" and "S2".', fixed = TRUE, info = mode)
+
   }
 
 })
@@ -839,6 +843,28 @@ test_that("average() writes no .flag column when no sample is flagged", {
 
 })
 
+test_that("average() averages a response named filename when the input has no filename column", {
+
+  ## Arrange: no OPUS filename column, and the clay response renamed, as a
+  ## data frame input with its own column of that name would carry it
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_responses = TRUE)
+  hd$data$analysis$filename <- NULL
+  hd$data$role_map <- hd$data$role_map[hd$data$role_map$variable != "filename", ]
+  names(hd$data$analysis)[names(hd$data$analysis) == "clay"] <- "filename"
+  hd$data$role_map$variable[hd$data$role_map$variable == "clay"] <- "filename"
+
+  ## Act
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+
+  ## Assert: the response is kept and averaged, 10 to 12 for S1 and 20 to 22
+  ## for S2
+  averaged <- result$data$analysis
+  expect_true("filename" %in% names(averaged))
+  expect_equal(averaged$filename[averaged$sample_id == "S1"], 11)
+  expect_equal(averaged$filename[averaged$sample_id == "S2"], 21)
+
+})
+
 test_that("average() always drops filename column", {
 
   ## Arrange ---------------------------------------------------------------
@@ -1126,6 +1152,33 @@ test_that("compute_replicate_quality() identifies outliers via iterative removal
   expect_equal(qc$outliers, 4L)
   expect_false(qc$all_fail)
 
+
+})
+
+test_that("compute_replicate_quality() sets aside a replicate that shares no band with the others, rather than failing it", {
+
+  ## Replicates 1 and 2 are read on bands 1-6, replicate 3 only on bands 7-10:
+  ## each has spread, but 3 has no complete pair with either of the others
+  set.seed(625)
+  base <- c(1, 3, 2, 5, 4, 6, 8, 7, 10, 9)
+  spectra <- rbind(base + stats::rnorm(10, 0, 0.01),
+                   base + stats::rnorm(10, 0, 0.01),
+                   base + stats::rnorm(10, 0, 0.01))
+  spectra[1:2, 7:10] <- NA
+  spectra[3, 1:6]    <- NA
+
+  qc <- horizons:::compute_replicate_quality(spectra, threshold = 0.9)
+
+  expect_identical(qc$uncorrelatable, 3L)
+  expect_identical(qc$outliers, integer(0))
+  expect_false(qc$all_fail)
+
+  ## With only one replicate left to correlate, there is no check to run
+  qc <- horizons:::compute_replicate_quality(spectra[c(1, 3), ], threshold = 0.9)
+
+  expect_identical(qc$uncorrelatable, 1:2)
+  expect_identical(qc$outliers, integer(0))
+  expect_false(qc$all_fail)
 
 })
 

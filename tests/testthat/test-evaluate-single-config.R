@@ -147,6 +147,36 @@ describe("evaluate_single_config() - success path", {
 
   })
 
+  it("writes nothing to the console, on either stream, leaving what it has to say on the row", {
+
+    ## rf preps the recipe for its mtry bound, and collects that prep's
+    ## garbage before tuning: the collection must not report itself either.
+    ## R's own reports go to the message stream without a condition, so
+    ## the stream itself is captured.
+    setup  <- make_eval_setup()
+    result <- NULL
+
+    stderr_lines <- utils::capture.output(
+      stdout_lines <- utils::capture.output(
+        result <- evaluate_single_config(
+          config_row    = make_eval_config(),
+          split         = setup$split,
+          cv_folds      = setup$folds,
+          role_map      = setup$role_map,
+          grid_size     = 2,
+          bayesian_iter = 0,
+          seed          = 42L
+        )
+      ),
+      type = "message"
+    )
+
+    expect_identical(result$status, "success")
+    expect_identical(stdout_lines, character(0))
+    expect_identical(stderr_lines, character(0))
+
+  })
+
 })
 
 ## =========================================================================
@@ -273,11 +303,19 @@ describe("cv_panel_at()", {
 
   })
 
-  it("returns all-NA rather than erroring when the lookup is impossible", {
+  it("returns the six columns, all NA, rather than erroring when the lookup is impossible", {
 
-    expect_true(all(is.na(unlist(cv_panel_at(NULL, best)))))
-    expect_true(all(is.na(unlist(cv_panel_at(tr, best[, setdiff(names(best), ".config")])))))
-    expect_true(all(is.na(unlist(cv_panel_at(tr, NULL)))))
+    ## The same one-row shape as a panel that was looked up, so the row is
+    ## built the same way either way
+    all_na <- tibble::as_tibble(stats::setNames(
+      as.list(rep(NA_real_, 6)),
+      paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
+    ))
+
+    expect_identical(cv_panel_at(NULL, best), all_na)
+    expect_identical(cv_panel_at(tr, best[, setdiff(names(best), ".config")]), all_na)
+    expect_identical(cv_panel_at(tr, best[0, ]), all_na)
+    expect_identical(cv_panel_at(tr, NULL), all_na)
 
   })
 
@@ -1075,6 +1113,24 @@ describe("evaluate_single_config() - each stage's failure exit", {
 
   })
 
+  it("names the parameter finalization when the tuning bounds cannot be set", {
+
+    ## rf's mtry bound is set from the prepped recipe's predictors
+    local_mocked_bindings(cap_pls_components = function(...) stop("the bounds broke"))
+
+    expect_failed_at(run_on_shared(), "Parameter finalization", "the bounds broke")
+
+  })
+
+  it("names the configuration's evaluation when a failure arises outside every stage", {
+
+    ## The tuning metric set is built between the labelled stages
+    local_mocked_bindings(tuning_metric_set = function(...) stop("no metric set"))
+
+    expect_failed_at(run_on_shared(), "Evaluation", "no metric set")
+
+  })
+
   it("names the grid search when tune_grid() errors", {
 
     local_mocked_bindings(tune_grid = function(...) stop("the grid broke"),
@@ -1109,6 +1165,22 @@ describe("evaluate_single_config() - each stage's failure exit", {
 
   })
 
+  it("names the parameter selection when the chosen candidate's warnings cannot be read", {
+
+    local_mocked_bindings(candidate_of = function(...) stop("the candidate is unreadable"))
+
+    expect_failed_at(run_on_shared(), "Parameter selection", "the candidate is unreadable")
+
+  })
+
+  it("names the parameter selection when the candidates left out cannot be counted", {
+
+    local_mocked_bindings(incomplete_note = function(...) stop("the count broke"))
+
+    expect_failed_at(run_on_shared(), "Parameter selection", "the count broke")
+
+  })
+
   it("names the cross-validated metrics when they cannot be read", {
 
     local_mocked_bindings(cv_panel_at = function(...) stop("metrics unreadable"))
@@ -1132,6 +1204,31 @@ describe("evaluate_single_config() - each stage's failure exit", {
                           .package = "tune")
 
     expect_failed_at(run_on_shared(), "Test evaluation", "the last fit broke")
+
+  })
+
+  it("names the test-set evaluation when the final fit's predictions cannot be collected", {
+
+    ## Broken only once the selection record has been read, so the error
+    ## arises at the runner's own call, after last_fit() returned
+    record_read  <- FALSE
+    real_reports <- selection_reports
+    real_collect <- tune::collect_predictions
+
+    local_mocked_bindings(selection_reports = function(...) {
+      out <- real_reports(...)
+      record_read <<- TRUE
+      out
+    })
+    local_mocked_bindings(collect_predictions = function(...) {
+      if (record_read) stop("the predictions broke")
+      real_collect(...)
+    }, .package = "tune")
+
+    result <- run_on_shared()
+
+    expect_true(record_read)
+    expect_failed_at(result, "Test evaluation", "the predictions broke")
 
   })
 
@@ -1172,7 +1269,8 @@ describe("evaluate_single_config() - each stage's failure exit", {
 ## =========================================================================
 ## One run, read by four tests: every stage's warnings reach the row's log
 ## (#96); test metrics that cannot be computed come back as six NAs; a CV
-## panel that cannot be recovered leaves a note; and tune's
+## panel with two metrics NA names them on the row (the line for all six,
+## cv_na_line()'s other wording, is checked with cv_panel_at()); and tune's
 ## parallel_over = "everything" is accepted (a refusal would fail the build,
 ## and every test below with it). render_warning_log() shows five lines
 ## besides pinned notes, most frequent first, and tune adds notes of its own,
@@ -1222,11 +1320,11 @@ build_esc_mocked <- function() {
       tibble::tibble(.metric    = c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"),
                      .estimator = "standard", .estimate = NA_real_, n = 1L)
     },
+    ## Two correlations undefined on a fold, as with constant predictions
+    ## there; the other four covered every fold
     cv_panel_at = function(...) {
-      tibble::as_tibble(stats::setNames(
-        as.list(rep(NA_real_, 6)),
-        paste0("cv_", c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae"))
-      ))
+      tibble::tibble(cv_rmse = 0.7, cv_rrmse = 35, cv_rsq = NA_real_,
+                     cv_ccc = NA_real_, cv_rpd = 1.1, cv_mae = 0.6)
     }
   )
 
@@ -1264,12 +1362,14 @@ describe("evaluate_single_config() - a run on parallel_over = 'everything' whose
 
   })
 
-  it("notes on the row when the CV panel at the selected parameters cannot be recovered", {
+  it("names on the row the cross-validated metrics left NA at the selected parameters", {
 
-    expect_true(any(grepl(
-      "CV metrics at the selected hyperparameters could not be recovered; cv_* columns are NA.",
-      esc_mocked()$result$warnings[[1]], fixed = TRUE
-    )))
+    result <- esc_mocked()$result
+
+    expect_identical(c(result$cv_rsq, result$cv_ccc), c(NA_real_, NA_real_))
+    expect_true(paste0("Cross-validated rsq and ccc are NA: they could not be computed on every fold, ",
+                       "and a cross-validated mean is kept only over every fold.") %in%
+                  result$warnings[[1]])
 
   })
 
@@ -1325,6 +1425,80 @@ describe("evaluate_single_config() - the RNG pin", {
 
     cols <- c("rmse", "rpd", "cv_rmse", "cv_rpd")
     expect_identical(result[cols], esc()[cols])
+
+  })
+
+  it("starts the Bayesian search from the seed, whatever the grid search drew", {
+
+    ## The grid's draws leave the stream where the axis puts it (the parallel
+    ## path draws worker seeds from it), so the search is pinned again and
+    ## proposes the same candidates on either axis
+    setup      <- make_eval_setup()
+    real_bayes <- tune::tune_bayes
+    at_search  <- NULL
+
+    local_mocked_bindings(tune_bayes = function(...) {
+      at_search <<- get(".Random.seed", envir = globalenv())
+      real_bayes(...)
+    }, .package = "tune")
+
+    result <- evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 1,
+      seed          = 42L
+    )
+
+    pinned <- withr::with_seed(42L, .rng_kind = "Mersenne-Twister",
+                               get(".Random.seed", envir = globalenv()))
+
+    expect_identical(result$status, "success")
+    expect_false(is.null(at_search))
+    expect_identical(at_search, pinned)
+
+  })
+
+})
+
+
+## =========================================================================
+## Run time
+## =========================================================================
+
+describe("evaluate_single_config() - run time", {
+
+  it("records the run time in seconds when a configuration runs past a minute", {
+
+    ## A clock that moves 90 s on after the runner's first reading of it. A
+    ## configuration whose model spec fails is the quickest to run, and its
+    ## row is timed as every row is.
+    setup <- make_eval_setup()
+    t0    <- as.POSIXct("2026-01-01 00:00:00", tz = "UTC")
+    reads <- 0L
+
+    local_mocked_bindings(define_model_spec = function(...) stop("no spec for this model"))
+
+    result <- with_mocked_bindings(
+      evaluate_single_config(
+        config_row    = make_eval_config(),
+        split         = setup$split,
+        cv_folds      = setup$folds,
+        role_map      = setup$role_map,
+        grid_size     = 2,
+        bayesian_iter = 0
+      ),
+      Sys.time = function() {
+        reads <<- reads + 1L
+        if (reads == 1L) t0 else t0 + 90
+      },
+      .package = "base"
+    )
+
+    expect_identical(result$status, "failed")
+    expect_identical(result$runtime_secs, 90)
 
   })
 
@@ -1499,8 +1673,13 @@ describe("exhaustive_grid()", {
     expect_identical(nrow(exhaustive_grid(two, 4)), 4L)
     expect_null(exhaustive_grid(two, 3))
 
-    ## A continuous parameter, or a range not finalized, has no points to count
+    ## A continuous parameter, transformed or not, an integer one on a
+    ## transformed scale, or a range not finalized, has no points to count
     expect_null(exhaustive_grid(dials::parameters(list(dials::num_comp(c(1L, 4L)), dials::penalty())), 1e6))
+    expect_null(exhaustive_grid(dials::parameters(list(dials::num_comp(c(1L, 4L)), dials::mixture())), 1e6))
+    log_k <- dials::new_quant_param(type = "integer", range = c(0L, 2L), inclusive = c(TRUE, TRUE),
+                                    trans = dials::penalty()$trans, label = c(k = "k"))
+    expect_null(exhaustive_grid(dials::parameters(list(log_k)), 1e6))
     expect_null(exhaustive_grid(dials::parameters(list(dials::mtry())), 1e6))
 
   })

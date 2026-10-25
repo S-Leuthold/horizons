@@ -358,6 +358,21 @@ describe("build_warmstart_grid() - max_points truncation", {
 
   })
 
+  it("samples the capped rows from across the whole grid, not its first rows", {
+
+    ## The first nine combinations without the best point hold min_n at its
+    ## lowest candidate and trees at its two lowest
+    grid <- build_warmstart_grid(best_params, param_set, max_points = 10)
+
+    expect_identical(nrow(grid), 10L)
+    expect_identical(as.list(grid[1, names(best_params)]), as.list(best_params))
+
+    for (p in names(best_params)) {
+      expect_gt(length(unique(grid[[p]][-1])), 2, label = p)
+    }
+
+  })
+
   it("includes the best_params point in the grid", {
 
     grid <- build_warmstart_grid(best_params, param_set, max_points = 25)
@@ -567,25 +582,32 @@ describe("tune_warmstart_bayes() - return contract", {
     min_n = 5L
   )
 
-  grid <- build_warmstart_grid(best_params, ts$param_set)
-
-  result <- tune_warmstart_bayes(
-    workflow      = ts$wf,
-    cv_resamples  = ts$folds,
-    initial_grid  = grid,
-    param_set     = ts$param_set,
-    bayesian_iter = 0L,
-    metric_set    = ts$metric_set,
-    allow_par     = FALSE
-  )
-
   it("is a list with tune_results, a single-row best_params tibble, the grid it started from and the dropped count", {
+
+    grid <- build_warmstart_grid(best_params, ts$param_set)
+
+    result <- expect_no_warning(tune_warmstart_bayes(
+      workflow      = ts$wf,
+      cv_resamples  = ts$folds,
+      initial_grid  = grid,
+      param_set     = ts$param_set,
+      bayesian_iter = 0L,
+      metric_set    = ts$metric_set,
+      allow_par     = FALSE
+    ))
 
     expect_true(is.list(result))
     expect_true("tune_results" %in% names(result))
     expect_s3_class(result$best_params, "tbl_df")
     expect_equal(nrow(result$best_params), 1)
     expect_true(".config" %in% names(result$best_params))
+
+    ## Chosen by RMSE, named outright rather than left to tune's default of
+    ## the metric set's first metric
+    expect_identical(
+      result$best_params$.config,
+      tune::select_best(result$tune_results, metric = "rmse")$.config
+    )
 
     ## The grid comes back, for the member to read its notes through (#109)
     expect_identical(result$grid, grid)

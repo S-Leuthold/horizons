@@ -978,7 +978,11 @@ evaluate <- function(x,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
 
-    stopifnot(setequal(names(shared_args), SHARED_ARG_NAMES))
+    if (!setequal(names(shared_args), SHARED_ARG_NAMES)) {
+
+      abort_horizons("The worker payload's fields do not match {.code SHARED_ARG_NAMES}.", kind = "internal")
+
+    }
 
     ## A worker that dies loses every value in memory; what it and the
     ## others finished is in their checkpoints.
