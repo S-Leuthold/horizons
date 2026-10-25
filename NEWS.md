@@ -1,4 +1,4 @@
-# horizons (development version)
+# horizons 0.12.0
 
 ## Changes
 
@@ -126,6 +126,11 @@
 * `evaluate()`, `fit()` and `ensemble()` check, before any work, that the packages their configurations need are installed, as `predict()` does: each model's engine and the Boruta package for `feature_selection = "boruta"`. A missing one is refused once, with `horizons_error_missing_package`, naming each package and what needs it, rather than failing every configuration that needs it. A package missing where the work ran stops the run with `horizons_error_systemic` and the results so far, as a worker's death does.
 * A stratified draw that comes out unstratified, because it failed or because rsample formed one stratum from the outcome (too little data, tied quantiles, a few-valued outcome pooled into one), is one `horizons_warning_substitution` in `evaluate()`, `fit()` and `ensemble()`, with rsample's words when it gave any. rsample's warnings no longer print mid-call, and a draw it left unstratified silently is now reported. A draw rsample stratifies on fewer bins than asked is a note on the log and a line in the tree. `ensemble()`'s meta-learner and CV+ folds fall back to an unstratified draw when the stratified one fails, as `evaluate()`'s and `fit()`'s do.
 * A write to `evaluate()`'s `output_dir` that fails (the directory, the manifest or a checkpoint) stops the run with `horizons_error_systemic`, naming the directory, with the results so far, and leaves no temporary file behind. On the configs axis, a checkpoint a worker could not write is known only once every configuration has run, so `evaluate()` returns the evaluation with one `horizons_warning_skipped` naming the configurations a resumed run would evaluate again.
+
+## Tests
+
+* Every change in this release was checked with mutation testing as it merged, and the mutations that survived were triaged once over the release's final code. About 700 were each settled: killed by a new or tightened test, shown to fail with the mutation in place, or closed with the code that makes them harmless.
+* The triage found eight defects, all fixed in this release (listed above).
 
 # horizons 0.11.0
 
