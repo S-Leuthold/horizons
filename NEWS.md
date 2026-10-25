@@ -2,6 +2,10 @@
 
 ## Changes
 
+* `select_training()` refuses a zero-length `scope`, `space`, `metric` or `depth` as an input error; before, an empty `depth` ran with no depth at all.
+* `average()` keeps and averages a response named `filename`; it drops only the OPUS input's meta column of that name.
+* `select_training()` refuses a pool whose spectra are all the same after the similarity transform, with an input error, whether `ncomp` is a count or a proportion (#259).
+* The validator gives an ensemble interval bundle whose default level is outside (0, 1) its own finding, as it does a fit's, rather than one blaming the calibration set.
 * `step_select_correlation()`, `step_select_cars()` and `step_select_boruta()` no longer fail at `prep()` when every band they are given is near-constant: they keep no band, as their warning says, and `bake()` returns the other columns.
 * `add_response()` and `parse_ids()` refuse a column named `.flag`, the column horizons reserves for the rows its steps flag, as an input error at their doors, as `spectra()` does; before, a `parse_ids()` token of that name marked every row as flagged.
 * At the smallest calibration set CV+ accepts, `ensemble()` reports its in-sample interval diagnostics (`oof_coverage`, `mean_width`) as `NA`, with a note on the log saying why, as `fit()` does, rather than `NaN` with no word.
