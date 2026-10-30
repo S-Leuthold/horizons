@@ -1,5 +1,9 @@
 # horizons (development version)
 
+## Bug fixes
+
+* `evaluate()` no longer fails every lightgbm configuration when it runs in parallel over configurations; each worker now loads the packages its configuration needs (#262).
+
 # horizons 0.12.0
 
 ## Changes
