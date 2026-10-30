@@ -200,6 +200,33 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("fits a lightgbm configuration in a fresh process, which has not loaded bonsai (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("callr")
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    shared <- worker_payload()
+    shared$configs$model <- "lightgbm"
+
+    ## A callr process rather than a future: a future sent from a session
+    ## that has loaded bonsai can load it on the worker as well, which would
+    ## pass without the fix. bonsai registers lightgbm's engine only once
+    ## loaded, so the process reports whether it had.
+    res <- callr::r(function(shared) {
+      before <- isNamespaceLoaded("bonsai")
+      row    <- suppressWarnings(horizons:::evaluate_config_worker(1L, shared))
+      list(before = before, status = row$status, error = row$error_message)
+    }, args = list(shared = shared), libpath = .libPaths())
+
+    expect_false(res$before)
+    expect_identical(res$status, "success", info = res$error)
+
+  })
+
   it("writes the checkpoint of the row it returns, stamped, and refuses a worker on another version", {
 
     shared <- worker_payload()

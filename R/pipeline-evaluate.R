@@ -3321,6 +3321,15 @@ evaluate_config_worker <- function(config_i, shared) {
 
   cfg <- shared$configs[config_i, ]
 
+  ## The packages the configuration needs, loaded here as evaluate()'s door
+  ## check loaded them in the parent (check_packages()). A worker is a fresh
+  ## process, and some of them work only once loaded: bonsai registers
+  ## lightgbm's engine with parsnip when it loads, so without this every
+  ## lightgbm configuration failed at workflow creation on a worker.
+  for (pkg in names(needed_packages(cfg$model, cfg$feature_selection))) {
+    requireNamespace(pkg, quietly = TRUE)
+  }
+
   ## Reconstruct the split and folds from indices. Fold membership is
   ## reproduced by construction, not by replaying the RNG.
   resamples <- rebuild_resamples(shared$data, shared$resample_idx)
