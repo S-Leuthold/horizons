@@ -807,9 +807,10 @@ select_training <- function(x, library,
   ## data, left out as evaluate() and fit() leave flagged rows, with a line
   ## in the tree.
 
-  ## Only the columns the call reads, and the matrices copied only when a
-  ## row leaves them: a library's analysis table and its matrix are each
-  ## about a gigabyte on KSSL.
+  ## Only the columns the call reads of the pool's analysis table, a
+  ## gigabyte on KSSL, and the targets' matrix copied only when a row leaves
+  ## it. The library's matrix is made only while its space is built
+  ## (build_space(), below).
 
   if (any(target_flagged)) tm$matrix <- tm$matrix[!target_flagged, , drop = FALSE]
 
