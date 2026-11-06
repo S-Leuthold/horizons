@@ -154,7 +154,7 @@ test_that("build_similarity_space() default reproduces the experiment's PCA spac
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  sp  <- build_similarity_space(pm$matrix, pm$wavenumbers, sdev_floor = 0)
+  sp  <- space_on(pm$matrix, pm$wavenumbers, sdev_floor = 0)
   ref <- reference_space(pm$matrix, pm$wavenumbers)
 
   expect_s3_class(sp, "horizons_similarity_space")
@@ -183,7 +183,7 @@ test_that("build_similarity_space(ncomp = integer) retains exactly that many", {
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 5L, sdev_floor = 0)
+  sp <- space_on(pm$matrix, pm$wavenumbers, ncomp = 5L, sdev_floor = 0)
 
   expect_identical(sp$ncomp, 5L)
   expect_identical(ncol(sp$scores), 5L)
@@ -197,8 +197,8 @@ test_that("build_similarity_space(ncomp = proportion) retains fewer at a lower p
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  hi <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 0.99, sdev_floor = 0)
-  lo <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 0.50, sdev_floor = 0)
+  hi <- space_on(pm$matrix, pm$wavenumbers, ncomp = 0.99, sdev_floor = 0)
+  lo <- space_on(pm$matrix, pm$wavenumbers, ncomp = 0.50, sdev_floor = 0)
 
   expect_lt(lo$ncomp, hi$ncomp)
   expect_gte(lo$variance_retained, 0.50)
@@ -211,8 +211,8 @@ test_that("build_similarity_space() caps proportional ncomp at max_comp", {
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 0.999999, max_comp = 3L,
-                               sdev_floor = 0)
+  sp <- space_on(pm$matrix, pm$wavenumbers, ncomp = 0.999999, max_comp = 3L,
+                 sdev_floor = 0)
 
   expect_identical(sp$ncomp, 3L)
 
@@ -224,13 +224,13 @@ test_that("each spectral lever changes the space", {
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  base <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0)
+  base <- space_on(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0)
 
   variants <- list(
-    snv  = build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, snv = FALSE),
-    der  = build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, derivative = 0L),
-    win  = build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, window = 21L),
-    mask = build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, mask = rbind(c(3100, 3700)))
+    snv  = space_on(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, snv = FALSE),
+    der  = space_on(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, derivative = 0L),
+    win  = space_on(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, window = 21L),
+    mask = space_on(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0, mask = rbind(c(3100, 3700)))
   )
 
   for (nm in names(variants)) {
@@ -257,14 +257,14 @@ test_that("build_similarity_space() accepts a coarse but gap-free pool", {
 
   expect_length(wn, 142L)
 
-  sp <- build_similarity_space(M, wn)
+  sp <- space_on(M, wn)
 
   expect_s3_class(sp, "horizons_similarity_space")
   expect_length(sp$wavenumbers, 132L)
   expect_gte(sp$ncomp, 1L)
 
   ## An integer ncomp still has to fit in the columns it is given
-  expect_error(build_similarity_space(M, wn, ncomp = 200L),
+  expect_error(space_on(M, wn, ncomp = 200L),
                regexp = "column", class = "horizons_error_input")
 
 })
@@ -277,25 +277,25 @@ test_that("build_similarity_space() refuses a mask that leaves too little to dec
 
   ## A mask over everything leaves no column. Most of the space masked is
   ## allowed, and the verb's tree says how much the mask took.
-  err <- expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, mask = rbind(c(0, 5000))),
+  err <- expect_error(space_on(pm$matrix, pm$wavenumbers, mask = rbind(c(0, 5000))),
                       regexp = "left with 0 columns, fewer than the 2", class = "horizons_error_input")
 
   ## And it does not name a component cap the caller never set
   expect_false(grepl("cap", conditionMessage(err)))
 
   ## A mask over all but a stretch runs
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers, mask = rbind(c(1100, 5000), c(0, 1000)))
+  sp <- space_on(pm$matrix, pm$wavenumbers, mask = rbind(c(1100, 5000), c(0, 1000)))
   expect_length(sp$wavenumbers, 24L)
 
   ## A count of one still needs two columns: one column left is refused,
   ## two run
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 1L,
-                                      mask = rbind(c(1006, 5000), c(0, 1002))),
+  expect_error(space_on(pm$matrix, pm$wavenumbers, ncomp = 1L,
+                        mask = rbind(c(1006, 5000), c(0, 1002))),
                "left with 1 column, fewer than the 2", fixed = TRUE,
                class = "horizons_error_input")
 
-  two <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 1L,
-                                mask = rbind(c(1010, 5000), c(0, 1002)))
+  two <- space_on(pm$matrix, pm$wavenumbers, ncomp = 1L,
+                  mask = rbind(c(1010, 5000), c(0, 1002)))
   expect_identical(two$wavenumbers, c(1008, 1004))
   expect_identical(two$ncomp, 1L)
 
@@ -333,12 +333,12 @@ test_that("sdev_floor drops the components below the floor on a known decay", {
   M <- known_decay_matrix(d)
   wn <- seq(4000, by = -4, length.out = ncol(M))
 
-  none <- build_similarity_space(M, wn, snv = FALSE, derivative = 0L,
-                                 ncomp = 20L, sdev_floor = 0)
-  ten  <- build_similarity_space(M, wn, snv = FALSE, derivative = 0L,
-                                 ncomp = 20L, sdev_floor = 0.10)
-  five <- build_similarity_space(M, wn, snv = FALSE, derivative = 0L,
-                                 ncomp = 20L, sdev_floor = 0.05)
+  none <- space_on(M, wn, snv = FALSE, derivative = 0L,
+                   ncomp = 20L, sdev_floor = 0)
+  ten  <- space_on(M, wn, snv = FALSE, derivative = 0L,
+                   ncomp = 20L, sdev_floor = 0.10)
+  five <- space_on(M, wn, snv = FALSE, derivative = 0L,
+                   ncomp = 20L, sdev_floor = 0.05)
 
   expect_identical(none$ncomp, 20L)
   expect_identical(ten$ncomp,   5L)   # 0.09 is below the floor
@@ -375,8 +375,8 @@ test_that("sdev_floor never empties the space and never adds components", {
   M <- known_decay_matrix(d)
   wn <- seq(4000, by = -4, length.out = ncol(M))
 
-  sp <- build_similarity_space(M, wn, snv = FALSE, derivative = 0L,
-                               ncomp = 20L, sdev_floor = 0.9)
+  sp <- space_on(M, wn, snv = FALSE, derivative = 0L,
+                 ncomp = 20L, sdev_floor = 0.9)
 
   expect_identical(sp$ncomp, 1L)
   expect_lte(sp$ncomp, sp$ncomp_variance)
@@ -398,7 +398,7 @@ test_that("a pool with no spread is refused, whether ncomp is a count or a propo
 
   for (ncomp in list(3L, 0.99)) {
 
-    expect_error(build_similarity_space(M, wn, snv = FALSE, derivative = 0L, ncomp = ncomp),
+    expect_error(space_on(M, wn, snv = FALSE, derivative = 0L, ncomp = ncomp),
                  "Every pool spectrum is the same after the similarity transform",
                  fixed = TRUE, class = "horizons_error_input")
 
@@ -412,8 +412,8 @@ test_that("the default floor trims the fixture's variance-chosen set", {
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  none <- build_similarity_space(pm$matrix, pm$wavenumbers, sdev_floor = 0)
-  dflt <- build_similarity_space(pm$matrix, pm$wavenumbers)
+  none <- space_on(pm$matrix, pm$wavenumbers, sdev_floor = 0)
+  dflt <- space_on(pm$matrix, pm$wavenumbers)
 
   ## Today's behaviour, exactly, at sdev_floor = 0
   ref <- reference_space(pm$matrix, pm$wavenumbers)
@@ -451,8 +451,8 @@ test_that("build_similarity_space(space = 'pls') trips an internal check on a y 
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  expect_error(build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
-                                      y = fx$pool$data$analysis$clay[-1]),
+  expect_error(space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
+                        y = fx$pool$data$analysis$clay[-1]),
                "must have one value per pool row (60), got 59", fixed = TRUE,
                class = "horizons_error_internal")
 
@@ -465,7 +465,7 @@ test_that("build_similarity_space(space = 'pls') fits on measured rows and score
   pm <- predictor_matrix(fx$pool)
   y  <- fx$pool$data$analysis$oc   # half NA
 
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 4L, y = y)
+  sp <- space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 4L, y = y)
 
   expect_identical(sp$settings$space, "pls")
   expect_identical(sp$ncomp, 4L)
@@ -480,7 +480,7 @@ test_that("build_similarity_space(space = 'pls') fits on measured rows and score
   ## The stored fit holds loadings, not the library's rows
   expect_lt(length(serialize(sp$fit, NULL)), length(serialize(pm$matrix, NULL)))
 
-  pca <- build_similarity_space(pm$matrix, pm$wavenumbers, ncomp = 4L)
+  pca <- space_on(pm$matrix, pm$wavenumbers, ncomp = 4L)
   expect_false(isTRUE(all.equal(abs(unname(sp$scores)), abs(unname(pca$scores)))))
 
 })
@@ -492,10 +492,10 @@ test_that("the PLS branch records the decay but is not floored by it", {
   pm <- predictor_matrix(fx$pool)
   y  <- fx$pool$data$analysis$clay
 
-  none <- build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 6L,
-                                 y = y, sdev_floor = 0)
-  hard <- build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 6L,
-                                 y = y, sdev_floor = 0.9)
+  none <- space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 6L,
+                   y = y, sdev_floor = 0)
+  hard <- space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 6L,
+                   y = y, sdev_floor = 0.9)
 
   expect_identical(none$ncomp, 6L)
   expect_identical(hard$ncomp, 6L)
@@ -521,7 +521,7 @@ test_that("project_similarity() of the pool onto its own space returns the store
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers)
+  sp <- space_on(pm$matrix, pm$wavenumbers)
   pr <- project_similarity(sp, pm$matrix, pm$wavenumbers)
 
   expect_equal(unname(pr), unname(sp$scores), tolerance = 1e-10)
@@ -535,8 +535,8 @@ test_that("project_similarity() works for the PLS space too", {
   fx <- select_fixture(n_pool = 60)
   pm <- predictor_matrix(fx$pool)
 
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
-                               y = fx$pool$data$analysis$clay)
+  sp <- space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
+                 y = fx$pool$data$analysis$clay)
   pr <- project_similarity(sp, pm$matrix, pm$wavenumbers)
 
   expect_equal(unname(pr), unname(sp$scores), tolerance = 1e-10)
@@ -550,7 +550,7 @@ test_that("project_similarity() places the exact twin on its pool row", {
   rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
 
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers)
+  sp <- space_on(rc$matrix, rc$wavenumbers)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
 
   expect_equal(unname(st[fx$twin_id, ]), unname(sp$scores[fx$twin_pool_id, ]), tolerance = 1e-10)
@@ -566,7 +566,7 @@ test_that("project_similarity() trips an internal check on a wavenumber mismatch
   pm <- predictor_matrix(fx$pool)
   tm <- predictor_matrix(fx$targets)   # the targets' 8 cm-1 grid, not the space's 4
 
-  sp <- build_similarity_space(pm$matrix, pm$wavenumbers)
+  sp <- space_on(pm$matrix, pm$wavenumbers)
 
   expect_error(project_similarity(sp, tm$matrix, tm$wavenumbers),
                "not on the wavenumbers the similarity space was built on", fixed = TRUE,

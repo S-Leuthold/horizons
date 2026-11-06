@@ -1069,12 +1069,16 @@ select_training <- function(x, library,
                          poly = as.integer(poly), mask = mask, ncomp = ncomp,
                          sdev_floor = sdev_floor)
 
-  ## The library's matrix exists only while the space is built, its flagged
+  ## The library's matrix exists only while it is transformed, its flagged
   ## rows and any columns past the overlap left out.
 
   build_space <- function() {
 
-    build_similarity_space(library_matrix(pool, pool_flagged, if (sa$record$mode != "full") sa$pool_cols),
+    build_similarity_space(transform_similarity(library_matrix(pool, pool_flagged, if (sa$record$mode != "full") sa$pool_cols),
+                                                sa$wavenumbers,
+                                                snv = space_settings$snv, derivative = space_settings$derivative,
+                                                window = space_settings$window, poly = space_settings$poly,
+                                                mask = mask, min_cols = similarity_min_cols(ncomp), call = call),
                            sa$wavenumbers,
                            snv = space_settings$snv, derivative = space_settings$derivative,
                            window = space_settings$window, poly = space_settings$poly,

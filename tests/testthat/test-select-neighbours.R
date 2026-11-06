@@ -14,7 +14,7 @@ fixture_scores <- function(n_pool = 60, ncomp = 4L, seed = 1) {
   fx <- select_fixture(n_pool = n_pool, seed = seed)
   rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = ncomp)
+  sp <- space_on(rc$matrix, rc$wavenumbers, ncomp = ncomp)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
 
   list(fx = fx, space = sp, Sp = sp$scores, St = st)
@@ -487,7 +487,7 @@ test_that("draw_neighbours() flags the whole replicate cluster at k below its si
   fxr <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc  <- pool_on_targets(fxr)
   tm  <- predictor_matrix(fxr$targets)
-  sp  <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
+  sp  <- space_on(rc$matrix, rc$wavenumbers, ncomp = 4L)
   st  <- project_similarity(sp, tm$matrix, tm$wavenumbers)
   rsp <- fxr$pool$data$analysis[, c("sample_id", "clay")]
 

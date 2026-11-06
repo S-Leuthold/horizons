@@ -820,7 +820,7 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
   fx <- select_fixture(n_pool = 60)
   rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
+  sp <- space_on(rc$matrix, rc$wavenumbers, ncomp = 4L)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
 
   set.seed(5)
@@ -1443,7 +1443,7 @@ test_that("at k = 1 batch and global record every twin in the measured pool, wit
   fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
+  sp <- space_on(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
   St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
   a  <- fx$pool$data$analysis
 

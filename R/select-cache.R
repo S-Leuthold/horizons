@@ -228,7 +228,7 @@ prime_library_space <- function(pool, record, verbose = TRUE,
   if (is.null(identity)) return(invisible(NULL))
 
   ## The space a draw builds: without the rows an earlier step flagged, the
-  ## matrix made only inside the build, as a draw makes it
+  ## matrix made only inside the build's transform, as a draw makes it
   wn       <- predictor_wavenumbers(pool)
   flagged  <- flagged_rows(pool$data$analysis)
   settings <- default_space_settings(grid_summary(wn)$resolution)
@@ -262,7 +262,12 @@ prime_library_space <- function(pool, record, verbose = TRUE,
   out <- run_unit(
     cached_space(identity, settings, wn, verbose = FALSE, collector = collector,
                  build = function() {
-                   build_similarity_space(library_matrix(pool, flagged), wn,
+                   build_similarity_space(transform_similarity(library_matrix(pool, flagged), wn,
+                                                               snv = settings$snv, derivative = settings$derivative,
+                                                               window = settings$window, poly = settings$poly,
+                                                               mask = settings$mask,
+                                                               min_cols = similarity_min_cols(settings$ncomp)),
+                                          wn,
                                           snv = settings$snv, derivative = settings$derivative,
                                           window = settings$window, poly = settings$poly,
                                           mask = settings$mask, space = "pca", ncomp = settings$ncomp,

@@ -50,8 +50,8 @@ predictor_matrix <- function(x) {
 #' @description
 #' `predictor_matrix()`'s matrix without the flagged rows, and on `cols`
 #' alone when given. It is made only to be passed straight to
-#' `build_similarity_space()`, which frees it once transformed: a library's
-#' is a gigabyte, so no caller holds it.
+#' `transform_similarity()` as a space is built, so it dies with that call: a
+#' library's is a gigabyte, so no caller holds it.
 #'
 #' @param pool [horizons_data.] The pool.
 #' @param flagged [Logical.] Rows to leave out, one per pool row.

@@ -121,16 +121,47 @@ transform_similarity <- function(M, wn,
 
 
 ## ---------------------------------------------------------------------------
+## similarity_min_cols() — The columns a space's decomposition needs
+## ---------------------------------------------------------------------------
+
+#' The fewest columns a similarity space can be decomposed on
+#'
+#' @description
+#' The floor is what the decomposition actually needs: the components asked
+#' for when `ncomp` is a count, and two when it is a proportion. It is not
+#' the component cap: under a variance proportion the cap is 100 by default
+#' and the rule usually retains a tenth of that, so requiring columns against
+#' the cap would refuse a perfectly ordinary 24 cm-1 pool (132 columns after
+#' the filter's edge trim) for a cap the user never set.
+#'
+#' @param ncomp [Numeric.] Proportion of variance in (0, 1) or an integer
+#'   count, as `build_similarity_space()` takes it.
+#'
+#' @return [Integer.] The `min_cols` for `transform_similarity()`.
+#' @noRd
+similarity_min_cols <- function(ncomp) {
+
+  if (ncomp > 0 && ncomp < 1) 2L else max(2L, as.integer(ncomp))
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## build_similarity_space() — Fit the score space on the pool
 ## ---------------------------------------------------------------------------
 
 #' Build the similarity space from a reference pool
 #'
 #' @description
-#' Runs `transform_similarity()` on the pool, then fits either a PCA of the
-#' pool (unsupervised, the default) or a PLS against one property
-#' (supervised, property-specific). Stores what projection needs and the
-#' pool's own scores.
+#' Fits either a PCA of the transformed pool (unsupervised, the default) or a
+#' PLS against one property (supervised, property-specific). Stores what
+#' projection needs and the pool's own scores.
+#'
+#' The caller transforms the pool, with `transform_similarity()` at the same
+#' settings and `min_cols = similarity_min_cols(ncomp)`, and passes the result
+#' as it is made: the raw spectra then live only inside that call. A library's
+#' are a gigabyte, and an argument of this function would stay alive until it
+#' returned, through the decomposition.
 #'
 #' @details
 #' For `space = "pca"`, `ncomp` in (0, 1) retains components to that
@@ -159,9 +190,12 @@ transform_similarity <- function(M, wn,
 #' Mahalanobis, which on these scores is Euclidean distance after dividing
 #' by that standard deviation.
 #'
-#' @param M [Matrix.] Pool spectra, rows named by sample id.
-#' @param wn [Numeric.] Wavenumbers, decreasing.
-#' @param snv,derivative,window,poly,mask Passed to `transform_similarity()`.
+#' @param tr [List.] `transform_similarity()`'s output on the pool, its
+#'   matrix's rows named by sample id.
+#' @param wn [Numeric.] The pool's wavenumbers before the transform,
+#'   decreasing.
+#' @param snv,derivative,window,poly,mask The settings `tr` was made with,
+#'   recorded for `project_similarity()`.
 #' @param space [Character.] `"pca"` or `"pls"`. Default: `"pca"`.
 #' @param ncomp [Numeric.] Proportion of variance in (0, 1) or an integer
 #'   count. Default: `0.99`.
@@ -188,7 +222,7 @@ transform_similarity <- function(M, wn,
 #'
 #' @seealso [transform_similarity()], [project_similarity()]
 #' @noRd
-build_similarity_space <- function(M, wn,
+build_similarity_space <- function(tr, wn,
                                    snv        = TRUE,
                                    derivative = 1L,
                                    window     = 11L,
@@ -208,37 +242,24 @@ build_similarity_space <- function(M, wn,
 
   is_prop <- ncomp > 0 && ncomp < 1
 
-  if (space == "pls" && length(y) != nrow(M)) {
+  if (space == "pls" && length(y) != nrow(tr$matrix)) {
 
-    abort_horizons("{.arg y} must have one value per pool row ({nrow(M)}), got {length(y)}.",
+    abort_horizons("{.arg y} must have one value per pool row ({nrow(tr$matrix)}), got {length(y)}.",
                    kind = "internal")
 
   }
 
   ### The most components either rule could ask for; it bounds what prcomp()
-  ### has to compute. It is not a floor on the columns: under a variance
-  ### proportion the cap is 100 by default and the rule usually retains a
-  ### tenth of that, so requiring columns against the cap would refuse a
-  ### perfectly ordinary 24 cm-1 pool (132 columns after the filter's edge
-  ### trim) for a cap the user never set. The floor is what the decomposition
-  ### actually needs: the components asked for when that is a count, and two
-  ### when it is a proportion.
+  ### has to compute. The column floor is similarity_min_cols()'s, applied
+  ### by the caller's transform.
   comp_cap <- as.integer(if (is_prop) max_comp else ncomp)
-  min_cols <- if (is_prop) 2L else max(2L, as.integer(ncomp))
 
-  tr <- transform_similarity(M, wn, snv = snv, derivative = derivative,
-                             window = window, poly = poly, mask = mask,
-                             min_cols = min_cols, call = call)
+  ## Reading tr runs the caller's transform, and raw spectra passed to it
+  ## unheld die with that call. A library's are a gigabyte, collected here
+  ## before the decomposition makes its own copies.
 
-  ## The raw spectra are done with once transformed. A library's are a
-  ## gigabyte, released and collected here before the decomposition makes
-  ## its own copies; the caller passes them without holding them
-  ## (library_matrix()).
-
-  row_ids  <- rownames(M)
-  released <- 8 * length(M)
-  rm(M)
-  collect_released(released)
+  row_ids <- rownames(tr$matrix)
+  collect_released(8 * nrow(tr$matrix) * length(wn))
 
   ## A pool with no spread has no components to rank neighbours by, however
   ## many are asked for, so it is refused here rather than decomposed

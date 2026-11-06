@@ -72,6 +72,31 @@ test_that("a cached space draws exactly what a fresh one does", {
 
 })
 
+test_that("a draw that builds the space builds the first-use space, bit for bit", {
+
+  ## Both paths make the library's matrix inside their own transform call and
+  ## pass the build only what the transform returns. The space must be the
+  ## same either way, and the same as a build on the whole matrix at hand.
+  m <- use_mini()
+  f <- file.path(m$cache, space_files(m$cache))
+  primed <- qs2::qs_read(f)$space
+  file.remove(f)
+
+  out <- suppressWarnings(select_training(mini_targets(m$pool), "mini", k = 5L))
+  expect_false(out$selection$search$cache$hit)
+  drawn <- qs2::qs_read(file.path(m$cache, space_files(m$cache)))$space
+
+  pm <- predictor_matrix(m$pool)
+  s  <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
+  direct <- space_on(pm$matrix, pm$wavenumbers, snv = s$snv, derivative = s$derivative,
+                     window = s$window, poly = s$poly, mask = s$mask, ncomp = s$ncomp,
+                     sdev_floor = s$sdev_floor)
+
+  expect_identical(drawn, primed)
+  expect_identical(primed, direct)
+
+})
+
 test_that("changing a lever misses the cache and keeps a second space", {
 
   m <- use_mini()
