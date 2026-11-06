@@ -281,9 +281,11 @@ test_that("select_training() records its control and its seed, 307 by default", 
 
 test_that("select_training() returns the same when every release is collected", {
 
-  ## Collection frees memory and nothing else. Forced on every chunk of the
-  ## neighbour search, the draw and the record are identical but for when
-  ## they were made.
+  ## A smoke test of the collection branch, not a proof of equality: gc()
+  ## changes no value, so the identity holds whatever the branch does. What
+  ## it can catch is a release that frees something still in use, which
+  ## would fail the call once collection is forced on every chunk and on the
+  ## pool's release.
   fx <- select_fixture(n_pool = 60)
 
   untimed <- function(out) {

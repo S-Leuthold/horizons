@@ -147,8 +147,9 @@ test_that("collect_released() collects from its threshold and not below it", {
 
 test_that("nearest_neighbours() returns the same when every chunk is collected", {
 
-  ## Collection frees memory and nothing else: forced on every chunk, the
-  ## neighbours and their distances are identical.
+  ## A smoke test of the collection branch, not a proof of equality: gc()
+  ## changes no value, so the identity holds whatever the branch does. It
+  ## catches a release that frees something the next chunk still reads.
   s <- fixture_scores()
   a <- nearest_neighbours(s$St, s$Sp, k = 7L, metric = "euclidean", chunk_size = 3L)
 
