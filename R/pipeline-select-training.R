@@ -795,7 +795,9 @@ select_training <- function(x, library,
   ## only. The training set comes back on the library's own columns at the
   ## wavenumbers the targets share (Step 5), checked at the door above.
 
-  pm <- predictor_matrix(pool)
+  ## The library's matrix is built only where the space is built (Step 2):
+  ## on KSSL it is a gigabyte, and a cached space never reads it.
+
   tm <- predictor_matrix(x)
 
   ## Rows an earlier step flagged leave the space and the draw first, as
@@ -809,7 +811,6 @@ select_training <- function(x, library,
   ## row leaves them: a library's analysis table and its matrix are each
   ## about a gigabyte on KSSL.
 
-  if (any(pool_flagged))   pm$matrix <- pm$matrix[!pool_flagged, , drop = FALSE]
   if (any(target_flagged)) tm$matrix <- tm$matrix[!target_flagged, , drop = FALSE]
 
   read_cols <- intersect(c("sample_id", properties, "upper_depth_cm"), names(pool$data$analysis))
@@ -826,7 +827,7 @@ select_training <- function(x, library,
 
   }
 
-  sa <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
+  sa <- search_axis(predictor_wavenumbers(pool), tm$matrix, tm$wavenumbers)
 
   ## Targets short of the library's range are searched on the overlap, in a
   ## space built fresh and not cached. The warning's ids are the library
@@ -849,7 +850,7 @@ select_training <- function(x, library,
   if (verbose) {
 
     search_res <- sa$record$library_grid$resolution
-    cat(paste0("\u2502  \u251C\u2500 Pool: ", nrow(pm$matrix), " rows; searched on its own ",
+    cat(paste0("\u2502  \u251C\u2500 Pool: ", sum(!pool_flagged), " rows; searched on its own ",
                search_res, " cm\u207B\u00B9 grid",
                if (sa$record$mode == "overlap") " (the overlap with the targets)" else "",
                ", targets ", if (sa$record$operation == "none") "already on it" else "resampled onto it",
@@ -1012,7 +1013,6 @@ select_training <- function(x, library,
   ## Read from the pool's own columns, a column at a time: the library's
   ## values are never copied whole for two numbers.
 
-  lib_m <- if (sa$record$mode == "full") pm$matrix else pm$matrix[, sa$pool_cols, drop = FALSE]
   units <- check_photometric_units(pool$data$analysis[pool_vars[sa$pool_cols]], sa$matrix,
                                    pool_rows = if (any(pool_flagged)) !pool_flagged)
 
@@ -1069,9 +1069,22 @@ select_training <- function(x, library,
                          poly = as.integer(poly), mask = mask, ncomp = ncomp,
                          sdev_floor = sdev_floor)
 
+  ## The library's matrix exists only while the space is built: made by
+  ## library_matrix(), its flagged rows and any columns past the overlap left
+  ## out, and passed on without a binding in this frame.
+
+  library_matrix <- function() {
+
+    m <- predictor_matrix(pool)$matrix
+    if (any(pool_flagged)) m <- m[!pool_flagged, , drop = FALSE]
+
+    if (sa$record$mode == "full") m else m[, sa$pool_cols, drop = FALSE]
+
+  }
+
   build_space <- function() {
 
-    build_similarity_space(lib_m, sa$wavenumbers,
+    build_similarity_space(library_matrix(), sa$wavenumbers,
                            snv = space_settings$snv, derivative = space_settings$derivative,
                            window = space_settings$window, poly = space_settings$poly,
                            mask = mask, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
@@ -1117,8 +1130,6 @@ select_training <- function(x, library,
                   reason = if (space == "pls") "pls space" else if (sa$record$mode != "full") "overlap space" else "pool passed in memory")
 
   }
-
-  rm(lib_m)
 
   St <- project_similarity(sp, sa$matrix, sa$wavenumbers)
 
