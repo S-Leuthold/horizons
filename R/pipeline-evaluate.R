@@ -1109,7 +1109,8 @@ evaluate <- function(x,
     best_config      = best_config_id,
     rank_metric      = metric,
     screened         = TRUE,
-    split            = split,
+    ## Positions and identity columns only: the rows are data$analysis
+    split            = slim_split(split, role_map),
     n_train          = n_train,
     n_test           = n_test,
     ## What the trim did, so fit() drops the same training rows rather than

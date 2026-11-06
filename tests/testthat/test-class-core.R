@@ -1325,8 +1325,10 @@ test_that("summary() gives an unvalidated evaluated or fitted object its next st
 ## exercise with a populated table instead.
 
 ## A minimal valid horizons_eval, built inline (the test-class-core idiom). The
-## split slot only needs to satisfy inherits(., "rsplit"); the validator does
-## not inspect its contents, so a classed empty list stands in for a real one.
+## validators check the split's class and its columns (the id and the outcome,
+## by the role map; with no data slot, the id alone), and the fit validator
+## that its ids are in the analysis table, so a classed list with no rows
+## stands in for a real one.
 make_valid_eval <- function() {
 
   results <- tibble::tibble(
@@ -1372,7 +1374,10 @@ make_valid_eval <- function() {
       best_config      = "cfg_a",
       rank_metric      = "rpd",
       screened         = TRUE,
-      split            = structure(list(), class = c("rsplit", "list")),
+      split            = structure(list(data   = tibble::tibble(sample_id = character()),
+                                        in_id  = integer(),
+                                        out_id = NA),
+                                   class = c("rsplit", "list")),
       n_train          = 80L,
       n_test           = 20L,
       response_trim    = NULL,
@@ -1412,7 +1417,6 @@ make_valid_fit <- function() {
     response_bound    = 45.2,
     cv_predictions    = tibble::tibble(),
     results           = results,
-    split             = obj$evaluation$split,
     uq                = list(cfg_a = list(quantile_model = 1, scores = seq(-1, 1, length.out = 10),
                                           level_default = 0.9)),
     ad                = list(cfg_a = list(centroid = c(f1 = 0), cov_matrix = matrix(1),
@@ -1971,6 +1975,9 @@ test_that("validate_horizons_eval runs the base validator at the full stage (#12
   obj      <- make_valid_eval()
   obj$data <- valid_data_slot()
 
+  ## The split keeps the id and the outcome the role map names
+  obj$evaluation$split$data <- tibble::tibble(sample_id = character(), SOC = numeric())
+
   expect_identical(validate_horizons_eval(obj), obj)
 
   ## A duplicate sample_id, which only warns at the raw stage, aborts.
@@ -2302,6 +2309,9 @@ test_that("validate_horizons_fit reaches the base contract through the eval vali
   obj      <- make_valid_fit()
   obj$data <- valid_data_slot()
 
+  ## The split keeps the id and the outcome the role map names
+  obj$evaluation$split$data <- tibble::tibble(sample_id = character(), SOC = numeric())
+
   expect_identical(validate_horizons_fit(obj), obj)
 
   ## An id role off sample_id, a base-contract failure, surfaces here.
@@ -2410,7 +2420,7 @@ test_that("validate_horizons_fit requires the six metrics in results and an rspl
   }
 
   obj <- make_valid_fit()
-  obj$models$split <- list()
+  obj$evaluation$split <- list()
   expect_error(suppressMessages(validate_horizons_fit(obj)),
                "split must be an <rsplit> object",
                fixed = TRUE, class = "horizons_error_validation")
@@ -3430,12 +3440,46 @@ describe("the class validators' new checks (#234)", {
   it("refuse a split whose rows do not carry unique sample_ids", {
 
     obj <- make_valid_fit()
-    obj$models$split <- structure(list(data = tibble::tibble(sample_id = c("A", "A")),
-                                       in_id = 1L, out_id = NA),
-                                  class = c("rsplit", "list"))
+    obj$evaluation$split$data <- tibble::tibble(sample_id = c("A", "A"))
 
     expect_true(any(grepl("do not carry unique sample_ids", finding_of(validate_horizons_fit(obj)),
                           fixed = TRUE)))
+
+  })
+
+  it("refuse a split naming samples the analysis table does not hold", {
+
+    obj      <- make_valid_fit()
+    obj$data <- valid_data_slot()
+    obj$evaluation$split$data <- tibble::tibble(sample_id = c("A", "Z"), SOC = c(1, 2))
+
+    expect_true(any(grepl("evaluation$split names 1 sample the analysis table does not hold",
+                          finding_of(validate_horizons_fit(obj)), fixed = TRUE)))
+
+    ## Every id held passes
+    obj$evaluation$split$data$sample_id <- c("A", "B")
+    expect_identical(validate_horizons_fit(obj), obj)
+
+  })
+
+  it("refuse an evaluation split stored with its modelling rows, as an earlier version stored it", {
+
+    obj      <- make_valid_eval()
+    obj$data <- valid_data_slot()
+    obj$evaluation$split$data <- obj$data$analysis
+
+    expect_true(any(grepl("it was stored by an earlier version", finding_of(validate_horizons_eval(obj)),
+                          fixed = TRUE)))
+
+  })
+
+  it("refuse an earlier version's fit at fit()'s and ensemble()'s doors", {
+
+    old <- ens_fitted()
+    old$evaluation$split <- rebuild_split(old)$split
+
+    expect_error(fit(old), "stored by an earlier version", class = "horizons_error_validation")
+    expect_error(ensemble(old), "stored by an earlier version", class = "horizons_error_validation")
 
   })
 

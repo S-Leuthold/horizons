@@ -31,11 +31,11 @@ build_ens_fitted <- function() {
 
 }
 
-#' The fixture's held-out test set (Split F's assessment rows)
+#' The fixture's held-out test set (Split F's assessment rows, rebuilt)
 #'
 #' @return Tibble. Cheap to take, so not memoised.
 #' @noRd
-ens_test_set <- function() rsample::assessment(ens_fitted()$models$split)
+ens_test_set <- function() rsample::assessment(rebuild_split(ens_fitted())$split)
 
 
 ## ---------------------------------------------------------------------------

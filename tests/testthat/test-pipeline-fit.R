@@ -375,7 +375,7 @@ describe("fit() - cv_predictions carries sample_id", {
 
     ## With UQ and AD off nothing is carved out for calibration, so the fit
     ## rows are Split F's training part.
-    train <- rsample::training(result$models$split)
+    train <- rsample::training(result$evaluation$split)
 
     expect_type(cv$sample_id, "character")
     expect_false(anyNA(cv$sample_id))
@@ -392,7 +392,7 @@ describe("fit() - cv_predictions carries sample_id", {
     result <- fit60()$fit
     cv     <- result$models$cv_predictions
 
-    train <- rsample::training(result$models$split)
+    train <- rsample::training(result$evaluation$split)
 
     for (cfg in unique(cv$config_id)) {
 
@@ -468,7 +468,7 @@ describe("fit() - UQ enabled", {
     expect_false(is.null(result$models$uq))
 
     uq_bundle <- result$models$uq[[result$models$best_config]]
-    held_out  <- rsample::testing(result$models$split)
+    held_out  <- rsample::testing(rebuild_split(result)$split)
     p         <- predict(result, held_out, interval = TRUE)
     covered   <- held_out$SOC >= p$.pred_lower & held_out$SOC <= p$.pred_upper
 
@@ -689,8 +689,11 @@ describe("fit() - scores on evaluate()'s split", {
     obj    <- shared$obj
     r      <- shared$fit
 
-    expect_identical(r$models$split$data, obj$evaluation$split$data)
-    expect_identical(rsample::testing(r$models$split)$sample_id,
+    ## Stored once, as evaluate() stored it: positions, the id and the outcome
+    expect_false("split" %in% names(r$models))
+    expect_identical(r$evaluation$split, obj$evaluation$split)
+    expect_named(r$evaluation$split$data, c("sample_id", "SOC"))
+    expect_identical(rsample::testing(rebuild_split(r)$split)$sample_id,
                      rsample::testing(obj$evaluation$split)$sample_id)
 
   })
@@ -710,7 +713,7 @@ describe("fit() - scores on evaluate()'s split", {
                                       prop = CALIB_PROP,
                                       strata = dplyr::all_of("SOC"))
 
-    test_ids  <- rsample::testing(r$models$split)$sample_id
+    test_ids  <- rsample::testing(r$evaluation$split)$sample_id
     calib_ids <- rsample::testing(split_C)$sample_id
     fit_ids   <- unique(r$models$cv_predictions$sample_id)
 
@@ -799,8 +802,8 @@ describe("fit() - scores on evaluate()'s split", {
     )
 
     expect_s3_class(r_clay, "horizons_fit")
-    expect_true("clay" %in% names(r_clay$models$split$data))
-    expect_identical(rsample::testing(r_clay$models$split)$sample_id,
+    expect_true("clay" %in% names(rebuild_split(r_clay)$split$data))
+    expect_identical(rsample::testing(rebuild_split(r_clay)$split)$sample_id,
                      rsample::testing(obj$evaluation$split)$sample_id)
 
   })

@@ -880,7 +880,6 @@ describe("configure() and the object contract", {
     obj$evaluation$split        <- "an rsplit"
     obj$models$workflows        <- list(cfg_a = "a fitted workflow")
     obj$models$n_models         <- 1L
-    obj$models$split            <- "an rsplit"
     obj$models$cv_predictions   <- tibble::tibble(.row = 1L, sample_id = "P001", .pred = 1)
     obj$models$predictor_schema <- c("wn_4000")
     obj$ensemble$method         <- "weighted"

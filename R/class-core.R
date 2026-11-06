@@ -171,7 +171,7 @@ new_horizons_data <- function(analysis = NULL,
                       best_config      = NULL,  ## character: top config_id
                       rank_metric      = NULL,  ## character: metric configs were ranked by
                       screened         = NULL,  ## logical: TRUE if evaluate() ranked the configs, FALSE for fit()'s cold start
-                      split            = NULL,  ## rsplit: train/test partition fit() reuses, less any training rows response_trim trimmed
+                      split            = NULL,  ## rsplit: train/test partition fit() reuses, less any training rows response_trim trimmed; its data only the id and outcome columns (rebuild_split() restores the rows)
                       n_train          = NULL,  ## integer: training rows after any trim
                       n_test           = NULL,  ## integer
                       response_trim    = NULL,  ## list: the training-partition response trim and its fences, or NULL when none was requested (#77)
@@ -195,7 +195,6 @@ new_horizons_data <- function(analysis = NULL,
                   response_bound    = NULL,  ## numeric: deploy-time winsorization bound (compute_response_bound(): max + 0.5 * (max - anchor), capped at a finite upper bound of outcome_range)
                   cv_predictions    = NULL,  ## tibble: .row, sample_id, .fold, config_id, .pred_trans, truth, .pred
                   results           = NULL,  ## tibble: config_id, status, degraded, metrics, etc.
-                  split             = NULL,  ## rsplit: Split F (train_F / test_F)
                   uq                = NULL,  ## list of UQ bundles (one per config), or NULL
                   ad                = NULL,  ## list of AD bundles (one per config), or NULL
                   selection_present = NULL,  ## logical: training rows came from select_training()
@@ -1927,7 +1926,10 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #'    configuration has the ranking metric, otherwise present in
 #'    `results$config_id` and in `x$config$configs$config_id`.
 #' 4. **rank_metric**: a length-1 character naming one of the six metrics.
-#' 5. **split**: an `rsplit` (the train/test partition `fit()` reuses).
+#' 5. **split**: an `rsplit` (the train/test partition `fit()` reuses) whose
+#'    `data` holds exactly the id and outcome columns ([split_columns()]),
+#'    since the rows are `data$analysis`. A split carrying the modelling
+#'    rows was stored by an earlier version and is refused.
 #' 6. **n_train / n_test**: single non-negative whole numbers.
 #' 7. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
 #'
@@ -2263,10 +2265,34 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
   }
 
   ## split ----------------------------------------------------------------------
+  ## The positions of the partition and the id and outcome columns that tell
+  ## whether they still name the same rows; the rows themselves are
+  ## data$analysis (rebuild_split()). A split carrying the modelling rows was
+  ## stored by an earlier version, and a fit or ensemble on it holds those
+  ## rows two or three times over.
 
   if (!inherits(ev$split, "rsplit")) {
 
     errors <- c(errors, cli::format_inline("{.field split} must be an {.cls rsplit} object"))
+
+  } else {
+
+    split_cols <- split_columns(x$data$role_map)
+    held_cols  <- names(ev$split$data)
+
+    if (length(setdiff(held_cols, split_cols)) > 0) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field split} holds columns besides the id and the outcome ({.field {split_cols}}): it was stored by an earlier version, which kept the modelling rows in it. Re-run {.fn evaluate}."
+      ))
+
+    } else if (!identical(held_cols, split_cols)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field split}'s data must hold the id and the outcome columns, {.field {split_cols}}, in that order"
+      ))
+
+    }
 
   }
 
@@ -2339,10 +2365,10 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
-#'    the `models` slot is present (see [contract_keys()]), 14 in all:
+#'    the `models` slot is present (see [contract_keys()]), 13 in all:
 #'    `workflows`, `n_models`, `best_config`, `rank_metric`,
 #'    `predictor_schema`, `response_bound`, `cv_predictions`, `results`,
-#'    `split`, `uq`, `ad`, `selection_present`, `timestamp`, `runtime_secs`.
+#'    `uq`, `ad`, `selection_present`, `timestamp`, `runtime_secs`.
 #'    [fit()] writes every one. Extra keys are tolerated.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
@@ -2366,6 +2392,9 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #' 10. **cv_predictions**: every member covers the same `.row` set, with no
 #'    `.row` twice for a member, since `ensemble()` reads them as one matrix.
 #' 11. **runtime_secs**: single non-negative numeric. **timestamp**: POSIXct.
+#' 12. **The evaluation split** the members were scored on, which
+#'    `ensemble()` rebuilds its test rows from: its ids are unique and all in
+#'    `data$analysis`. The rows themselves are not rebuilt here.
 #'
 #' @param x `horizons_fit`. The object to validate.
 #' @param call The frame the error reports: the verb that validated.
@@ -2523,20 +2552,24 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
   }
 
-  ## split ----------------------------------------------------------------------
-  ## Split F (train_F / test_F), the same partition the eval slot carries. The
-  ## eval validator shape-checks evaluation$split; the fit slot holds its own
-  ## copy, so shape-check it too (a corrupted models$split would otherwise pass
-  ## while evaluation$split stayed clean).
+  ## The evaluation split ---------------------------------------------------------
+  ## Split F, the partition the members were scored on and ensemble()
+  ## rebuilds its test rows from (rebuild_split()). The eval validator has
+  ## checked its class and columns. Its ids are checked against the table it
+  ## points into, one pass over the id column; the rows are rebuilt only by
+  ## the verbs that read them.
 
-  if (!inherits(md$split, "rsplit")) {
+  split_ids <- x$evaluation$split$data[[id_column(x$data$role_map)]]
 
-    errors <- c(errors, cli::format_inline("{.field split} must be an {.cls rsplit} object"))
-
-  } else if (anyDuplicated(md$split$data$sample_id) > 0) {
+  if (anyDuplicated(split_ids) > 0) {
 
     ## The ensemble keys the members' test predictions by sample_id
-    errors <- c(errors, cli::format_inline("{.field split}'s rows do not carry unique {.field sample_id}s"))
+    errors <- c(errors, cli::format_inline("{.field evaluation$split}'s rows do not carry unique {.field sample_id}s"))
+
+  } else if (!all(split_ids %in% x$data$analysis[[id_column(x$data$role_map)]])) {
+
+    n_out  <- sum(!split_ids %in% x$data$analysis[[id_column(x$data$role_map)]])
+    errors <- c(errors, cli::format_inline("{.field evaluation$split} names {n_out} sample{?s} the analysis table does not hold"))
 
   }
 
@@ -3744,10 +3777,10 @@ summary.horizons_data <- function(object, ...) {
     }
 
     ## Split info
-    if (!is.null(x$models$split)) {
+    if (!is.null(x$evaluation$split)) {
 
-      n_train <- nrow(rsample::training(x$models$split))
-      n_test  <- nrow(rsample::testing(x$models$split))
+      n_train <- x$evaluation$n_train
+      n_test  <- x$evaluation$n_test
 
       ## After a response trim (#77) the CV above ran on trimmed training
       ## rows and the test metrics on untrimmed ones; say so beside the pair.

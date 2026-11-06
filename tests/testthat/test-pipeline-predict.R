@@ -80,7 +80,8 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
     screened    = TRUE,
     parallelize_over = "sequential",
     workers      = 1L,
-    split        = rsample::initial_split(df, prop = 0.8),
+    ## Stored as evaluate() stores it: positions, the id and the outcome
+    split        = slim_split(rsample::initial_split(df, prop = 0.8), obj$data$role_map),
     n_train      = as.integer(round(nrow(df) * 0.8)),
     n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
     recipe       = list(sg_window = DEFAULT_SG_WINDOW, sg_window_cm = NA_real_,
@@ -951,7 +952,7 @@ describe("predict.horizons_fit() - response bound guardrail", {
     ## Precondition: the fixture discriminates. The largest training-part
     ## outcome sits in the calibration rows, so a bound over Split F's whole
     ## training part would differ from one over the fit rows.
-    train_F <- rsample::training(fitted_fixture$models$split)
+    train_F <- rsample::training(fitted_fixture$evaluation$split)
     expect_gt(max(train_F$SOC), max(analysis$SOC[fit_rows]))
 
     expect_equal(fitted_fixture$models$response_bound, expected)

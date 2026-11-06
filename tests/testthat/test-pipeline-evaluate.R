@@ -819,7 +819,10 @@ describe("draw_eval_split()", {
     drawn <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 42L))
 
     expect_identical(ev$evaluation$split$in_id, drawn$split$in_id)
-    expect_identical(ev$evaluation$split$data, drawn$split$data)
+
+    ## Stored slim: the draw's id and outcome columns, the rows being
+    ## data$analysis
+    expect_identical(ev$evaluation$split$data, drawn$split$data[, c("sample_id", "SOC")])
 
     ## No trim was requested, so none is applied or recorded (#77)
     expect_identical(trim_training_responses(drawn$split, "SOC", NULL, "sample_id"),
@@ -1070,7 +1073,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
 
   it("round-trips the trimmed split through the parallel transport", {
 
-    split    <- ev$evaluation$split
+    split    <- rebuild_split(ev)$split
     cv_folds <- rsample::vfold_cv(rsample::training(split), v = 3)
     rebuilt  <- rebuild_resamples(split$data, resample_indices(split, cv_folds))
 

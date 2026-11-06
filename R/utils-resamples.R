@@ -207,8 +207,47 @@ rebuild_resamples <- function(data, idx) {
 
 
 ## ---------------------------------------------------------------------------
-## The evaluation split, pointed at the object's rows
+## The evaluation split, stored slim and pointed at the object's rows
 ## ---------------------------------------------------------------------------
+##
+## The fitted object stores its data once, in data$analysis. evaluation$split
+## keeps the positions of its partition and, as its data, only the columns
+## that tell whether those positions still name the same rows: the id and
+## the outcome. rebuild_split() points it back at the object's rows.
+
+#' The columns a stored split keeps
+#'
+#' @param role_map The object's role map.
+#' @return Character: the id column, then the outcome.
+#' @keywords internal
+#' @noRd
+
+split_columns <- function(role_map) {
+
+  c(id_column(role_map), role_map$variable[role_map$role == "outcome"])
+
+}
+
+#' A split as the object stores it: its positions and its identity columns
+#'
+#' @description
+#' Keeps the `rsplit`'s class, `in_id` and `out_id`, so `training()`,
+#' `testing()` and [rebuild_split()]'s check work on it unchanged, and cuts
+#' its `data` to [split_columns()]. `evaluate()` and `fit()`'s cold start
+#' store the split through this.
+#'
+#' @param split An `rsplit` over the modelled rows.
+#' @param role_map The object's role map.
+#' @return The `rsplit`, its `data` the id and outcome columns.
+#' @keywords internal
+#' @noRd
+
+slim_split <- function(split, role_map) {
+
+  split$data <- split$data[, split_columns(role_map), drop = FALSE]
+  split
+
+}
 
 #' Point the evaluation split at the rows the object models
 #'

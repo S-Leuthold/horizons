@@ -24,7 +24,7 @@
 #' object, carrying constructor defaults, so the presence of a slot is not
 #' evidence of promotion. The test is on the specific fields a verb writes
 #' when it earns the promotion: `evaluation$results` and `evaluation$split`
-#' from `evaluate()`, `models$workflows` and `models$split` from `fit()`,
+#' from `evaluate()`, `models$workflows` from `fit()`,
 #' `ensemble$method` or `ensemble$model` from `ensemble()`. Anything
 #' narrower would miss a promotion; anything broader trips on a default
 #' (`models$uq` is `list(enabled = FALSE)` on objects `spectra()` built
@@ -52,7 +52,6 @@ promoted_state <- function(x) {
   if (!is.null(x$evaluation$results))   states <- c(states, "evaluation results")
   if (!is.null(x$evaluation$split))     states <- c(states, "an evaluation split")
   if (!is.null(x$models$workflows))     states <- c(states, "fitted models")
-  if (!is.null(x$models$split))         states <- c(states, "a model split")
 
   if (!is.null(x$ensemble$method) || !is.null(x$ensemble$model)) {
 
@@ -261,7 +260,7 @@ check_unpromoted <- function(x, kind = "input", call = rlang::caller_env()) {
 #' than silently dropping the record.
 #'
 #' The object must be unpromoted. An object carrying evaluation results,
-#' fitted models or an ensemble is refused by name, because `models$split`,
+#' fitted models or an ensemble is refused by name, because `evaluation$split`,
 #' `models$cv_predictions` and `evaluation$results` are keyed to a row order
 #' this function is free to change, and nothing downstream would notice.
 #' The verbs refuse such an object at their door ([check_unpromoted()]), so
