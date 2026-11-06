@@ -42,6 +42,35 @@ predictor_matrix <- function(x) {
 
 
 ## ---------------------------------------------------------------------------
+## library_matrix() — The pool's spectra, for a similarity space
+## ---------------------------------------------------------------------------
+
+#' The pool's spectral matrix as a similarity space is built on
+#'
+#' @description
+#' `predictor_matrix()`'s matrix without the flagged rows, and on `cols`
+#' alone when given. It is made only to be passed straight to
+#' `build_similarity_space()`, which frees it once transformed: a library's
+#' is a gigabyte, so no caller holds it.
+#'
+#' @param pool [horizons_data.] The pool.
+#' @param flagged [Logical.] Rows to leave out, one per pool row.
+#' @param cols [Integer or NULL.] Columns to keep; `NULL` keeps every one.
+#'   Default: `NULL`.
+#'
+#' @return [Matrix.] Rows named by `sample_id`, no column names.
+#' @noRd
+library_matrix <- function(pool, flagged, cols = NULL) {
+
+  m <- predictor_matrix(pool)$matrix
+  if (any(flagged)) m <- m[!flagged, , drop = FALSE]
+
+  if (is.null(cols)) m else m[, cols, drop = FALSE]
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## predictor_wavenumbers() — The axis, without the spectra
 ## ---------------------------------------------------------------------------
 

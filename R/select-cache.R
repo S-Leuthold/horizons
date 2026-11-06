@@ -228,12 +228,11 @@ prime_library_space <- function(pool, record, verbose = TRUE,
   if (is.null(identity)) return(invisible(NULL))
 
   ## The space a draw builds: without the rows an earlier step flagged, the
-  ## matrix copied only when one leaves it
-  pm       <- predictor_matrix(pool)
+  ## matrix made only inside the build, as a draw makes it
+  wn       <- predictor_wavenumbers(pool)
   flagged  <- flagged_rows(pool$data$analysis)
-  if (any(flagged)) pm$matrix <- pm$matrix[!flagged, , drop = FALSE]
-  settings <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
-  n_cols   <- length(pm$wavenumbers)
+  settings <- default_space_settings(grid_summary(wn)$resolution)
+  n_cols   <- length(wn)
 
   if (settings$derivative > 0L && !sg_window_fits(settings$window, n_cols)) {
 
@@ -261,9 +260,9 @@ prime_library_space <- function(pool, record, verbose = TRUE,
   ## cached_space() writes its own note or warning to the collector, so the
   ## unit's records hold only a failure
   out <- run_unit(
-    cached_space(identity, settings, pm$wavenumbers, verbose = FALSE, collector = collector,
+    cached_space(identity, settings, wn, verbose = FALSE, collector = collector,
                  build = function() {
-                   build_similarity_space(pm$matrix, pm$wavenumbers,
+                   build_similarity_space(library_matrix(pool, flagged), wn,
                                           snv = settings$snv, derivative = settings$derivative,
                                           window = settings$window, poly = settings$poly,
                                           mask = settings$mask, space = "pca", ncomp = settings$ncomp,

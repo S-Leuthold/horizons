@@ -230,6 +230,16 @@ build_similarity_space <- function(M, wn,
                              window = window, poly = poly, mask = mask,
                              min_cols = min_cols, call = call)
 
+  ## The raw spectra are done with once transformed. A library's are a
+  ## gigabyte, released and collected here before the decomposition makes
+  ## its own copies; the caller passes them without holding them
+  ## (library_matrix()).
+
+  row_ids  <- rownames(M)
+  released <- 8 * length(M)
+  rm(M)
+  collect_released(released)
+
   ## A pool with no spread has no components to rank neighbours by, however
   ## many are asked for, so it is refused here rather than decomposed
   if (all(apply(tr$matrix, 2, stats::var) == 0)) {
@@ -317,7 +327,7 @@ build_similarity_space <- function(M, wn,
 
   }
 
-  dimnames(out$scores) <- list(rownames(M), NULL)
+  dimnames(out$scores) <- list(row_ids, NULL)
 
   structure(out, class = c("horizons_similarity_space", "list"))
 

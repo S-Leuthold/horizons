@@ -1069,22 +1069,13 @@ select_training <- function(x, library,
                          poly = as.integer(poly), mask = mask, ncomp = ncomp,
                          sdev_floor = sdev_floor)
 
-  ## The library's matrix exists only while the space is built: made by
-  ## library_matrix(), its flagged rows and any columns past the overlap left
-  ## out, and passed on without a binding in this frame.
-
-  library_matrix <- function() {
-
-    m <- predictor_matrix(pool)$matrix
-    if (any(pool_flagged)) m <- m[!pool_flagged, , drop = FALSE]
-
-    if (sa$record$mode == "full") m else m[, sa$pool_cols, drop = FALSE]
-
-  }
+  ## The library's matrix exists only while the space is built, its flagged
+  ## rows and any columns past the overlap left out.
 
   build_space <- function() {
 
-    build_similarity_space(library_matrix(), sa$wavenumbers,
+    build_similarity_space(library_matrix(pool, pool_flagged, if (sa$record$mode != "full") sa$pool_cols),
+                           sa$wavenumbers,
                            snv = space_settings$snv, derivative = space_settings$derivative,
                            window = space_settings$window, poly = space_settings$poly,
                            mask = mask, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
