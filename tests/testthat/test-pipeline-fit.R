@@ -449,9 +449,9 @@ describe("fit() - UQ enabled", {
 
     expected <- c("quantile_model", "scores", "n_calib",
                   "level_default", "oof_coverage", "mean_width",
-                  "prepped_recipe", "test_coverage", "test_mean_width",
-                  "n_test")
+                  "test_coverage", "test_mean_width", "n_test")
     expect_true(all(expected %in% names(uq_bundle)))
+    expect_false("prepped_recipe" %in% names(uq_bundle))
 
     ## Coverage measured on the held-out test rows (#118)
     expect_gt(uq_bundle$n_test, 0)
@@ -920,6 +920,25 @@ describe("fit() - a PCA member stores only the components it uses", {
 
     uq_fields <- c("scores", "test_coverage", "test_mean_width", "n_calib")
     expect_identical(cut$models$uq[[1]][uq_fields], full$models$uq[[1]][uq_fields])
+
+  })
+
+  it("measures its test coverage on the intervals predict() serves, from the workflow's recipe", {
+
+    cut <- fit_pca()
+    uq  <- cut$models$uq[[1]]
+
+    expect_false("prepped_recipe" %in% names(uq))
+
+    ## The member's bundle bakes nothing of its own: its measured coverage is
+    ## the coverage of predict()'s intervals on the same test rows
+    test_rows <- rsample::testing(rebuild_split(cut)$split)
+    p         <- predict(cut, test_rows, interval = TRUE)
+    covered   <- test_rows$SOC >= p$.pred_lower & test_rows$SOC <= p$.pred_upper
+
+    expect_identical(uq$n_test, nrow(test_rows))
+    expect_equal(uq$test_coverage, mean(covered))
+    expect_equal(uq$test_mean_width, mean(p$.interval_width))
 
   })
 

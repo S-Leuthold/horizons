@@ -108,7 +108,9 @@ compute_c_alpha <- function(scores, level) {
 #'   rather than recover.
 #'
 #' @return Named list with fields: `quantile_model`, `scores`, `n_calib`,
-#'   `level_default`, `oof_coverage`, `mean_width`, `prepped_recipe`.
+#'   `level_default`, `oof_coverage`, `mean_width`. The trained recipe
+#'   the features are baked through is the workflow's own, read from it at
+#'   predict time, so the bundle holds no copy.
 #'   Aborts with class `horizons_error_run` when the calibration set is too
 #'   small (under `min_calib_rows` rows, or fewer finite scores than that or
 #'   than `level_default`'s order statistic needs), and with class
@@ -349,8 +351,7 @@ fit_uq <- function(fitted_workflow,
     n_calib        = n_calib,
     level_default  = level_default,
     oof_coverage   = oof_coverage,
-    mean_width     = mean_width,
-    prepped_recipe = prepped_recipe
+    mean_width     = mean_width
   )
 
 }

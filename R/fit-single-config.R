@@ -472,11 +472,17 @@ fit_single_config <- function(config_row,
       ## it is an in-sample diagnostic for the quantile forest, not coverage.
       if (!is.null(uq_result)) {
 
-        coverage <- run_addon(
-          test_interval_coverage(uq_result, test_preds, test_data, test_truth,
-                                 config_id, outcome_range),
-          "coverage", skipped_add_on("Measured test coverage was")
-        )
+        ## The test rows' predictors, baked through the member's trained
+        ## recipe as predict() bakes new rows; the bundle holds no recipe of
+        ## its own.
+        coverage <- run_addon({
+          test_features <- unit_step("uq_bake", as.data.frame(recipes::bake(
+            workflows::extract_recipe(final_fit, estimated = TRUE),
+            new_data = test_data, recipes::all_predictors()
+          )))
+          test_interval_coverage(uq_result, test_preds, test_features, test_truth,
+                                 config_id, outcome_range)
+        }, "coverage", skipped_add_on("Measured test coverage was"))
 
         uq_result <- c(uq_result, coverage %||% test_interval_coverage_missing())
 
@@ -617,17 +623,18 @@ fit_single_config <- function(config_row,
 #' @param uq A UQ bundle from [fit_uq()].
 #' @param test_preds Numeric. Back-transformed test predictions, original
 #'   scale.
-#' @param test_data Data frame. The test rows, raw (as passed to `predict()`).
+#' @param test_features Data frame. The test rows' predictors, baked through
+#'   the member's trained recipe.
 #' @param test_truth Numeric. The test outcomes, original scale.
 #' @param config_id Character(1). Named in any warning.
 #' @param outcome_range Numeric length 2. The bounds intervals are clamped to.
 #' @return List with `test_coverage`, `test_mean_width` and `n_test`.
 #' @keywords internal
 #' @noRd
-test_interval_coverage <- function(uq, test_preds, test_data, test_truth,
+test_interval_coverage <- function(uq, test_preds, test_features, test_truth,
                                    config_id, outcome_range) {
 
-  intervals <- predict_intervals(uq, test_preds, test_data,
+  intervals <- predict_intervals(uq, test_preds, test_features,
                                  config_id     = config_id,
                                  outcome_range = outcome_range)
 

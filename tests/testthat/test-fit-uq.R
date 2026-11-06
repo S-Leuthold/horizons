@@ -181,9 +181,12 @@ describe("fit_uq() - return contract", {
 
     expected_fields <- c(
       "quantile_model", "scores", "n_calib", "level_default",
-      "oof_coverage", "mean_width", "prepped_recipe"
+      "oof_coverage", "mean_width"
     )
     expect_true(all(expected_fields %in% names(result)))
+
+    ## The trained recipe is the workflow's; the bundle keeps no copy
+    expect_false("prepped_recipe" %in% names(result))
 
     expect_s3_class(result$quantile_model, "ranger")
 
@@ -197,8 +200,6 @@ describe("fit_uq() - return contract", {
     expect_true(result$oof_coverage <= 1)
 
     expect_true(result$mean_width > 0)
-
-    expect_s3_class(result$prepped_recipe, "recipe")
 
   })
 
@@ -299,8 +300,8 @@ describe("fit_uq() - conformal scores properties", {
       outcome_range   = c(0, cap)
     )
 
-    features <- recipes::bake(clamped$prepped_recipe, new_data = setup$calib_data,
-                              recipes::all_predictors())
+    features <- recipes::bake(workflows::extract_recipe(setup$fitted_wf, estimated = TRUE),
+                              new_data = setup$calib_data, recipes::all_predictors())
     alpha    <- 1 - 0.90
     q        <- stats::predict(clamped$quantile_model, data = as.data.frame(features),
                                type = "quantiles",
@@ -457,13 +458,15 @@ describe("fit_uq() - prepped recipe can bake new data", {
     level_default   = 0.90
   )
 
-  it("prepped_recipe can bake calibration data (predictors only)", {
+  it("trains its forest on the predictors the workflow's own recipe bakes", {
 
-    baked <- recipes::bake(result$prepped_recipe,
-                            new_data = setup$calib_data,
-                            recipes::all_predictors())
-    expect_s3_class(baked, "tbl_df")
+    ## predict() serves the intervals from the rows it baked through the
+    ## member's workflow, so the forest's features must be those
+    baked <- recipes::bake(workflows::extract_recipe(setup$fitted_wf, estimated = TRUE),
+                           new_data = setup$calib_data,
+                           recipes::all_predictors())
     expect_true(nrow(baked) == nrow(setup$calib_data))
+    expect_identical(result$quantile_model$forest$independent.variable.names, names(baked))
 
     ## Should NOT contain outcome or id columns
     expect_false(setup$outcome_col %in% names(baked))

@@ -1022,8 +1022,10 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
       if (!is.null(uq)) {
 
+        ## The predictors baked above for these rows, through the recipe
+        ## the forest's features came from: the intervals bake nothing again
         interval_cols <- add_on(
-          predict_intervals(uq, point_pred, rows, config_id = config_id,
+          predict_intervals(uq, point_pred, as.data.frame(baked), config_id = config_id,
                             outcome_range = outcome_range),
           "intervals", skipped_add_on("Prediction intervals (UQ) were")
         )
@@ -1518,8 +1520,12 @@ predict_members <- function(object, members, new_spectra,
 #' The bounds are therefore assembled directly and **never back-transformed
 #' again** — re-transforming here would be the classic "applied twice" bug.
 #'
-#' A failure in the bake or the forest raises, labelled with its step
-#' (`uq_bake`, `uq_quantiles`): the caller runs this as a unit of its own (a
+#' It bakes nothing: the caller passes the rows already baked through the
+#' member's trained recipe, the workflow's own (`predict()` bakes them once
+#' for the point prediction's check and the applicability domain;
+#' [test_interval_coverage()] bakes the test rows). The bundle holds no recipe
+#' of its own. A failure in the forest raises, labelled with its step
+#' (`uq_quantiles`): the caller runs this as a unit of its own (a
 #' configuration's intervals in `predict()`, a member's measured coverage in
 #' `fit()`), which records it and says the intervals were not computed. A
 #' missing `ranger` is refused at `predict()`'s door, so it cannot arrive
@@ -1532,17 +1538,19 @@ predict_members <- function(object, members, new_spectra,
 #'
 #' @param uq A UQ bundle from `models$uq[[config_id]]`.
 #' @param point_pred Numeric point predictions, original scale.
-#' @param new_spectra Tibble of new data (sample_id + predictors).
+#' @param new_features Data frame of the rows' predictors, baked through the
+#'   member's trained recipe (`recipes::all_predictors()`): the feature space
+#'   the quantile forest was trained on.
 #' @param config_id Character(1) or `NULL`. The config this bundle belongs
 #'   to, named in a row-alignment failure. `NULL` (default) omits it.
 #' @param outcome_range Numeric length-2 vector the bounds are clamped to,
 #'   from [outcome_range_setting()]. Default `DEFAULT_OUTCOME_RANGE`.
-#' @return Tibble of interval columns, one row per row of `new_spectra`.
-#'   Aborts with class `horizons_error_internal` when `point_pred` or the
-#'   baked features do not have one row per row of `new_spectra`.
+#' @return Tibble of interval columns, one row per row of `new_features`.
+#'   Aborts with class `horizons_error_internal` when `point_pred` does not
+#'   have one value per row of `new_features`.
 #' @keywords internal
 #' @noRd
-predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
+predict_intervals <- function(uq, point_pred, new_features, config_id = NULL,
                               outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   ## Intervals are returned at the coverage level the UQ was calibrated for.
@@ -1550,31 +1558,16 @@ predict_intervals <- function(uq, point_pred, new_spectra, config_id = NULL,
   alpha <- 1 - level
 
   ## The bounds are point_pred + q_low and point_pred + q_high, by position,
-  ## and the result is attached to new_data's rows by the caller. Vectors of
-  ## different lengths recycle without an error when one length divides the
-  ## other, so both sides are checked against new_data before they meet.
+  ## and the result is attached to the baked rows' rows by the caller.
+  ## Vectors of different lengths recycle without an error when one length
+  ## divides the other, so the two are checked before they meet.
   for_config <- if (is.null(config_id)) "" else paste0(" for config '", config_id, "'")
 
   check_rows_aligned(
     what       = paste0("Point predictions", for_config),
     to         = "the rows of new_data",
     n          = length(point_pred),
-    n_expected = nrow(new_spectra)
-  )
-
-  ## Bake new_data through the UQ recipe (predictors only — the same feature
-  ## space the quantile forest was trained on).
-  new_features <- unit_step("uq_bake", as.data.frame(
-    recipes::bake(uq$prepped_recipe, new_data = new_spectra, recipes::all_predictors())
-  ))
-
-  ## A bake that ran but dropped rows is a bug, not a reason to return point
-  ## predictions only.
-  check_rows_aligned(
-    what       = paste0("Features baked through the UQ recipe", for_config),
-    to         = "the rows of new_data",
-    n          = nrow(new_features),
-    n_expected = nrow(new_spectra)
+    n_expected = nrow(new_features)
   )
 
   ## Residual quantiles from the quantile forest (original scale).
