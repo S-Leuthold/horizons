@@ -1079,10 +1079,7 @@ select_training <- function(x, library,
                                                 snv = space_settings$snv, derivative = space_settings$derivative,
                                                 window = space_settings$window, poly = space_settings$poly,
                                                 mask = mask, min_cols = similarity_min_cols(ncomp), call = call),
-                           sa$wavenumbers,
-                           snv = space_settings$snv, derivative = space_settings$derivative,
-                           window = space_settings$window, poly = space_settings$poly,
-                           mask = mask, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
+                           sa$wavenumbers, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
                            y = if (space == "pls") usable[[properties]] else NULL,
                            call = call)
 

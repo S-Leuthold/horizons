@@ -267,10 +267,7 @@ prime_library_space <- function(pool, record, verbose = TRUE,
                                                                window = settings$window, poly = settings$poly,
                                                                mask = settings$mask,
                                                                min_cols = similarity_min_cols(settings$ncomp)),
-                                          wn,
-                                          snv = settings$snv, derivative = settings$derivative,
-                                          window = settings$window, poly = settings$poly,
-                                          mask = settings$mask, space = "pca", ncomp = settings$ncomp,
+                                          wn, space = "pca", ncomp = settings$ncomp,
                                           sdev_floor = settings$sdev_floor)
                  }),
     unit = "library_space", id = record$name, debug = debug

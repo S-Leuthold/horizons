@@ -41,8 +41,10 @@
 #'
 #' @param call The frame a refusal reports: the verb's.
 #'
-#' @return [List.] `matrix` (transformed, row names kept) and `wavenumbers`
-#'   (the columns that survive the filter's edge trim and the mask).
+#' @return [List.] `matrix` (transformed, row names kept), `wavenumbers`
+#'   (the columns that survive the filter's edge trim and the mask), and
+#'   `settings` (`snv`, `derivative`, `window`, `poly`, `mask`: what the
+#'   transform was run with, for `build_similarity_space()` to record).
 #'   Errors of class `horizons_error_input` when the mask leaves too few
 #'   columns.
 #'
@@ -60,6 +62,10 @@ transform_similarity <- function(M, wn,
   ## The mask and the filter's arguments are select_training()'s, checked at
   ## its door: an odd window (window_to_points()), a polynomial below it and
   ## at least the derivative.
+
+  settings <- list(snv = snv, derivative = as.integer(derivative),
+                   window = as.integer(window), poly = as.integer(poly),
+                   mask = mask)
 
   ids <- rownames(M)
   m   <- M
@@ -115,7 +121,7 @@ transform_similarity <- function(M, wn,
 
   dimnames(m) <- list(ids, NULL)
 
-  list(matrix = m, wavenumbers = wn)
+  list(matrix = m, wavenumbers = wn, settings = settings)
 
 }
 
@@ -157,11 +163,13 @@ similarity_min_cols <- function(ncomp) {
 #' PLS against one property (supervised, property-specific). Stores what
 #' projection needs and the pool's own scores.
 #'
-#' The caller transforms the pool, with `transform_similarity()` at the same
-#' settings and `min_cols = similarity_min_cols(ncomp)`, and passes the result
-#' as it is made: the raw spectra then live only inside that call. A library's
-#' are a gigabyte, and an argument of this function would stay alive until it
-#' returned, through the decomposition.
+#' The caller transforms the pool with `transform_similarity()` and
+#' `min_cols = similarity_min_cols(ncomp)`, and passes the result as it is
+#' made: the raw spectra then live only inside that call. A library's are a
+#' gigabyte, and an argument of this function would stay alive until it
+#' returned, through the decomposition. The space records the settings the
+#' transform reports, so projection repeats the transform the pool had, and
+#' holds the column floor itself, so no caller can decompose too few columns.
 #'
 #' @details
 #' For `space = "pca"`, `ncomp` in (0, 1) retains components to that
@@ -194,8 +202,6 @@ similarity_min_cols <- function(ncomp) {
 #'   matrix's rows named by sample id.
 #' @param wn [Numeric.] The pool's wavenumbers before the transform,
 #'   decreasing.
-#' @param snv,derivative,window,poly,mask The settings `tr` was made with,
-#'   recorded for `project_similarity()`.
 #' @param space [Character.] `"pca"` or `"pls"`. Default: `"pca"`.
 #' @param ncomp [Numeric.] Proportion of variance in (0, 1) or an integer
 #'   count. Default: `0.99`.
@@ -223,11 +229,6 @@ similarity_min_cols <- function(ncomp) {
 #' @seealso [transform_similarity()], [project_similarity()]
 #' @noRd
 build_similarity_space <- function(tr, wn,
-                                   snv        = TRUE,
-                                   derivative = 1L,
-                                   window     = 11L,
-                                   poly       = 2L,
-                                   mask       = NULL,
                                    space      = c("pca", "pls"),
                                    ncomp      = 0.99,
                                    y          = NULL,
@@ -249,9 +250,19 @@ build_similarity_space <- function(tr, wn,
 
   }
 
+  ### The callers' transforms refuse a pool below the column floor against
+  ### the verb; this holds it for a caller that did not ask.
+  min_cols <- similarity_min_cols(ncomp)
+
+  if (ncol(tr$matrix) < min_cols) {
+
+    abort_horizons("The similarity space has {ncol(tr$matrix)} column{?s}, fewer than the {min_cols} the decomposition needs.",
+                   kind = "internal")
+
+  }
+
   ### The most components either rule could ask for; it bounds what prcomp()
-  ### has to compute. The column floor is similarity_min_cols()'s, applied
-  ### by the caller's transform.
+  ### has to compute.
   comp_cap <- as.integer(if (is_prop) max_comp else ncomp)
 
   ## Reading tr runs the caller's transform, and raw spectra passed to it
@@ -273,10 +284,7 @@ build_similarity_space <- function(tr, wn,
   }
 
   out <- list(
-    settings = list(snv = snv, derivative = as.integer(derivative),
-                    window = as.integer(window), poly = as.integer(poly),
-                    mask = mask, space = space, ncomp = ncomp,
-                    sdev_floor = sdev_floor),
+    settings = c(tr$settings, list(space = space, ncomp = ncomp, sdev_floor = sdev_floor)),
     input_wavenumbers = wn,
     wavenumbers       = tr$wavenumbers
   )

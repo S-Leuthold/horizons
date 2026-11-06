@@ -324,7 +324,8 @@ select_fixture <- function(...) {
 #'
 #' @param M [Matrix.] Pool spectra, rows named by sample id.
 #' @param wn [Numeric.] Wavenumbers, decreasing.
-#' @param snv,derivative,window,poly,mask,ncomp As `build_similarity_space()`.
+#' @param snv,derivative,window,poly,mask As `transform_similarity()`.
+#' @param ncomp As `build_similarity_space()`.
 #' @param ... Passed to `build_similarity_space()`.
 #'
 #' @return [horizons_similarity_space.]
@@ -336,8 +337,6 @@ space_on <- function(M, wn, snv = TRUE, derivative = 1L, window = 11L,
                              window = window, poly = poly, mask = mask,
                              min_cols = similarity_min_cols(ncomp))
 
-  build_similarity_space(tr, wn, snv = snv, derivative = derivative,
-                         window = window, poly = poly, mask = mask,
-                         ncomp = ncomp, ...)
+  build_similarity_space(tr, wn, ncomp = ncomp, ...)
 
 }

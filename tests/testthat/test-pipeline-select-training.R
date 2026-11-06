@@ -1050,6 +1050,18 @@ test_that("a mask over most of the similarity space runs, and the tree says how 
 })
 
 
+test_that("select_training() refuses a mask that leaves the space too few columns, against the verb", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  err <- expect_error(quiet_select(fx, k = 5, properties = "clay", mask = rbind(c(0, 5000))),
+                      "left with 0 columns, fewer than the 2", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "select_training")
+
+})
+
+
 test_that("select_training() refuses keep_traces, which it has no row to keep on", {
 
   fx <- select_fixture(n_pool = 60)

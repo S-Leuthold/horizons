@@ -302,6 +302,50 @@ test_that("build_similarity_space() refuses a mask that leaves too little to dec
 })
 
 
+test_that("build_similarity_space() trips an internal check on a matrix below the column floor", {
+
+  ## The callers' transforms refuse this first, against the verb; the build
+  ## holds the floor too, so a caller that drops it fails loudly rather than
+  ## decomposing too few columns.
+  fx <- select_fixture(n_pool = 60)
+  pm <- predictor_matrix(fx$pool)
+
+  one <- transform_similarity(pm$matrix, pm$wavenumbers, mask = rbind(c(1006, 5000), c(0, 1002)))
+  expect_identical(ncol(one$matrix), 1L)
+
+  expect_error(build_similarity_space(one, pm$wavenumbers, ncomp = 1L),
+               "1 column, fewer than the 2", fixed = TRUE, class = "horizons_error_internal")
+
+  ## A count past the columns is held to them, not quietly cut to what fits
+  tr <- transform_similarity(pm$matrix, pm$wavenumbers)
+  expect_error(build_similarity_space(tr, pm$wavenumbers, ncomp = ncol(tr$matrix) + 1L),
+               class = "horizons_error_internal")
+
+})
+
+
+test_that("build_similarity_space() records the settings its transform used", {
+
+  ## Projection repeats the transform from the recorded settings, so they
+  ## are the transform's own, not spelled again by the caller.
+  fx   <- select_fixture(n_pool = 60)
+  pm   <- predictor_matrix(fx$pool)
+  mask <- rbind(c(1580, 1720))
+
+  tr <- transform_similarity(pm$matrix, pm$wavenumbers, snv = FALSE, derivative = 2L,
+                             window = 21L, poly = 3L, mask = mask)
+  sp <- build_similarity_space(tr, pm$wavenumbers, ncomp = 3L)
+
+  expect_identical(sp$settings,
+                   list(snv = FALSE, derivative = 2L, window = 21L, poly = 3L, mask = mask,
+                        space = "pca", ncomp = 3L, sdev_floor = 0.10))
+
+  ## And projecting the pool through them gives back its own scores
+  expect_equal(project_similarity(sp, pm$matrix, pm$wavenumbers), sp$scores, tolerance = 1e-8)
+
+})
+
+
 ## =============================================================================
 ## build_similarity_space() — the noise floor
 ## =============================================================================
