@@ -508,8 +508,9 @@ describe("fit() - AD enabled", {
 
     bundle <- result$models$ad[[1]]
 
-    expect_true(all(c("centroid", "cov_matrix", "ad_thresholds", "n_calib")
+    expect_true(all(c("form", "centroid", "cov_matrix", "ad_thresholds", "n_calib")
                     %in% names(bundle)))
+    expect_identical(bundle$form, "full")
     expect_length(bundle$ad_thresholds, 4)
     expect_true(all(diff(bundle$ad_thresholds) > 0))
     expect_equal(length(bundle$centroid), nrow(bundle$cov_matrix))

@@ -1261,7 +1261,7 @@ describe("predict.horizons_fit() - applicability domain", {
                         class = "horizons_error_validation")
 
     expect_true(any(grepl(cid, err$findings, fixed = TRUE) &
-                    grepl("a square cov_matrix of its length", err$findings, fixed = TRUE)))
+                    grepl("of its length", err$findings, fixed = TRUE)))
 
   })
 

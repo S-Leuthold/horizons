@@ -1268,6 +1268,7 @@ describe("ensemble() and predict.horizons_ensemble() - member AD and intervals",
     member       <- names(with_bundles$models$workflows)[1]
 
     with_bundles$models$ad <- stats::setNames(list(list(
+      form          = "full",
       centroid      = c(wn_0 = 0),
       cov_matrix    = matrix(1, dimnames = list("wn_0", "wn_0")),
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)

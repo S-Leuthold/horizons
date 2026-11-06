@@ -1419,7 +1419,7 @@ make_valid_fit <- function() {
     results           = results,
     uq                = list(cfg_a = list(quantile_model = 1, scores = seq(-1, 1, length.out = 10),
                                           level_default = 0.9)),
-    ad                = list(cfg_a = list(centroid = c(f1 = 0), cov_matrix = matrix(1),
+    ad                = list(cfg_a = list(form = "full", centroid = c(f1 = 0), cov_matrix = matrix(1),
                                           ad_thresholds = c(1, 2, 3, 4))),
     selection_present = FALSE,
     control           = NULL,
@@ -2378,7 +2378,7 @@ test_that("validate_horizons_fit enforces the AD-subset invariant", {
   ## AD metadata keyed by a config with no fitted workflow is unreachable at
   ## predict time — same contract as uq.
   obj <- make_valid_fit()
-  obj$models$ad <- list(cfg_ghost = list(centroid = 1, cov_matrix = 1,
+  obj$models$ad <- list(cfg_ghost = list(form = "full", centroid = 1, cov_matrix = 1,
                                          ad_thresholds = 1:4))
   expect_error(suppressMessages(validate_horizons_fit(obj)),
                "ad keys not present in workflows: cfg_ghost",
@@ -3434,6 +3434,36 @@ describe("the class validators' new checks (#234)", {
     obj <- make_valid_fit()
     obj$models$ad$cfg_a$ad_thresholds <- c(1, 2, 2, 4)
     expect_identical(validate_horizons_fit(obj), obj)
+
+    ## The low-rank form: a scale of the centroid's length, a basis with that
+    ## many rows and fewer columns, one value per basis column, lambda in (0, 1]
+    low_rank <- list(form = "low_rank", centroid = c(f1 = 0, f2 = 0, f3 = 0),
+                     scale = c(1, 1, 1), lambda = 0.5, basis = matrix(c(1, 0, 0), 3),
+                     values = 2, ad_thresholds = c(1, 2, 3, 4))
+    obj <- make_valid_fit()
+    obj$models$ad$cfg_a <- low_rank
+    expect_identical(validate_horizons_fit(obj), obj)
+
+    low_shapes <- list(
+      basis_rows = function(b) { b$basis <- matrix(1, 2, 1); b },
+      basis_cols = function(b) { b$basis <- diag(3); b$values <- 1:3; b },
+      values     = function(b) { b$values <- c(2, 1); b },
+      scale      = function(b) { b$scale <- 1; b },
+      lambda     = function(b) { b$lambda <- 0; b }
+    )
+
+    for (name in names(low_shapes)) {
+      obj <- make_valid_fit()
+      obj$models$ad$cfg_a <- low_shapes[[name]](low_rank)
+      expect_true(any(grepl("(the low-rank form) does not carry", finding_of(validate_horizons_fit(obj)),
+                            fixed = TRUE)), label = name)
+    }
+
+    ## A bundle that names no form is refused for that
+    obj <- make_valid_fit()
+    obj$models$ad$cfg_a$form <- NULL
+    expect_true(any(grepl("does not name its covariance's form", finding_of(validate_horizons_fit(obj)),
+                          fixed = TRUE)))
 
   })
 

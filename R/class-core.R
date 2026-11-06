@@ -879,6 +879,12 @@ control_finding <- function(control, slot) {
 
 #' Whether an applicability-domain bundle has the shape predict() reads
 #'
+#' The centroid and thresholds, and the covariance in the form the bundle
+#' names ([compute_ad_metadata()]): a square `cov_matrix` of the centroid's
+#' length (`"full"`), or a `scale` of that length, a `basis` with that many
+#' rows and fewer columns, one of `values` per basis column and a `lambda` in
+#' (0, 1] (`"low_rank"`).
+#'
 #' @param bundle One entry of `models$ad`.
 #' @return `TRUE` or `FALSE`.
 #' @seealso [validate_horizons_fit()]
@@ -888,14 +894,36 @@ ad_bundle_ok <- function(bundle) {
   if (!is.list(bundle)) return(FALSE)
 
   centroid   <- bundle$centroid
-  cov_matrix <- bundle$cov_matrix
   thresholds <- bundle$ad_thresholds
+  p          <- length(centroid)
 
-  is.numeric(centroid) && length(centroid) > 0 && !anyNA(centroid) &&
-    is.matrix(cov_matrix) && is.numeric(cov_matrix) &&
-    nrow(cov_matrix) == length(centroid) && ncol(cov_matrix) == length(centroid) &&
+  common <- is.numeric(centroid) && p > 0 && !anyNA(centroid) &&
     is.numeric(thresholds) && length(thresholds) == 4 && !anyNA(thresholds) &&
     !is.unsorted(thresholds)
+
+  if (!common || !rlang::is_string(bundle$form)) return(FALSE)
+
+  ## The covariance in the form compute_ad_metadata() chose
+  switch(bundle$form,
+
+    full = {
+      cov_matrix <- bundle$cov_matrix
+      is.matrix(cov_matrix) && is.numeric(cov_matrix) &&
+        nrow(cov_matrix) == p && ncol(cov_matrix) == p
+    },
+
+    low_rank = {
+      basis <- bundle$basis
+      is.numeric(bundle$scale) && length(bundle$scale) == p && !anyNA(bundle$scale) &&
+        is.matrix(basis) && is.numeric(basis) && nrow(basis) == p && ncol(basis) < p &&
+        is.numeric(bundle$values) && length(bundle$values) == ncol(basis) &&
+        !anyNA(bundle$values) &&
+        rlang::is_scalar_double(bundle$lambda) && !is.na(bundle$lambda) &&
+        bundle$lambda > 0 && bundle$lambda <= 1
+    },
+
+    FALSE
+  )
 
 }
 
@@ -2782,11 +2810,23 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
       bad_shape <- names(ad)[!vapply(ad, ad_bundle_ok, logical(1))]
 
-      if (length(bad_shape) > 0) {
+      ### Named by the covariance's form, since each form needs other fields
+      bad_form <- vapply(ad[bad_shape], function(b) {
+        if (rlang::is_string(b$form) && b$form %in% c("full", "low_rank")) b$form else "none"
+      }, character(1))
 
-        errors <- c(errors, cli::format_inline(
-          "{.field ad} {cli::qty(length(bad_shape))}bundle{?s} {.val {bad_shape}} {?does/do} not carry a numeric {.field centroid}, a square {.field cov_matrix} of its length, and four non-decreasing {.field ad_thresholds}"
-        ))
+      needs <- c(
+        full     = "(the full form) {?does/do} not carry a numeric {.field centroid}, a square {.field cov_matrix} of its length, and four non-decreasing {.field ad_thresholds}",
+        low_rank = "(the low-rank form) {?does/do} not carry a numeric {.field centroid}, a {.field scale} of its length, a {.field basis} with that many rows and fewer columns, one of {.field values} per basis column, a {.field lambda} in (0, 1], and four non-decreasing {.field ad_thresholds}",
+        none     = "{?does/do} not name {?its/their} covariance's {.field form}, {.val full} or {.val low_rank}"
+      )
+
+      for (form in intersect(names(needs), bad_form)) {
+
+        ids    <- bad_shape[bad_form == form]
+        errors <- c(errors, cli::format_inline(paste(
+          "{.field ad} {cli::qty(length(ids))}bundle{?s} {.val {ids}}", needs[[form]]
+        )))
 
       }
 
@@ -2938,8 +2978,9 @@ has_uq <- function(x) {
 #'
 #' @details
 #' Checks the per-config AD slot populated by [fit()] (each entry a
-#' `centroid` / `cov_matrix` / `ad_thresholds` bundle). Whether a given config
-#' earned a bundle depends on `compute_ad` and a sufficient calibration set.
+#' `centroid`, the covariance in one of its two forms, and `ad_thresholds`).
+#' Whether a given config earned a bundle depends on `compute_ad` and a
+#' sufficient calibration set.
 #'
 #' @param x Any object (typically `horizons_fit`).
 #'
