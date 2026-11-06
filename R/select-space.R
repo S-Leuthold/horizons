@@ -41,8 +41,10 @@
 #'
 #' @param call The frame a refusal reports: the verb's.
 #'
-#' @return [List.] `matrix` (transformed, row names kept) and `wavenumbers`
-#'   (the columns that survive the filter's edge trim and the mask).
+#' @return [List.] `matrix` (transformed, row names kept), `wavenumbers`
+#'   (the columns that survive the filter's edge trim and the mask), and
+#'   `settings` (`snv`, `derivative`, `window`, `poly`, `mask`: what the
+#'   transform was run with, for `build_similarity_space()` to record).
 #'   Errors of class `horizons_error_input` when the mask leaves too few
 #'   columns.
 #'
@@ -60,6 +62,10 @@ transform_similarity <- function(M, wn,
   ## The mask and the filter's arguments are select_training()'s, checked at
   ## its door: an odd window (window_to_points()), a polynomial below it and
   ## at least the derivative.
+
+  settings <- list(snv = snv, derivative = as.integer(derivative),
+                   window = as.integer(window), poly = as.integer(poly),
+                   mask = mask)
 
   ids <- rownames(M)
   m   <- M
@@ -115,7 +121,33 @@ transform_similarity <- function(M, wn,
 
   dimnames(m) <- list(ids, NULL)
 
-  list(matrix = m, wavenumbers = wn)
+  list(matrix = m, wavenumbers = wn, settings = settings)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## similarity_min_cols() — The columns a space's decomposition needs
+## ---------------------------------------------------------------------------
+
+#' The fewest columns a similarity space can be decomposed on
+#'
+#' @description
+#' The floor is what the decomposition actually needs: the components asked
+#' for when `ncomp` is a count, and two when it is a proportion. It is not
+#' the component cap: under a variance proportion the cap is 100 by default
+#' and the rule usually retains a tenth of that, so requiring columns against
+#' the cap would refuse a perfectly ordinary 24 cm-1 pool (132 columns after
+#' the filter's edge trim) for a cap the user never set.
+#'
+#' @param ncomp [Numeric.] Proportion of variance in (0, 1) or an integer
+#'   count, as `build_similarity_space()` takes it.
+#'
+#' @return [Integer.] The `min_cols` for `transform_similarity()`.
+#' @noRd
+similarity_min_cols <- function(ncomp) {
+
+  if (ncomp > 0 && ncomp < 1) 2L else max(2L, as.integer(ncomp))
 
 }
 
@@ -127,10 +159,17 @@ transform_similarity <- function(M, wn,
 #' Build the similarity space from a reference pool
 #'
 #' @description
-#' Runs `transform_similarity()` on the pool, then fits either a PCA of the
-#' pool (unsupervised, the default) or a PLS against one property
-#' (supervised, property-specific). Stores what projection needs and the
-#' pool's own scores.
+#' Fits either a PCA of the transformed pool (unsupervised, the default) or a
+#' PLS against one property (supervised, property-specific). Stores what
+#' projection needs and the pool's own scores.
+#'
+#' The caller transforms the pool with `transform_similarity()` and
+#' `min_cols = similarity_min_cols(ncomp)`, and passes the result as it is
+#' made: the raw spectra then live only inside that call. A library's are a
+#' gigabyte, and an argument of this function would stay alive until it
+#' returned, through the decomposition. The space records the settings the
+#' transform reports, so projection repeats the transform the pool had, and
+#' holds the column floor itself, so no caller can decompose too few columns.
 #'
 #' @details
 #' For `space = "pca"`, `ncomp` in (0, 1) retains components to that
@@ -159,9 +198,10 @@ transform_similarity <- function(M, wn,
 #' Mahalanobis, which on these scores is Euclidean distance after dividing
 #' by that standard deviation.
 #'
-#' @param M [Matrix.] Pool spectra, rows named by sample id.
-#' @param wn [Numeric.] Wavenumbers, decreasing.
-#' @param snv,derivative,window,poly,mask Passed to `transform_similarity()`.
+#' @param tr [List.] `transform_similarity()`'s output on the pool, its
+#'   matrix's rows named by sample id.
+#' @param wn [Numeric.] The pool's wavenumbers before the transform,
+#'   decreasing.
 #' @param space [Character.] `"pca"` or `"pls"`. Default: `"pca"`.
 #' @param ncomp [Numeric.] Proportion of variance in (0, 1) or an integer
 #'   count. Default: `0.99`.
@@ -188,12 +228,7 @@ transform_similarity <- function(M, wn,
 #'
 #' @seealso [transform_similarity()], [project_similarity()]
 #' @noRd
-build_similarity_space <- function(M, wn,
-                                   snv        = TRUE,
-                                   derivative = 1L,
-                                   window     = 11L,
-                                   poly       = 2L,
-                                   mask       = NULL,
+build_similarity_space <- function(tr, wn,
                                    space      = c("pca", "pls"),
                                    ncomp      = 0.99,
                                    y          = NULL,
@@ -208,27 +243,34 @@ build_similarity_space <- function(M, wn,
 
   is_prop <- ncomp > 0 && ncomp < 1
 
-  if (space == "pls" && length(y) != nrow(M)) {
+  if (space == "pls" && length(y) != nrow(tr$matrix)) {
 
-    abort_horizons("{.arg y} must have one value per pool row ({nrow(M)}), got {length(y)}.",
+    abort_horizons("{.arg y} must have one value per pool row ({nrow(tr$matrix)}), got {length(y)}.",
+                   kind = "internal")
+
+  }
+
+  ### The callers' transforms refuse a pool below the column floor against
+  ### the verb; this holds it for a caller that did not ask.
+  min_cols <- similarity_min_cols(ncomp)
+
+  if (ncol(tr$matrix) < min_cols) {
+
+    abort_horizons("The similarity space has {ncol(tr$matrix)} column{?s}, fewer than the {min_cols} the decomposition needs.",
                    kind = "internal")
 
   }
 
   ### The most components either rule could ask for; it bounds what prcomp()
-  ### has to compute. It is not a floor on the columns: under a variance
-  ### proportion the cap is 100 by default and the rule usually retains a
-  ### tenth of that, so requiring columns against the cap would refuse a
-  ### perfectly ordinary 24 cm-1 pool (132 columns after the filter's edge
-  ### trim) for a cap the user never set. The floor is what the decomposition
-  ### actually needs: the components asked for when that is a count, and two
-  ### when it is a proportion.
+  ### has to compute.
   comp_cap <- as.integer(if (is_prop) max_comp else ncomp)
-  min_cols <- if (is_prop) 2L else max(2L, as.integer(ncomp))
 
-  tr <- transform_similarity(M, wn, snv = snv, derivative = derivative,
-                             window = window, poly = poly, mask = mask,
-                             min_cols = min_cols, call = call)
+  ## Reading tr runs the caller's transform, and raw spectra passed to it
+  ## unheld die with that call. A library's are a gigabyte, collected here
+  ## before the decomposition makes its own copies.
+
+  row_ids <- rownames(tr$matrix)
+  collect_released(8 * nrow(tr$matrix) * length(wn))
 
   ## A pool with no spread has no components to rank neighbours by, however
   ## many are asked for, so it is refused here rather than decomposed
@@ -242,10 +284,7 @@ build_similarity_space <- function(M, wn,
   }
 
   out <- list(
-    settings = list(snv = snv, derivative = as.integer(derivative),
-                    window = as.integer(window), poly = as.integer(poly),
-                    mask = mask, space = space, ncomp = ncomp,
-                    sdev_floor = sdev_floor),
+    settings = c(tr$settings, list(space = space, ncomp = ncomp, sdev_floor = sdev_floor)),
     input_wavenumbers = wn,
     wavenumbers       = tr$wavenumbers
   )
@@ -317,7 +356,7 @@ build_similarity_space <- function(M, wn,
 
   }
 
-  dimnames(out$scores) <- list(rownames(M), NULL)
+  dimnames(out$scores) <- list(row_ids, NULL)
 
   structure(out, class = c("horizons_similarity_space", "list"))
 

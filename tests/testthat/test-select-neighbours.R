@@ -14,7 +14,7 @@ fixture_scores <- function(n_pool = 60, ncomp = 4L, seed = 1) {
   fx <- select_fixture(n_pool = n_pool, seed = seed)
   rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = ncomp)
+  sp <- space_on(rc$matrix, rc$wavenumbers, ncomp = ncomp)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
 
   list(fx = fx, space = sp, Sp = sp$scores, St = st)
@@ -129,6 +129,34 @@ test_that("nearest_neighbours() chunked equals unchunked", {
 
   expect_identical(a$ids, b$ids)
   expect_equal(a$dist, b$dist, tolerance = 1e-12)
+
+})
+
+
+test_that("collect_released() collects from its threshold and not below it", {
+
+  expect_false(collect_released(1, at = 2))
+  expect_true(collect_released(2, at = 2))
+
+  ## A small call's chunks are left to R
+  expect_false(collect_released(SELECT_COLLECT_BYTES - 1))
+  expect_true(collect_released(SELECT_COLLECT_BYTES))
+
+})
+
+
+test_that("nearest_neighbours() returns the same when every chunk is collected", {
+
+  ## A smoke test of the collection branch, not a proof of equality: gc()
+  ## changes no value, so the identity holds whatever the branch does. It
+  ## catches a release that frees something the next chunk still reads.
+  s <- fixture_scores()
+  a <- nearest_neighbours(s$St, s$Sp, k = 7L, metric = "euclidean", chunk_size = 3L)
+
+  local_mocked_bindings(SELECT_COLLECT_BYTES = 0)
+  b <- nearest_neighbours(s$St, s$Sp, k = 7L, metric = "euclidean", chunk_size = 3L)
+
+  expect_identical(a, b)
 
 })
 
@@ -460,7 +488,7 @@ test_that("draw_neighbours() flags the whole replicate cluster at k below its si
   fxr <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc  <- pool_on_targets(fxr)
   tm  <- predictor_matrix(fxr$targets)
-  sp  <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
+  sp  <- space_on(rc$matrix, rc$wavenumbers, ncomp = 4L)
   st  <- project_similarity(sp, tm$matrix, tm$wavenumbers)
   rsp <- fxr$pool$data$analysis[, c("sample_id", "clay")]
 

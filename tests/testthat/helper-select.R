@@ -309,3 +309,34 @@ select_fixture <- function(...) {
   memo_fixture("select_fixture", make_select_fixture, ...)
 
 }
+
+
+## ---------------------------------------------------------------------------
+## space_on() — a similarity space on a matrix, as select_training() builds it
+## ---------------------------------------------------------------------------
+
+#' Transform a pool's matrix and build its similarity space
+#'
+#' @description
+#' The two calls `select_training()` and `prime_library_space()` make, at one
+#' set of settings: `transform_similarity()` with the space's column floor,
+#' then `build_similarity_space()` on its output.
+#'
+#' @param M [Matrix.] Pool spectra, rows named by sample id.
+#' @param wn [Numeric.] Wavenumbers, decreasing.
+#' @param snv,derivative,window,poly,mask As `transform_similarity()`.
+#' @param ncomp As `build_similarity_space()`.
+#' @param ... Passed to `build_similarity_space()`.
+#'
+#' @return [horizons_similarity_space.]
+#' @noRd
+space_on <- function(M, wn, snv = TRUE, derivative = 1L, window = 11L,
+                     poly = 2L, mask = NULL, ncomp = 0.99, ...) {
+
+  tr <- transform_similarity(M, wn, snv = snv, derivative = derivative,
+                             window = window, poly = poly, mask = mask,
+                             min_cols = similarity_min_cols(ncomp))
+
+  build_similarity_space(tr, wn, ncomp = ncomp, ...)
+
+}

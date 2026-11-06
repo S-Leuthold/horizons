@@ -406,6 +406,14 @@ SELECT_RESEMBLANCE_MIN_ROWS <- 30L
 # (control_horizons(chunk_size = )).
 SELECT_CHUNK_SIZE <- 500L
 
+# select_training(): released memory at or above this size is collected at
+# once. R otherwise collects only when the heap reaches a trigger that an
+# earlier peak may have raised, so a large block of garbage (a chunk's
+# distances, the library once the draw is done) can lift the call's peak by
+# gigabytes. A collection costs about 0.1 s, so smaller releases are left to
+# R: every chunk at library scale passes this, and no small call does.
+SELECT_COLLECT_BYTES <- 64 * 1024^2
+
 # select_training(): the version of the similarity-space algorithm, part of
 # every cached space's key. Cached spaces live in the user's cache directory
 # and outlive package upgrades, so a change to how the space is built

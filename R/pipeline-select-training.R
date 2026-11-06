@@ -795,7 +795,9 @@ select_training <- function(x, library,
   ## only. The training set comes back on the library's own columns at the
   ## wavenumbers the targets share (Step 5), checked at the door above.
 
-  pm <- predictor_matrix(pool)
+  ## The library's matrix is built only where the space is built (Step 2):
+  ## on KSSL it is a gigabyte, and a cached space never reads it.
+
   tm <- predictor_matrix(x)
 
   ## Rows an earlier step flagged leave the space and the draw first, as
@@ -805,11 +807,11 @@ select_training <- function(x, library,
   ## data, left out as evaluate() and fit() leave flagged rows, with a line
   ## in the tree.
 
-  ## Only the columns the call reads, and the matrices copied only when a
-  ## row leaves them: a library's analysis table and its matrix are each
-  ## about a gigabyte on KSSL.
+  ## Only the columns the call reads of the pool's analysis table, a
+  ## gigabyte on KSSL, and the targets' matrix copied only when a row leaves
+  ## it. The library's matrix is made only while its space is built
+  ## (build_space(), below).
 
-  if (any(pool_flagged))   pm$matrix <- pm$matrix[!pool_flagged, , drop = FALSE]
   if (any(target_flagged)) tm$matrix <- tm$matrix[!target_flagged, , drop = FALSE]
 
   read_cols <- intersect(c("sample_id", properties, "upper_depth_cm"), names(pool$data$analysis))
@@ -826,7 +828,7 @@ select_training <- function(x, library,
 
   }
 
-  sa <- search_axis(pm$wavenumbers, tm$matrix, tm$wavenumbers)
+  sa <- search_axis(predictor_wavenumbers(pool), tm$matrix, tm$wavenumbers)
 
   ## Targets short of the library's range are searched on the overlap, in a
   ## space built fresh and not cached. The warning's ids are the library
@@ -849,7 +851,7 @@ select_training <- function(x, library,
   if (verbose) {
 
     search_res <- sa$record$library_grid$resolution
-    cat(paste0("\u2502  \u251C\u2500 Pool: ", nrow(pm$matrix), " rows; searched on its own ",
+    cat(paste0("\u2502  \u251C\u2500 Pool: ", sum(!pool_flagged), " rows; searched on its own ",
                search_res, " cm\u207B\u00B9 grid",
                if (sa$record$mode == "overlap") " (the overlap with the targets)" else "",
                ", targets ", if (sa$record$operation == "none") "already on it" else "resampled onto it",
@@ -1009,8 +1011,11 @@ select_training <- function(x, library,
 
   ## Units, before SNV erases the evidence ----------------------------------
 
-  lib_m <- if (sa$record$mode == "full") pm$matrix else pm$matrix[, sa$pool_cols, drop = FALSE]
-  units <- check_photometric_units(lib_m, sa$matrix)
+  ## Read from the pool's own columns, a column at a time: the library's
+  ## values are never copied whole for two numbers.
+
+  units <- check_photometric_units(pool$data$analysis[pool_vars[sa$pool_cols]], sa$matrix,
+                                   pool_rows = if (any(pool_flagged)) !pool_flagged)
 
   if (units$mismatch) {
 
@@ -1065,12 +1070,17 @@ select_training <- function(x, library,
                          poly = as.integer(poly), mask = mask, ncomp = ncomp,
                          sdev_floor = sdev_floor)
 
+  ## The library's matrix exists only while it is transformed, its flagged
+  ## rows and any columns past the overlap left out.
+
   build_space <- function() {
 
-    build_similarity_space(lib_m, sa$wavenumbers,
-                           snv = space_settings$snv, derivative = space_settings$derivative,
-                           window = space_settings$window, poly = space_settings$poly,
-                           mask = mask, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
+    build_similarity_space(transform_similarity(library_matrix(pool, pool_flagged, if (sa$record$mode != "full") sa$pool_cols),
+                                                sa$wavenumbers,
+                                                snv = space_settings$snv, derivative = space_settings$derivative,
+                                                window = space_settings$window, poly = space_settings$poly,
+                                                mask = mask, min_cols = similarity_min_cols(ncomp), call = call),
+                           sa$wavenumbers, space = space, ncomp = ncomp, sdev_floor = sdev_floor,
                            y = if (space == "pls") usable[[properties]] else NULL,
                            call = call)
 
@@ -1113,8 +1123,6 @@ select_training <- function(x, library,
                   reason = if (space == "pls") "pls space" else if (sa$record$mode != "full") "overlap space" else "pool passed in memory")
 
   }
-
-  rm(lib_m)
 
   St <- project_similarity(sp, sa$matrix, sa$wavenumbers)
 
@@ -1452,6 +1460,19 @@ select_training <- function(x, library,
     }, integer(1), USE.NAMES = FALSE)
   )
 
+  ## The library is done with: the record keeps its size, its ids' hash and
+  ## its provenance, and the resemblance check runs on the scores alone. A
+  ## library-scale pool is a gigabyte, released and collected here rather
+  ## than carried through the check.
+
+  pool_record    <- list(n_rows = nrow(pool$data$analysis),
+                         id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix")))
+  library_record <- resolved$record
+  released       <- 8 * nrow(pool$data$analysis) * length(pool_vars)
+
+  rm(pool, resolved)
+  collect_released(released)
+
   ## Resemblance: targets beyond the pool's own nearest-neighbour spread ----
 
   resemblance <- check_resemblance(sp, St, metric = metric, chunk_size = chunk_size, seed = seed,
@@ -1478,12 +1499,11 @@ select_training <- function(x, library,
                             shared_range = range(as.numeric(sub("^wn_", "", cols$shared))),
                             target_only  = as.numeric(sub("^wn_", "", cols$target_only))),
     search           = c(sa$record, list(cache = cache)),
-    pool             = list(n_rows = nrow(pool$data$analysis),
-                            id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix"))),
+    pool             = pool_record,
     targets          = list(source  = targets_source(x$log),
                             n_rows  = nrow(x$data$analysis),
                             id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),
-    library          = resolved$record,
+    library          = library_record,
     depth            = list(requested = depth, recorded = depth_recorded, applied = depth_applied,
                             max_cm = if (depth_applied) SELECT_TOPSOIL_MAX_CM else NULL,
                             n_eligible = sum(eligible)),
@@ -1917,21 +1937,32 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
 #' leaves an instrument gain difference of around 1.5x silent, which is the
 #' band this check is not for.
 #'
-#' @param pool_m [Matrix.] Pool spectra on the search grid, raw.
-#' @param target_m [Matrix.] Target spectra on the same grid, raw.
+#' The medians and IQRs are pooled over every value, and are exactly those of
+#' `stats::median()` and `stats::IQR()`, computed a column at a time by
+#' `median_iqr()`, so a library's spectra are never copied whole.
+#'
+#' @param pool_m [Matrix or data frame.] Pool spectra on the search grid,
+#'   raw: a matrix, or the pool's spectral columns as a data frame.
+#' @param target_m [Matrix or data frame.] Target spectra on the same grid,
+#'   raw.
 #' @param ratio [Numeric.] Fold difference that counts as a mismatch.
 #'   Default: `2`.
+#' @param pool_rows [Logical or NULL.] The pool rows to count; `NULL` counts
+#'   every row. Default: `NULL`.
 #'
 #' @return [List.] `pool_median`, `target_median`, `pool_iqr`, `target_iqr`,
 #'   `basis` (`"iqr"`, or `"median and iqr"` when the locations were
 #'   informative) and `mismatch`.
 #' @noRd
-check_photometric_units <- function(pool_m, target_m, ratio = 2) {
+check_photometric_units <- function(pool_m, target_m, ratio = 2, pool_rows = NULL) {
 
-  p_med <- stats::median(pool_m,   na.rm = TRUE)
-  t_med <- stats::median(target_m, na.rm = TRUE)
-  p_iqr <- stats::IQR(pool_m,      na.rm = TRUE)
-  t_iqr <- stats::IQR(target_m,    na.rm = TRUE)
+  p <- median_iqr(pool_m, rows = pool_rows)
+  t <- median_iqr(target_m)
+
+  p_med <- p$median
+  t_med <- t$median
+  p_iqr <- p$iqr
+  t_iqr <- t$iqr
 
   fold <- function(a, b) {
 
@@ -1956,6 +1987,229 @@ check_photometric_units <- function(pool_m, target_m, ratio = 2) {
     basis         = if (located) "median and iqr" else "iqr",
     mismatch      = isTRUE(scale_off || loc_off)
   )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## median_iqr() — The pooled median and IQR, a column at a time
+## ---------------------------------------------------------------------------
+
+#' The median and IQR of every value in a matrix, without copying it
+#'
+#' @description
+#' Returns exactly `stats::median(v, na.rm = TRUE)` and
+#' `stats::IQR(v, na.rm = TRUE)`, where `v` is every value of `x` (in
+#' `rows`), while holding one column at a time. On a spectral library the
+#' whole-matrix calls copy and sort every value, several gigabytes.
+#'
+#' @details
+#' Both statistics read at most six order statistics: the one or two middle
+#' ranks, and the ranks either side of each quartile's position. They are
+#' found by selection. The finite range is cut into `bins` equal-width
+#' buckets by a map that is monotone in the value, so cumulative counts place
+#' each rank in one bucket, whose values are then gathered and sorted. A
+#' needed bucket holding more than `cap` values is not gathered: the
+#' selection repeats inside its range, up to a fixed depth past which the
+#' values are gathered whatever their number, so the answer is exact for any
+#' input. `-Inf` and `Inf` are counted rather than bucketed, and take the
+#' ranks at either end.
+#'
+#' The final arithmetic is `median.default()`'s and `quantile.default()`'s
+#' (type 7), on the same values in the same order. When the order statistic
+#' is zero and both `0` and `-0` occur, which of them is returned may differ
+#' from R's sort; they compare equal.
+#'
+#' @param x [Matrix or data frame.] Numeric values; a data frame is read as
+#'   `as.matrix()` would read it.
+#' @param rows [Logical or NULL.] The rows to count; `NULL` counts every row.
+#'   Default: `NULL`.
+#' @param bins [Integer.] Buckets per selection pass. Default: `65536L`.
+#' @param cap [Numeric.] The most values a bucket may hold to be gathered.
+#'   Default: `2^20`.
+#'
+#' @return [List.] `median` and `iqr` (double). The median is integer only
+#'   for an odd count of values when every column is integer, as
+#'   `stats::median()` of an integer matrix is; an even count's is the
+#'   `mean()` of the two middle values, a double.
+#' @noRd
+median_iqr <- function(x, rows = NULL, bins = 65536L, cap = 2^20) {
+
+  is_m    <- is.matrix(x)
+  n_col   <- if (is_m) ncol(x) else length(x)
+  integer <- if (is_m) is.integer(x) else n_col > 0L && all(vapply(x, is.integer, logical(1)))
+
+  column <- function(j) {
+
+    v <- if (is_m) x[, j] else x[[j]]
+
+    if (is.null(rows)) v else v[rows]
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Pass 1: the count, the infinities, the finite range
+  ## ---------------------------------------------------------------------------
+
+  n <- 0
+  n_neg <- 0
+  n_pos <- 0
+  lo <- NULL
+  hi <- NULL
+
+  for (j in seq_len(n_col)) {
+
+    v <- column(j)
+    v <- v[!is.na(v)]
+    n <- n + length(v)
+
+    fin <- is.finite(v)
+
+    if (!all(fin)) {
+
+      n_neg <- n_neg + sum(v == -Inf)
+      n_pos <- n_pos + sum(v == Inf)
+      v     <- v[fin]
+
+    }
+
+    if (length(v)) {
+
+      r  <- range(v)
+      lo <- if (is.null(lo)) r[1] else min(lo, r[1])
+      hi <- if (is.null(hi)) r[2] else max(hi, r[2])
+
+    }
+
+  }
+
+  if (n == 0) return(list(median = if (integer) NA_integer_ else NA_real_, iqr = NA_real_))
+
+  ## ---------------------------------------------------------------------------
+  ## The ranks median.default() and quantile.default(type = 7) read
+  ## ---------------------------------------------------------------------------
+
+  half  <- (n + 1) %/% 2
+  index <- 1 + max(n - 1, 0) * c(0.25, 0.75)
+  q_lo  <- floor(index)
+  q_hi  <- ceiling(index)
+
+  ranks <- unique(c(half, if (n %% 2 == 0) half + 1, q_lo, q_hi))
+
+  ## ---------------------------------------------------------------------------
+  ## Selection by buckets, among the finite values in [lo, hi]
+  ## ---------------------------------------------------------------------------
+
+  in_range <- function(j, lo, hi) {
+
+    v <- column(j)
+
+    v[!is.na(v) & v >= lo & v <= hi]
+
+  }
+
+  gather <- function(lo, hi, keep = NULL) {
+
+    vals <- vector("list", n_col)
+
+    for (j in seq_len(n_col)) {
+
+      v <- in_range(j, lo, hi)
+      vals[[j]] <- if (is.null(keep)) v else v[keep(v)]
+
+    }
+
+    unlist(vals, use.names = FALSE)
+
+  }
+
+  pick <- function(r, lo, hi, depth) {
+
+    if (lo == hi) return(rep(lo, length(r)))
+
+    width <- hi - lo
+    scale <- bins / width
+
+    ### A range too wide or too narrow for the map to be finite, or a
+    ### selection that has narrowed as far as it will: gather and sort.
+    if (!is.finite(width) || !is.finite(scale) || depth == 0L) {
+
+      return(sort(gather(lo, hi))[r])
+
+    }
+
+    bucket <- function(v) pmin(floor((v - lo) * scale), bins - 1) + 1
+
+    counts <- numeric(bins)
+
+    for (j in seq_len(n_col)) counts <- counts + tabulate(bucket(in_range(j, lo, hi)), bins)
+
+    cum    <- cumsum(counts)
+    b      <- findInterval(r - 1, cum) + 1L
+    within <- r - c(0, cum)[b]
+
+    needed <- unique(b)
+    big    <- needed[counts[needed] > cap]
+    small  <- setdiff(needed, big)
+
+    out <- vector("list", length(r))
+
+    if (length(small)) {
+
+      vals <- gather(lo, hi, keep = function(v) bucket(v) %in% small)
+      at   <- bucket(vals)
+
+      for (s in small) {
+
+        sorted <- sort(vals[at == s])
+        for (i in which(b == s)) out[[i]] <- sorted[within[i]]
+
+      }
+
+    }
+
+    for (g in big) {
+
+      vals <- gather(lo, hi, keep = function(v) bucket(v) == g)
+      g_r  <- range(vals)
+      rm(vals)
+
+      i <- which(b == g)
+      out[i] <- as.list(pick(within[i], g_r[1], g_r[2], depth - 1L))
+
+    }
+
+    unlist(out, use.names = FALSE)
+
+  }
+
+  ## Ranks among every value: -Inf first, then the finite values, then Inf.
+
+  value <- vector("list", length(ranks))
+  value[ranks <= n_neg]    <- list(-Inf)
+  value[ranks > n - n_pos] <- list(Inf)
+
+  finite <- ranks > n_neg & ranks <= n - n_pos
+
+  if (any(finite)) value[finite] <- as.list(pick(ranks[finite] - n_neg, lo, hi, depth = 4L))
+
+  at <- function(r) value[[match(r, ranks)]]
+
+  ## ---------------------------------------------------------------------------
+  ## median.default() and quantile.default()'s arithmetic
+  ## ---------------------------------------------------------------------------
+
+  med <- if (n %% 2 == 1) at(half) else mean(c(at(half), at(half + 1)))
+
+  x_lo <- as.numeric(c(at(q_lo[1]), at(q_lo[2])))
+  x_hi <- as.numeric(c(at(q_hi[1]), at(q_hi[2])))
+
+  qs <- x_lo
+  i  <- which(index > q_lo & x_hi != qs)
+  h  <- (index - q_lo)[i]
+  qs[i] <- (1 - h) * qs[i] + h * x_hi[i]
+
+  list(median = med, iqr = diff(qs))
 
 }
 

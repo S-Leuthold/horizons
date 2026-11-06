@@ -279,6 +279,44 @@ test_that("select_training() records its control and its seed, 307 by default", 
 })
 
 
+test_that("select_training() returns the same when every release is collected", {
+
+  ## A smoke test of the collection branch, not a proof of equality: gc()
+  ## changes no value, so the identity holds whatever the branch does. What
+  ## it can catch is a release that frees something still in use, which
+  ## would fail the call once collection is forced on every chunk and on the
+  ## pool's release.
+  fx <- select_fixture(n_pool = 60)
+
+  untimed <- function(out) {
+
+    out$selection$timestamp <- NULL
+    out$log$time <- NULL
+    out
+
+  }
+
+  a <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay",
+                                     control = control_horizons(chunk_size = 7L)))
+
+  collected <- 0L
+  real      <- collect_released
+  local_mocked_bindings(
+    SELECT_COLLECT_BYTES = 0,
+    collect_released = function(bytes, at = SELECT_COLLECT_BYTES) {
+      collected <<- collected + real(bytes, at = at)
+    }
+  )
+
+  b <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay",
+                                     control = control_horizons(chunk_size = 7L)))
+
+  expect_gt(collected, 0L)
+  expect_identical(untimed(a), untimed(b))
+
+})
+
+
 test_that("select_training() takes the resemblance check's minimum and the chunk size from its control", {
 
   fx <- select_fixture(n_pool = 60)
@@ -712,6 +750,71 @@ test_that("the unit check catches a log-base difference and lets an instrument g
 })
 
 
+test_that("median_iqr() equals stats::median() and stats::IQR() exactly", {
+
+  ## The units check reads a library a column at a time, so its statistics
+  ## must be R's own to the bit: the record compares them. Small bins and
+  ## caps force the refinement and the gather-everything paths.
+  set.seed(11)
+
+  same <- function(x, rows = NULL, ...) {
+
+    m <- as.matrix(x)
+    if (!is.null(rows)) m <- m[rows, , drop = FALSE]
+
+    got <- median_iqr(x, rows = rows, ...)
+
+    expect_identical(got$median, stats::median(m, na.rm = TRUE))
+    expect_identical(got$iqr,    stats::IQR(m,    na.rm = TRUE))
+
+  }
+
+  ## Odd and even counts, and ties at the ranks read
+  odd  <- matrix(rnorm(35), 7)
+  even <- matrix(rnorm(36), 9)
+  tied <- matrix(round(rnorm(400), 1), 40)
+
+  for (m in list(odd, even, tied)) {
+
+    same(m)
+    same(m, bins = 2L, cap = 2)
+    same(m, bins = 3L, cap = 1)
+
+  }
+
+  ## Missing values, infinities, negative values, and nothing at all
+  holes <- tied
+  holes[c(3, 50, 77)]  <- NA
+  holes[c(5, 90)]      <- NaN
+  holes[c(8, 120, 33)] <- c(-Inf, Inf, Inf)
+
+  same(holes)
+  same(holes, bins = 2L, cap = 1)
+  same(matrix(NA_real_, 3, 2))
+  same(matrix(-2.5, 1, 1))
+  same(matrix(c(-Inf, Inf), 1))
+  same(matrix(c(Inf, Inf, 1), 1))
+
+  ## An integer matrix keeps the integer median R gives it
+  ints <- matrix(sample(1:5, 21, replace = TRUE), 7)
+
+  same(ints)
+  same(ints[, -1])
+  same(ints, bins = 2L, cap = 1)
+
+  ## A data frame's columns, mixed types and a row filter, as the matrix of
+  ## the same rows
+  df   <- data.frame(a = 1:6, b = c(0.5, 2, NA, 2, 3, -1), c = c(4L, 4L, 4L, NA, 1L, 2L))
+  keep <- c(TRUE, FALSE, TRUE, TRUE, TRUE, FALSE)
+
+  same(df)
+  same(df, rows = keep)
+  same(df[c("a", "c")], rows = keep)
+  same(as.data.frame(holes), rows = rep(c(TRUE, FALSE), 20), bins = 2L, cap = 2)
+
+})
+
+
 test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
 
   ## Arrange: a pool over the 2,000-row reference cap would be slow to build,
@@ -719,7 +822,7 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
   fx <- select_fixture(n_pool = 60)
   rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, ncomp = 4L)
+  sp <- space_on(rc$matrix, rc$wavenumbers, ncomp = 4L)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
 
   set.seed(5)
@@ -945,6 +1048,18 @@ test_that("a mask over most of the similarity space runs, and the tree says how 
   ## And nothing is printed without verbose
   expect_silent(suppressWarnings(select_training(fx$targets, fx$pool, k = 5, properties = "clay",
                                                  mask = mask)))
+
+})
+
+
+test_that("select_training() refuses a mask that leaves the space too few columns, against the verb", {
+
+  fx <- select_fixture(n_pool = 60)
+
+  err <- expect_error(quiet_select(fx, k = 5, properties = "clay", mask = rbind(c(0, 5000))),
+                      "left with 0 columns, fewer than the 2", fixed = TRUE,
+                      class = "horizons_error_input")
+  expect_identical(rlang::call_name(err$call), "select_training")
 
 })
 
@@ -1342,7 +1457,7 @@ test_that("at k = 1 batch and global record every twin in the measured pool, wit
   fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc <- pool_on_targets(fx)
   tm <- predictor_matrix(fx$targets)
-  sp <- build_similarity_space(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
+  sp <- space_on(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
   St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
   a  <- fx$pool$data$analysis
 
