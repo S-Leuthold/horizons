@@ -712,6 +712,71 @@ test_that("the unit check catches a log-base difference and lets an instrument g
 })
 
 
+test_that("median_iqr() equals stats::median() and stats::IQR() exactly", {
+
+  ## The units check reads a library a column at a time, so its statistics
+  ## must be R's own to the bit: the record compares them. Small bins and
+  ## caps force the refinement and the gather-everything paths.
+  set.seed(11)
+
+  same <- function(x, rows = NULL, ...) {
+
+    m <- as.matrix(x)
+    if (!is.null(rows)) m <- m[rows, , drop = FALSE]
+
+    got <- median_iqr(x, rows = rows, ...)
+
+    expect_identical(got$median, stats::median(m, na.rm = TRUE))
+    expect_identical(got$iqr,    stats::IQR(m,    na.rm = TRUE))
+
+  }
+
+  ## Odd and even counts, and ties at the ranks read
+  odd  <- matrix(rnorm(35), 7)
+  even <- matrix(rnorm(36), 9)
+  tied <- matrix(round(rnorm(400), 1), 40)
+
+  for (m in list(odd, even, tied)) {
+
+    same(m)
+    same(m, bins = 2L, cap = 2)
+    same(m, bins = 3L, cap = 1)
+
+  }
+
+  ## Missing values, infinities, negative values, and nothing at all
+  holes <- tied
+  holes[c(3, 50, 77)]  <- NA
+  holes[c(5, 90)]      <- NaN
+  holes[c(8, 120, 33)] <- c(-Inf, Inf, Inf)
+
+  same(holes)
+  same(holes, bins = 2L, cap = 1)
+  same(matrix(NA_real_, 3, 2))
+  same(matrix(-2.5, 1, 1))
+  same(matrix(c(-Inf, Inf), 1))
+  same(matrix(c(Inf, Inf, 1), 1))
+
+  ## An integer matrix keeps the integer median R gives it
+  ints <- matrix(sample(1:5, 21, replace = TRUE), 7)
+
+  same(ints)
+  same(ints[, -1])
+  same(ints, bins = 2L, cap = 1)
+
+  ## A data frame's columns, mixed types and a row filter, as the matrix of
+  ## the same rows
+  df   <- data.frame(a = 1:6, b = c(0.5, 2, NA, 2, 3, -1), c = c(4L, 4L, 4L, NA, 1L, 2L))
+  keep <- c(TRUE, FALSE, TRUE, TRUE, TRUE, FALSE)
+
+  same(df)
+  same(df, rows = keep)
+  same(df[c("a", "c")], rows = keep)
+  same(as.data.frame(holes), rows = rep(c(TRUE, FALSE), 20), bins = 2L, cap = 2)
+
+})
+
+
 test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
 
   ## Arrange: a pool over the 2,000-row reference cap would be slow to build,
