@@ -184,8 +184,9 @@ meta_tune_control <- function(kind = c("grid", "resamples"), allow_par = FALSE) 
 #'
 #' @description
 #' Has every ensemble member predict the Split-F assessment set (the held-out
-#' evaluation data `fit()` reserved), via `predict_members()` — predict once,
-#' back-transform once, one unit per member. Shared by all engines so the
+#' evaluation data `fit()` was scored on, rebuilt from `evaluation$split` and
+#' the object's rows by `rebuild_split()`), via `predict_members()` — predict
+#' once, back-transform once, one unit per member. Shared by all engines so the
 #' meaning of "test_F" and the per-member prediction contract live in one
 #' place. A member that cannot predict the test rows aborts with
 #' `horizons_error_prediction_failed`, reporting `call`; inside `ensemble()`
@@ -195,8 +196,8 @@ meta_tune_control <- function(kind = c("grid", "resamples"), allow_par = FALSE) 
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s.
-#' @param call The frame a member's failure to predict the test rows reports
-#'   (`ensemble()`'s).
+#' @param call The frame a member's failure to predict the test rows, or a
+#'   split that no longer indexes the object's rows, reports (`ensemble()`'s).
 #'
 #' @return A long tibble: `config_id`, `sample_id`, `.pred`, `truth` (original
 #'   scale), one block per member, with the attributes `"unit_records"` and
@@ -208,7 +209,9 @@ predict_members_on_test <- function(object, members, call = rlang::caller_env())
   ## The namespaces the members' predict methods live in were loaded at
   ## ensemble()'s door (ensure_predict_namespaces()), the one caller.
 
-  test_data   <- rsample::assessment(object$models$split)
+  ## The test rows rebuilt from evaluate()'s split and the object's rows, as
+  ## fit() rebuilt them to score the members (rebuild_split()).
+  test_data   <- rsample::assessment(rebuild_split(object, call = call)$split)
   role_map    <- object$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 

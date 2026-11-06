@@ -289,6 +289,54 @@ describe("rebuild_resamples() fails at the boundary", {
 ## Transfer footprint — regression guard
 ## =========================================================================
 
+describe("rebuild_split() points evaluate()'s split at the object's rows", {
+
+  ## An evaluation with both kinds of row the split leaves out: one with no
+  ## measured outcome (#67) and the training rows the response trim (#77)
+  ## recorded.
+  obj <- make_eval_object(n = 60, n_configs = 1)
+  obj$data$analysis$SOC[c(1:4, 31:34)] <- c(20, 25, 30, 35, -15, -20, -25, -30)
+  obj$data$analysis$SOC[50] <- NA_real_
+  obj$config$outcome_range <- c(-Inf, Inf)
+
+  utils::capture.output(
+    v <- suppressWarnings(validate(obj, remove_outliers = "response"))
+  )
+  ev <- suppressWarnings(evaluate(v, prune = FALSE, seed = 307L))
+
+  it("rebuilds the training and test rows by position from the object's rows", {
+
+    trimmed <- ev$evaluation$response_trim$trimmed_ids
+    expect_gt(length(trimmed), 0)
+
+    ## The rows by hand: the measured ones, less the trimmed, in table order;
+    ## the split's positions index them.
+    full <- ev$data$analysis
+    rows <- full[!is.na(full$SOC) & !full$sample_id %in% trimmed, , drop = FALSE]
+    in_id <- ev$evaluation$split$in_id
+
+    rebuilt <- rebuild_split(ev)
+
+    expect_identical(rsample::training(rebuilt$split), rows[in_id, , drop = FALSE])
+    expect_identical(rsample::testing(rebuilt$split), rows[-in_id, , drop = FALSE])
+    expect_identical(rebuilt$trimmed_rows, full[full$sample_id %in% trimmed, , drop = FALSE])
+    expect_identical(rebuilt$modelled$n_dropped, 1L)
+
+  })
+
+  it("refuses a split whose rows no longer name the same samples and outcomes", {
+
+    moved <- ev
+    moved$data$analysis$SOC[10] <- moved$data$analysis$SOC[10] + 1
+
+    expect_error(rebuild_split(moved), "does not index the rows this object models",
+                 class = "horizons_error_input")
+
+  })
+
+})
+
+
 describe("resample transfer footprint", {
 
   it("carries no data in the index payload", {

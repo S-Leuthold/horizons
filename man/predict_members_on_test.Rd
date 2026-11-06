@@ -11,8 +11,8 @@ predict_members_on_test(object, members, call = rlang::caller_env())
 
 \item{members}{Character vector of member \code{config_id}s.}
 
-\item{call}{The frame a member's failure to predict the test rows reports
-(\code{ensemble()}'s).}
+\item{call}{The frame a member's failure to predict the test rows, or a
+split that no longer indexes the object's rows, reports (\code{ensemble()}'s).}
 }
 \value{
 A long tibble: \code{config_id}, \code{sample_id}, \code{.pred}, \code{truth} (original
@@ -21,8 +21,9 @@ scale), one block per member, with the attributes \code{"unit_records"} and
 }
 \description{
 Has every ensemble member predict the Split-F assessment set (the held-out
-evaluation data \code{fit()} reserved), via \code{predict_members()} — predict once,
-back-transform once, one unit per member. Shared by all engines so the
+evaluation data \code{fit()} was scored on, rebuilt from \code{evaluation$split} and
+the object's rows by \code{rebuild_split()}), via \code{predict_members()} — predict
+once, back-transform once, one unit per member. Shared by all engines so the
 meaning of "test_F" and the per-member prediction contract live in one
 place. A member that cannot predict the test rows aborts with
 \code{horizons_error_prediction_failed}, reporting \code{call}; inside \code{ensemble()}

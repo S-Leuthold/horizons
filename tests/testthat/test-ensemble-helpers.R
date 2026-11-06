@@ -61,6 +61,32 @@ describe("build_oof_matrix() - row order", {
 ## fit_tuned_meta_learner() - refusals
 ## =========================================================================
 
+describe("predict_members_on_test() - the rows it scores", {
+
+  it("predicts every test row of evaluate()'s split once per member, keyed by its ids", {
+
+    fitted  <- ens_fitted()
+    members <- gather_members(fitted)$members
+    test    <- rsample::testing(rebuild_split(fitted)$split)
+    outcome <- fitted$data$role_map$variable[fitted$data$role_map$role == "outcome"]
+
+    pred <- predict_members_on_test(fitted, members)
+
+    for (m in members) {
+
+      rows <- pred[pred$config_id == m, , drop = FALSE]
+
+      expect_setequal(rows$sample_id, test$sample_id)
+      expect_identical(anyDuplicated(rows$sample_id), 0L)
+      expect_identical(rows$truth, test[[outcome]][match(rows$sample_id, test$sample_id)])
+
+    }
+
+  })
+
+})
+
+
 describe("fit_tuned_meta_learner() - refusals", {
 
   it("is never handed a rank metric the tuning did not collect: ensemble() refuses it at the door", {
