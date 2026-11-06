@@ -279,6 +279,42 @@ test_that("select_training() records its control and its seed, 307 by default", 
 })
 
 
+test_that("select_training() returns the same when every release is collected", {
+
+  ## Collection frees memory and nothing else. Forced on every chunk of the
+  ## neighbour search, the draw and the record are identical but for when
+  ## they were made.
+  fx <- select_fixture(n_pool = 60)
+
+  untimed <- function(out) {
+
+    out$selection$timestamp <- NULL
+    out$log$time <- NULL
+    out
+
+  }
+
+  a <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay",
+                                     control = control_horizons(chunk_size = 7L)))
+
+  collected <- 0L
+  real      <- collect_released
+  local_mocked_bindings(
+    SELECT_COLLECT_BYTES = 0,
+    collect_released = function(bytes, at = SELECT_COLLECT_BYTES) {
+      collected <<- collected + real(bytes, at = at)
+    }
+  )
+
+  b <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay",
+                                     control = control_horizons(chunk_size = 7L)))
+
+  expect_gt(collected, 0L)
+  expect_identical(untimed(a), untimed(b))
+
+})
+
+
 test_that("select_training() takes the resemblance check's minimum and the chunk size from its control", {
 
   fx <- select_fixture(n_pool = 60)

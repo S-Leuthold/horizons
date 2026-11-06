@@ -133,6 +133,33 @@ test_that("nearest_neighbours() chunked equals unchunked", {
 })
 
 
+test_that("collect_released() collects from its threshold and not below it", {
+
+  expect_false(collect_released(1, at = 2))
+  expect_true(collect_released(2, at = 2))
+
+  ## A small call's chunks are left to R
+  expect_false(collect_released(SELECT_COLLECT_BYTES - 1))
+  expect_true(collect_released(SELECT_COLLECT_BYTES))
+
+})
+
+
+test_that("nearest_neighbours() returns the same when every chunk is collected", {
+
+  ## Collection frees memory and nothing else: forced on every chunk, the
+  ## neighbours and their distances are identical.
+  s <- fixture_scores()
+  a <- nearest_neighbours(s$St, s$Sp, k = 7L, metric = "euclidean", chunk_size = 3L)
+
+  local_mocked_bindings(SELECT_COLLECT_BYTES = 0)
+  b <- nearest_neighbours(s$St, s$Sp, k = 7L, metric = "euclidean", chunk_size = 3L)
+
+  expect_identical(a, b)
+
+})
+
+
 test_that("nearest_neighbours() returns accurate small distances, not the identity's", {
 
   ## Arrange: score vectors far from the origin but a hair apart. The

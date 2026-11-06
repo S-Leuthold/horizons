@@ -136,9 +136,45 @@ nearest_neighbours <- function(St, Sp, k,
 
     }
 
+    ## The chunk's distances and their temporaries end with the chunk.
+
+    released <- 8 * length(D)
+    rm(D)
+    collect_released(released)
+
   }
 
   list(ids = ids, dist = dist)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## collect_released() — Collect a large release at once
+## ---------------------------------------------------------------------------
+
+#' Run a full garbage collection after a large release
+#'
+#' @description
+#' R collects when the heap reaches a trigger, and an earlier peak can leave
+#' that trigger gigabytes high, so released blocks pile up as garbage until
+#' it is reached. Collecting at once bounds the peak to what is live. A
+#' collection costs about 0.1 s, so only releases of at least `at` bytes are
+#' collected.
+#'
+#' @param bytes [Numeric.] The size of what was released.
+#' @param at [Numeric.] The size from which to collect. Default:
+#'   `SELECT_COLLECT_BYTES`.
+#'
+#' @return `TRUE` if it collected, invisibly.
+#' @noRd
+collect_released <- function(bytes, at = SELECT_COLLECT_BYTES) {
+
+  collect <- bytes >= at
+
+  if (collect) gc(verbose = FALSE)
+
+  invisible(collect)
 
 }
 
