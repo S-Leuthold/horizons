@@ -383,6 +383,12 @@ fit_single_config <- function(config_row,
     ## recipe, as evaluate() raises it
     unit_step("selection_record", selection_reports(final_fit))
 
+    ## The PCA rotation cut to the components the member uses, before
+    ## anything predicts with it, so the test metrics, the intervals, the
+    ## applicability domain and the stored workflow all run on the cut
+    ## recipe. The products bake() takes are unchanged.
+    final_fit <- cut_pca_rotation(final_fit)
+
     ## -----------------------------------------------------------------------
     ## Step 8: Evaluate on test_F (original scale)
     ## -----------------------------------------------------------------------

@@ -862,6 +862,70 @@ describe("fit() - member ranking (#50)", {
 ## allow_par with no backend (M2e, 2026-09-15)
 ## =========================================================================
 
+describe("fit() - a PCA member stores only the components it uses", {
+
+  ## One plsr + PCA configuration, cold-started, with UQ and AD on (200 rows,
+  ## so the calibration split clears its minimum). The same fit with the cut
+  ## switched off keeps the full rotation; everything the member computes
+  ## after the final fit has to come out the same.
+  obj <- make_eval_object(n = 200, n_wn = 40, n_configs = 1)
+  obj$config$configs$model             <- "plsr"
+  obj$config$configs$feature_selection <- "pca"
+  obj$config$recipe$pca_threshold      <- 0.9
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  fit_pca <- function() {
+    suppressWarnings(fit(obj, compute_uq = TRUE, compute_ad = TRUE, seed = 11L))
+  }
+
+  pca_step <- function(f) {
+    steps <- workflows::extract_recipe(f$models$workflows[[1]], estimated = TRUE)$steps
+    steps[[which(vapply(steps, inherits, logical(1), what = "step_pca"))]]
+  }
+
+  set.seed(9)
+  new_rows <- tibble::as_tibble(matrix(rnorm(25 * 40), nrow = 25,
+                                       dimnames = list(NULL, names(obj$data$analysis)[1:40])))
+  new_rows$sample_id <- sprintf("N%02d", 1:25)
+
+  it("keeps num_comp columns of the rotation, as extract_recipe() sees it", {
+
+    cut  <- fit_pca()
+    step <- pca_step(cut)
+
+    expect_identical(ncol(step$res$rotation), as.integer(step$num_comp))
+    expect_lt(step$num_comp, nrow(step$res$rotation))
+
+  })
+
+  it("predicts, scores and calibrates exactly as the full rotation does", {
+
+    cut  <- fit_pca()
+    full <- local({
+      local_mocked_bindings(cut_pca_rotation = function(fitted_wf) fitted_wf)
+      fit_pca()
+    })
+
+    expect_gt(ncol(pca_step(full)$res$rotation), pca_step(full)$num_comp)
+    expect_length(cut$models$uq, 1L)
+    expect_length(cut$models$ad, 1L)
+
+    expect_identical(predict(cut, new_rows, interval = TRUE),
+                     predict(full, new_rows, interval = TRUE))
+
+    metrics <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae", "cv_rmse_mean", "cv_rpd_mean")
+    expect_identical(cut$models$results[metrics], full$models$results[metrics])
+    expect_identical(cut$models$cv_predictions, full$models$cv_predictions)
+    expect_identical(cut$models$ad, full$models$ad)
+
+    uq_fields <- c("scores", "test_coverage", "test_mean_width", "n_calib")
+    expect_identical(cut$models$uq[[1]][uq_fields], full$models$uq[[1]][uq_fields])
+
+  })
+
+})
+
+
 describe("fit() - allow_par without a usable backend", {
 
   it("warns once naming fit() and the plan, on the log too, then runs sequentially", {
