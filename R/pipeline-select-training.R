@@ -2028,8 +2028,10 @@ check_photometric_units <- function(pool_m, target_m, ratio = 2, pool_rows = NUL
 #' @param cap [Numeric.] The most values a bucket may hold to be gathered.
 #'   Default: `2^20`.
 #'
-#' @return [List.] `median` (integer when every column is integer, as
-#'   `stats::median()` of an integer matrix is) and `iqr` (double).
+#' @return [List.] `median` and `iqr` (double). The median is integer only
+#'   for an odd count of values when every column is integer, as
+#'   `stats::median()` of an integer matrix is; an even count's is the
+#'   `mean()` of the two middle values, a double.
 #' @noRd
 median_iqr <- function(x, rows = NULL, bins = 65536L, cap = 2^20) {
 
