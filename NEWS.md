@@ -1,5 +1,9 @@
 # horizons (development version)
 
+## Changes
+
+* `select_training()` needs less memory: on a library-scale draw over KSSL with its similarity space cached, the peak falls from about 6.7 GB to about 3.8 GB, and a draw that builds the space peaks at about 6.4 to 7.4 GB rather than 8.1 GB. The units comparison is computed exactly a column at a time, the library is held once and released before the space's decomposition, and the neighbour search frees each block of distances as it goes. Results are unchanged (#264).
+
 ## Bug fixes
 
 * `evaluate()` no longer fails every lightgbm configuration when it runs in parallel over configurations; each worker now loads the packages its configuration needs (#262).
