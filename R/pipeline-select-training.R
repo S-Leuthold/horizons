@@ -1467,6 +1467,19 @@ select_training <- function(x, library,
     }, integer(1), USE.NAMES = FALSE)
   )
 
+  ## The library is done with: the record keeps its size, its ids' hash and
+  ## its provenance, and the resemblance check runs on the scores alone. A
+  ## library-scale pool is a gigabyte, released and collected here rather
+  ## than carried through the check.
+
+  pool_record    <- list(n_rows = nrow(pool$data$analysis),
+                         id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix")))
+  library_record <- resolved$record
+  released       <- 8 * nrow(pool$data$analysis) * length(pool_vars)
+
+  rm(pool, resolved)
+  collect_released(released)
+
   ## Resemblance: targets beyond the pool's own nearest-neighbour spread ----
 
   resemblance <- check_resemblance(sp, St, metric = metric, chunk_size = chunk_size, seed = seed,
@@ -1493,12 +1506,11 @@ select_training <- function(x, library,
                             shared_range = range(as.numeric(sub("^wn_", "", cols$shared))),
                             target_only  = as.numeric(sub("^wn_", "", cols$target_only))),
     search           = c(sa$record, list(cache = cache)),
-    pool             = list(n_rows = nrow(pool$data$analysis),
-                            id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix"))),
+    pool             = pool_record,
     targets          = list(source  = targets_source(x$log),
                             n_rows  = nrow(x$data$analysis),
                             id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),
-    library          = resolved$record,
+    library          = library_record,
     depth            = list(requested = depth, recorded = depth_recorded, applied = depth_applied,
                             max_cm = if (depth_applied) SELECT_TOPSOIL_MAX_CM else NULL,
                             n_eligible = sum(eligible)),
