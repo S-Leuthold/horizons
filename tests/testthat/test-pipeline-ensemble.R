@@ -202,6 +202,30 @@ describe("ensemble() - the object it returns", {
 
   })
 
+  it("keeps none of ensemble()'s frame in its meta-learner's formulas, so it does not store the fitted object again", {
+
+    for (method in c("penalized", "xgb")) {
+
+      ens    <- ens_built(method)
+      wflows <- c(list(ens$ensemble$model), ens$ensemble$uq$fold_models)
+
+      for (w in wflows) {
+
+        env <- environment(workflows::extract_preprocessor(w))
+        expect_identical(ls(env, all.names = TRUE), character(0))
+        expect_identical(parent.env(env), asNamespace("horizons"))
+
+      }
+
+    }
+
+    ### A penalized ensemble's own parts are small next to the object it
+    ### combines; one holding that object again is several times its size
+    size <- function(x) length(serialize(x, NULL))
+    expect_lt(size(ens_built("penalized")), 1.5 * size(ens_fitted()))
+
+  })
+
 })
 
 

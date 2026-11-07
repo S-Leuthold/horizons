@@ -283,6 +283,31 @@ with_run_records <- function(contract, member_pred, warning_log = new_warning_lo
 }
 
 ## ---------------------------------------------------------------------------
+## meta_formula()
+## ---------------------------------------------------------------------------
+
+#' The Meta-Learner's Formula, in an Environment That Holds Nothing
+#'
+#' @description
+#' `.truth ~ .` for the meta-learner's workflows. A formula written inline
+#' keeps the frame it was written in, and the fitted workflow stores that
+#' formula (and the terms built from it), so an ensemble would carry
+#' `ensemble()`'s frame, the fitted object among it, in its model and in each
+#' CV+ fold model. The formula's environment is an empty child of the package
+#' namespace instead: the terms name only columns of the meta-frame, so
+#' nothing is looked up in it.
+#'
+#' @return A two-sided formula.
+#' @keywords internal
+#' @noRd
+meta_formula <- function() {
+
+  rlang::new_formula(quote(.truth), quote(.),
+                     env = rlang::new_environment(parent = rlang::ns_env("horizons")))
+
+}
+
+## ---------------------------------------------------------------------------
 ## fit_tuned_meta_learner()
 ## ---------------------------------------------------------------------------
 
@@ -359,7 +384,7 @@ fit_tuned_meta_learner <- function(object,
 
   meta_wflow <- workflows::workflow() |>
     workflows::add_model(spec) |>
-    workflows::add_formula(.truth ~ .)
+    workflows::add_formula(meta_formula())
 
   ## Combined predictions are clamped to the outcome's range, as every served
   ## prediction is (#76); a floor at 0 under the default range. The tuning

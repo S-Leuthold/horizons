@@ -287,7 +287,7 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 
     workflows::workflow() |>
       workflows::add_model(workflows::extract_spec_parsnip(contract$model)) |>
-      workflows::add_formula(.truth ~ .)
+      workflows::add_formula(meta_formula())
 
   } else {
 
