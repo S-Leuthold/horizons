@@ -2,6 +2,7 @@
 
 ## Changes
 
+* A fitted object stores its modelling data once: `evaluation$split` keeps only the sample ids and the outcome, `models$split` is gone, and the rows are rebuilt from `data$analysis` when they are needed. A PCA member keeps only the principal components it uses, so `tidy()` on its PCA step lists the coefficients of only those. The uncertainty bundles no longer carry a second copy of the trained recipe, and the applicability domain's covariance is stored in a low-rank form when that is smaller (more predictors than rows). Predictions, intervals and stored results are unchanged. On a library-scale fit the object is 38% smaller (830 MB to 512 MB serialized), and on a small local fit 48% smaller. A penalized or xgb ensemble no longer stores the fitted object a second time through its meta-learner's formula, so it is now about the size of the fit it combines (on a small local fit, 373 MB to 48 MB). Evaluations and fits saved by earlier versions are refused; re-run `evaluate()` (#265).
 * `select_training()` needs less memory: on a library-scale draw over KSSL with its similarity space cached, the peak falls from about 6.7 GB to about 3.8 GB, and a draw that builds the space peaks at about 6.4 to 7.4 GB rather than 8.1 GB. The units comparison is computed exactly a column at a time, the library is held once and released before the space's decomposition, and the neighbour search frees each block of distances as it goes. Results are unchanged (#264).
 
 ## Bug fixes
