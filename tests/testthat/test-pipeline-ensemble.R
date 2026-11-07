@@ -202,6 +202,30 @@ describe("ensemble() - the object it returns", {
 
   })
 
+  it("keeps none of ensemble()'s frame in its meta-learner's formulas, so it does not store the fitted object again", {
+
+    for (method in c("penalized", "xgb")) {
+
+      ens    <- ens_built(method)
+      wflows <- c(list(ens$ensemble$model), ens$ensemble$uq$fold_models)
+
+      for (w in wflows) {
+
+        env <- environment(workflows::extract_preprocessor(w))
+        expect_identical(ls(env, all.names = TRUE), character(0))
+        expect_identical(parent.env(env), asNamespace("horizons"))
+
+      }
+
+    }
+
+    ### A penalized ensemble's own parts are small next to the object it
+    ### combines; one holding that object again is several times its size
+    size <- function(x) length(serialize(x, NULL))
+    expect_lt(size(ens_built("penalized")), 1.5 * size(ens_fitted()))
+
+  })
+
 })
 
 
@@ -320,6 +344,27 @@ describe("ensemble() - preflight validation", {
                   label = deparse(bad))
 
     }
+
+  })
+
+  it("refuses an object whose modelled rows changed since evaluate() split them", {
+
+    ## The split keeps the ids and outcomes it was drawn on; an outcome edited
+    ## since no longer matches, and ensemble() takes its test rows through
+    ## the same check fit() does
+    drifted <- ens_fitted()
+    outcome <- drifted$data$role_map$variable[drifted$data$role_map$role == "outcome"]
+    row     <- match(drifted$evaluation$split$data$sample_id[1], drifted$data$analysis$sample_id)
+    drifted$data$analysis[[outcome]][row] <- drifted$data$analysis[[outcome]][row] + 1
+
+    err <- expect_error(
+      suppressMessages(capture.output(
+        ensemble(drifted, method = "weighted", optimize = FALSE, compute_uq = FALSE)
+      )),
+      "does not index the rows",
+      class = "horizons_error_input"
+    )
+    expect_identical(rlang::call_name(err$call), "ensemble")
 
   })
 
@@ -1268,6 +1313,7 @@ describe("ensemble() and predict.horizons_ensemble() - member AD and intervals",
     member       <- names(with_bundles$models$workflows)[1]
 
     with_bundles$models$ad <- stats::setNames(list(list(
+      form          = "full",
       centroid      = c(wn_0 = 0),
       cov_matrix    = matrix(1, dimnames = list("wn_0", "wn_0")),
       ad_thresholds = c(q25 = 1, q50 = 2, q75 = 3, ood = 4)

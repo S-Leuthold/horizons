@@ -1086,7 +1086,7 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
     })
 
     coverage <- test_interval_coverage(uq = list(), test_preds = rep(NA_real_, 4),
-                                       test_data = NULL, test_truth = c(1, 2, 3, 4),
+                                       test_features = NULL, test_truth = c(1, 2, 3, 4),
                                        config_id = "cfg_001", outcome_range = c(0, Inf))
 
     expect_identical(coverage, no_coverage)

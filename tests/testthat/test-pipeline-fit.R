@@ -375,7 +375,7 @@ describe("fit() - cv_predictions carries sample_id", {
 
     ## With UQ and AD off nothing is carved out for calibration, so the fit
     ## rows are Split F's training part.
-    train <- rsample::training(result$models$split)
+    train <- rsample::training(result$evaluation$split)
 
     expect_type(cv$sample_id, "character")
     expect_false(anyNA(cv$sample_id))
@@ -392,7 +392,7 @@ describe("fit() - cv_predictions carries sample_id", {
     result <- fit60()$fit
     cv     <- result$models$cv_predictions
 
-    train <- rsample::training(result$models$split)
+    train <- rsample::training(result$evaluation$split)
 
     for (cfg in unique(cv$config_id)) {
 
@@ -449,9 +449,9 @@ describe("fit() - UQ enabled", {
 
     expected <- c("quantile_model", "scores", "n_calib",
                   "level_default", "oof_coverage", "mean_width",
-                  "prepped_recipe", "test_coverage", "test_mean_width",
-                  "n_test")
+                  "test_coverage", "test_mean_width", "n_test")
     expect_true(all(expected %in% names(uq_bundle)))
+    expect_false("prepped_recipe" %in% names(uq_bundle))
 
     ## Coverage measured on the held-out test rows (#118)
     expect_gt(uq_bundle$n_test, 0)
@@ -468,7 +468,7 @@ describe("fit() - UQ enabled", {
     expect_false(is.null(result$models$uq))
 
     uq_bundle <- result$models$uq[[result$models$best_config]]
-    held_out  <- rsample::testing(result$models$split)
+    held_out  <- rsample::testing(rebuild_split(result)$split)
     p         <- predict(result, held_out, interval = TRUE)
     covered   <- held_out$SOC >= p$.pred_lower & held_out$SOC <= p$.pred_upper
 
@@ -508,8 +508,9 @@ describe("fit() - AD enabled", {
 
     bundle <- result$models$ad[[1]]
 
-    expect_true(all(c("centroid", "cov_matrix", "ad_thresholds", "n_calib")
+    expect_true(all(c("form", "centroid", "cov_matrix", "ad_thresholds", "n_calib")
                     %in% names(bundle)))
+    expect_identical(bundle$form, "full")
     expect_length(bundle$ad_thresholds, 4)
     expect_true(all(diff(bundle$ad_thresholds) > 0))
     expect_equal(length(bundle$centroid), nrow(bundle$cov_matrix))
@@ -689,9 +690,20 @@ describe("fit() - scores on evaluate()'s split", {
     obj    <- shared$obj
     r      <- shared$fit
 
-    expect_identical(r$models$split$data, obj$evaluation$split$data)
-    expect_identical(rsample::testing(r$models$split)$sample_id,
-                     rsample::testing(obj$evaluation$split)$sample_id)
+    ## Stored once, as evaluate() stored it: positions, the id and the outcome
+    expect_false("split" %in% names(r$models))
+    expect_identical(r$evaluation$split, obj$evaluation$split)
+    expect_named(r$evaluation$split$data, c("sample_id", "SOC"))
+
+    ## fit() scored on evaluate()'s test rows and fitted on none of them: each
+    ## member's measured coverage counts them, and no out-of-fold prediction
+    ## is for one
+    test_ids <- rsample::testing(obj$evaluation$split)$sample_id
+
+    for (id in names(r$models$uq)) {
+      expect_identical(r$models$uq[[id]]$n_test, length(test_ids), label = id)
+    }
+    expect_length(intersect(unique(r$models$cv_predictions$sample_id), test_ids), 0L)
 
   })
 
@@ -710,7 +722,7 @@ describe("fit() - scores on evaluate()'s split", {
                                       prop = CALIB_PROP,
                                       strata = dplyr::all_of("SOC"))
 
-    test_ids  <- rsample::testing(r$models$split)$sample_id
+    test_ids  <- rsample::testing(r$evaluation$split)$sample_id
     calib_ids <- rsample::testing(split_C)$sample_id
     fit_ids   <- unique(r$models$cv_predictions$sample_id)
 
@@ -799,8 +811,8 @@ describe("fit() - scores on evaluate()'s split", {
     )
 
     expect_s3_class(r_clay, "horizons_fit")
-    expect_true("clay" %in% names(r_clay$models$split$data))
-    expect_identical(rsample::testing(r_clay$models$split)$sample_id,
+    expect_true("clay" %in% names(rebuild_split(r_clay)$split$data))
+    expect_identical(rsample::testing(rebuild_split(r_clay)$split)$sample_id,
                      rsample::testing(obj$evaluation$split)$sample_id)
 
   })
@@ -858,6 +870,93 @@ describe("fit() - member ranking (#50)", {
 ## =========================================================================
 ## allow_par with no backend (M2e, 2026-09-15)
 ## =========================================================================
+
+describe("fit() - a PCA member stores only the components it uses", {
+
+  ## One plsr + PCA configuration, cold-started, with UQ and AD on (200 rows,
+  ## so the calibration split clears its minimum). The same fit with the cut
+  ## switched off keeps the full rotation; everything the member computes
+  ## after the final fit has to come out the same.
+  obj <- make_eval_object(n = 200, n_wn = 40, n_configs = 1)
+  obj$config$configs$model             <- "plsr"
+  obj$config$configs$feature_selection <- "pca"
+  obj$config$recipe$pca_threshold      <- 0.9
+  obj$config$tuning$final_bayesian_iter <- 0L
+
+  fit_pca <- function() {
+    suppressWarnings(fit(obj, compute_uq = TRUE, compute_ad = TRUE, seed = 11L))
+  }
+
+  ## The cut fit is built once and read by every test here; the full one only
+  ## by the comparison
+  fit_pca_cut <- function() memo_fixture("fit_pca_cut", fit_pca)
+
+  pca_step <- function(f) {
+    steps <- workflows::extract_recipe(f$models$workflows[[1]], estimated = TRUE)$steps
+    steps[[which(vapply(steps, inherits, logical(1), what = "step_pca"))]]
+  }
+
+  set.seed(9)
+  new_rows <- tibble::as_tibble(matrix(rnorm(25 * 40), nrow = 25,
+                                       dimnames = list(NULL, names(obj$data$analysis)[1:40])))
+  new_rows$sample_id <- sprintf("N%02d", 1:25)
+
+  it("keeps num_comp columns of the rotation, as extract_recipe() sees it", {
+
+    cut  <- fit_pca_cut()
+    step <- pca_step(cut)
+
+    expect_identical(ncol(step$res$rotation), as.integer(step$num_comp))
+    expect_lt(step$num_comp, nrow(step$res$rotation))
+
+  })
+
+  it("predicts, scores and calibrates exactly as the full rotation does", {
+
+    cut  <- fit_pca_cut()
+    full <- local({
+      local_mocked_bindings(cut_pca_rotation = function(fitted_wf) fitted_wf)
+      fit_pca()
+    })
+
+    expect_gt(ncol(pca_step(full)$res$rotation), pca_step(full)$num_comp)
+    expect_length(cut$models$uq, 1L)
+    expect_length(cut$models$ad, 1L)
+
+    expect_identical(predict(cut, new_rows, interval = TRUE),
+                     predict(full, new_rows, interval = TRUE))
+
+    metrics <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae", "cv_rmse_mean", "cv_rpd_mean")
+    expect_identical(cut$models$results[metrics], full$models$results[metrics])
+    expect_identical(cut$models$cv_predictions, full$models$cv_predictions)
+    expect_identical(cut$models$ad, full$models$ad)
+
+    uq_fields <- c("scores", "test_coverage", "test_mean_width", "n_calib")
+    expect_identical(cut$models$uq[[1]][uq_fields], full$models$uq[[1]][uq_fields])
+
+  })
+
+  it("measures its test coverage on the intervals predict() serves, from the workflow's recipe", {
+
+    cut <- fit_pca_cut()
+    uq  <- cut$models$uq[[1]]
+
+    expect_false("prepped_recipe" %in% names(uq))
+
+    ## The member's bundle bakes nothing of its own: its measured coverage is
+    ## the coverage of predict()'s intervals on the same test rows
+    test_rows <- rsample::testing(rebuild_split(cut)$split)
+    p         <- predict(cut, test_rows, interval = TRUE)
+    covered   <- test_rows$SOC >= p$.pred_lower & test_rows$SOC <= p$.pred_upper
+
+    expect_identical(uq$n_test, nrow(test_rows))
+    expect_equal(uq$test_coverage, mean(covered))
+    expect_equal(uq$test_mean_width, mean(p$.interval_width))
+
+  })
+
+})
+
 
 describe("fit() - allow_par without a usable backend", {
 

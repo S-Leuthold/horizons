@@ -1496,3 +1496,68 @@ describe("quiet_selection_warnings()", {
   })
 
 })
+
+
+## =========================================================================
+## cut_pca_rotation(): only the components a member uses
+## =========================================================================
+
+describe("cut_pca_rotation()", {
+
+  ## A small fitted workflow with a PCA step that keeps 2 of 6 components
+  pca_workflow <- function() {
+
+    set.seed(3)
+    df <- as.data.frame(matrix(rnorm(30 * 6), ncol = 6))
+    df$y <- rowSums(df[, 1:2]) + rnorm(30, sd = 0.1)
+
+    rec <- recipes::recipe(y ~ ., data = df) |>
+      recipes::step_pca(recipes::all_predictors(), num_comp = 2)
+
+    wf <- workflows::workflow() |>
+      workflows::add_recipe(rec) |>
+      workflows::add_model(parsnip::linear_reg())
+
+    list(fitted = parsnip::fit(wf, data = df), data = df)
+
+  }
+
+  it("cuts the rotation the trained recipe holds and bakes the same numbers", {
+
+    pw   <- pca_workflow()
+    full <- workflows::extract_recipe(pw$fitted, estimated = TRUE)
+    cut  <- cut_pca_rotation(pw$fitted)
+    seen <- workflows::extract_recipe(cut, estimated = TRUE)
+
+    expect_identical(ncol(full$steps[[1]]$res$rotation), 6L)
+    expect_identical(ncol(seen$steps[[1]]$res$rotation), 2L)
+    expect_identical(recipes::bake(seen, pw$data), recipes::bake(full, pw$data))
+    expect_identical(stats::predict(cut, pw$data), stats::predict(pw$fitted, pw$data))
+
+  })
+
+  it("leaves a workflow without a PCA step as it is", {
+
+    pw  <- pca_workflow()
+    rec <- recipes::recipe(y ~ ., data = pw$data)
+    wf  <- parsnip::fit(workflows::add_model(workflows::add_recipe(workflows::workflow(), rec),
+                                             parsnip::linear_reg()), data = pw$data)
+
+    expect_identical(cut_pca_rotation(wf), wf)
+
+  })
+
+  it("raises an internal error when the read-back does not see the cut", {
+
+    pw    <- pca_workflow()
+    uncut <- workflows::extract_recipe(pw$fitted, estimated = TRUE)
+
+    ## A workflows release that keeps the trained recipe somewhere else
+    local_mocked_bindings(extract_recipe = function(x, ...) uncut, .package = "workflows")
+
+    expect_error(cut_pca_rotation(pw$fitted), "does not show its PCA rotation cut",
+                 class = "horizons_error_internal")
+
+  })
+
+})

@@ -181,8 +181,7 @@ test_that("subset_rows() aborts on an object carrying an ensemble", {
 
 test_that("subset_rows() aborts on a stored split", {
 
-  ## The slots the verbs actually write: evaluate() fills evaluation$split,
-  ## fit() fills models$split.
+  ## The slot the verbs actually write: evaluate() fills evaluation$split.
 
   fx <- select_fixture(n_pool = 40)
 
@@ -191,13 +190,6 @@ test_that("subset_rows() aborts on a stored split", {
 
   expect_error(subset_rows(ev, c("P001", "P002")),
                regexp = "evaluation split",
-               class  = "horizons_error_internal")
-
-  sp <- fx$pool
-  sp$models$split <- "an rsplit"
-
-  expect_error(subset_rows(sp, c("P001", "P002")),
-               regexp = "model split",
                class  = "horizons_error_internal")
 
 })

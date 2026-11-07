@@ -792,3 +792,73 @@ tidy_selection_step <- function(x) {
   tibble::tibble(terms = as.character(terms), id = rep(x$id, length(terms)))
 
 }
+
+## ---------------------------------------------------------------------------
+## cut_pca_rotation
+## ---------------------------------------------------------------------------
+
+#' Keep only the principal components a fitted member uses
+#'
+#' @description
+#' A trained `recipes::step_pca()` keeps the whole rotation, one column per
+#' component prcomp() returned (up to as many as the predictors), while
+#' `bake()` multiplies by its first `num_comp` columns only (recipes 1.3.3).
+#' On full spectra the unused columns are most of the step's size: 1,691 by
+#' 1,691 against the 80 a library member used. This cuts each trained PCA
+#' step's rotation to its `num_comp` columns, so `bake()` multiplies by the
+#' same numbers and every prediction is unchanged; `tidy()` on the step then
+#' lists the coefficients of only those components. `sdev`, `center` and
+#' `scale` are kept, so its variances still cover every component.
+#'
+#' The trained recipe sits inside the workflow at
+#' `pre$mold$blueprint$recipe`, which workflows and hardhat do not export a
+#' setter for. So the cut is read back through
+#' `workflows::extract_recipe(estimated = TRUE)`, and a layout that moved
+#' raises an internal error rather than keeping the full rotation unseen.
+#'
+#' @param fitted_wf A fitted `workflow` with a recipe preprocessor.
+#' @return `fitted_wf`, each trained PCA step's rotation cut to `num_comp`
+#'   columns. Aborts with class `horizons_error_internal` when the read-back
+#'   does not see the cut.
+#' @keywords internal
+#' @noRd
+cut_pca_rotation <- function(fitted_wf) {
+
+  steps  <- fitted_wf$pre$mold$blueprint$recipe$steps
+  is_pca <- vapply(steps, inherits, logical(1), what = "step_pca")
+
+  if (!any(is_pca)) return(fitted_wf)
+
+  ### A step with no components or no columns trained no rotation
+  wide <- function(step) {
+    !is.null(step$res$rotation) && ncol(step$res$rotation) > step$num_comp
+  }
+
+  for (i in which(is_pca)) {
+
+    step <- steps[[i]]
+
+    if (wide(step)) {
+
+      step$res$rotation <- step$res$rotation[, seq_len(step$num_comp), drop = FALSE]
+      fitted_wf$pre$mold$blueprint$recipe$steps[[i]] <- step
+
+    }
+
+  }
+
+  seen <- workflows::extract_recipe(fitted_wf, estimated = TRUE)$steps
+
+  if (length(seen) != length(steps) ||
+      any(vapply(seen[is_pca], wide, logical(1)))) {
+
+    abort_horizons(c(
+      "The fitted workflow's trained recipe does not show its PCA rotation cut to the components it uses.",
+      "i" = "{.fn cut_pca_rotation} writes into {.pkg workflows}' unexported layout ({.code pre$mold$blueprint$recipe}), which this version of {.pkg workflows} may have moved."
+    ), kind = "internal")
+
+  }
+
+  fitted_wf
+
+}

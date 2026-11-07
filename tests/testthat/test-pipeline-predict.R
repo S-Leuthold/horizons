@@ -80,7 +80,8 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
     screened    = TRUE,
     parallelize_over = "sequential",
     workers      = 1L,
-    split        = rsample::initial_split(df, prop = 0.8),
+    ## Stored as evaluate() stores it: positions, the id and the outcome
+    split        = slim_split(rsample::initial_split(df, prop = 0.8), obj$data$role_map),
     n_train      = as.integer(round(nrow(df) * 0.8)),
     n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
     recipe       = list(sg_window = DEFAULT_SG_WINDOW, sg_window_cm = NA_real_,
@@ -250,8 +251,10 @@ describe("predict.horizons_fit() - intervals", {
     ## floor nor the response bound binds on this fixture's points.
     uq       <- fitted_fixture$models$uq[["cfg_001"]]
     alpha    <- 1 - uq$level_default
-    features <- as.data.frame(recipes::bake(uq$prepped_recipe, new_data = new_df,
-                                            recipes::all_predictors()))
+    features <- as.data.frame(recipes::bake(
+      workflows::extract_recipe(fitted_fixture$models$workflows[["cfg_001"]], estimated = TRUE),
+      new_data = new_df, recipes::all_predictors()
+    ))
     q        <- stats::predict(uq$quantile_model, data = features, type = "quantiles",
                                quantiles = c(alpha / 2, 1 - alpha / 2))$predictions
     margin   <- compute_c_alpha(uq$scores, uq$level_default)
@@ -951,7 +954,7 @@ describe("predict.horizons_fit() - response bound guardrail", {
     ## Precondition: the fixture discriminates. The largest training-part
     ## outcome sits in the calibration rows, so a bound over Split F's whole
     ## training part would differ from one over the fit rows.
-    train_F <- rsample::training(fitted_fixture$models$split)
+    train_F <- rsample::training(fitted_fixture$evaluation$split)
     expect_gt(max(train_F$SOC), max(analysis$SOC[fit_rows]))
 
     expect_equal(fitted_fixture$models$response_bound, expected)
@@ -1258,7 +1261,7 @@ describe("predict.horizons_fit() - applicability domain", {
                         class = "horizons_error_validation")
 
     expect_true(any(grepl(cid, err$findings, fixed = TRUE) &
-                    grepl("a square cov_matrix of its length", err$findings, fixed = TRUE)))
+                    grepl("(the full form) does not carry", err$findings, fixed = TRUE)))
 
   })
 
@@ -1570,8 +1573,9 @@ describe("predict_intervals() - a failure is the intervals unit's", {
   new_df <- make_new_spectra()
   point_pred <- rep(5, nrow(new_df))
 
-  cfg_id <- names(fitted_fixture$models$workflows)[1]
-  uq     <- fitted_fixture$models$uq[[cfg_id]]
+  cfg_id   <- names(fitted_fixture$models$workflows)[1]
+  uq       <- fitted_fixture$models$uq[[cfg_id]]
+  features <- as.data.frame(bake_predictors(fitted_fixture$models$workflows[[cfg_id]], new_df))
 
   failed_step <- function(out) out$records$step[out$records$type == "failure"]
 
@@ -1586,22 +1590,10 @@ describe("predict_intervals() - a failure is the intervals unit's", {
     broken_uq <- uq
     broken_uq$quantile_model <- structure(list(), class = "not_a_real_model")
 
-    out <- run_unit(predict_intervals(broken_uq, point_pred, new_df), "intervals", cfg_id)
+    out <- run_unit(predict_intervals(broken_uq, point_pred, features), "intervals", cfg_id)
 
     expect_true(out$failed)
     expect_identical(failed_step(out), "uq_quantiles")
-
-  })
-
-  it("fails at its bake step when baking new data through the UQ recipe fails", {
-
-    broken_uq <- uq
-    broken_uq$prepped_recipe <- "not a recipe"
-
-    out <- run_unit(predict_intervals(broken_uq, point_pred, new_df), "intervals", cfg_id)
-
-    expect_true(out$failed)
-    expect_identical(failed_step(out), "uq_bake")
 
   })
 
@@ -1848,38 +1840,26 @@ describe("predict() - row alignment before positional binds", {
 
 describe("predict_intervals() - row alignment before the bounds are assembled", {
 
-  new_df <- make_new_spectra()
-  cfg_id <- names(fitted_fixture$models$workflows)[1]
-  uq     <- fitted_fixture$models$uq[[cfg_id]]
+  new_df   <- make_new_spectra()
+  cfg_id   <- names(fitted_fixture$models$workflows)[1]
+  uq       <- fitted_fixture$models$uq[[cfg_id]]
+  features <- as.data.frame(bake_predictors(fitted_fixture$models$workflows[[cfg_id]], new_df))
 
-  it("aborts when point_pred does not have one value per row of new_data", {
+  it("aborts when point_pred does not have one value per baked row", {
 
     ## Half the rows: point_pred + q_low recycled this without an error.
-    expect_error(predict_intervals(uq, rep(5, nrow(new_df) / 2), new_df, config_id = cfg_id),
+    expect_error(predict_intervals(uq, rep(5, nrow(new_df) / 2), features, config_id = cfg_id),
                  "Point predictions for config", class = "horizons_error_internal")
 
-  })
-
-  it("aborts when the bake through the UQ recipe drops rows, rather than degrading", {
-
-    real_bake <- recipes::bake
-
-    local_mocked_bindings(
-      bake = function(object, new_data, ...) {
-        real_bake(object, new_data = new_data[seq_len(nrow(new_data) / 2), ], ...)
-      },
-      .package = "recipes"
-    )
-
-    expect_error(predict_intervals(uq, rep(5, nrow(new_df)), new_df),
-                 "Features baked through the UQ recipe",
-                 class = "horizons_error_internal")
+    ## And a bake that dropped rows meets the same check
+    expect_error(predict_intervals(uq, rep(5, nrow(new_df)), features[seq_len(nrow(new_df) / 2), ]),
+                 "Point predictions", class = "horizons_error_internal")
 
   })
 
   it("is silent on the ordinary path", {
 
-    expect_no_error(out <- predict_intervals(uq, rep(5, nrow(new_df)), new_df))
+    expect_no_error(out <- predict_intervals(uq, rep(5, nrow(new_df)), features))
     expect_identical(nrow(out), nrow(new_df))
 
   })

@@ -50,12 +50,30 @@
 #' sample-covariance basis are pulled by aberrant training rows, which shrinks
 #' those rows' own distances. AD assumes a vetted training set.
 #'
+#' **Two exact forms, whichever is smaller for the shape.** The p x p matrix
+#' costs p^2 numbers whatever the rows. With fewer rows than features its
+#' information is smaller than that: corpcor's estimate is
+#' `S (lambda I + (1 - lambda) R) S`, with `S` the shrunk standard deviations,
+#' `lambda` the correlation shrinkage intensity and `R` the empirical
+#' correlation, whose rank is at most r = n - 1. So the bundle stores, when
+#' r + 4 < p, the low-rank form: `scale` (S's diagonal), `lambda`, and `R`'s
+#' eigenvectors (`basis`, p x r) and eigenvalues (`values`), from the thin
+#' SVD of the rows standardized by their empirical standard deviations. The
+#' distance is then exact by the Woodbury identity ([calculate_ad_distance()]),
+#' and the p x p matrix is never built. The intensities are corpcor's own
+#' (`estimate.lambda()`, `var.shrink()`). Otherwise, and whenever the low-rank
+#' form cannot hold (`lambda` of 0, where the shrunk correlation is singular,
+#' or a constant feature), the bundle stores `corpcor::cov.shrink()`'s matrix.
+#' It stores no training rows either way (DECISIONS 2026-11-05).
+#'
 #' @param feature_matrix Numeric matrix (n x p) of baked predictors, with
 #'   column names. Rows are samples, columns the model's features. No NA/NaN/Inf
 #'   and at least `min_ad_rows` rows: [fit_ad()], its one caller, checks both.
 #'
-#' @return List with `centroid` (numeric length p, named), `cov_matrix`
-#'   (p x p shrinkage covariance).
+#' @return List with `form` (`"full"` or `"low_rank"`), `centroid` (numeric
+#'   length p, named), and for the full form `cov_matrix` (p x p shrinkage
+#'   covariance), for the low-rank form `scale` (length p), `lambda` (in
+#'   (0, 1]), `basis` (p x r) and `values` (length r).
 #'
 #' @seealso [compute_ad_thresholds()], [calculate_ad_distance()].
 #'
@@ -72,14 +90,49 @@ compute_ad_metadata <- function(feature_matrix) {
 
   }
 
-  ## Centroid + shrinkage covariance --------------------------------------------
+  centroid <- colMeans(feature_matrix)
 
-  centroid   <- colMeans(feature_matrix)
-  cov_matrix <- corpcor::cov.shrink(feature_matrix, verbose = FALSE)
+  ## The low-rank form, when it is the smaller -----------------------------------
+  ## r is the rank the empirical correlation can have; the form stores p x r
+  ## plus four p-vectors' worth against the matrix's p x p.
+
+  n <- nrow(feature_matrix)
+  p <- ncol(feature_matrix)
+  r <- min(n - 1L, p)
+
+  if (r + 4L < p) {
+
+    ### A constant feature has no correlation to factor; it takes the full
+    ### form, which handles it as it always has
+    sd_emp <- apply(feature_matrix, 2, stats::sd)
+    lambda <- if (all(sd_emp > 0)) corpcor::estimate.lambda(feature_matrix, verbose = FALSE) else 0
+
+    if (lambda > 0) {
+
+      ### The empirical correlation's eigenvectors and eigenvalues, from the
+      ### thin SVD of the standardized rows
+      z  <- sweep(sweep(feature_matrix, 2, centroid), 2, sd_emp, "/")
+      sv <- svd(z, nu = 0L, nv = r)
+
+      return(list(
+        form     = "low_rank",
+        centroid = centroid,
+        scale    = sqrt(corpcor::var.shrink(feature_matrix, verbose = FALSE)),
+        lambda   = lambda,
+        basis    = sv$v,
+        values   = sv$d[seq_len(r)]^2 / (n - 1L)
+      ))
+
+    }
+
+  }
+
+  ## The p x p shrinkage covariance -------------------------------------------------
 
   list(
+    form       = "full",
     centroid   = centroid,
-    cov_matrix = cov_matrix
+    cov_matrix = corpcor::cov.shrink(feature_matrix, verbose = FALSE)
   )
 
 }
@@ -108,8 +161,7 @@ compute_ad_metadata <- function(feature_matrix) {
 #' @param calib_matrix Numeric matrix (m x p) of baked predictors for the
 #'   held-out calibration samples. Same columns, in the same order, as the
 #'   matrix passed to [compute_ad_metadata()].
-#' @param ad_metadata List from [compute_ad_metadata()] (`centroid`,
-#'   `cov_matrix`).
+#' @param ad_metadata List from [compute_ad_metadata()], either form.
 #' @param level Numeric in (0, 1). OOD coverage level. Default
 #'   `DEFAULT_AD_LEVEL` (0.99).
 #'
@@ -160,6 +212,14 @@ compute_ad_thresholds <- function(calib_matrix,
 #' so binning is consistent. Do not take a square root or compare to a
 #' chi-squared quantile.
 #'
+#' The full form goes through `stats::mahalanobis()`. The low-rank form
+#' ([compute_ad_metadata()]) gives the same distance by the Woodbury
+#' identity: with `y = (x - centroid) / scale`, the inverse of
+#' `lambda I + (1 - lambda) V E V'` is `(I - V W V') / lambda`, where
+#' `W = (1 - lambda) E / (lambda + (1 - lambda) E)`, so the distance is
+#' `(sum(y^2) - sum(W (V'y)^2)) / lambda`. The two agree to rounding, not
+#' bit for bit.
+#'
 #' New samples must be preprocessed with the same recipe as training so they
 #' land in the identical feature space. Column names and count are checked, but
 #' name-matching alone does not guarantee an identical transform — the caller
@@ -167,8 +227,8 @@ compute_ad_thresholds <- function(calib_matrix,
 #'
 #' @param new_matrix Numeric matrix (m x p) of baked predictors for new
 #'   samples. Same column names and order as the training matrix.
-#' @param ad_metadata List from [compute_ad_metadata()] (`centroid`,
-#'   `cov_matrix`).
+#' @param ad_metadata List from [compute_ad_metadata()] or an AD bundle,
+#'   either form.
 #'
 #' @return Numeric vector (length m) of non-negative squared distances.
 #'
@@ -179,9 +239,9 @@ calculate_ad_distance <- function(new_matrix, ad_metadata) {
 
   ### A matrix that is not numeric fails loudly in mahalanobis().
 
-  ### Both callers build ad_metadata with both fields, and predict()'s door
-  ### validator checks each saved bundle's shape; a feature count that does
-  ### not match fails loudly in mahalanobis().
+  ### Both callers build ad_metadata with its form's fields, and predict()'s
+  ### door validator checks each saved bundle's shape; a feature count that
+  ### does not match fails loudly in mahalanobis() or the basis product.
 
   new_names   <- colnames(new_matrix)
   train_names <- names(ad_metadata$centroid)
@@ -195,6 +255,17 @@ calculate_ad_distance <- function(new_matrix, ad_metadata) {
   }
 
   ## Squared Mahalanobis distance -----------------------------------------------
+
+  if (identical(ad_metadata$form, "low_rank")) {
+
+    y    <- sweep(sweep(new_matrix, 2, ad_metadata$centroid), 2, ad_metadata$scale, "/")
+    lam  <- ad_metadata$lambda
+    w    <- (1 - lam) * ad_metadata$values / (lam + (1 - lam) * ad_metadata$values)
+    proj <- y %*% ad_metadata$basis
+
+    return((rowSums(y^2) - as.vector(proj^2 %*% w)) / lam)
+
+  }
 
   stats::mahalanobis(
     x      = new_matrix,
@@ -303,7 +374,8 @@ assign_ad_bin <- function(distances, thresholds) {
 #'   estimated from; `control_horizons(min_ad_rows = )`. Default
 #'   `N_AD_TRAIN_MIN`.
 #'
-#' @return List `list(centroid, cov_matrix, ad_thresholds, n_calib)`.
+#' @return The covariance's form and fields from [compute_ad_metadata()],
+#'   with `ad_thresholds` and `n_calib`.
 #'
 #' @seealso [compute_ad_metadata()], [compute_ad_thresholds()], [fit_uq()].
 #'
@@ -352,12 +424,10 @@ fit_ad <- function(fitted_workflow,
   ad_thresholds <- unit_step("ad_thresholds",
                              compute_ad_thresholds(calib_matrix, ad_metadata, level = level))
 
-  list(
-    centroid      = ad_metadata$centroid,
-    cov_matrix    = ad_metadata$cov_matrix,
+  c(ad_metadata, list(
     ad_thresholds = ad_thresholds,
     n_calib       = nrow(calib_matrix)
-  )
+  ))
 
 }
 
@@ -406,7 +476,7 @@ check_finite_features <- function(x, what, call = rlang::caller_env()) {
 #' @param new_matrix Numeric matrix of the baked predictors, every value
 #'   finite.
 #' @param ad_bundle The config's AD bundle from `models$ad[[config_id]]`
-#'   (`centroid`, `cov_matrix`, `ad_thresholds`).
+#'   (its covariance in either form, and `ad_thresholds`).
 #'
 #' @return Tibble with `.ad_distance` (numeric, squared) and `.ad_flag`
 #'   (factor Q1-Q4/OOD), one row per row of `new_matrix`.
@@ -419,10 +489,7 @@ predict_ad <- function(new_matrix, ad_bundle) {
 
   unit_step("ad_distance", {
 
-    distances <- calculate_ad_distance(
-      new_matrix,
-      list(centroid = ad_bundle$centroid, cov_matrix = ad_bundle$cov_matrix)
-    )
+    distances <- calculate_ad_distance(new_matrix, ad_bundle)
 
     tibble::tibble(
       .ad_distance = distances,

@@ -25,7 +25,8 @@ test_that("compute_ad_metadata returns centroid and positive-definite covariance
   X  <- ad_matrix(100, 20, mean = 5, seed = 123)
   md <- compute_ad_metadata(X)
 
-  expect_named(md, c("centroid", "cov_matrix"))
+  expect_named(md, c("form", "centroid", "cov_matrix"))
+  expect_identical(md$form, "full")
   expect_length(md$centroid, 20)
   expect_true(all(abs(md$centroid - 5) < 1))
   expect_equal(dim(md$cov_matrix), c(20, 20))
@@ -37,12 +38,105 @@ test_that("compute_ad_metadata returns centroid and positive-definite covariance
 test_that("compute_ad_metadata estimates a positive-definite covariance at p > n without a warning", {
 
   ## Fewer samples than features is the regime the shrinkage estimator is
-  ## built for, not a degraded one
+  ## built for, not a degraded one. Its estimate is stored in low-rank form
+  ## there; the full matrix is rebuilt here to check it.
   X <- ad_matrix(50, 100, seed = 456)               # p > n
 
   expect_no_warning(md <- compute_ad_metadata(X))
-  expect_equal(dim(md$cov_matrix), c(100, 100))
-  expect_true(all(eigen(md$cov_matrix)$values > 0))
+  expect_identical(md$form, "low_rank")
+
+  S    <- diag(md$scale)
+  full <- S %*% (md$lambda * diag(100) +
+                   (1 - md$lambda) * md$basis %*% diag(md$values) %*% t(md$basis)) %*% S
+  expect_equal(full, unclass(corpcor::cov.shrink(X, verbose = FALSE)),
+               tolerance = 1e-10, ignore_attr = TRUE)
+  expect_true(all(eigen(full, symmetric = TRUE)$values > 0))
+
+})
+
+## ---------------------------------------------------------------------------
+## The covariance in whichever exact form is smaller
+## ---------------------------------------------------------------------------
+
+describe("compute_ad_metadata() - the two forms", {
+
+  ## Correlated features, as baked spectra are: a few latent factors
+  wide <- function(n, p, seed, noise = 1) {
+    set.seed(seed)
+    m <- matrix(stats::rnorm(n * 3), n) %*% matrix(stats::rnorm(3 * p), 3) +
+      matrix(stats::rnorm(n * p, sd = noise), n)
+    colnames(m) <- paste0("f", seq_len(p))
+    m
+  }
+
+  it("stores the low-rank form at fewer rows than features, with the distances mahalanobis() gives", {
+
+    X  <- wide(40, 300, seed = 1)
+    Xn <- wide(25, 300, seed = 2) + 0.3
+    md <- compute_ad_metadata(X)
+
+    expect_identical(md$form, "low_rank")
+    expect_named(md, c("form", "centroid", "scale", "lambda", "basis", "values"))
+    expect_identical(dim(md$basis), c(300L, 39L))
+    expect_length(md$values, 39L)
+
+    reference <- stats::mahalanobis(Xn, colMeans(X), corpcor::cov.shrink(X, verbose = FALSE))
+    expect_equal(calculate_ad_distance(Xn, md), reference, tolerance = 1e-8)
+
+    ## And the thresholds follow the distances
+    calib <- wide(60, 300, seed = 3)
+    full  <- list(form = "full", centroid = colMeans(X),
+                  cov_matrix = corpcor::cov.shrink(X, verbose = FALSE))
+    expect_equal(compute_ad_thresholds(calib, md), compute_ad_thresholds(calib, full),
+                 tolerance = 1e-8)
+
+    ## Smaller than the matrix it stands for
+    expect_lt(utils::object.size(md), utils::object.size(full) / 4)
+
+  })
+
+  it("agrees with mahalanobis() when the correlations are barely shrunk", {
+
+    ## Strongly correlated features over few rows: a small intensity, where
+    ## the Woodbury weights are largest
+    X  <- wide(60, 120, seed = 4, noise = 0.05)
+    Xn <- wide(10, 120, seed = 5, noise = 0.05)
+    md <- compute_ad_metadata(X)
+
+    expect_identical(md$form, "low_rank")
+    expect_lt(md$lambda, 0.1)
+
+    reference <- stats::mahalanobis(Xn, colMeans(X), corpcor::cov.shrink(X, verbose = FALSE))
+    expect_equal(calculate_ad_distance(Xn, md), reference, tolerance = 1e-8)
+
+  })
+
+  it("stores today's matrix, and today's distances, at more rows than features", {
+
+    X  <- wide(200, 30, seed = 6)
+    Xn <- wide(20, 30, seed = 7)
+    md <- compute_ad_metadata(X)
+
+    expect_identical(md$form, "full")
+    expect_identical(md$cov_matrix, corpcor::cov.shrink(X, verbose = FALSE))
+    expect_identical(calculate_ad_distance(Xn, md),
+                     stats::mahalanobis(Xn, colMeans(X), corpcor::cov.shrink(X, verbose = FALSE)))
+
+  })
+
+  it("keeps the matrix when the low-rank form would not be smaller, or cannot hold", {
+
+    ## r + 4 = p: the same size either way
+    expect_identical(compute_ad_metadata(wide(27, 30, seed = 8))$form, "full")
+    expect_identical(compute_ad_metadata(wide(25, 30, seed = 8))$form, "low_rank")
+
+    ## A constant feature has no empirical correlation to factor; the full
+    ## form takes it as it always has, corpcor's warning included
+    X <- wide(20, 60, seed = 9)
+    X[, 5] <- 1
+    expect_identical(suppressWarnings(compute_ad_metadata(X))$form, "full")
+
+  })
 
 })
 
@@ -446,10 +540,15 @@ test_that("fit_ad keeps the bundle at p > n and records no warning", {
   out <- run_ad(fx, calib_data = calib$data, min_ad_rows = 10L)
 
   expect_false(out$failed)
-  expect_named(out$value, c("centroid", "cov_matrix", "ad_thresholds", "n_calib"))
+  expect_named(out$value, c("form", "centroid", "scale", "lambda", "basis", "values",
+                            "ad_thresholds", "n_calib"))
   p <- length(out$value$centroid)
   expect_gt(p, 12L)
-  expect_equal(dim(out$value$cov_matrix), c(p, p))
+  expect_identical(out$value$form, "low_rank")
+  expect_identical(dim(out$value$basis), c(p, 11L))
   expect_false(any(out$records$type == "warning"))
+
+  ## The bundle fit_ad() writes is one the fit validator admits
+  expect_true(ad_bundle_ok(out$value))
 
 })

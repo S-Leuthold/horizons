@@ -71,10 +71,12 @@ describe("fit() - cold start from one configuration (#45)", {
   it("holds out the rows evaluate() holds out at the same seed", {
 
     expect_identical(cold$evaluation$split$in_id, ev$evaluation$split$in_id)
-    expect_identical(rsample::testing(cold$models$split)$sample_id,
-                     rsample::testing(ev$evaluation$split)$sample_id)
-    expect_identical(rsample::testing(cold$models$split)$sample_id,
-                     rsample::testing(warm$models$split)$sample_id)
+
+    ## Both fit on evaluate()'s training rows, so neither on its test rows
+    train_ids <- rsample::training(ev$evaluation$split)$sample_id
+
+    expect_setequal(unique(cold$models$cv_predictions$sample_id), train_ids)
+    expect_setequal(unique(warm$models$cv_predictions$sample_id), train_ids)
 
   })
 
@@ -92,8 +94,9 @@ describe("fit() - cold start from one configuration (#45)", {
       evaluate(with_na, prune = FALSE, seed = 7L)
     )
 
-    expect_identical(cold_na$models$split$data, ev_na$evaluation$split$data)
-    expect_identical(cold_na$models$split$in_id, ev_na$evaluation$split$in_id)
+    expect_named(cold_na$evaluation$split$data, c("sample_id", "SOC"))
+    expect_identical(cold_na$evaluation$split$data, ev_na$evaluation$split$data)
+    expect_identical(cold_na$evaluation$split$in_id, ev_na$evaluation$split$in_id)
 
   })
 
@@ -215,7 +218,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     expect_s3_class(again, "horizons_fit")
     expect_false(again$evaluation$screened)
-    expect_identical(again$models$split$in_id, cold$models$split$in_id)
+    expect_identical(again$evaluation$split$in_id, cold$evaluation$split$in_id)
 
     ## metric = NULL carries the recorded one, as it carries evaluate()'s
     expect_identical(again$evaluation$rank_metric, "rmse")
@@ -488,12 +491,12 @@ describe("fit() - cold start with UQ and AD (#45)", {
   )
 
   modelled_ids <- obj$data$analysis$sample_id[!is.na(obj$data$analysis$SOC)]
-  test_ids     <- rsample::testing(cold$models$split)$sample_id
+  test_ids     <- rsample::testing(cold$evaluation$split)$sample_id
   fit_ids      <- unique(cold$models$cv_predictions$sample_id)
 
   ## Split C, reproduced from calib_split_seed() and the training part alone
   set.seed(calib_split_seed(42L))
-  split_C   <- rsample::initial_split(rsample::training(cold$models$split),
+  split_C   <- rsample::initial_split(rsample::training(cold$evaluation$split),
                                       prop = CALIB_PROP,
                                       strata = dplyr::all_of("SOC"))
   calib_ids <- rsample::testing(split_C)$sample_id

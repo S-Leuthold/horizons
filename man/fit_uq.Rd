@@ -52,7 +52,9 @@ rather than recover.}
 }
 \value{
 Named list with fields: \code{quantile_model}, \code{scores}, \code{n_calib},
-\code{level_default}, \code{oof_coverage}, \code{mean_width}, \code{prepped_recipe}.
+\code{level_default}, \code{oof_coverage}, \code{mean_width}. The trained recipe
+the features are baked through is the workflow's own, read from it at
+predict time, so the bundle holds no copy.
 Aborts with class \code{horizons_error_run} when the calibration set is too
 small (under \code{min_calib_rows} rows, or fewer finite scores than that or
 than \code{level_default}'s order statistic needs), and with class

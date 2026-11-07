@@ -458,11 +458,6 @@ fit <- function(x,
   ## cold_start_evaluation() checked against the spectrum.
   recipe_cfg   <- recipe_settings(x)
 
-  ## The rows evaluate() modelled: the same rule on the same table (#67).
-  modelled  <- modelling_rows(x$data$analysis, outcome_col)
-  n_dropped <- modelled$n_dropped
-  n_flagged <- modelled$n_flagged
-
   ## -----------------------------------------------------------------------
   ## Step 1: Data partitioning — Split F is evaluate()'s split
   ## -----------------------------------------------------------------------
@@ -474,73 +469,22 @@ fit <- function(x,
   ## selected on, so fit() is scored on them.
   ##
   ## Reusing the split is sound only if its row positions still name the
-  ## same samples with the same outcomes, so that is what is checked: the id
-  ## and outcome columns, identical values in the same order. Other columns
-  ## may legitimately have changed; add_response() can add a sibling response
-  ## to an evaluated object. set_analysis() refuses a promoted object, so a
-  ## mismatch here means the rows or outcomes were changed some other way, or
-  ## the object was built by hand; refuse it rather than score the wrong rows.
-  ## The split is then pointed at the current table, so the fit sees the
-  ## object's columns as they are now. On a cold start the split was drawn in
-  ## Step 0 from these rows, by the draw evaluate() uses, so it passes.
-
-  ### An rsplit: the eval validator at the door refuses anything else, and a
-  ### cold start draws one.
-  split_F <- x$evaluation$split
+  ## same samples with the same outcomes; rebuild_split() checks that and
+  ## points the split at the object's current rows, less the training rows
+  ## evaluate()'s response trim (#77) recorded, as ensemble() does for its
+  ## test rows. On a cold start the split was drawn in Step 0 from these
+  ## rows, by the draw evaluate() uses, so it passes.
 
   id_col <- id_column(role_map)
 
-  ## evaluate()'s response trim (#77) dropped training rows from the split's
-  ## data, so the same rows are dropped here before the comparison. They are
-  ## the rows evaluate() recorded, not a fresh trim: fences recomputed here
-  ## could fall on another set. An evaluation without the record (no trim
-  ## requested) trimmed nothing.
-  trimmed_ids   <- x$evaluation$response_trim$trimmed_ids %||% character(0)
-  is_trimmed    <- modelled$data[[id_col]] %in% trimmed_ids
-  modelled_rows <- if (length(trimmed_ids) > 0) {
-    modelled$data[!is_trimmed, , drop = FALSE]
-  } else {
-    modelled$data
-  }
-
-  ## The trimmed rows themselves. They belong to the training partition,
-  ## never the test part, and no model is fitted on them; the calibration
-  ## pool and the response bound below take them back in.
-  trimmed_rows <- if (length(trimmed_ids) > 0) {
-    modelled$data[is_trimmed, , drop = FALSE]
-  } else {
-    NULL
-  }
-
-  ## The fences the rows were trimmed by, for the degradation check: the CV
-  ## runs inside them and the test rows are untrimmed, so the check compares
-  ## like with like only within them (see fit_single_config()).
-  response_fences <- if (length(trimmed_ids) > 0) {
-    c(lower = x$evaluation$response_trim$lower,
-      upper = x$evaluation$response_trim$upper)
-  } else {
-    NULL
-  }
-
-  if (!identical(split_F$data[[id_col]], modelled_rows[[id_col]]) ||
-      !identical(split_F$data[[outcome_col]], modelled_rows[[outcome_col]])) {
-
-    trim_note <- if (length(trimmed_ids) > 0) {
-      paste0(" once the ", length(trimmed_ids), " training rows evaluate() trimmed are left out")
-    } else {
-      ""
-    }
-
-    abort_horizons(c(
-      "{.fn evaluate}'s split does not index the rows this object models.",
-      "x" = "{.field evaluation$split} was drawn on {nrow(split_F$data)} row{?s}; the analysis table has {nrow(modelled_rows)} with an observed {.field {outcome_col}}{trim_note}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
-      "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
-      "i" = "Re-run {.fn evaluate} on the object as it is now."
-    ), kind = "input")
-
-  }
-
-  split_F$data <- modelled_rows
+  rebuilt         <- rebuild_split(x)
+  split_F         <- rebuilt$split
+  modelled        <- rebuilt$modelled
+  n_dropped       <- modelled$n_dropped
+  n_flagged       <- modelled$n_flagged
+  trimmed_ids     <- rebuilt$trimmed_ids
+  trimmed_rows    <- rebuilt$trimmed_rows
+  response_fences <- rebuilt$response_fences
 
   train_F <- rsample::training(split_F)
   test_F  <- rsample::testing(split_F)
@@ -1152,7 +1096,6 @@ fit <- function(x,
     response_bound    = response_bound,
     cv_predictions    = all_cv_predictions,
     results           = results_tibble,
-    split             = split_F,
     uq                = uq_list,
     ad                = ad_list,
     selection_present = selection_present,
@@ -1447,7 +1390,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
       best_config   = configs$config_id,
       rank_metric   = rank_metric,
       screened      = FALSE,
-      split         = split,
+      ## Positions and identity columns only, as evaluate() stores it
+      split         = slim_split(split, role_map),
       n_train       = nrow(rsample::training(split)),
       n_test        = nrow(rsample::testing(split)),
       response_trim = trimmed$record,

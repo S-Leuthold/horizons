@@ -207,6 +207,153 @@ rebuild_resamples <- function(data, idx) {
 
 
 ## ---------------------------------------------------------------------------
+## The evaluation split, stored slim and pointed at the object's rows
+## ---------------------------------------------------------------------------
+##
+## The fitted object stores its data once, in data$analysis. evaluation$split
+## keeps the positions of its partition and, as its data, only the columns
+## that tell whether those positions still name the same rows: the id and
+## the outcome. rebuild_split() points it back at the object's rows.
+
+#' The columns a stored split keeps
+#'
+#' @param role_map The object's role map.
+#' @return Character: the id column, then the outcome.
+#' @keywords internal
+#' @noRd
+
+split_columns <- function(role_map) {
+
+  c(id_column(role_map), role_map$variable[role_map$role == "outcome"])
+
+}
+
+#' A split as the object stores it: its positions and its identity columns
+#'
+#' @description
+#' Keeps the `rsplit`'s class, `in_id` and `out_id`, so `training()`,
+#' `testing()` and [rebuild_split()]'s check work on it unchanged, and cuts
+#' its `data` to [split_columns()]. `evaluate()` and `fit()`'s cold start
+#' store the split through this.
+#'
+#' @param split An `rsplit` over the modelled rows.
+#' @param role_map The object's role map.
+#' @return The `rsplit`, its `data` the id and outcome columns.
+#' @keywords internal
+#' @noRd
+
+slim_split <- function(split, role_map) {
+
+  split$data <- split$data[, split_columns(role_map), drop = FALSE]
+  split
+
+}
+
+#' Point the evaluation split at the rows the object models
+#'
+#' @description
+#' `evaluate()`'s split is what `fit()` is scored on and what `ensemble()`'s
+#' members predict, so both rebuild its rows here, by the rule
+#' [rebuild_resamples()] follows: positions plus one copy of the data. The
+#' rows are the object's modelled rows ([modelling_rows()]) less the training
+#' rows `evaluate()`'s response trim (#77) recorded. They are the rows
+#' `evaluate()` recorded, not a fresh trim: fences recomputed here could fall
+#' on another set. An evaluation without the record (no trim requested)
+#' trimmed nothing.
+#'
+#' The split's positions are sound only if they still name the same samples
+#' with the same outcomes, so that is what is checked: the id and outcome
+#' columns, identical values in the same order. Other columns may
+#' legitimately have changed; `add_response()` can add a sibling response to
+#' an evaluated object. `set_analysis()` refuses a promoted object, so a
+#' mismatch means the rows or outcomes were changed some other way, or the
+#' object was built by hand; it is refused rather than scoring the wrong rows.
+#' The split is then pointed at the current table, so the caller sees the
+#' object's columns as they are now.
+#'
+#' @param x A `horizons_eval` (or a cold start's object, whose split was drawn
+#'   from these rows by the draw `evaluate()` uses).
+#' @param call The frame a mismatch reports.
+#'
+#' @return A list: `split`, the `rsplit` over the rows; `modelled`, what
+#'   [modelling_rows()] returned; `trimmed_ids`; `trimmed_rows`, the trimmed
+#'   training rows or `NULL`; `response_fences`, the trim's `lower` and `upper`
+#'   or `NULL`.
+#' @keywords internal
+#' @noRd
+
+rebuild_split <- function(x, call = rlang::caller_env()) {
+
+  role_map    <- x$data$role_map
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
+  id_col      <- id_column(role_map)
+
+  ## The rows evaluate() modelled: the same rule on the same table (#67).
+  modelled <- modelling_rows(x$data$analysis, outcome_col, call = call)
+
+  ### An rsplit: the eval validator at the door refuses anything else, and a
+  ### cold start draws one.
+  split <- x$evaluation$split
+
+  trimmed_ids   <- x$evaluation$response_trim$trimmed_ids %||% character(0)
+  is_trimmed    <- modelled$data[[id_col]] %in% trimmed_ids
+  modelled_rows <- if (length(trimmed_ids) > 0) {
+    modelled$data[!is_trimmed, , drop = FALSE]
+  } else {
+    modelled$data
+  }
+
+  ## The trimmed rows themselves. They belong to the training partition,
+  ## never the test part, and no model is fitted on them; fit()'s calibration
+  ## pool and response bound take them back in.
+  trimmed_rows <- if (length(trimmed_ids) > 0) {
+    modelled$data[is_trimmed, , drop = FALSE]
+  } else {
+    NULL
+  }
+
+  ## The fences the rows were trimmed by, for fit()'s degradation check: the
+  ## CV runs inside them and the test rows are untrimmed, so the check
+  ## compares like with like only within them (see fit_single_config()).
+  response_fences <- if (length(trimmed_ids) > 0) {
+    c(lower = x$evaluation$response_trim$lower,
+      upper = x$evaluation$response_trim$upper)
+  } else {
+    NULL
+  }
+
+  if (!identical(split$data[[id_col]], modelled_rows[[id_col]]) ||
+      !identical(split$data[[outcome_col]], modelled_rows[[outcome_col]])) {
+
+    trim_note <- if (length(trimmed_ids) > 0) {
+      paste0(" once the ", length(trimmed_ids), " training rows evaluate() trimmed are left out")
+    } else {
+      ""
+    }
+
+    abort_horizons(c(
+      "{.fn evaluate}'s split does not index the rows this object models.",
+      "x" = "{.field evaluation$split} was drawn on {nrow(split$data)} row{?s}; the analysis table has {nrow(modelled_rows)} with an observed {.field {outcome_col}}{trim_note}, and their {.field {id_col}} or {.field {outcome_col}} values differ.",
+      "i" = "The rows or outcomes changed after {.fn evaluate}, or the object was built by hand.",
+      "i" = "Re-run {.fn evaluate} on the object as it is now."
+    ), kind = "input", call = call)
+
+  }
+
+  split$data <- modelled_rows
+
+  list(
+    split           = split,
+    modelled        = modelled,
+    trimmed_ids     = trimmed_ids,
+    trimmed_rows    = trimmed_rows,
+    response_fences = response_fences
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## Stratified draws: whether the strata held
 ## ---------------------------------------------------------------------------
 ##

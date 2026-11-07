@@ -31,15 +31,17 @@ describe("fit() - NA-outcome rows (#67)", {
   it("keeps NA-outcome rows out of Split F and the row index", {
 
     expect_length(na_ids, 6L)
-    expect_false(any(na_ids %in% r$models$split$data$sample_id))
-    expect_false(anyNA(r$models$split$data$SOC))
+    expect_false(any(na_ids %in% r$evaluation$split$data$sample_id))
+    expect_false(anyNA(r$evaluation$split$data$SOC))
     expect_false(any(na_ids %in% unique(r$models$cv_predictions$sample_id)))
 
   })
 
   it("scores on the frame evaluate() split", {
 
-    expect_identical(r$models$split$data, obj$evaluation$split$data)
+    expect_identical(r$evaluation$split, obj$evaluation$split)
+    expect_identical(rebuild_split(r)$split$data,
+                     obj$data$analysis[!is.na(obj$data$analysis$SOC), , drop = FALSE])
 
   })
 
@@ -64,9 +66,9 @@ describe("fit() - NA-outcome rows with UQ on (#67)", {
   )
 
   analysis  <- obj$data$analysis
-  test_ids  <- rsample::testing(r$models$split)$sample_id
+  test_ids  <- rsample::testing(r$evaluation$split)$sample_id
   fit_ids   <- unique(r$models$cv_predictions$sample_id)
-  calib_ids <- setdiff(rsample::training(r$models$split)$sample_id, fit_ids)
+  calib_ids <- setdiff(rsample::training(r$evaluation$split)$sample_id, fit_ids)
 
   it("calibrates UQ on the rows left between the fit rows and the test part", {
 
@@ -242,8 +244,8 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
     expect_s3_class(f, "horizons_fit")
     expect_false(any(trimmed %in% unique(f$models$cv_predictions$sample_id)))
-    expect_identical(rsample::testing(f$models$split)$sample_id,
-                     rsample::testing(ev$evaluation$split)$sample_id)
+    expect_setequal(unique(f$models$cv_predictions$sample_id),
+                    rsample::training(ev$evaluation$split)$sample_id)
     expect_true(is.finite(f$models$results$rmse))
 
   })
@@ -432,8 +434,8 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
     expect_s3_class(f_same, "horizons_fit")
     expect_identical(f_same$models$results$rmse, f_before$models$results$rmse)
-    expect_identical(rsample::training(f_same$models$split)$sample_id,
-                     rsample::training(f_before$models$split)$sample_id)
+    expect_setequal(unique(f_same$models$cv_predictions$sample_id),
+                    rsample::training(trimmed$evaluation$split)$sample_id)
 
   })
 

@@ -1741,7 +1741,7 @@ validate_select_input <- function(obj, arg, what, call = rlang::caller_env()) {
 #' that had been configured, validated, evaluated or fitted would hand that
 #' state to the training set: a configuration and an outcome chosen for the
 #' library, a verdict and a removal record about rows that are mostly not
-#' there, or `models$split` and `evaluation$split` keyed to a row order the
+#' there, or `evaluation$split` and `models$cv_predictions` keyed to a row order the
 #' subset just destroyed. So the pool has to be data as `standardize()`
 #' and `add_response()` leave it, and this refuses rather than silently
 #' clearing.
