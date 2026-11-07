@@ -185,6 +185,13 @@ DEFAULT_FINAL_BAYES_ITER <- 25L
 N_CALIB_MIN              <- 30L
 DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L
+
+### The quantile forest's minimum node size grows with its rows: the rows over
+### UQ_QUANTILE_NODE_DIVISOR, rounded up, and never below UQ_QUANTILE_MIN_NODE
+### (ranger's default, so the forest is unchanged up to 1,250 rows). See
+### uq_min_node_size().
+UQ_QUANTILE_MIN_NODE     <- 5L
+UQ_QUANTILE_NODE_DIVISOR <- 250L
 WARMSTART_GRID_SIZE      <- 25L
 
 ### The degradation check bootstraps the test RPD and flags a config only when

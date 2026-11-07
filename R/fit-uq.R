@@ -23,6 +23,26 @@ conformal_min_rows <- function(level) {
 
 
 ## ===========================================================================
+## uq_min_node_size() — the quantile forest's smallest node
+## ===========================================================================
+
+#' The quantile forest's minimum node size for its rows
+#'
+#' `UQ_QUANTILE_MIN_NODE` rows, or the rows over `UQ_QUANTILE_NODE_DIVISOR`
+#' rounded up, whichever is larger: 5 up to 1,250 rows, 27 at 6,616.
+#'
+#' @param n Integer. The forest's training rows.
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+uq_min_node_size <- function(n) {
+
+  max(UQ_QUANTILE_MIN_NODE, as.integer(ceiling(n / UQ_QUANTILE_NODE_DIVISOR)))
+
+}
+
+
+## ===========================================================================
 ## compute_c_alpha() — conformal finite-sample correction
 ## ===========================================================================
 
@@ -70,7 +90,8 @@ compute_c_alpha <- function(scores, level) {
 #' Grow the quantile forest
 #'
 #' A ranger quantile regression forest of the residuals on the features, at
-#' `UQ_QUANTILE_TREES` trees on one thread.
+#' `UQ_QUANTILE_TREES` trees on one thread, its minimum node size growing
+#' with the rows (`uq_min_node_size()`).
 #'
 #' @param features Data frame or matrix of predictors, one row per residual.
 #' @param residuals Numeric vector of residuals.
@@ -92,15 +113,16 @@ fit_quantile_forest <- function(features, residuals, seed = NULL) {
   }
 
   ranger::ranger(
-    x           = as.data.frame(features),
-    y           = residuals,
-    quantreg    = TRUE,
-    num.trees   = UQ_QUANTILE_TREES,
+    x             = as.data.frame(features),
+    y             = residuals,
+    quantreg      = TRUE,
+    num.trees     = UQ_QUANTILE_TREES,
+    min.node.size = uq_min_node_size(nrow(features)),
     ## Pinned at the call site. Unset, ranger falls back to
     ## getOption("ranger.num.threads", detectCores()), i.e. every core,
     ## which oversubscribes under any parallel dispatch (M6, 2026-09-15).
-    num.threads = 1L,
-    seed        = seed
+    num.threads   = 1L,
+    seed          = seed
   )
 
 }

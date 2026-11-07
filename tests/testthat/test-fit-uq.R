@@ -673,12 +673,38 @@ describe("fit_quantile_forest() - the seed", {
 
 
 ## =========================================================================
-## Thread pinning at the call site (M6, 2026-09-15)
+## The quantile forest's settings: its size, and threads pinned at the call
+## site (M6, 2026-09-15)
 ## =========================================================================
 
-describe("fit_uq() - quantile forest thread pinning", {
+describe("uq_min_node_size()", {
 
-  it("calls ranger with num.threads = 1", {
+  it("keeps ranger's default up to 1,250 rows and grows with the rows past it", {
+
+    expect_identical(uq_min_node_size(1L), 5L)
+    expect_identical(uq_min_node_size(1250L), 5L)
+    expect_identical(uq_min_node_size(1251L), 6L)
+    expect_identical(uq_min_node_size(6616L), 27L)
+
+  })
+
+})
+
+describe("fit_uq() - the quantile forest's settings", {
+
+  it("grows the forest the rule sizes", {
+
+    withr::local_seed(3)
+    x <- data.frame(a = stats::rnorm(1300), b = stats::rnorm(1300), c = stats::rnorm(1300))
+
+    forest <- fit_quantile_forest(x, stats::rnorm(1300), seed = 1L)
+
+    expect_equal(forest$min.node.size, 6)
+    expect_equal(forest$num.trees, UQ_QUANTILE_TREES)
+
+  })
+
+  it("calls ranger with the settings, and num.threads = 1", {
 
     setup    <- make_uq_setup()
     captured <- NULL
@@ -700,6 +726,8 @@ describe("fit_uq() - quantile forest thread pinning", {
 
     expect_false(is.null(captured))
     expect_identical(captured$num.threads, 1L)
+    expect_identical(captured$num.trees, UQ_QUANTILE_TREES)
+    expect_identical(captured$min.node.size, uq_min_node_size(nrow(setup$oof_predictions)))
 
   })
 
