@@ -3465,6 +3465,12 @@ describe("the class validators' new checks (#234)", {
     expect_true(any(grepl("does not name its covariance's form", finding_of(validate_horizons_fit(obj)),
                           fixed = TRUE)))
 
+    ## and so is one that names a form there is none of
+    obj <- make_valid_fit()
+    obj$models$ad$cfg_a$form <- "diag"
+    expect_true(any(grepl("does not name its covariance's form", finding_of(validate_horizons_fit(obj)),
+                          fixed = TRUE)))
+
   })
 
   it("refuse a split whose rows do not carry unique sample_ids", {
@@ -3500,6 +3506,10 @@ describe("the class validators' new checks (#234)", {
 
     expect_true(any(grepl("it was stored by an earlier version", finding_of(validate_horizons_eval(obj)),
                           fixed = TRUE)))
+
+    ## The id and the outcome alone, in the other order, are refused for that
+    obj$evaluation$split$data <- obj$data$analysis[c("SOC", "sample_id")]
+    expect_true(any(grepl("in that order", finding_of(validate_horizons_eval(obj)), fixed = TRUE)))
 
   })
 

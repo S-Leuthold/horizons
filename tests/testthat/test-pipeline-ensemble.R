@@ -347,6 +347,27 @@ describe("ensemble() - preflight validation", {
 
   })
 
+  it("refuses an object whose modelled rows changed since evaluate() split them", {
+
+    ## The split keeps the ids and outcomes it was drawn on; an outcome edited
+    ## since no longer matches, and ensemble() takes its test rows through
+    ## the same check fit() does
+    drifted <- ens_fitted()
+    outcome <- drifted$data$role_map$variable[drifted$data$role_map$role == "outcome"]
+    row     <- match(drifted$evaluation$split$data$sample_id[1], drifted$data$analysis$sample_id)
+    drifted$data$analysis[[outcome]][row] <- drifted$data$analysis[[outcome]][row] + 1
+
+    err <- expect_error(
+      suppressMessages(capture.output(
+        ensemble(drifted, method = "weighted", optimize = FALSE, compute_uq = FALSE)
+      )),
+      "does not index the rows",
+      class = "horizons_error_input"
+    )
+    expect_identical(rlang::call_name(err$call), "ensemble")
+
+  })
+
   it("refuses a bad seed, optimize or compute_uq before any engine runs (#130)", {
 
     fitted <- ens_fitted()

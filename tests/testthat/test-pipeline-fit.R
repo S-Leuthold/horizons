@@ -694,8 +694,16 @@ describe("fit() - scores on evaluate()'s split", {
     expect_false("split" %in% names(r$models))
     expect_identical(r$evaluation$split, obj$evaluation$split)
     expect_named(r$evaluation$split$data, c("sample_id", "SOC"))
-    expect_identical(rsample::testing(rebuild_split(r)$split)$sample_id,
-                     rsample::testing(obj$evaluation$split)$sample_id)
+
+    ## fit() scored on evaluate()'s test rows and fitted on none of them: each
+    ## member's measured coverage counts them, and no out-of-fold prediction
+    ## is for one
+    test_ids <- rsample::testing(obj$evaluation$split)$sample_id
+
+    for (id in names(r$models$uq)) {
+      expect_identical(r$models$uq[[id]]$n_test, length(test_ids), label = id)
+    }
+    expect_length(intersect(unique(r$models$cv_predictions$sample_id), test_ids), 0L)
 
   })
 
@@ -879,6 +887,10 @@ describe("fit() - a PCA member stores only the components it uses", {
     suppressWarnings(fit(obj, compute_uq = TRUE, compute_ad = TRUE, seed = 11L))
   }
 
+  ## The cut fit is built once and read by every test here; the full one only
+  ## by the comparison
+  fit_pca_cut <- function() memo_fixture("fit_pca_cut", fit_pca)
+
   pca_step <- function(f) {
     steps <- workflows::extract_recipe(f$models$workflows[[1]], estimated = TRUE)$steps
     steps[[which(vapply(steps, inherits, logical(1), what = "step_pca"))]]
@@ -891,7 +903,7 @@ describe("fit() - a PCA member stores only the components it uses", {
 
   it("keeps num_comp columns of the rotation, as extract_recipe() sees it", {
 
-    cut  <- fit_pca()
+    cut  <- fit_pca_cut()
     step <- pca_step(cut)
 
     expect_identical(ncol(step$res$rotation), as.integer(step$num_comp))
@@ -901,7 +913,7 @@ describe("fit() - a PCA member stores only the components it uses", {
 
   it("predicts, scores and calibrates exactly as the full rotation does", {
 
-    cut  <- fit_pca()
+    cut  <- fit_pca_cut()
     full <- local({
       local_mocked_bindings(cut_pca_rotation = function(fitted_wf) fitted_wf)
       fit_pca()
@@ -926,7 +938,7 @@ describe("fit() - a PCA member stores only the components it uses", {
 
   it("measures its test coverage on the intervals predict() serves, from the workflow's recipe", {
 
-    cut <- fit_pca()
+    cut <- fit_pca_cut()
     uq  <- cut$models$uq[[1]]
 
     expect_false("prepped_recipe" %in% names(uq))

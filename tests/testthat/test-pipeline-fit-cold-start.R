@@ -71,10 +71,12 @@ describe("fit() - cold start from one configuration (#45)", {
   it("holds out the rows evaluate() holds out at the same seed", {
 
     expect_identical(cold$evaluation$split$in_id, ev$evaluation$split$in_id)
-    expect_identical(rsample::testing(cold$evaluation$split)$sample_id,
-                     rsample::testing(ev$evaluation$split)$sample_id)
-    expect_identical(rsample::testing(cold$evaluation$split)$sample_id,
-                     rsample::testing(warm$evaluation$split)$sample_id)
+
+    ## Both fit on evaluate()'s training rows, so neither on its test rows
+    train_ids <- rsample::training(ev$evaluation$split)$sample_id
+
+    expect_setequal(unique(cold$models$cv_predictions$sample_id), train_ids)
+    expect_setequal(unique(warm$models$cv_predictions$sample_id), train_ids)
 
   })
 

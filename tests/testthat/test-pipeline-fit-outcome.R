@@ -244,8 +244,8 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
     expect_s3_class(f, "horizons_fit")
     expect_false(any(trimmed %in% unique(f$models$cv_predictions$sample_id)))
-    expect_identical(rsample::testing(f$evaluation$split)$sample_id,
-                     rsample::testing(ev$evaluation$split)$sample_id)
+    expect_setequal(unique(f$models$cv_predictions$sample_id),
+                    rsample::training(ev$evaluation$split)$sample_id)
     expect_true(is.finite(f$models$results$rmse))
 
   })
@@ -434,8 +434,8 @@ describe("fit() - a trim request changed after evaluate() (#137)", {
 
     expect_s3_class(f_same, "horizons_fit")
     expect_identical(f_same$models$results$rmse, f_before$models$results$rmse)
-    expect_identical(rsample::training(f_same$evaluation$split)$sample_id,
-                     rsample::training(f_before$evaluation$split)$sample_id)
+    expect_setequal(unique(f_same$models$cv_predictions$sample_id),
+                    rsample::training(trimmed$evaluation$split)$sample_id)
 
   })
 

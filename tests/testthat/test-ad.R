@@ -548,4 +548,7 @@ test_that("fit_ad keeps the bundle at p > n and records no warning", {
   expect_identical(dim(out$value$basis), c(p, 11L))
   expect_false(any(out$records$type == "warning"))
 
+  ## The bundle fit_ad() writes is one the fit validator admits
+  expect_true(ad_bundle_ok(out$value))
+
 })
