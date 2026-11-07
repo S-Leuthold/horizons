@@ -807,7 +807,8 @@ tidy_selection_step <- function(x) {
 #' 1,691 against the 80 a library member used. This cuts each trained PCA
 #' step's rotation to its `num_comp` columns, so `bake()` multiplies by the
 #' same numbers and every prediction is unchanged; `tidy()` on the step then
-#' lists only those components. `sdev`, `center` and `scale` are kept.
+#' lists the coefficients of only those components. `sdev`, `center` and
+#' `scale` are kept, so its variances still cover every component.
 #'
 #' The trained recipe sits inside the workflow at
 #' `pre$mold$blueprint$recipe`, which workflows and hardhat do not export a

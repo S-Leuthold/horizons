@@ -2311,7 +2311,7 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
     if (length(setdiff(held_cols, split_cols)) > 0) {
 
       errors <- c(errors, cli::format_inline(
-        "{.field split} holds columns besides the id and the outcome ({.field {split_cols}}): it was stored by an earlier version, which kept the modelling rows in it. Re-run {.fn evaluate}."
+        "{.field split} holds columns besides the id and the outcome ({.field {split_cols}}): it was stored by an earlier version, which kept the modelling rows in it."
       ))
 
     } else if (!identical(held_cols, split_cols)) {
