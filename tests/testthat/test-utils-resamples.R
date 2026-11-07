@@ -487,6 +487,75 @@ describe("outcome_stratifies()", {
 
 })
 
+describe("local_rng_state()", {
+
+  ## Seeds and draws inside, after an exit handler of its own, as the sites
+  ## that call the helper do
+  exited <- FALSE
+  seeds_and_draws <- function(fail = FALSE) {
+    on.exit(exited <<- TRUE, add = TRUE)
+    local_rng_state()
+    set.seed(1, kind = "Mersenne-Twister")
+    stats::runif(5)
+    if (fail) stop("failed after seeding")
+    invisible(NULL)
+  }
+
+  it("restores the caller's stream and kind from a function frame, on return and on error", {
+
+    withr::local_seed(3, .rng_kind = "L'Ecuyer-CMRG")
+    before <- .Random.seed
+
+    exited <<- FALSE
+    seeds_and_draws()
+    expect_identical(.Random.seed, before)
+    expect_identical(RNGkind()[1], "L'Ecuyer-CMRG")
+    expect_true(exited)
+
+    exited <<- FALSE
+    expect_error(seeds_and_draws(fail = TRUE), "failed after seeding")
+    expect_identical(.Random.seed, before)
+    expect_identical(RNGkind()[1], "L'Ecuyer-CMRG")
+    expect_true(exited)
+
+  })
+
+  it("restores the stream when a local() block ends, before the function goes on", {
+
+    in_block <- function() {
+      local({
+        local_rng_state()
+        set.seed(1)
+        stats::runif(5)
+      })
+      .Random.seed
+    }
+
+    withr::local_seed(4)
+    before <- .Random.seed
+
+    expect_identical(in_block(), before)
+
+  })
+
+  it("leaves an absent stream absent", {
+
+    withr::with_preserve_seed({
+
+      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+        rm(".Random.seed", envir = globalenv())
+      }
+
+      seeds_and_draws()
+
+      expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+
+    })
+
+  })
+
+})
+
 describe("draw_stratified()", {
 
   df <- data.frame(y = seq_len(100) / 10)

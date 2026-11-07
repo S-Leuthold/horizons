@@ -90,19 +90,11 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
     ## here clobbered it partway through fit_single_config(), so everything
     ## downstream — tune_grid()'s sampling, tune_bayes()'s GP initialisation —
     ## became independent of the user's `seed` when the grid overflowed
-    ## max_points and dependent on it when it didn't. Written out rather than
-    ## using withr::with_seed() because withr is only a Suggests. See #51.
+    ## max_points and dependent on it when it didn't. See #51.
 
     sampled <- local({
 
-      if (exists(".Random.seed", envir = globalenv())) {
-
-        old_seed <- get(".Random.seed", envir = globalenv())
-        on.exit(assign(".Random.seed", old_seed, envir = globalenv()),
-                add = TRUE)
-
-      }
-
+      local_rng_state()
       set.seed(1, kind = "Mersenne-Twister")
       others <- full_grid[!point_matches(best_row, full_grid), , drop = FALSE]
       dplyr::slice_sample(others, n = max_points - 1L)

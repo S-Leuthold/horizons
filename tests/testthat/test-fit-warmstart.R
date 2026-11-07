@@ -342,6 +342,26 @@ describe("build_warmstart_grid() - the caller's random stream (#51)", {
 
   })
 
+  it("leaves a session with no random stream without one", {
+
+    param_set   <- make_warmstart_param_set()
+    best_params <- make_best_params()
+
+    withr::with_preserve_seed({
+
+      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+        rm(".Random.seed", envir = globalenv())
+      }
+
+      grid <- build_warmstart_grid(best_params, param_set, max_points = 10)
+
+      expect_identical(nrow(grid), 10L)
+      expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+
+    })
+
+  })
+
 })
 
 

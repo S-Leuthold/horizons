@@ -354,6 +354,45 @@ rebuild_split <- function(x, call = rlang::caller_env()) {
 
 
 ## ---------------------------------------------------------------------------
+## The caller's RNG state
+## ---------------------------------------------------------------------------
+
+
+#' Restore the caller's RNG state when a function exits
+#'
+#' @description
+#' Records `.Random.seed` (or its absence) and registers its restore on
+#' `frame`'s exit, after any exit handlers already there. Restoring
+#' `.Random.seed` restores the RNG kind with it, and a stream that was absent
+#' is removed again. A function that seeds or draws for its own purposes calls
+#' this first, so the caller's stream is left as found.
+#'
+#' @param frame The frame whose exit restores the state: the caller's by
+#'   default, or a `local()` block's when called inside one.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+
+local_rng_state <- function(frame = parent.frame()) {
+
+  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
+
+  restore <- function() {
+    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
+    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
+  }
+
+  ## Registered on the caller's frame, as withr's local_ functions do; written
+  ## out because withr is only a Suggests.
+  do.call(base::on.exit, list(as.call(list(restore)), add = TRUE), envir = frame)
+
+  invisible(NULL)
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## Stratified draws: whether the strata held
 ## ---------------------------------------------------------------------------
 ##
@@ -394,12 +433,7 @@ rebuild_split <- function(x, call = rlang::caller_env()) {
 
 outcome_stratifies <- function(outcome) {
 
-  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
-    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
-  }, add = TRUE)
+  local_rng_state()
 
   strata <- suppressWarnings(
     rsample::make_strata(outcome, breaks = STRATA_BREAKS, pool = STRATA_POOL)
