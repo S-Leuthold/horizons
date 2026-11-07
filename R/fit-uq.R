@@ -64,6 +64,49 @@ compute_c_alpha <- function(scores, level) {
 
 
 ## ===========================================================================
+## fit_quantile_forest() — the quantile forest on the out-of-fold residuals
+## ===========================================================================
+
+#' Grow the quantile forest
+#'
+#' A ranger quantile regression forest of the residuals on the features, at
+#' `UQ_QUANTILE_TREES` trees on one thread.
+#'
+#' @param features Data frame or matrix of predictors, one row per residual.
+#' @param residuals Numeric vector of residuals.
+#' @param seed Integer or NULL. Under a seed the forest depends on it alone
+#'   and the caller's RNG stream is left as found; NULL draws from the
+#'   caller's stream, for callers that manage it themselves.
+#' @return A `ranger` object fitted with `quantreg = TRUE`.
+#' @keywords internal
+#' @noRd
+fit_quantile_forest <- function(features, residuals, seed = NULL) {
+
+  ## ranger's `seed` fixes the trees; the node values quantreg stores are drawn
+  ## with sample() from R's stream after the trees are grown. Under a seed both
+  ## come from it alone, with the kind pinned as fit_single_config() pins it,
+  ## and the caller's stream is left as found.
+  if (!is.null(seed)) {
+    local_rng_state()
+    set.seed(seed, kind = "Mersenne-Twister")
+  }
+
+  ranger::ranger(
+    x           = as.data.frame(features),
+    y           = residuals,
+    quantreg    = TRUE,
+    num.trees   = UQ_QUANTILE_TREES,
+    ## Pinned at the call site. Unset, ranger falls back to
+    ## getOption("ranger.num.threads", detectCores()), i.e. every core,
+    ## which oversubscribes under any parallel dispatch (M6, 2026-09-15).
+    num.threads = 1L,
+    seed        = seed
+  )
+
+}
+
+
+## ===========================================================================
 ## fit_uq() — CQR-style uncertainty quantification
 ## ===========================================================================
 
@@ -94,9 +137,10 @@ compute_c_alpha <- function(scores, level) {
 #'   (e.g. "none", "log", "log10", "sqrt").
 #' @param level_default Numeric. Default coverage level. Default 0.90.
 #' @param seed Integer or NULL. Seed for the quantile forest. `fit()` passes
-#'   its own seed so the forest is reproducible regardless of how the
-#'   preceding stages consumed the parent RNG stream; NULL keeps ranger's
-#'   default of drawing a seed from that stream.
+#'   its own, so the forest, its trees and the node values it stores, depends
+#'   on `seed` alone, however the preceding stages consumed the caller's RNG
+#'   stream, and growing it leaves that stream as found. NULL keeps ranger's
+#'   default of drawing both from the caller's stream.
 #' @param outcome_range Numeric length-2 vector. The outcome's physical range,
 #'   which the back-transformed calibration predictions are clamped to, as
 #'   `predict()` clamps the point predictions the intervals are served
@@ -179,21 +223,8 @@ fit_uq <- function(fitted_workflow,
   oof_features <- train_data_for_bake[oof_rows, , drop = FALSE]
 
   ## Train quantile forest
-  quantile_model <- unit_step("uq_quantile_forest", ranger::ranger(
-      x           = as.data.frame(oof_features),
-      y           = oof_residuals,
-      quantreg    = TRUE,
-      num.trees   = UQ_QUANTILE_TREES,
-      ## Pinned at the call site. Unset, ranger falls back to
-      ## getOption("ranger.num.threads", detectCores()), i.e. every core,
-      ## which oversubscribes under any parallel dispatch (M6, 2026-09-15).
-      num.threads = 1L,
-      ## Explicit seed: ranger's default draws from the parent R stream, whose
-      ## position depends on how the preceding stages ran, so the quantile
-      ## forest was not reproducible in its own right. NULL keeps ranger's
-      ## default for callers that manage the stream themselves.
-      seed        = seed
-  ))
+  quantile_model <- unit_step("uq_quantile_forest",
+                              fit_quantile_forest(oof_features, oof_residuals, seed = seed))
 
   ## -----------------------------------------------------------------------
   ## Phase 2: Conformal calibration on calib_data

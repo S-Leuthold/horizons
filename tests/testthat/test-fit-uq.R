@@ -602,6 +602,77 @@ describe("fit_uq() - a prediction step that fails", {
 
 
 ## =========================================================================
+## The quantile forest's seed
+## =========================================================================
+## ranger's `seed` fixes the trees, but quantreg draws the node values it
+## stores from R's stream, so without a seed of its own the forest depended on
+## what the member's fit drew before it.
+
+describe("fit_quantile_forest() - the seed", {
+
+  setup     <- suppressWarnings(make_uq_setup())
+  features  <- mold_predictors(setup$fitted_wf)
+  residuals <- setup$oof_predictions$truth - setup$oof_predictions$.pred
+
+  run_uq <- function() {
+    suppressWarnings(fit_uq(
+      fitted_workflow = setup$fitted_wf,
+      oof_predictions = setup$oof_predictions,
+      calib_data      = setup$calib_data,
+      role_map        = setup$role_map,
+      seed            = 7L
+    ))
+  }
+
+  it("gives the same forest for the same seed, whatever the caller's stream", {
+
+    a <- withr::with_seed(1, fit_quantile_forest(features, residuals, seed = 7L))
+    b <- withr::with_seed(2, fit_quantile_forest(features, residuals, seed = 7L))
+    c <- withr::with_seed(3, .rng_kind = "L'Ecuyer-CMRG",
+                          fit_quantile_forest(features, residuals, seed = 7L))
+    d <- withr::with_seed(1, fit_quantile_forest(features, residuals, seed = 8L))
+
+    expect_identical(b$random.node.values, a$random.node.values)
+    expect_identical(c$random.node.values, a$random.node.values)
+    expect_identical(b$forest$split.values, a$forest$split.values)
+    expect_identical(c$forest$split.values, a$forest$split.values)
+    expect_false(identical(d$random.node.values, a$random.node.values))
+
+    ## So the calibration scores fit_uq() stores depend on its seed alone
+    expect_identical(withr::with_seed(2, run_uq())$scores,
+                     withr::with_seed(1, run_uq())$scores)
+
+  })
+
+  it("leaves the caller's stream and kind as found", {
+
+    withr::with_seed(5, {
+      before <- .Random.seed
+      fit_quantile_forest(features, residuals, seed = 7L)
+      expect_identical(.Random.seed, before)
+    })
+
+    withr::with_seed(5, .rng_kind = "L'Ecuyer-CMRG", {
+      before <- .Random.seed
+      fit_quantile_forest(features, residuals, seed = 7L)
+      expect_identical(.Random.seed, before)
+      expect_identical(RNGkind()[1], "L'Ecuyer-CMRG")
+    })
+
+    withr::with_preserve_seed({
+      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+        rm(".Random.seed", envir = globalenv())
+      }
+      fit_quantile_forest(features, residuals, seed = 7L)
+      expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+    })
+
+  })
+
+})
+
+
+## =========================================================================
 ## Thread pinning at the call site (M6, 2026-09-15)
 ## =========================================================================
 
