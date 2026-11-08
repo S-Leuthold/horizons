@@ -843,12 +843,7 @@ cluster_targets <- function(St,
 
   ## Preserve the caller's RNG state -----------------------------------------
 
-  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
-    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
-  }, add = TRUE)
+  local_rng_state()
 
   sil <- NA_real_
 

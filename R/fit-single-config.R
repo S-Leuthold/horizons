@@ -778,12 +778,7 @@ check_degradation <- function(cv_metrics, test_truth, test_preds,
   if (!is.finite(test_rpd)) return(cannot_run("the test RPD is not finite"))
 
   ## Bootstrap with a local seed; the caller's stream is restored on exit.
-  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
-    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
-  }, add = TRUE)
+  local_rng_state()
   set.seed(seed, kind = "Mersenne-Twister")
 
   ## The same RPD as rpd_vec(), inline: SD of the outcomes over the RMSE, Inf
