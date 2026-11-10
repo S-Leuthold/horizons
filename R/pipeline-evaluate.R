@@ -110,6 +110,11 @@
 #' wants one registers it with `future::plan(list(...))` and uses
 #' `"configs"`.
 #'
+#' Results do not depend on the backend, the number of workers, which worker
+#' runs a configuration or the order the work finishes in: every draw is
+#' seeded from the run's `seed` and its own name, where it is made. A
+#' backend's own seed (`mirai::daemons(seed = )`, say) has no effect on them.
+#'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
 #' future::plan(future::multisession, workers = 4)

@@ -46,7 +46,8 @@
 #'   `"everything"` ships the whole rset to every task. tune may rewrite the
 #'   value before dispatch (parameter-free configs become `"resamples"`;
 #'   single-split rsets become `"everything"`).
-#' @param seed Integer. Random seed for reproducibility.
+#' @param seed Integer. The run's seed, from which each stage's seed is
+#'   derived with the stage's name ([with_unit_seed()]).
 #' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
 #'   to [build_recipe()]. `evaluate()` reads it from `configure()`'s
 #'   `config$recipe`. Default 9.

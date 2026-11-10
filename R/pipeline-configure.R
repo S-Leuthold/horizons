@@ -48,17 +48,15 @@
 #'
 #' **Reproducibility:**
 #'
-#' `evaluate()` and `fit()` pin the RNG seed and kind, so a run is
-#' repeatable from its recorded `seed` for every model except `cubist`.
-#' The Cubist C implementation is not bit-reproducible when
-#' `committees > 1`: repeated fits on identical data under an identical
-#' `set.seed()`, or under an explicit `cubistControl(seed = )`, can differ in
-#' the fourth significant figure of a fold metric (measured on Cubist
-#' 0.6.0). `committees = 1` is stable. The effect is small, but it can flip
-#' `select_best()` between near-tied grid points and move a reported test
-#' metric by a few percent, so a `cubist` result should be read as
-#' reproducible to that tolerance rather than exactly. `rf` and the other
-#' engines are deterministic given `seed`. See GitHub issue #51.
+#' Every draw `evaluate()`, `fit()` and `ensemble()` make is seeded from the
+#' run's seed and the draw's own name, so a run repeats from the seed it
+#' records, whatever the order of the configurations, the workers or the
+#' session's random number generator. The one exception is `cubist` with
+#' `neighbors > 0`: its neighbour distance cutoff comes from a generator
+#' inside the Cubist C code that no seed reaches, which carries on from every
+#' Cubist fit made before it in the same R process, so its predictions can
+#' differ slightly between runs. Its rules, and its predictions at
+#' `neighbors = 0`, are stable. See GitHub issue #51.
 #'
 #' **Choosing models for large spectral libraries:**
 #'
