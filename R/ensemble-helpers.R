@@ -341,8 +341,10 @@ meta_formula <- function() {
 #'   build their control through `meta_tune_control()` with it, so the
 #'   meta-learner never dispatches onto a registered plan unless asked.
 #'   Default `FALSE`.
-#' @param seed Integer. Seed set immediately before the CV folds are drawn, so
-#'   the tuning resamples and the genuine meta-OOF are reproducible.
+#' @param seed Integer. The run's seed, recorded on the contract. `ensemble()`
+#'   runs the meta-learner in the unit `ensemble/meta-folds`
+#'   ([with_unit_seed()]), so the tuning resamples and the genuine meta-OOF
+#'   are reproducible.
 #' @param debug Logical. From `ensemble()`'s control: a failure inside tune,
 #'   or a candidate left out for a missing fold, stops the call.
 #' @param call The frame a member's failure to predict the test rows reports
@@ -403,12 +405,8 @@ fit_tuned_meta_learner <- function(object,
   ## Stratify on the (original-scale) outcome so folds stay balanced on skewed
   ## soil properties. A draw rsample stratifies on fewer bins than asked, or
   ## leaves unstratified, is reported from this unit as evaluate()'s and
-  ## fit()'s draws are (draw_stratified()).
-  ## Seed set here (not via a side-effect in the caller) so the folds — which
-  ## seed the Phase-2 conformal calibration — are reproducible regardless of
-  ## any RNG use upstream of this point.
-
-  set.seed(seed)
+  ## fit()'s draws are (draw_stratified()). Drawn first in the meta-learner's
+  ## unit, so they depend on the run's seed alone.
 
   drawn <- draw_stratified(
     outcome      = meta_frame$.truth,
@@ -508,7 +506,7 @@ fit_tuned_meta_learner <- function(object,
   ## the optimize = TRUE path the hyperparameters were selected by tune_grid on
   ## these same folds, so the residuals carry hyperparameter-selection bias.
   ## Route B (implemented in ensemble-uq.R): fit_ensemble_uq() draws a FRESH
-  ## fold partition at seed + 1000, refits the finalized workflow per fold with
+  ## fold partition in its own unit, refits the finalized workflow per fold with
   ## the fold models retained, and aggregates via genuine CV+ order statistics
   ## (cv_plus_bounds()) — never through compute_c_alpha(). These contract
   ## oof_predictions remain for diagnostics and the fold-honesty regression
@@ -657,8 +655,8 @@ fit_tuned_meta_learner <- function(object,
 #' @param optimize Logical. The build-time optimize flag, recorded so
 #'   ensemble UQ can re-derive fold weights (weighted method) by the same
 #'   rule.
-#' @param seed Integer. The build-time seed, recorded so ensemble UQ can
-#'   derive a calibration partition disjoint from the tuning folds.
+#' @param seed Integer. The run's seed, recorded so ensemble UQ can draw its
+#'   calibration partition in its own unit, `ensemble/cvplus`.
 #'
 #' @return A list matching the `ensemble` slot contract: `method`, `model`,
 #'   `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,

@@ -422,9 +422,10 @@ describe("fit_tuned_meta_learner() - the clamped combination (#104)", {
       parsnip::set_engine("glmnet")
     grid <- tidyr::expand_grid(penalty = c(1e-4, 1e-2), mixture = c(0, 1))
 
-    ## suppressWarnings(): rsample's note that the meta rows are too few for
-    ## its default strata breaks
-    suppressWarnings(fit_tuned_meta_learner(
+    ## In the meta-learner's unit, as ensemble() runs it. suppressWarnings():
+    ## rsample's note that the meta rows are too few for its default strata
+    ## breaks
+    with_unit_seed(307L, "ensemble/meta-folds", suppressWarnings(fit_tuned_meta_learner(
       fitted, members, oof,
       rank_metric     = "rpd",
       optimize        = TRUE,
@@ -432,7 +433,7 @@ describe("fit_tuned_meta_learner() - the clamped combination (#104)", {
       spec            = spec,
       grid            = grid,
       extract_weights = extract_weights_penalized
-    ))
+    )))
 
     expect_named(seen, c("grid", "oof"), ignore.order = TRUE)
 

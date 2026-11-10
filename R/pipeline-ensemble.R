@@ -254,24 +254,23 @@ ensemble <- function(x,
   ## nothing usable, so the call aborts with the record. Its warnings are
   ## recorded, not raised as they come, and a worker's death is systemic.
   ##
-  ## `seed` is threaded explicitly into each engine (rather than a set.seed()
-  ## side-effect here) so the meta-learner's CV folds - which seed the Phase-2
-  ## conformal calibration - are reproducible regardless of any RNG use between
-  ## here and the vfold_cv() call. The tuned engines set the seed immediately
-  ## before drawing folds; the weighted engine is deterministic and ignores it.
+  ## The meta-learner draws in one unit of its own, ensemble/meta-folds
+  ## (with_unit_seed()): its CV folds, its tuning, its refit and its
+  ## out-of-fold pass. The xgb engine is given the unit's seed; glmnet and
+  ## the weighted engine draw nothing after the folds.
 
   meta <- stop_on_worker_death(run_unit({
 
     oof <- unit_step("oof_matrix", build_oof_matrix(x, members))
 
-    switch(
+    with_unit_seed(seed, "ensemble/meta-folds", switch(
       method,
       penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed,
                                          allow_par = allow_par, debug = debug),
       weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize, seed),
       xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed,
                                    allow_par = allow_par, debug = debug)
-    )
+    ))
 
   }, unit = "meta_learner", id = method, debug = debug, keep_traces = control$keep_traces),
   results = NULL, verb = "ensemble")

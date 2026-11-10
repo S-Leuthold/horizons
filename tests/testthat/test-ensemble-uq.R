@@ -115,7 +115,7 @@ describe("fit_ensemble_uq() - bundle contract", {
     expect_setequal(
       names(uq),
       c("method", "ensemble_method", "members", "fold_models", "calib",
-        "n_calib", "level_default", "seed", "oof_coverage", "mean_width",
+        "n_calib", "level_default", "oof_coverage", "mean_width",
         "timestamp", "test_coverage", "test_mean_width", "n_test")
     )
 
@@ -130,7 +130,6 @@ describe("fit_ensemble_uq() - bundle contract", {
     expect_identical(uq$ensemble_method, "weighted")
     expect_equal(length(uq$fold_models), 5)
     expect_equal(uq$level_default, DEFAULT_UQ_LEVEL)
-    expect_equal(uq$seed, 307L + 1000L)
     expect_setequal(uq$members, ens_ref$ensemble$weights$member)
 
   })
@@ -177,7 +176,7 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
   })
 
-  it("the stored seed reproduces the fold assignment exactly", {
+  it("the ensemble's seed reproduces the fold assignment exactly, in the unit ensemble/cvplus", {
 
     ens_ref <- ens_built("weighted")
     uq  <- ens_ref$ensemble$uq
@@ -186,10 +185,9 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
     meta_frame        <- oof$predictors
     meta_frame$.truth <- oof$truth
 
-    set.seed(uq$seed)
-    folds_redrawn <- suppressWarnings(
+    folds_redrawn <- with_unit_seed(ens_ref$ensemble$seed, "ensemble/cvplus", suppressWarnings(
       rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
-    )
+    ))
 
     for (k in seq_len(nrow(folds_redrawn))) {
 
@@ -236,12 +234,11 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
     meta_frame        <- oof$predictors
     meta_frame$.truth <- oof$truth
 
-    fold_of <- function(seed) {
+    fold_of <- function(unit) {
 
-      set.seed(seed)
-      folds <- suppressWarnings(
+      folds <- with_unit_seed(ens_ref$ensemble$seed, unit, suppressWarnings(
         rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
-      )
+      ))
 
       assign <- integer(nrow(meta_frame))
       for (k in seq_len(nrow(folds))) {
@@ -251,7 +248,56 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
     }
 
-    expect_false(identical(fold_of(307L), fold_of(uq$seed)))
+    expect_false(identical(fold_of("ensemble/meta-folds"), fold_of("ensemble/cvplus")))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## The units ensemble() draws in
+## ---------------------------------------------------------------------------
+## The meta-learner draws in ensemble/meta-folds and CV+ in ensemble/cvplus,
+## each fold refit in ensemble/cvplus/fold-<k>, from the ensemble's seed and
+## the unit's name alone.
+
+describe("ensemble() - the units it draws in", {
+
+  it("builds the same ensemble whatever the session's random stream", {
+
+    ## A penalized meta-learner's out-of-fold predictions follow its folds,
+    ## and the CV+ calibration rows follow the partition. suppressWarnings():
+    ## rsample's note that the 43 meta rows are too few for its default
+    ## strata breaks.
+    build <- function(session_seed) {
+      withr::with_seed(session_seed, suppressWarnings(
+        ensemble(ens_fitted(), method = "penalized", optimize = FALSE, compute_uq = TRUE)
+      ))$ensemble
+    }
+
+    a <- build(1L)
+    b <- build(2L)
+
+    expect_identical(a$oof_predictions, b$oof_predictions)
+    expect_identical(a$uq$calib, b$uq$calib)
+
+  })
+
+  it("gives the xgb meta-learner its unit's seed, and each CV+ fold refit its own", {
+
+    ens     <- ens_built("xgb")$ensemble
+    seed_of <- function(wflow) rlang::eval_tidy(workflows::extract_spec_parsnip(wflow)$eng_args$seed)
+
+    expect_identical(seed_of(ens$model), unit_seed(ens$seed, "ensemble/meta-folds"))
+
+    for (k in seq_along(ens$uq$fold_models)) {
+
+      expect_identical(seed_of(ens$uq$fold_models[[k]]),
+                       unit_seed(ens$seed, c("ensemble", "cvplus", paste0("fold-", k))),
+                       info = k)
+
+    }
 
   })
 
@@ -417,10 +463,11 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
 
   })
 
-  it("calibrates an ensemble without a trim on its meta rows alone, as the fold pass at the stored seed does", {
+  it("calibrates an ensemble without a trim on its meta rows alone, as the fold pass in its unit does", {
 
     ## The trimmed rows' folds are drawn only when there are some, after the
-    ## fold models, so an ensemble without a trim calibrates as it always has
+    ## fold models, so an ensemble without a trim calibrates on the fold pass
+    ## alone
     ens_ref <- ens_built("weighted")
     uq      <- ens_ref$ensemble$uq
     oof     <- build_oof_matrix(ens_ref, uq$members)
@@ -428,10 +475,11 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     meta_frame        <- oof$predictors
     meta_frame$.truth <- oof$truth
 
-    set.seed(uq$seed)
-    folds <- suppressWarnings(rsample::vfold_cv(meta_frame, v = 5, strata = ".truth"))
-    plain <- fit_uq_fold_models(meta_frame, oof$row, oof$sample_id, folds,
-                                ens_ref$ensemble, ens_ref$ensemble$optimize)
+    plain <- with_unit_seed(ens_ref$ensemble$seed, "ensemble/cvplus", {
+      folds <- suppressWarnings(rsample::vfold_cv(meta_frame, v = 5, strata = ".truth"))
+      fit_uq_fold_models(meta_frame, oof$row, oof$sample_id, folds,
+                         ens_ref$ensemble, ens_ref$ensemble$optimize, seed = ens_ref$ensemble$seed)
+    })
 
     expect_false(anyNA(uq$calib$.row))
     expect_identical(uq$calib, plain$calib)
@@ -857,7 +905,7 @@ describe("ensemble UQ - degradation and gates", {
 
     err <- expect_error(
       compute_ensemble_uq(oof = oof_small, contract = ens_ref$ensemble,
-                          optimize = FALSE, conformal_seed = 1307L),
+                          optimize = FALSE, seed = 307L),
       class = "horizons_error_run"
     )
     expect_match(conditionMessage(err), "has 25 rows to calibrate on, fewer than `min_calib_rows` (30)",
@@ -870,7 +918,7 @@ describe("ensemble UQ - degradation and gates", {
     ## rsample's note that 25 rows are too few for its default strata breaks
     expect_false(is.null(suppressWarnings(compute_ensemble_uq(
       oof = oof_small, contract = ens_ref$ensemble, optimize = FALSE,
-      conformal_seed = 1307L, min_calib_rows = 10L
+      seed = 307L, min_calib_rows = 10L
     ))))
 
   })
@@ -892,7 +940,7 @@ describe("ensemble UQ - degradation and gates", {
       ## suppressWarnings(): rsample's note that 25 rows are too few for its
       ## default strata breaks
       suppressWarnings(compute_ensemble_uq(oof = small, contract = ens_ref$ensemble,
-                                           optimize = FALSE, conformal_seed = 1307L,
+                                           optimize = FALSE, seed = 307L,
                                            trimmed = trimmed))
     }
 
@@ -926,7 +974,7 @@ describe("ensemble UQ - degradation and gates", {
 
     run <- function() {
       compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
-                          optimize = FALSE, conformal_seed = 1307L)
+                          optimize = FALSE, seed = 307L)
     }
 
     spoil  <- 1:3
@@ -961,7 +1009,7 @@ describe("ensemble UQ - degradation and gates", {
       ## suppressWarnings(): rsample's note that so few rows are too few for
       ## its default strata breaks
       suppressWarnings(compute_ensemble_uq(oof = first(n), contract = ens_ref$ensemble,
-                                           optimize = FALSE, conformal_seed = 1307L, ...))
+                                           optimize = FALSE, seed = 307L, ...))
     }
 
     ## 18 rows meet a minimum of 9 but not the 19 CV+ needs at 0.90: lowering
@@ -997,7 +1045,7 @@ describe("ensemble UQ - degradation and gates", {
     notes <- character()
     uq <- withCallingHandlers(
       suppressWarnings(compute_ensemble_uq(oof = oof19, contract = ens_ref$ensemble,
-                                           optimize = FALSE, conformal_seed = 1307L,
+                                           optimize = FALSE, seed = 307L,
                                            min_calib_rows = 19L)),
       horizons_note = function(n) notes <<- c(notes, conditionMessage(n))
     )
@@ -1031,7 +1079,7 @@ describe("ensemble UQ - degradation and gates", {
     ## for its default strata breaks
     out <- suppressWarnings(run_unit(
       compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
-                          optimize = FALSE, conformal_seed = 1307L),
+                          optimize = FALSE, seed = 307L),
       unit = "intervals", id = "ensemble"
     ))
 
