@@ -1039,7 +1039,8 @@ describe("fit() - on a two-worker plan", {
 make_selection_stub <- function() {
 
   list(
-    settings         = list(method = "neighbours", n_target = 10L),
+    settings         = list(method = "neighbours", n_target = 10L,
+                            seed = 1L, seed_rule = SEED_RULE),
     membership       = tibble::tibble(target_id = character(0),
                                       property  = character(0),
                                       pool_id   = character(0),

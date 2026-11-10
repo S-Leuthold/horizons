@@ -23,7 +23,7 @@ select_training(
   clusters = NULL,
   cluster_min = 30L,
   twin_ratio = SELECT_TWIN_RATIO,
-  seed = 307L,
+  seed = NULL,
   control = control_horizons()
 )
 }
@@ -124,11 +124,16 @@ Currently \code{0.05}, an internal constant carried over from an earlier rule
 and still to be calibrated on replicate scans, so treat the value as
 provisional rather than settled.}
 
-\item{seed}{\code{integer.} Seed for every stochastic step of the verb: the
-target clustering under \code{scope = "cluster"}, and the pool sample the
-resemblance check draws its reference distribution from. The caller's
-RNG state is saved and restored, so the verb does not advance it.
-Default: \code{307}, as the other verbs'.}
+\item{seed}{\code{NULL} or a whole number: the run's seed. Every stochastic
+step of the verb (the target clustering under \code{scope = "cluster"}, and
+the pool sample the resemblance check draws its reference distribution
+from) is seeded from it and its own name, and the caller's random state
+is left as found. \code{NULL} (the default) takes the seed the targets record,
+else one integer from the session's random stream, which is left where
+it was and printed in the tree. The seed is recorded as
+\code{selection$settings$seed} on every call, and \code{\link[=evaluate]{evaluate()}} on the
+training set takes it, so one seed reproduces the pipeline from the
+draw on.}
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{select_training()} reads \code{verbose}, \code{debug} (a failure

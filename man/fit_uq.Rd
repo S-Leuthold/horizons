@@ -33,11 +33,11 @@ train_Fit).}
 
 \item{level_default}{Numeric. Default coverage level. Default 0.90.}
 
-\item{seed}{Integer or NULL. Seed for the quantile forest. \code{fit()} passes
-its own, so the forest, its trees and the node values it stores, depends
-on \code{seed} alone, however the preceding stages consumed the caller's RNG
-stream, and growing it leaves that stream as found. NULL keeps ranger's
-default of drawing both from the caller's stream.}
+\item{seed}{Integer or NULL. ranger's seed for the quantile forest.
+\code{fit()} runs this in the member's \code{forest} stage (\code{\link[=with_unit_seed]{with_unit_seed()}})
+and passes that stage's seed, so the forest, its trees and the node
+values it stores, depends on the stage alone. NULL keeps ranger's
+default of drawing its seed from the stream.}
 
 \item{outcome_range}{Numeric length-2 vector. The outcome's physical range,
 which the back-transformed calibration predictions are clamped to, as

@@ -87,6 +87,9 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
     n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
     recipe       = list(sg_window = DEFAULT_SG_WINDOW, sg_window_cm = NA_real_,
                         pca_threshold = DEFAULT_PCA_THRESHOLD),
+    ## The run's seed, which fit() takes
+    seed         = as.integer(seed),
+    seed_rule    = SEED_RULE,
     runtime_secs = 1,
     timestamp    = Sys.time()
   )

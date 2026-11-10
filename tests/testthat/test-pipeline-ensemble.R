@@ -374,12 +374,12 @@ describe("ensemble() - preflight validation", {
 
     ## Both are recorded on the ensemble and must not be NULL there, so a bad
     ## value is refused on entry rather than by the validator once the
-    ## meta-learner is built.
+    ## meta-learner is built. A NULL seed is the default, the fit's seed.
     local_mocked_bindings(
       fit_ensemble_weighted = function(...) stop("fit_ensemble_weighted() was called")
     )
 
-    bad_seeds <- list(NULL, NA_real_, c(1, 2), "307", Inf, 1.5, .Machine$integer.max + 1)
+    bad_seeds <- list(NA_real_, c(1, 2), "307", Inf, 1.5, .Machine$integer.max + 1)
 
     for (s in bad_seeds) {
 
@@ -1643,13 +1643,13 @@ describe("ensemble() weighted - test-set combine", {
 
     fitted <- ens_fitted()
 
-    ## The members predict the test rows 20 lower, so some combined
-    ## predictions fall below the floor at 0 and some stay above it
+    ## The members predict the test rows lower by their median, so some
+    ## combined predictions fall below the floor at 0 and some stay above it
     real_members <- predict_members_on_test
     shifted      <- NULL
     local_mocked_bindings(predict_members_on_test = function(object, members, ...) {
       mp       <- real_members(object, members, ...)
-      mp$.pred <- mp$.pred - 20
+      mp$.pred <- mp$.pred - stats::median(mp$.pred)
       shifted <<- mp
       mp
     })

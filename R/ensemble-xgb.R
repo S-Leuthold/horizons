@@ -52,7 +52,7 @@ fit_ensemble_xgb <- function(object,
                              oof,
                              rank_metric,
                              optimize  = TRUE,
-                             seed      = DEFAULT_ENSEMBLE_SEED,
+                             seed,
                              allow_par = FALSE,
                              debug     = FALSE,
                              call      = rlang::caller_env()) {

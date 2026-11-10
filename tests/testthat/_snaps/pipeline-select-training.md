@@ -23,7 +23,7 @@
 # verbose = TRUE reports the pool, the space and the draw
 
     Code
-      out <- select_training(fx$targets, fx$pool, k = 5, control = control_horizons(
+      out <- select_training(fx$targets, fx$pool, k = 5, seed = 307, control = control_horizons(
         verbose = TRUE))
     Output
       ├─ Selecting training set...

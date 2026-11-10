@@ -230,7 +230,8 @@ describe("evaluate() - gate checks", {
 
     obj <- make_eval_object()
 
-    for (bad in list(1.5, NA, "307", Inf, c(1, 2), NULL, .Machine$integer.max + 1)) {
+    ## NULL is the default: the seed the object records, else the session's
+    for (bad in list(1.5, NA, "307", Inf, c(1, 2), .Machine$integer.max + 1)) {
       expect_error(evaluate(obj, seed = bad), "`seed`", fixed = TRUE,
                    class = "horizons_error_input")
     }
@@ -2191,6 +2192,29 @@ describe("evaluate() - checkpoint data provenance", {
 
     ## Reported from the verb the user called, not from a helper.
     expect_identical(as.character(err$call[[1]]), "evaluate")
+
+    ## The seeds agree, so the refusal names none to pass
+    expect_no_match(msg, "to resume it")
+
+  })
+
+  it("names the seed to pass when the checkpoints were tuned at another one", {
+
+    ## A run that took its seed from the session draws another in a new
+    ## session, so its split moves and the checkpoints are refused as written
+    ## on other rows; the refusal says which seed resumes them
+    ck <- ck_a()
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(ck$value$obj, prune = FALSE, seed = 43L,
+                                control = control_horizons(output_dir = ck$dir))),
+      horizons_error_input = function(e) e
+    )
+
+    msg <- flat_message(err)
+
+    expect_match(msg, "different training data")
+    expect_match(msg, "Pass `seed = 42` to resume it.", fixed = TRUE)
 
   })
 

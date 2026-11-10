@@ -9,7 +9,7 @@ evaluate(
   metric = "rpd",
   prune = TRUE,
   prune_threshold = 1,
-  seed = 307L,
+  seed = NULL,
   control = control_horizons()
 )
 }
@@ -37,8 +37,17 @@ grid-search RPD below this value skip Bayesian optimization but still
 receive test-set metrics from grid-search best. Default 1.0 (the
 "no better than the mean" line).}
 
-\item{seed}{Integer. Random seed for train/test split and CV folds.
-Default 307L.}
+\item{seed}{\code{NULL} or a whole number: the run's seed. Every draw (the
+train/test split, the CV folds and each configuration's stages) is
+seeded from it and its own name, so a configuration's results depend on
+the seed alone, not on the other configurations, the order they run in,
+the workers or the session's generator. \code{NULL} (the default) takes the
+seed the object records (a \code{\link[=select_training]{select_training()}} result's), else one
+integer from the session's random stream, which is left where it was:
+\code{set.seed()} before the call chooses it, and calls with nothing drawn
+between them repeat. A seed drawn from the session is printed in the
+tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit()}} and
+\code{\link[=ensemble]{ensemble()}} take it unless given one.}
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{evaluate()} reads \code{allow_par}, \code{parallelize_over},
@@ -94,7 +103,10 @@ values) and tuned with this run's settings
 when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
 and \code{outcome_range}) and this run's response trim
 (\code{response_threshold}, \code{NA} when none was requested); either mismatch
-aborts, naming what differs.
+aborts, naming what differs. A run left to draw its seed from the
+session draws another in a new session, so its split moves: the
+refusal then names the seed the checkpoints were tuned with, to pass as
+\verb{seed =}.
 So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one

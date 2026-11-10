@@ -8,7 +8,7 @@ ensemble(
   x,
   method = "penalized",
   optimize = TRUE,
-  seed = DEFAULT_ENSEMBLE_SEED,
+  seed = NULL,
   compute_uq = TRUE,
   control = control_horizons()
 )
@@ -23,12 +23,13 @@ ensemble(
 the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}).
 Default \code{TRUE}.}
 
-\item{seed}{Integer. Random seed for the meta-learner's CV folds (used by
-the \code{penalized} and \code{xgb} engines for both tuning and the genuine
-out-of-fold meta predictions; recorded on the contract for all methods).
-Ensemble UQ draws its calibration partition at \code{seed + 1000}, disjoint
-from the tuning folds. Mirrors the \code{seed} argument of \code{\link[=fit]{fit()}} and
-\code{\link[=evaluate]{evaluate()}}. Default \code{DEFAULT_ENSEMBLE_SEED} (307).}
+\item{seed}{\code{NULL} or a whole number: the run's seed. The meta-learner
+(its CV folds, tuning and out-of-fold predictions) and the CV+
+intervals (their calibration folds and each fold's refit) are seeded
+from it and their own names. \code{NULL} (the default) takes the seed the
+object records (\code{fit()}'s, or a re-built ensemble's own); a seed given
+here overrides it and is recorded as \code{ensemble$seed}, as in \code{\link[=fit]{fit()}} and
+\code{\link[=evaluate]{evaluate()}}.}
 
 \item{compute_uq}{Logical. Calibrate CV+ conformal prediction intervals for
 the ensemble (see \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), stored in \verb{$ensemble$uq} and

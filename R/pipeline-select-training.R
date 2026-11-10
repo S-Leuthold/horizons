@@ -286,11 +286,16 @@
 #'   Currently `0.05`, an internal constant carried over from an earlier rule
 #'   and still to be calibrated on replicate scans, so treat the value as
 #'   provisional rather than settled.
-#' @param seed `integer.` Seed for every stochastic step of the verb: the
-#'   target clustering under `scope = "cluster"`, and the pool sample the
-#'   resemblance check draws its reference distribution from. The caller's
-#'   RNG state is saved and restored, so the verb does not advance it.
-#'   Default: `307`, as the other verbs'.
+#' @param seed `NULL` or a whole number: the run's seed. Every stochastic
+#'   step of the verb (the target clustering under `scope = "cluster"`, and
+#'   the pool sample the resemblance check draws its reference distribution
+#'   from) is seeded from it and its own name, and the caller's random state
+#'   is left as found. `NULL` (the default) takes the seed the targets record,
+#'   else one integer from the session's random stream, which is left where
+#'   it was and printed in the tree. The seed is recorded as
+#'   `selection$settings$seed` on every call, and [evaluate()] on the
+#'   training set takes it, so one seed reproduces the pipeline from the
+#'   draw on.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `select_training()` reads `verbose`, `debug` (a failure
 #'   building a registered library's first-use similarity space stops the
@@ -366,7 +371,7 @@ select_training <- function(x, library,
                             clusters    = NULL,
                             cluster_min = 30L,
                             twin_ratio  = SELECT_TWIN_RATIO,
-                            seed        = 307L,
+                            seed        = NULL,
                             control     = control_horizons()) {
 
   ## ---------------------------------------------------------------------------
@@ -587,9 +592,9 @@ select_training <- function(x, library,
   }
 
   if (!is_count(cluster_min))  errors <- c(errors, cli::format_inline("{.arg cluster_min} must be a single positive whole number"))
-  if (!is_count(seed, min = -SEED_MAX) || abs(seed) > SEED_MAX) {
+  if (!is.null(seed) && (!is_count(seed, min = -SEED_MAX) || abs(seed) > SEED_MAX)) {
 
-    errors <- c(errors, cli::format_inline("{.arg seed} must be a single whole number within R's integer range"))
+    errors <- c(errors, cli::format_inline("{.arg seed} must be NULL or a single whole number within R's integer range"))
 
   }
 
@@ -607,6 +612,12 @@ select_training <- function(x, library,
   ## first.
 
   x <- validate_select_input(x, arg = "x", what = "the targets")
+
+  ## The run's root, once, before anything draws: the seed given, else the
+  ## targets', else one from the session. Recorded on every call, so
+  ## evaluate() on the training set takes it, whether or not this call drew.
+  root <- resolve_seed(seed, x)
+  seed <- root$seed
 
   ## The targets' axis needs nothing from the library, so it is checked now:
   ## two columns or more, and no gap (check_select_axis()).
@@ -1493,7 +1504,8 @@ select_training <- function(x, library,
       sdev_ratio = sp$sdev_ratio, variance_retained = sp$variance_retained,
       depth = depth,
       metric = metric, clusters = clusters,
-      cluster_min = as.integer(cluster_min), twin_ratio = twin_ratio, seed = as.integer(seed),
+      cluster_min = as.integer(cluster_min), twin_ratio = twin_ratio,
+      seed = seed, seed_rule = SEED_RULE,
       space_note = space_note,
       control = control
     ),
@@ -1527,7 +1539,8 @@ select_training <- function(x, library,
   ## Step 6: Report
   ## ---------------------------------------------------------------------------
 
-  if (verbose) report_selection(out$selection, n_targets = length(target_ids))
+  if (verbose) report_selection(out$selection, n_targets = length(target_ids),
+                                seed_line = seed_tree_line(root))
 
   ## Draws short of k: too few measured rows left after the twin
   ## subtraction, or, under cosine, no defined distance at all. One coverage
@@ -2362,14 +2375,18 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
 #'
 #' @param sel [List.] `x$selection`.
 #' @param n_targets [Integer.] Targets in the batch.
+#' @param seed_line [Character or NULL.] The line for a seed drawn from the
+#'   session ([seed_tree_line()]), or `NULL`.
 #'
 #' @return NULL, called for its output.
 #' @noRd
-report_selection <- function(sel, n_targets) {
+report_selection <- function(sel, n_targets, seed_line = NULL) {
 
   s     <- sel$settings
   ps    <- sel$pool_sizes
   scope <- s$scope
+
+  if (!is.null(seed_line)) cat(paste0("│  ├─ ", seed_line, "\n"))
 
   for (i in seq_len(nrow(ps))) {
 

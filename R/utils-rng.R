@@ -110,6 +110,75 @@ with_unit_seed <- function(seed, name, code) {
 }
 
 
+#' The run's root seed, resolved once at a verb's door
+#'
+#' @description
+#' An explicit `seed`; else the object's recorded root ([recorded_seed()]);
+#' else one integer drawn from the caller's stream with `sample.int(100000L,
+#' 1L)`, under the caller's kinds, after which the stream is restored. So the
+#' same `set.seed()` gives the same run however many verbs follow, and the
+#' user's own draws are not moved; calls with nothing drawn between them get
+#' the same root, and only a session that has never drawn gets a fresh one
+#' each time. There is no fixed fallback.
+#'
+#' @param seed The verb's `seed`: `NULL` or a whole number, checked at the
+#'   door.
+#' @param x The object the verb was given.
+#' @return A list: `seed`, the root as an integer, and `drawn`, `TRUE` when it
+#'   came from the session's stream (the verb's tree then prints it).
+#' @keywords internal
+#' @noRd
+
+resolve_seed <- function(seed, x) {
+
+  seed <- seed %||% recorded_seed(x)
+
+  if (!is.null(seed)) return(list(seed = as.integer(seed), drawn = FALSE))
+
+  local_rng_state()
+
+  list(seed = sample.int(100000L, 1L), drawn = TRUE)
+
+}
+
+
+#' The root an object records
+#'
+#' @description
+#' The most recent of the roots the verbs record on their slots, read in
+#' reverse lifecycle order: `ensemble$seed`, `models$seed`,
+#' `evaluation$seed`, `selection$settings$seed`. So one number reproduces a
+#' pipeline from the library draw to the ensemble, and an explicit seed at a
+#' later verb is the one its successors take.
+#'
+#' @param x A horizons object.
+#' @return The root, or `NULL` when the object records none.
+#' @keywords internal
+#' @noRd
+
+recorded_seed <- function(x) {
+
+  x$ensemble$seed %||% x$models$seed %||% x$evaluation$seed %||% x$selection$settings$seed
+
+}
+
+
+#' The tree's line for a root drawn from the session
+#'
+#' @param root From [resolve_seed()].
+#' @return The line, or `NULL` when the root was given or recorded.
+#' @keywords internal
+#' @noRd
+
+seed_tree_line <- function(root) {
+
+  if (!root$drawn) return(NULL)
+
+  paste0("Seed: ", root$seed, ", drawn from the session; `seed = ", root$seed, "` repeats this run")
+
+}
+
+
 #' Give a workflow's engine the stage's seed
 #'
 #' @description

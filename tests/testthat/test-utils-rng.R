@@ -190,6 +190,62 @@ describe("with_unit_seed()", {
 
 })
 
+describe("resolve_seed()", {
+
+  it("takes an explicit seed first, as an integer", {
+
+    expect_identical(resolve_seed(307, list(evaluation = list(seed = 5L))),
+                     list(seed = 307L, drawn = FALSE))
+
+  })
+
+  it("else the most recent root the object records", {
+
+    x <- list(selection  = list(settings = list(seed = 1L)),
+              evaluation = list(seed = 2L),
+              models     = list(seed = 3L),
+              ensemble   = list(seed = 4L))
+
+    for (root in 4:1) {
+
+      expect_identical(resolve_seed(NULL, x), list(seed = root, drawn = FALSE))
+      x[[c("ensemble", "models", "evaluation", "selection")[5L - root]]] <- NULL
+
+    }
+
+  })
+
+  it("else draws one from the caller's stream, under its kinds, and leaves the stream where it was", {
+
+    withr::local_seed(7)
+    before <- .Random.seed
+
+    root <- resolve_seed(NULL, list())
+
+    expect_true(root$drawn)
+    expect_identical(root$seed, withr::with_seed(7, sample.int(100000L, 1L)))
+    expect_identical(.Random.seed, before)
+
+    ## So calls with nothing drawn between them take the same root
+    expect_identical(resolve_seed(NULL, list()), root)
+
+  })
+
+  it("leaves a session that has never drawn without a stream", {
+
+    withr::with_preserve_seed({
+
+      if (has_stream()) rm(".Random.seed", envir = globalenv())
+
+      expect_true(resolve_seed(NULL, list())$drawn)
+      expect_false(has_stream())
+
+    })
+
+  })
+
+})
+
 describe("seed_engine()", {
 
   skip_if_not_installed("ranger")

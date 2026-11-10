@@ -369,7 +369,7 @@ fit_tuned_meta_learner <- function(object,
                                    spec,
                                    grid,
                                    extract_weights,
-                                   seed      = DEFAULT_ENSEMBLE_SEED,
+                                   seed,
                                    allow_par = FALSE,
                                    debug     = FALSE,
                                    call      = rlang::caller_env()) {
@@ -656,11 +656,12 @@ fit_tuned_meta_learner <- function(object,
 #'   ensemble UQ can re-derive fold weights (weighted method) by the same
 #'   rule.
 #' @param seed Integer. The run's seed, recorded so ensemble UQ can draw its
-#'   calibration partition in its own unit, `ensemble/cvplus`.
+#'   calibration partition in its own unit, `ensemble/cvplus`, with the
+#'   seeding rule's version (`seed_rule`).
 #'
 #' @return A list matching the `ensemble` slot contract: `method`, `model`,
 #'   `weights`, `predictions`, `metrics`, `member_metrics`, `improvement`,
-#'   `oof_predictions`, `optimize`, `seed`, `uq` (populated by
+#'   `oof_predictions`, `optimize`, `seed`, `seed_rule`, `uq` (populated by
 #'   [fit_ensemble_uq()]), `control` and `warnings` (filled by [ensemble()]),
 #'   `timestamp`, `runtime_secs`.
 #'
@@ -747,6 +748,7 @@ build_ensemble_contract <- function(method,
     oof_predictions = oof_pred,
     optimize        = optimize,
     seed            = seed,
+    seed_rule       = SEED_RULE,
     uq              = NULL,
     control         = NULL,
     warnings        = NULL,

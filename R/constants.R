@@ -235,12 +235,7 @@ DEFAULT_AD_LEVEL <- 0.99
 ### AD is disabled rather than returning a meaningless domain.
 N_AD_TRAIN_MIN <- 10L
 
-## Ensemble ----------------------------------------------------------------------
-
-### Default seed for ensemble() — the meta-learner's tuning/OOF folds. Ensemble
-### UQ draws its calibration partition at this seed + 1000. Centralized so the
-### verb default and the engines' defaults cannot drift independently.
-DEFAULT_ENSEMBLE_SEED <- 307L
+## Seeds -------------------------------------------------------------------------
 
 ### The largest magnitude a verb's seed may have: set.seed() takes a whole
 ### number within R's integer range unchanged. fit()'s n_best, taken as an

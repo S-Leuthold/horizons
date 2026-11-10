@@ -981,6 +981,33 @@ test_that("validate_horizons_data refuses a selection that is not a list, or has
 })
 
 
+test_that("validate_horizons_data refuses a selection record without the run's seed and its rule, or with either malformed", {
+
+  ## select_training() records both on every call, so a record without
+  ## them was made before they were recorded
+  for (key in c("seed", "seed_rule")) {
+
+    obj <- new_horizons_data()
+    obj$selection <- make_selection_record()
+    obj$selection$settings[[key]] <- NULL
+
+    err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation", info = key)
+    expect_match(conditionMessage(err), paste0("selection$settings records no ", key), fixed = TRUE, info = key)
+
+  }
+
+  obj <- new_horizons_data()
+  obj$selection <- make_selection_record()
+  obj$selection$settings$seed      <- 1.5
+  obj$selection$settings$seed_rule <- 0L
+
+  err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+  expect_match(conditionMessage(err), "selection$settings$seed must be", fixed = TRUE)
+  expect_match(conditionMessage(err), "selection$settings$seed_rule must be", fixed = TRUE)
+
+})
+
+
 test_that("validate_horizons_data enforces I4b containment on membership", {
 
   ## Arrange — a record naming a pool id the analysis table does not have
@@ -1385,6 +1412,8 @@ make_valid_eval <- function() {
       parallelize_over = "configs",
       recipe           = list(sg_window = 9L, sg_window_cm = 18,
                               pca_threshold = 0.995),
+      seed             = 42L,
+      seed_rule        = SEED_RULE,
       control          = NULL,
       runtime_secs     = 12.3,
       timestamp        = Sys.time()
@@ -1422,6 +1451,8 @@ make_valid_fit <- function() {
     ad                = list(cfg_a = list(form = "full", centroid = c(f1 = 0), cov_matrix = matrix(1),
                                           ad_thresholds = c(1, 2, 3, 4))),
     selection_present = FALSE,
+    seed              = 42L,
+    seed_rule         = SEED_RULE,
     control           = NULL,
     timestamp         = Sys.time(),
     runtime_secs      = 30.1
@@ -1489,7 +1520,8 @@ make_valid_ensemble <- function() {
                                      .pred = c(1.2, 2.1),
                                      truth = c(1.0, 2.0)),
     optimize        = TRUE,
-    seed            = 307L,
+    seed            = 42L,
+    seed_rule       = SEED_RULE,
     uq              = NULL,
     control         = NULL,
     warnings        = NULL,
@@ -2241,6 +2273,57 @@ test_that("validate_horizons_fit refuses a missing response_bound or selection_p
 
   obj$models$selection_present <- TRUE
   expect_identical(validate_horizons_fit(obj), obj)
+
+})
+
+test_that("the validators refuse a slot without the run's seed and its rule, with the remedy, or with either malformed", {
+
+  ## Every modelling verb records both, so a slot without them was made
+  ## before they were recorded, and is re-run
+  cases <- list(
+    evaluation = list(obj = make_valid_eval(),     check = validate_horizons_eval,     remedy = EVAL_REMEDY),
+    models     = list(obj = make_valid_fit(),      check = validate_horizons_fit,      remedy = FIT_REMEDY),
+    ensemble   = list(obj = make_valid_ensemble(), check = validate_horizons_ensemble, remedy = ENSEMBLE_REMEDY)
+  )
+
+  for (slot in names(cases)) {
+
+    case <- cases[[slot]]
+
+    expect_identical(case$check(case$obj), case$obj)
+
+    for (key in c("seed", "seed_rule")) {
+
+      gone <- case$obj
+      gone[[slot]][[key]] <- NULL
+
+      err <- expect_error(suppressMessages(case$check(gone)), paste0("missing from ", slot, ": ", key),
+                          class = "horizons_error_validation", info = paste(slot, key))
+      expect_match(conditionMessage(err), case$remedy, fixed = TRUE, info = paste(slot, key))
+
+    }
+
+    for (bad in list(NULL, NA_integer_, 1.5, c(1L, 2L), "42", 2^31)) {
+
+      broken <- case$obj
+      broken[[slot]]["seed"] <- list(bad)
+
+      expect_error(suppressMessages(case$check(broken)), paste0(slot, "$seed must be"), fixed = TRUE,
+                   class = "horizons_error_validation", info = paste(slot, deparse(bad)))
+
+    }
+
+    for (bad in list(NULL, 0L, 1.5, NA_integer_)) {
+
+      broken <- case$obj
+      broken[[slot]]["seed_rule"] <- list(bad)
+
+      expect_error(suppressMessages(case$check(broken)), paste0(slot, "$seed_rule must be"), fixed = TRUE,
+                   class = "horizons_error_validation", info = paste(slot, deparse(bad)))
+
+    }
+
+  }
 
 })
 
@@ -3118,12 +3201,12 @@ test_that("summary() gives the best configuration with its model and test metric
   fx       <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
   ev       <- fx$evaluation
   best_row <- ev$results[ev$results$config_id == ev$best_config, ]
-  expect_identical(fx$config$configs$model[fx$config$configs$config_id == ev$best_config], "cubist")
+  expect_identical(fx$config$configs$model[fx$config$configs$config_id == ev$best_config], "rf")
   expect_identical(fx$models$results$status, rep("success", 3))
 
   ## The best configuration and its test metrics
   section <- models_section(utils::capture.output(summary(fx)), "Evaluation")
-  at      <- which(section == paste0("   ├─ Best: ", ev$best_config, " (Cubist)"))
+  at      <- which(section == paste0("   ├─ Best: ", ev$best_config, " (Random Forest)"))
 
   expect_length(at, 1)
   expect_identical(section[at + 1],
@@ -3132,11 +3215,14 @@ test_that("summary() gives the best configuration with its model and test metric
                           ", RSQ = ", round(best_row$rsq, 3),
                           ", CCC = ", round(best_row$ccc, 3)))
 
-  ## Every member succeeded: no failed count; one failed: counted
+  ## Every member succeeded: no failed count; one failed: counted. None is
+  ## marked degraded here, so the line counts successes and failures alone.
   results_line <- function(obj) {
     grep("Results:", models_section(utils::capture.output(summary(obj)), "Models (fit)"),
          value = TRUE, fixed = TRUE)
   }
+
+  fx$models$results$degraded <- FALSE
 
   expect_identical(results_line(fx), "   ├─ Results: 3 success")
 

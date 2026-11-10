@@ -146,12 +146,13 @@ describe("fit_ensemble_uq() - bundle contract", {
 
   })
 
-  it("records optimize and seed on the ensemble contract", {
+  it("records optimize and seed on the ensemble contract, the seed the fit's", {
 
     ens_ref <- ens_built("weighted")
 
     expect_identical(ens_ref$ensemble$optimize, FALSE)
-    expect_identical(ens_ref$ensemble$seed, 307L)
+    expect_identical(ens_ref$ensemble$seed, ens_ref$models$seed)
+    expect_identical(ens_ref$ensemble$seed_rule, SEED_RULE)
 
   })
 

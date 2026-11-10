@@ -34,9 +34,9 @@
 #'   improvement comparison).
 #' @param optimize Logical. Inverse-RMSE weighting (`TRUE`) or equal weights
 #'   (`FALSE`). Default `TRUE`.
-#' @param seed Integer. Recorded on the contract (the engine itself is
-#'   deterministic); ensemble UQ derives its calibration partition from it.
-#'   Default `DEFAULT_ENSEMBLE_SEED` (307).
+#' @param seed Integer. The run's seed, recorded on the contract (the engine
+#'   itself is deterministic); ensemble UQ derives its calibration partition
+#'   from it.
 #' @param call The frame a member's failure to predict the test rows reports
 #'   (`ensemble()`'s).
 #'
@@ -51,7 +51,7 @@ fit_ensemble_weighted <- function(object,
                                   oof,
                                   rank_metric,
                                   optimize = TRUE,
-                                  seed     = DEFAULT_ENSEMBLE_SEED,
+                                  seed,
                                   call     = rlang::caller_env()) {
 
   started <- Sys.time()

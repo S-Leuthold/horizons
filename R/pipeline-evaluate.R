@@ -26,8 +26,17 @@
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
 #'   "no better than the mean" line).
-#' @param seed Integer. Random seed for train/test split and CV folds.
-#'   Default 307L.
+#' @param seed `NULL` or a whole number: the run's seed. Every draw (the
+#'   train/test split, the CV folds and each configuration's stages) is
+#'   seeded from it and its own name, so a configuration's results depend on
+#'   the seed alone, not on the other configurations, the order they run in,
+#'   the workers or the session's generator. `NULL` (the default) takes the
+#'   seed the object records (a [select_training()] result's), else one
+#'   integer from the session's random stream, which is left where it was:
+#'   `set.seed()` before the call chooses it, and calls with nothing drawn
+#'   between them repeat. A seed drawn from the session is printed in the
+#'   tree. The seed is recorded as `evaluation$seed`, and [fit()] and
+#'   [ensemble()] take it unless given one.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
 #'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces` and
@@ -47,7 +56,10 @@
 #'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
 #'   and `outcome_range`) and this run's response trim
 #'   (`response_threshold`, `NA` when none was requested); either mismatch
-#'   aborts, naming what differs.
+#'   aborts, naming what differs. A run left to draw its seed from the
+#'   session draws another in a new session, so its split moves: the
+#'   refusal then names the seed the checkpoints were tuned with, to pass as
+#'   `seed =`.
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
@@ -252,7 +264,7 @@ evaluate <- function(x,
                      metric          = "rpd",
                      prune           = TRUE,
                      prune_threshold = 1.0,
-                     seed            = 307L,
+                     seed            = NULL,
                      control         = control_horizons()) {
 
   start_time <- Sys.time()
@@ -305,9 +317,13 @@ evaluate <- function(x,
   check_arg(rlang::check_bool, prune)
   check_arg(rlang::check_number_decimal, prune_threshold, min = 0, allow_infinite = FALSE)
 
-  ## The seed, as at every verb, is a whole number set.seed() takes
-  ## unchanged.
-  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
+  ## The seed, as at every verb, is NULL or a whole number set.seed() takes
+  ## unchanged. The run's root is resolved once, here, before anything
+  ## draws: the seed given, else the object's, else one from the session.
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX, allow_null = TRUE)
+
+  root <- resolve_seed(seed, x)
+  seed <- root$seed
 
   configs <- x$config$configs
 
@@ -617,6 +633,11 @@ evaluate <- function(x,
     cat(paste0("\u250C Evaluation ",
                paste(rep("\u2500", 50), collapse = ""), "\n"))
     cat("\u2502\n")
+
+    seed_line <- seed_tree_line(root)
+
+    if (!is.null(seed_line)) cat(paste0("\u2502  ", seed_line, "\n"))
+
     if (n_dropped > 0) {
 
       cat(paste0("\u2502  ",
@@ -1128,6 +1149,10 @@ evaluate <- function(x,
     ## What every config's recipe ran with, the window's width included, so
     ## the results of an sg_window sweep can be told apart after the fact.
     recipe           = recipe_cfg,
+    ## The run's root and the rule that turned it into each unit's draws:
+    ## fit() and ensemble() take the root unless given one
+    seed             = seed,
+    seed_rule        = SEED_RULE,
     control          = control,
     runtime_secs     = total_runtime,
     timestamp        = Sys.time()
@@ -1447,6 +1472,7 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
         source        = first$source,
         differ        = first$data_differ,
         settings_diff = diffs,
+        stored_seed   = if ("seed" %in% first$settings_differ) first$stored_settings$seed,
         call          = call
       )
 
@@ -2372,6 +2398,9 @@ checkpoint_row_fingerprint <- function(row) {
 #' @param settings_diff Settings the same row records with another value,
 #'   from [describe_settings_diff()]. A changed `seed` moves the split, so it
 #'   surfaces here as a data mismatch; naming it says why.
+#' @param stored_seed The seed the checkpoint was tuned with when it differs
+#'   from this run's, else `NULL`: a run whose seed was drawn from the session
+#'   resumes only with it given.
 #' @param call The frame to report the error from (`evaluate()`'s).
 #' @return Never returns; aborts with class `horizons_error_input`.
 #' @keywords internal
@@ -2379,6 +2408,7 @@ checkpoint_row_fingerprint <- function(row) {
 abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
                                            differ = character(0),
                                            settings_diff = character(0),
+                                           stored_seed = NULL,
                                            call = rlang::caller_env()) {
 
   what <- describe_data_diff(stored$data_fields, current$data_fields, differ)
@@ -2396,6 +2426,7 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
     "Checkpoints in {.path {output_dir}} were written on different training data.",
     found,
     if (length(settings_diff) > 0) c("i" = "That checkpoint was also tuned with {settings_diff}, which may be why."),
+    if (!is.null(stored_seed)) c("i" = "Pass {.code seed = {stored_seed}} to resume it."),
     "i" = "Resuming would reuse cross-validated results, and warm-start {.fn fit}, from hyperparameters tuned on the wrong rows.",
     if ("outcome" %in% differ) c("i" = "Keep one {.arg output_dir} per outcome."),
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
