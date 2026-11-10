@@ -257,6 +257,11 @@ evaluate <- function(x,
 
   start_time <- Sys.time()
 
+  ## The caller's random state is left as found: every draw that shapes a
+  ## result is a unit of its own (with_unit_seed()), and what only moves the
+  ## stream (a recipe step's id, an engine's discarded seed) is undone on exit
+  local_rng_state()
+
   ## How the run goes: the fields evaluate() reads, defaults filled in, and
   ## the record of it on the evaluation
   control          <- resolve_control(control, "evaluate")

@@ -244,6 +244,9 @@ fit <- function(x,
 
   start_time <- Sys.time()
 
+  ## The caller's random state is left as found, as evaluate() leaves it
+  local_rng_state()
+
   ## How the run goes: the fields fit() reads, defaults filled in, and the
   ## record of it on the models
   control   <- resolve_control(control, "fit")

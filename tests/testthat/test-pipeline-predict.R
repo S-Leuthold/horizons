@@ -963,7 +963,9 @@ describe("predict.horizons_fit() - response bound guardrail", {
     eval_obj$data$analysis$SOC[top_calib]    <- max(analysis$SOC) + 1
     eval_obj$evaluation$split$data$SOC[top_calib] <- max(analysis$SOC) + 1
 
-    refit <- fit(eval_obj, n_best = 1L, compute_uq = TRUE)
+    ## suppressWarnings(): tibble's note that the hand-built evaluation has
+    ## no best_params column, as the shared fit raises it
+    refit <- suppressWarnings(fit(eval_obj, n_best = 1L, compute_uq = TRUE))
 
     soc      <- eval_obj$data$analysis$SOC
     ids      <- eval_obj$data$analysis$sample_id

@@ -846,6 +846,10 @@ predict.horizons_ensemble <- function(object,
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
 
+  ## The caller's random state is left as found, as predict() on a fit
+  ## leaves it
+  local_rng_state()
+
   ## The object as it arrives (#234). S3 dispatch guarantees the class; the
   ## validator's gate refuses a direct ::: call, an ensemble slot with no
   ## model, a member set of fewer than two, and an unknown method.

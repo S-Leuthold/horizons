@@ -128,6 +128,9 @@ ensemble <- function(x,
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
 
+  ## The caller's random state is left as found, as evaluate() leaves it
+  local_rng_state()
+
   ## How the run goes: the fields ensemble() reads, defaults filled in, and
   ## the record of it on the ensemble
   control   <- resolve_control(control, "ensemble")

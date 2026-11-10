@@ -377,6 +377,9 @@ select_training <- function(x, library,
   ## the verb hands work to
   call <- rlang::current_env()
 
+  ## The caller's random state is left as found, as evaluate() leaves it
+  local_rng_state()
+
   ## How the run goes: the fields select_training() reads, defaults filled
   ## in, and the record of it on the selection
   control    <- resolve_control(control, "select_training")
