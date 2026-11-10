@@ -850,6 +850,14 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
   c2 <- check_resemblance(big, st, metric = "euclidean", chunk_size = 500L, seed = 7L)
   expect_false(isTRUE(all.equal(a$threshold, c2$threshold)))
 
+  ## The reference sample is the unit select_training/resemblance: re-run
+  ## from its seed, it gives the same threshold
+  ref <- with_unit_seed(1L, "select_training/resemblance",
+                        big$scores[sort(sample.int(2500L, 2000L)), , drop = FALSE])
+  nn  <- nearest_neighbours(ref, big$scores, k = 2L, metric = "euclidean",
+                            sdev = big$sdev, chunk_size = 500L)
+  expect_equal(a$threshold, unname(stats::quantile(nn$dist[, 2], 0.99, na.rm = TRUE)))
+
   ## A session with no RNG state is left with none, whether the reference was
   ## sampled (over the cap) or not
   withr::local_preserve_seed()

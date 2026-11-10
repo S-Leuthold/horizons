@@ -2264,9 +2264,9 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #' percentile are named. A warning, never a stop.
 #'
 #' @details
-#' The sample is seeded from the verb's `seed` and the caller's RNG state is
-#' saved and restored around it, the way `cluster_targets()` does. Without
-#' that, the threshold and the list of targets beyond it differ between two
+#' The sample is the unit `select_training/resemblance` ([with_unit_seed()]),
+#' drawn from the verb's `seed`, and leaves the caller's stream as found.
+#' Without that, the threshold and the list of targets beyond it differ between two
 #' identical calls on any pool over 2,000 rows — which is every real library
 #' run — and the number a user would cite when defending a prediction cannot
 #' be re-derived from the record.
@@ -2274,7 +2274,8 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #' @param sp [horizons_similarity_space.] The space, with pool scores.
 #' @param St [Matrix.] Target scores.
 #' @param metric,chunk_size Passed to `nearest_neighbours()`.
-#' @param seed [Integer.] Seed for the reference sample. Default: `1L`.
+#' @param seed [Integer.] The run's seed, from which the reference sample's
+#'   is derived. Default: `1L`.
 #' @param min_rows [Integer.] The fewest rows the reference distribution is
 #'   taken from; below it the check is skipped and says why. Default:
 #'   `SELECT_RESEMBLANCE_MIN_ROWS`.
@@ -2311,14 +2312,9 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = 
 
   }
 
-  ## Preserve the caller's RNG state -----------------------------------------
-
-  local_rng_state()
-
   ref <- if (n > 2000L) {
 
-    set.seed(seed)
-    Sp[sort(sample.int(n, 2000L)), , drop = FALSE]
+    with_unit_seed(seed, "select_training/resemblance", Sp[sort(sample.int(n, 2000L)), , drop = FALSE])
 
   } else {
 

@@ -905,3 +905,40 @@ test_that("cluster_targets() seeds its k-means and leaves the caller's RNG state
   expect_identical(fixed_3, fixed_1)
 
 })
+
+
+test_that("cluster_targets() runs the k-means at each count as the unit select_training/clusters/k-<K>", {
+
+  s <- fixture_scores(n_pool = 100)
+
+  ## Each k-means starts from its unit's stream: the search's at every count,
+  ## and a specified count's. Its 25 starts find the same labelled solution
+  ## from most streams on this fixture, so the stream itself is compared.
+  started <- list()
+  real    <- stats::kmeans
+  local_mocked_bindings(kmeans = function(x, centers, ...) {
+    started[[length(started) + 1L]] <<- list(K = centers, stream = .Random.seed)
+    real(x, centers, ...)
+  }, .package = "stats")
+
+  cluster_targets(s$St, cluster_min = 2L, seed = 1L)
+  cluster_targets(s$St, clusters = 3L, cluster_min = 1L, seed = 1L)
+
+  expect_gte(length(started), 3L)
+
+  for (run in started) {
+
+    expect_identical(run$stream,
+                     with_unit_seed(1L, c("select_training", "clusters", paste0("k-", run$K)), .Random.seed),
+                     info = run$K)
+
+  }
+
+  ## The count the search chooses draws as the same count specified
+  searched <- cluster_targets(s$St, cluster_min = 2L, seed = 1L)
+
+  expect_identical(searched$k_chosen, 2L)
+  expect_identical(searched$assignment,
+                   cluster_targets(s$St, clusters = 2L, cluster_min = 2L, seed = 1L)$assignment)
+
+})
