@@ -1348,7 +1348,7 @@ make_valid_eval <- function() {
     ## the settings evaluate() stamps on every row
     settings  = rep(list(eval_settings(
       cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
-      prune = FALSE, prune_threshold = NA_real_, seed = 42L,
+      prune = FALSE, prune_threshold = NA_real_, seed = 42L, seed_rule = SEED_RULE,
       sg_window = DEFAULT_SG_WINDOW, pca_threshold = DEFAULT_PCA_THRESHOLD,
       outcome_range = DEFAULT_OUTCOME_RANGE, response_threshold = NA_real_
     )), 2)

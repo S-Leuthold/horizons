@@ -442,8 +442,7 @@ evaluate <- function(x,
   ## the split as drawn: the fences come from the training partition's labels
   ## alone, and only training rows outside them leave, before the folds below
   ## are drawn. fit()'s cold start makes the same call after the same draw.
-  ## The trim draws nothing from the RNG, so the folds follow the stream they
-  ## always did; without a request the split is the draw.
+  ## Without a request the split is the draw.
 
   trim_request <- response_trim_request(x)
 
@@ -484,16 +483,16 @@ evaluate <- function(x,
   ## Step 5: Create CV folds
   ## -----------------------------------------------------------------------
 
-  ## Drawn from the stream the split left. The fallback notes print inside
-  ## the tree, after its header (#91).
+  ## A unit of their own. The fallback notes print inside the tree, after its
+  ## header (#91).
 
-  cv_drawn <- draw_stratified(
+  cv_drawn <- with_unit_seed(seed, "evaluate/folds", draw_stratified(
     outcome      = train_data[[outcome_col]],
     stratified   = function() rsample::vfold_cv(train_data, v = cv_folds,
                                                 strata = dplyr::all_of(outcome_col),
                                                 breaks = STRATA_BREAKS, pool = STRATA_POOL),
     unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
-  )
+  ))
   cv_fold_obj <- cv_drawn$draw
 
   ## A stratified draw that came out unstratified, because it failed or
@@ -540,6 +539,9 @@ evaluate <- function(x,
     ## Read only when pruning, so it cannot have changed a row otherwise.
     prune_threshold = if (isTRUE(prune)) prune_threshold else NA_real_,
     seed            = seed,
+    ## The rule that turns the seed into each unit's draws: a row from an
+    ## earlier rule lacks it, and is re-evaluated.
+    seed_rule       = SEED_RULE,
     ## configure()'s recipe settings (#62). pca_threshold is recorded for
     ## every row, PCA or not: conservative, since a row that never ran PCA
     ## re-runs rather than resumes when only the threshold changed.
@@ -2852,7 +2854,8 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #'
 #' @description
 #' The split `evaluate()` scores on and `fit()` reuses: the rows with an
-#' observed outcome ([modelling_rows()]), then `set.seed(seed)`, then
+#' observed outcome ([modelling_rows()]), then, in the unit
+#' `evaluate/split` ([with_unit_seed()]),
 #' a `SPLIT_PROP` split stratified on the outcome, falling back to an
 #' unstratified one when the stratified draw fails. The split can also come
 #' out unstratified with no failure: rsample drops the strata itself when it
@@ -2863,16 +2866,13 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #' which happened (#91; see [draw_stratified()]). `fit()` calls it when it
 #' starts cold from a configured object with one configuration (#45), so that
 #' fit holds out exactly the rows `evaluate()` would have at the same seed.
-#' The draw was inline in `evaluate()` before, and it is unchanged.
-#'
-#' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
-#' folds are drawn from the state it leaves.
+#' The caller's stream is left as found.
 #'
 #' @param analysis Data frame. The object's analysis table. Rows whose
 #'   outcome is `NA` are dropped here; a table the callers have already
 #'   filtered for their sample-size gate passes through uncopied.
 #' @param outcome_col Character. Name of the outcome column.
-#' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
+#' @param seed Integer. The run's seed, `evaluate()`'s (or `fit()`'s on a
 #'   cold start).
 #' @param call The frame a refusal reports: the verb's.
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
@@ -2889,15 +2889,13 @@ draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_en
 
   modelled <- modelling_rows(analysis, outcome_col, call = call)
 
-  set.seed(seed)
-
-  drawn <- draw_stratified(
+  drawn <- with_unit_seed(seed, "evaluate/split", draw_stratified(
     outcome      = modelled$data[[outcome_col]],
     stratified   = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP,
                                                      strata = dplyr::all_of(outcome_col),
                                                      breaks = STRATA_BREAKS, pool = STRATA_POOL),
     unstratified = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP)
-  )
+  ))
 
   list(split           = drawn$draw,
        n_dropped       = modelled$n_dropped,
@@ -3291,10 +3289,10 @@ evaluate_config_worker <- function(config_i, shared) {
 
   }
 
-  ## A mis-keyed entry arrives as NULL. Most then error, but `seed` and
-  ## `grid_size` do not: set.seed(NULL) reseeds from the clock and
+  ## A mis-keyed entry arrives as NULL. Most then error (a NULL `seed` at
+  ## the first unit's seed), but `grid_size` does not:
   ## tune_grid(grid = NULL) invents its own grid, so the run would succeed
-  ## while being unreproducible or tuned over the wrong space. The parent
+  ## while tuned over the wrong space. The parent
   ## asserts the same keys before dispatch, so a mismatch here means the
   ## transport changed the payload.
   if (!setequal(names(shared), SHARED_ARG_NAMES)) {

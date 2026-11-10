@@ -268,7 +268,8 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 ## on them scores each.
 
 #' A weighted ensemble with CV+ intervals over a fit whose evaluation trimmed
-#' eight training rows far above the rest. plsr and elastic net keep it fast.
+#' the training rows among eight far above the rest (the trim never touches a
+#' test row). plsr and elastic net keep it fast.
 #' @noRd
 build_trimmed_ens <- function() {
 
@@ -299,7 +300,10 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     ids <- ens$evaluation$response_trim$trimmed_ids
     oof <- build_oof_matrix(ens, uq$members)
 
-    expect_length(ids, 8L)
+    ## Every one of the eight the split put in training
+    extreme <- sprintf("S%03d", 1:8)
+    expect_setequal(ids, setdiff(extreme, rsample::testing(ens$evaluation$split)$sample_id))
+    expect_gte(length(ids), 2L)
 
     at <- match(ids, uq$calib$sample_id)
 
@@ -307,9 +311,11 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     expect_identical(which(is.na(uq$calib$.row)), sort(at))
     expect_true(all(uq$calib$fold[at] %in% seq_along(uq$fold_models)))
 
-    ## Balanced across the five folds: eight rows give 2, 2, 2, 1, 1
+    ## Balanced across the five folds: n rows give each fold n %/% 5 or one
+    ## more
+    n_ids <- length(ids)
     expect_identical(sort(as.integer(table(factor(uq$calib$fold[at], levels = 1:5)))),
-                     c(1L, 1L, 2L, 2L, 2L))
+                     sort(rep(n_ids %/% 5L, 5L) + rep(c(1L, 0L), c(n_ids %% 5L, 5L - n_ids %% 5L))))
 
     ## The meta rows are all there, each once, with their sample_ids
     expect_setequal(uq$calib$.row[-at], oof$row)
@@ -527,8 +533,10 @@ describe("fit_ensemble_uq() - coverage", {
       oof     <- build_oof_matrix(ens, uq$members)
       trimmed <- ensemble_trimmed_rows(ens, uq$members)
 
-      ## The trimmed ensemble calibrates on its eight trimmed rows
-      expect_identical(sum(is.na(uq$calib$.row)), c(plain = 0L, trimmed = 8L)[[name]], info = name)
+      ## The trimmed ensemble calibrates on every row its trim set aside
+      n_trimmed <- length(ens$evaluation$response_trim$trimmed_ids %||% character(0))
+      expect_identical(sum(is.na(uq$calib$.row)), c(plain = 0L, trimmed = n_trimmed)[[name]], info = name)
+      if (name == "trimmed") expect_gte(n_trimmed, 2L)
 
       member_mat <- dplyr::bind_rows(oof$predictors, trimmed$predictors)
       member_mat <- member_mat[, paste0("member_", uq$members), drop = FALSE]

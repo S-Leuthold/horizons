@@ -70,6 +70,7 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
                                  settings = list(eval_settings(
                                    cv_folds = 3L, grid_size = 3L, bayesian_iter = 0L,
                                    prune = FALSE, prune_threshold = NA_real_, seed = seed,
+                                   seed_rule = SEED_RULE,
                                    sg_window = DEFAULT_SG_WINDOW,
                                    pca_threshold = DEFAULT_PCA_THRESHOLD,
                                    outcome_range = DEFAULT_OUTCOME_RANGE,

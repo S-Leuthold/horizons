@@ -276,9 +276,8 @@ DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
 # The keys evaluate()'s parallel branch sends to evaluate_config_worker().
 # Assembled in one place and asserted in the worker, because a mis-keyed entry
-# arrives as NULL and two of them fail SILENTLY rather than erroring: a NULL
-# `seed` makes set.seed(NULL) reseed from the clock (the run succeeds and is not
-# reproducible), and a NULL `grid_size` makes tune_grid() invent its own grid.
+# arrives as NULL and one fails SILENTLY rather than erroring: a NULL
+# `grid_size` makes tune_grid() invent its own grid.
 
 SHARED_ARG_NAMES <- c(
   "data",
@@ -322,7 +321,9 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      fails the configuration (#102).
 #   5  2026-10-21: an untransformed response's tuning metrics score the
 #      estimate clamped to outcome_range, as every other score is (#104).
-SCORING_SCHEMA <- 5L
+#   6  2026-11-09: every draw is seeded from the run's seed and its unit's
+#      name (SEED_RULE 1), so the split, the folds and each stage move.
+SCORING_SCHEMA <- 6L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

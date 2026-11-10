@@ -455,11 +455,13 @@ tune_warmstart_bayes <- function(workflow,
 #' interrupt is recorded as it arrives and raised again once tune has
 #' returned: the search the user stopped is not kept as a result.
 #'
-#' The caller re-pins the seed first where it needs one, and grids a space
-#' small enough to try whole instead of searching it ([exhaustive_grid()]).
+#' The caller runs it inside its stage's unit ([with_unit_seed()]) and passes
+#' that unit's seed, and grids a space small enough to try whole instead of
+#' searching it ([exhaustive_grid()]).
 #'
 #' @param workflow,resamples,initial,iter,param_info,metrics Passed to
 #'   [tune::tune_bayes()].
+#' @param seed Integer. The stage's seed, for [tune::control_bayes()].
 #' @param allow_par,parallel_over Passed to [tune::control_bayes()].
 #' @param debug Logical(1). Stop at the first failure rather than fall back.
 #' @param search,grid Character(1). How the messages name the search and the
@@ -475,6 +477,7 @@ bayes_search <- function(workflow,
                          iter,
                          param_info,
                          metrics,
+                         seed          = sample.int(10^5, 1),
                          allow_par     = FALSE,
                          parallel_over = "resamples",
                          debug         = FALSE,
@@ -521,6 +524,7 @@ bayes_search <- function(workflow,
             verbose       = FALSE,
             verbose_iter  = TRUE,
             no_improve    = BAYES_NO_IMPROVE_LIMIT,
+            seed          = seed,
             allow_par     = allow_par,
             parallel_over = parallel_over
           )

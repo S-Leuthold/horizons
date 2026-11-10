@@ -380,7 +380,9 @@ describe("evaluate() - success path", {
     success_rows <- result$evaluation$results$status == "success"
     expect_true(any(success_rows))
 
-    for (m in c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae")) {
+    ## The metrics two test rows define. rsq and ccc are also undefined, and
+    ## NA, when a success's test predictions are constant.
+    for (m in c("rmse", "rrmse", "rpd", "mae")) {
       expect_false(any(is.na(result$evaluation$results[[m]][success_rows])),
                    info = paste("NA found in", m))
     }
@@ -747,23 +749,24 @@ describe("draw_eval_split()", {
   obj <- make_eval_object(n = 60, n_configs = 1)
   obj$data$analysis$SOC[c(3, 17, 41)] <- NA_real_
 
-  ## evaluate()'s draw before #45, as it was written inline: the rows with an
-  ## observed outcome, then the seed, then a stratified split, falling back to
-  ## an unstratified one.
+  ## The draw written out: the rows with an observed outcome, then, in the
+  ## unit evaluate/split, a stratified split, falling back to an unstratified
+  ## one.
   draw_before <- function(analysis, seed) {
 
     modelled <- modelling_rows(analysis, "SOC")$data
 
-    set.seed(seed)
-
-    tryCatch(
+    with_unit_seed(seed, "evaluate/split", tryCatch(
       rsample::initial_split(modelled, prop = SPLIT_PROP, strata = dplyr::all_of("SOC")),
       error = function(e) rsample::initial_split(modelled, prop = SPLIT_PROP)
-    )
+    ))
 
   }
 
-  it("gives the split evaluate() drew before it was factored out", {
+  it("draws the split in the unit evaluate/split, leaving the caller's stream as found", {
+
+    withr::local_seed(11)
+    stream <- .Random.seed
 
     for (seed in c(1L, 42L, 307L)) {
 
@@ -776,6 +779,8 @@ describe("draw_eval_split()", {
       expect_identical(drawn$n_dropped, 3L)
 
     }
+
+    expect_identical(.Random.seed, stream)
 
   })
 
@@ -1399,13 +1404,12 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
 
   })
 
-  it("draws the split and the folds it drew before the check, on an outcome whose strata draw random numbers", {
+  it("draws the split and the folds in their units, on an outcome whose strata draw random numbers", {
 
     ## A pooled outcome (5 is under 10 % of the rows): make_strata() samples a
-    ## stratum for each pooled row, in the split and again in the folds, which
-    ## are drawn from the stream the split leaves, without a reseed. The
+    ## stratum for each pooled row, in the split and again in the folds. The
     ## check runs make_strata() before each draw, so without its RNG restore
-    ## the folds would move.
+    ## the draws would move.
     obj <- make_eval_object(n = 96, n_configs = 1)
     set.seed(3)
     obj$data$analysis$SOC <- sample(c(rep(1:4, each = 23), rep(5, 4)))
@@ -1424,12 +1428,13 @@ describe("evaluate() - the split line and the fallback notes (#91)", {
       .package = "horizons"
     )
 
-    ## The inline draws, as evaluate() made them before #91
-    set.seed(42L)
-    split <- rsample::initial_split(obj$data$analysis, prop = SPLIT_PROP,
-                                    strata = dplyr::all_of("SOC"))
-    folds <- rsample::vfold_cv(rsample::training(split), v = 3L,
-                               strata = dplyr::all_of("SOC"))
+    ## The two draws written out, each in its unit
+    split <- with_unit_seed(42L, "evaluate/split",
+                            rsample::initial_split(obj$data$analysis, prop = SPLIT_PROP,
+                                                   strata = dplyr::all_of("SOC")))
+    folds <- with_unit_seed(42L, "evaluate/folds",
+                            rsample::vfold_cv(rsample::training(split), v = 3L,
+                                              strata = dplyr::all_of("SOC")))
 
     expect_identical(captured$split$in_id, split$in_id)
     expect_identical(lapply(captured$cv_folds$splits, `[[`, "in_id"),
@@ -1774,7 +1779,7 @@ describe("checkpoint scoring schema", {
 
     run_fp   <- list(data_hash = "h", data_n_rows = 10L,
                      data_fields = list(ids = "i", outcome = "SOC"))
-    settings <- eval_settings(cv_folds = 3L, seed = 42L)
+    settings <- eval_settings(cv_folds = 3L, seed = 42L, seed_rule = SEED_RULE)
 
     ## A row as this version writes it, then variants of it
     current <- tibble::tibble(config_id = "keep", scoring_schema = SCORING_SCHEMA)
@@ -1798,13 +1803,21 @@ describe("checkpoint scoring schema", {
       variant("no_fields",   function(r) { r$data_fields <- NULL; r }),
       variant("one_field",   function(r) { r$data_fields <- list(run_fp$data_fields["ids"]); r }),
       variant("no_settings", function(r) { r$settings <- NULL; r }),
-      variant("one_setting", function(r) { r$settings <- list(settings["seed"]); r })
+      variant("one_setting", function(r) { r$settings <- list(settings["seed"]); r }),
+      ## Written before the seed rule: no seed_rule, and a split drawn
+      ## another way, so other training rows. Dropped, not refused.
+      variant("pre_rule",    function(r) {
+        r$settings    <- list(settings[names(settings) != "seed_rule"])
+        r$data_hash   <- "other"
+        r$data_fields <- list(list(ids = "j", outcome = "SOC"))
+        r
+      })
     )
 
     gated <- gate_checkpoint_rows(candidates, run_fp, settings)
 
     expect_named(gated$kept, "keep")
-    expect_equal(gated$n_foreign, 9L)
+    expect_equal(gated$n_foreign, 10L)
     expect_length(gated$refused, 0)
 
     ## A run with no fingerprint of its own resumes nothing
@@ -1873,6 +1886,32 @@ describe("checkpoint scoring schema", {
     expect_true(any(grepl("written under an earlier schema", out)))
     expect_false(any(second$evaluation$results$cv_rpd == 999))
     expect_equal(second$evaluation$best_config, first$evaluation$best_config)
+
+  })
+
+  it("on resume, re-evaluates configs whose checkpoint was written before the seed rule", {
+
+    ck     <- ck_b()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
+
+    ## A row as an earlier version wrote it: no seed_rule among its settings,
+    ## and a split drawn another way, so its rows differ from this run's
+    f   <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
+    row <- readRDS(f)
+    row$settings[[1]]$seed_rule <- NULL
+    row$data_hash               <- "0000deadbeef"
+    row$data_fields[[1]]$ids    <- "0000deadbeef"
+    row$cv_rpd                  <- 999
+    saveRDS(row, f)
+
+    out <- capture.output(
+      second <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir, verbose = TRUE)))
+    )
+
+    expect_true(any(grepl("Dropped 1 checkpoint row written under an earlier schema", out, fixed = TRUE)))
+    expect_false(any(second$evaluation$results$cv_rpd == 999))
+    expect_identical(second$evaluation$results$settings[[1]]$seed_rule, as.double(SEED_RULE))
 
   })
 
@@ -2110,6 +2149,7 @@ describe("evaluate() - checkpoint data provenance", {
                      eval_settings(cv_folds = 3L, grid_size = 2L,
                                    bayesian_iter = 0L, prune = FALSE,
                                    prune_threshold = NA_real_, seed = 42L,
+                                   seed_rule = SEED_RULE,
                                    ## configure()'s recipe settings (#62), at
                                    ## the defaults an unconfigured record runs
                                    sg_window = 9L, pca_threshold = 0.995,

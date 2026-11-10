@@ -435,6 +435,12 @@ build_allow_par_run <- function() {
   obj         <- make_eval_object(n_configs = 2)
   warnings    <- list()
 
+  ## xgboost, not the fixture's cubist: the results are compared with a run
+  ## made later in the session, and Cubist's neighbour cutoff comes from a
+  ## process-wide generator no seed reaches, so a cubist with neighbours
+  ## depends on the fits before it (configure()'s reproducibility note)
+  obj$config$configs$model <- c("rf", "xgboost")
+
   result <- withCallingHandlers(
     evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE)),
     warning = function(w) {
@@ -1231,7 +1237,9 @@ describe("evaluate() - results are identical across axes", {
 ## The in-process test above shows the worker forwards the settings; this one
 ## shows they survive the trip to a multisession worker and change what it
 ## computes. On "raw" a window of 13 trims 12 of the 20 columns rather than 8,
-## so the configured run and the default run model different predictors.
+## so the configured run and the default run model different predictors. plsr
+## reads every predictor it keeps, where a tuned rf on this little data can
+## come out predicting the mean whatever its predictors.
 
 describe("evaluate() - recipe settings on the configs axis", {
 
@@ -1245,6 +1253,7 @@ describe("evaluate() - recipe settings on the configs axis", {
                   "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
 
     obj <- make_eval_object(n = 60, n_wn = 20, n_configs = 1)
+    obj$config$configs$model <- "plsr"
     obj$config$recipe <- list(sg_window = 13L, pca_threshold = 0.995)
 
     seq_result <- suppressWarnings(

@@ -1401,15 +1401,15 @@ describe("evaluate_single_config() - parallel_over", {
 
 
 ## =========================================================================
-## The RNG pin
+## The stages' units
 ## =========================================================================
 
-describe("evaluate_single_config() - the RNG pin", {
+describe("evaluate_single_config() - the stages' units", {
 
   it("returns the shared run whatever the caller's RNG kind and state", {
 
-    ## The grid's rf fits draw from the stream the runner pins on entry, and
-    ## the CV panel reads them
+    ## The grid's rf fits draw from their stage's unit, and the CV panel
+    ## reads them
     setup <- make_eval_setup()
 
     result <- withr::with_seed(99, .rng_kind = "L'Ecuyer-CMRG", evaluate_single_config(
@@ -1428,22 +1428,24 @@ describe("evaluate_single_config() - the RNG pin", {
 
   })
 
-  it("starts the Bayesian search from the seed, whatever the grid search drew", {
+  it("starts the Bayesian search from its stage's seed, and gives that seed to tune and the engine", {
 
-    ## The grid's draws leave the stream where the axis puts it (the parallel
-    ## path draws worker seeds from it), so the search is pinned again and
-    ## proposes the same candidates on either axis
+    ## The search is a unit of its own, so it proposes the same candidates
+    ## whatever the grid search drew and on either axis
     setup      <- make_eval_setup()
+    config     <- make_eval_config()
     real_bayes <- tune::tune_bayes
     at_search  <- NULL
+    args       <- NULL
 
-    local_mocked_bindings(tune_bayes = function(...) {
+    local_mocked_bindings(tune_bayes = function(object, ...) {
       at_search <<- get(".Random.seed", envir = globalenv())
-      real_bayes(...)
+      args      <<- list(object = object, ...)
+      real_bayes(object, ...)
     }, .package = "tune")
 
     result <- evaluate_single_config(
-      config_row    = make_eval_config(),
+      config_row    = config,
       split         = setup$split,
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
@@ -1452,12 +1454,16 @@ describe("evaluate_single_config() - the RNG pin", {
       seed          = 42L
     )
 
-    pinned <- withr::with_seed(42L, .rng_kind = "Mersenne-Twister",
-                               get(".Random.seed", envir = globalenv()))
+    bayes_seed <- unit_seed(42L, c("evaluate", config$config_id, "bayes"))
+    pinned     <- withr::with_seed(bayes_seed, .rng_kind = "Mersenne-Twister",
+                                   .rng_normal_kind = "Inversion", .rng_sample_kind = "Rejection",
+                                   get(".Random.seed", envir = globalenv()))
 
     expect_identical(result$status, "success")
     expect_false(is.null(at_search))
     expect_identical(at_search, pinned)
+    expect_identical(args$control$seed, bayes_seed)
+    expect_identical(rlang::eval_tidy(workflows::extract_spec_parsnip(args$object)$eng_args$seed), bayes_seed)
 
   })
 

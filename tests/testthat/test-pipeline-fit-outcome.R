@@ -97,11 +97,18 @@ describe("fit() - NA-outcome rows with UQ on (#67)", {
 
 describe("fit() - response_bound (#68)", {
 
-  ## At fixture seed 12, evaluate()'s split (which fit() reuses) puts the
-  ## object's largest outcome in the test part, which is what makes a
-  ## whole-table bound and a training-row bound differ.
-  obj <- make_fit_object(n = 60, n_configs = 1, seed = 12)
+  ## A whole-table bound and a training-row bound differ when the object's
+  ## largest outcome is held out. fit() starts cold here, drawing the split
+  ## evaluate() would (#45); the largest outcome that split holds out is
+  ## raised above every other, which keeps it in the top quartile's stratum,
+  ## so the split is drawn as it was.
+  obj <- make_eval_object(n = 60, n_configs = 1)
   obj$config$tuning$final_bayesian_iter <- 0L
+
+  held_out <- rsample::testing(suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 12L))$split)$sample_id
+  top_test <- which(obj$data$analysis$sample_id %in% held_out)
+  top_test <- top_test[which.max(obj$data$analysis$SOC[top_test])]
+  obj$data$analysis$SOC[top_test] <- max(obj$data$analysis$SOC) + 1
 
   r <- suppressWarnings(
     fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 12L)
@@ -112,8 +119,7 @@ describe("fit() - response_bound (#68)", {
     soc      <- obj$data$analysis$SOC
     fit_rows <- obj$data$analysis$sample_id %in% unique(r$models$cv_predictions$sample_id)
 
-    ## Precondition: the fixture discriminates. If a change to the split
-    ## moves the maximum back into the fit rows, pick another seed.
+    ## Precondition: the fixture discriminates
     expect_gt(max(soc), max(soc[fit_rows]))
 
     expect_equal(r$models$response_bound,
