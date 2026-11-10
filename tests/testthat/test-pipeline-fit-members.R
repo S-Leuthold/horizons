@@ -658,7 +658,13 @@ describe("fit() - each member is one unit", {
     ## interrupt, about two seconds. tune's on.exit() return cancels the
     ## interrupt's unwind, so without the record the search's first iteration
     ## came back as the member's result.
+    ##
+    ## The warm start is centred on a min_n the 32 rows a fold trains on can
+    ## split: around evaluate()'s min_n of 40, every starting candidate
+    ## predicts a constant, their scores tie, and tune's search stops before
+    ## its first iteration.
     obj          <- fit_obj(1L)
+    obj$evaluation$results$best_params[[1]]$min_n <- 5L
     real_pred_gp <- tune:::pred_gp
     calls        <- 0L
     local_mocked_bindings(pred_gp = function(...) {

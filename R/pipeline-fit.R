@@ -164,8 +164,8 @@
 #'   shrinkage covariance + held-out OOD thresholds) per config, so `predict()`
 #'   can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split.
 #'   Default TRUE.
-#' @param seed Integer. Random seed for the CV folds and, through
-#'   `calib_split_seed()` (`seed + 1L`), for the calibration split. The
+#' @param seed Integer. Random seed for the CV folds, the calibration split
+#'   and each member's stages. The
 #'   train/test split is `evaluate()`'s, so it does not depend on this seed,
 #'   except on a cold start, where `fit()` draws that split at this seed as
 #'   `evaluate()` would. Default 307L.
@@ -494,8 +494,8 @@ fit <- function(x,
   ## Calibration partitioning: split train_F into train_Fit / calib_Fit.
   ## UQ and AD share this one held-out split (D7) \u2014 both calibrate on calib_Fit
   ## and never train on it. Built whenever either capability is requested.
-  ## Seeded on its own, so the calibration rows depend on `seed` and train_F
-  ## alone, not on RNG state an earlier draw left behind.
+  ## A unit of its own, so the calibration rows depend on `seed` and train_F
+  ## alone.
   ##
   ## After a response trim (#77) the pool is the untrimmed training part,
   ## train_F plus the trimmed rows. Split conformal needs calibration rows
@@ -511,15 +511,13 @@ fit <- function(x,
 
   if (compute_uq || compute_ad) {
 
-    set.seed(calib_split_seed(seed))
-
-    calib_drawn <- draw_stratified(
+    calib_drawn <- with_unit_seed(seed, "fit/calibration", draw_stratified(
       outcome      = calib_pool[[outcome_col]],
       stratified   = function() rsample::initial_split(calib_pool, prop = CALIB_PROP,
                                                        strata = dplyr::all_of(outcome_col),
                                                        breaks = STRATA_BREAKS, pool = STRATA_POOL),
       unstratified = function() rsample::initial_split(calib_pool, prop = CALIB_PROP)
-    )
+    ))
     split_C <- calib_drawn$draw
 
     train_Fit  <- rsample::training(split_C)
@@ -592,18 +590,13 @@ fit <- function(x,
                   n_trimmed  = length(trimmed_ids),
                   n_calib    = if (is.null(calib_data)) 0L else sum(calib_kept))
 
-  ## Seeded here: with the split reused, no draw precedes this one when UQ
-  ## and AD are off, so the folds would otherwise follow the caller's RNG.
-
-  set.seed(seed)
-
-  cv_drawn <- draw_stratified(
+  cv_drawn <- with_unit_seed(seed, "fit/folds", draw_stratified(
     outcome      = train_Fit[[outcome_col]],
     stratified   = function() rsample::vfold_cv(train_Fit, v = cv_folds,
                                                 strata = dplyr::all_of(outcome_col),
                                                 breaks = STRATA_BREAKS, pool = STRATA_POOL),
     unstratified = function() rsample::vfold_cv(train_Fit, v = cv_folds)
-  )
+  ))
   cv_resamples <- cv_drawn$draw
 
   ## A stratified draw that fell back to an unstratified one says so once,
@@ -1721,30 +1714,6 @@ log_calibration_skip <- function(collector, compute_uq, compute_ad, n_calib,
   invisible(collector)
 
 }
-
-## ---------------------------------------------------------------------------
-## calib_split_seed \u2014 Split C's seed, derived from the user's seed
-## ---------------------------------------------------------------------------
-
-#' Seed for fit()'s calibration split
-#'
-#' @description
-#' `fit()` scores on `evaluate()`'s train/test split and carves the
-#' calibration set that UQ and AD share (Split C) out of its training part.
-#' Split C is seeded on its own, with `seed + 1L`, so the calibration rows
-#' depend only on `seed` and those training rows, not on RNG state left by an
-#' earlier draw. The offset is documented rather than hidden so a caller who
-#' needs to reproduce the partition can.
-#'
-#' @param seed Integer seed passed to `fit()`.
-#' @return Integer seed for Split C.
-#' @keywords internal
-calib_split_seed <- function(seed) {
-
-  as.integer(seed) + 1L
-
-}
-
 
 ## ---------------------------------------------------------------------------
 ## format_test_coverage(): the console line for measured interval coverage

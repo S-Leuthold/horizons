@@ -318,47 +318,23 @@ describe("build_warmstart_grid() - NULL/NA fallback", {
 })
 
 
-describe("build_warmstart_grid() - the caller's random stream (#51)", {
+describe("build_warmstart_grid() - the random stream (#51)", {
 
-  it("samples an overflowing grid without moving the caller's random stream", {
+  it("samples an overflowing grid from the stream it is given, the best point first", {
 
-    ## 125 combinations against max_points = 10, so the grid is sampled
+    ## 125 combinations against max_points = 10, so the grid is sampled. The
+    ## member builds it in its warmstart-grid stage (test-fit-single-config.R)
     param_set   <- make_warmstart_param_set()
     best_params <- make_best_params()
 
-    set.seed(9)
-    expected <- stats::runif(3)
-
-    set.seed(9)
-    grid  <- build_warmstart_grid(best_params, param_set, max_points = 10)
-    after <- stats::runif(3)
+    grid  <- withr::with_seed(9, build_warmstart_grid(best_params, param_set, max_points = 10))
+    again <- withr::with_seed(9, build_warmstart_grid(best_params, param_set, max_points = 10))
+    other <- withr::with_seed(10, build_warmstart_grid(best_params, param_set, max_points = 10))
 
     expect_identical(nrow(grid), 10L)
-    expect_identical(after, expected)
-
-    ## The sample is the same whatever the caller's stream
-    set.seed(10)
-    expect_identical(build_warmstart_grid(best_params, param_set, max_points = 10), grid)
-
-  })
-
-  it("leaves a session with no random stream without one", {
-
-    param_set   <- make_warmstart_param_set()
-    best_params <- make_best_params()
-
-    withr::with_preserve_seed({
-
-      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-        rm(".Random.seed", envir = globalenv())
-      }
-
-      grid <- build_warmstart_grid(best_params, param_set, max_points = 10)
-
-      expect_identical(nrow(grid), 10L)
-      expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-
-    })
+    expect_identical(again, grid)
+    expect_false(identical(other, grid))
+    expect_identical(grid[1, names(other)], other[1, ])
 
   })
 
@@ -613,7 +589,8 @@ describe("tune_warmstart_bayes() - return contract", {
       param_set     = ts$param_set,
       bayesian_iter = 0L,
       metric_set    = ts$metric_set,
-      allow_par     = FALSE
+      allow_par     = FALSE,
+      config_id     = "tune_test_001"
     ))
 
     expect_true(is.list(result))
@@ -663,7 +640,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
         param_set     = ts$param_set,
         bayesian_iter = 2L,
         metric_set    = ts$metric_set,
-        allow_par     = FALSE
+        allow_par     = FALSE,
+        config_id     = "tune_test_001"
       ), "horizons_warning_substitution"),
       class = "horizons_warning_substitution"
     )
@@ -695,7 +673,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
         param_set     = ts$param_set,
         bayesian_iter = 2L,
         metric_set    = ts$metric_set,
-        allow_par     = FALSE
+        allow_par     = FALSE,
+        config_id     = "tune_test_001"
       ),
       class = "horizons_warning_substitution"
     )
@@ -721,7 +700,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
         bayesian_iter = 2L,
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
-        debug         = TRUE
+        debug         = TRUE,
+        config_id     = "tune_test_001"
       ),
       "The GP model requires 2+ initial points", fixed = TRUE
     )
@@ -742,7 +722,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
       param_set     = ts$param_set,
       bayesian_iter = 2L,
       metric_set    = ts$metric_set,
-      allow_par     = FALSE
+      allow_par     = FALSE,
+      config_id     = "tune_test_001"
     ), unit = "member", id = "tune_test_001")
 
     expect_true(out$failed)
@@ -771,7 +752,8 @@ describe("tune_warmstart_bayes() - a starting grid that errors", {
         param_set     = ts$param_set,
         bayesian_iter = 0L,
         metric_set    = ts$metric_set,
-        allow_par     = FALSE
+        allow_par     = FALSE,
+        config_id     = "tune_test_001"
       ),
       "the grid broke", fixed = TRUE
     )
@@ -797,7 +779,8 @@ describe("tune_warmstart_bayes() - fallback behavior", {
       param_set     = ts$param_set,
       bayesian_iter = 0L,
       metric_set    = ts$metric_set,
-      allow_par     = FALSE
+      allow_par     = FALSE,
+      config_id     = "tune_test_001"
     )
 
     expect_true(is.list(result))
@@ -824,18 +807,18 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
     budget <- 2L
     warm   <- build_warmstart_grid(best_params, ts$param_set, max_points = 5L)
 
-    ## tune's control seed and the model fits draw from the session's random
-    ## stream, so pin it. A search that ran raises no substitution warning.
+    ## A search that ran raises no substitution warning
     expect_no_warning(
-      result <- withr::with_seed(42, tune_warmstart_bayes(
+      result <- tune_warmstart_bayes(
         workflow      = ts$wf,
         cv_resamples  = ts$folds,
         initial_grid  = warm,
         param_set     = ts$param_set,
         bayesian_iter = budget,
         metric_set    = ts$metric_set,
-        allow_par     = FALSE
-      )),
+        allow_par     = FALSE,
+        config_id     = "tune_test_001"
+      ),
       class = "horizons_warning_substitution"
     )
 
@@ -873,10 +856,11 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
     skip_unless_slow_tier()
 
     ## An elastic net with an interior optimum, which glmnet fits
-    ## deterministically, so only the search's own draws can differ. Without
-    ## the re-pin the search reads whatever stream the grid stage left, which
-    ## differs between the sequential and parallel paths; here two caller
-    ## seeds stand in for that, and choose two different points.
+    ## deterministically, so only the search's own draws can differ. Were the
+    ## search not a unit of its own, it would read whatever stream the grid
+    ## stage left, which differs between the sequential and parallel paths;
+    ## here two caller seeds stand in for that, and choose two different
+    ## points.
     dat <- withr::with_seed(11, {
       x <- matrix(stats::rnorm(120 * 30), 120)
       colnames(x) <- paste0("x", 1:30)
@@ -899,7 +883,7 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
       withr::local_seed(caller_seed)
       r <- tune_warmstart_bayes(wf, folds, grid, ps, bayesian_iter = 3L,
-                                metric_set = ms, seed = 42L)
+                                metric_set = ms, seed = 42L, config_id = "glmnet_151")
       scored <- tune::collect_metrics(r$tune_results)
 
       list(best     = r$best_params[c("penalty", "mixture")],

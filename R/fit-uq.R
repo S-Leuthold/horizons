@@ -95,23 +95,17 @@ compute_c_alpha <- function(scores, level) {
 #'
 #' @param features Data frame or matrix of predictors, one row per residual.
 #' @param residuals Numeric vector of residuals.
-#' @param seed Integer or NULL. Under a seed the forest depends on it alone
-#'   and the caller's RNG stream is left as found; NULL draws from the
-#'   caller's stream, for callers that manage it themselves.
+#' @param seed Integer or NULL. ranger's seed, which fixes the trees; NULL
+#'   lets ranger draw one from the stream.
 #' @return A `ranger` object fitted with `quantreg = TRUE`.
 #' @keywords internal
 #' @noRd
 fit_quantile_forest <- function(features, residuals, seed = NULL) {
 
   ## ranger's `seed` fixes the trees; the node values quantreg stores are drawn
-  ## with sample() from R's stream after the trees are grown. Under a seed both
-  ## come from it alone, with the kind pinned as fit_single_config() pins it,
-  ## and the caller's stream is left as found.
-  if (!is.null(seed)) {
-    local_rng_state()
-    set.seed(seed, kind = "Mersenne-Twister")
-  }
-
+  ## with sample() from R's stream after the trees are grown, so the caller
+  ## seeds the stream as well: fit() grows the forest in the member's
+  ## `forest` stage (with_unit_seed()), with that stage's seed here.
   ranger::ranger(
     x             = as.data.frame(features),
     y             = residuals,
@@ -158,11 +152,11 @@ fit_quantile_forest <- function(features, residuals, seed = NULL) {
 #' @param transformation Character. Transformation applied to the response
 #'   (e.g. "none", "log", "log10", "sqrt").
 #' @param level_default Numeric. Default coverage level. Default 0.90.
-#' @param seed Integer or NULL. Seed for the quantile forest. `fit()` passes
-#'   its own, so the forest, its trees and the node values it stores, depends
-#'   on `seed` alone, however the preceding stages consumed the caller's RNG
-#'   stream, and growing it leaves that stream as found. NULL keeps ranger's
-#'   default of drawing both from the caller's stream.
+#' @param seed Integer or NULL. ranger's seed for the quantile forest.
+#'   `fit()` runs this in the member's `forest` stage ([with_unit_seed()])
+#'   and passes that stage's seed, so the forest, its trees and the node
+#'   values it stores, depends on the stage alone. NULL keeps ranger's
+#'   default of drawing its seed from the stream.
 #' @param outcome_range Numeric length-2 vector. The outcome's physical range,
 #'   which the back-transformed calibration predictions are clamped to, as
 #'   `predict()` clamps the point predictions the intervals are served
