@@ -31,6 +31,11 @@ MODEL_SPECS <- list(
   mars        = list(fn = "mars",         engine = "earth")
 )
 
+# The engines that take a seed, which each stage gives them (seed_engine(),
+# R/utils-rng.R) rather than letting parsnip or bonsai draw one from the
+# stream. Keyed by engine, not model, so the xgb meta-learner shares it.
+SEEDED_ENGINES <- c("ranger", "xgboost", "lightgbm")
+
 # The packages each model needs, to fit it and to predict from it (#65),
 # keyed by the same short names as MODEL_SPECS and VALID_MODELS. Not derivable
 # from MODEL_SPECS$engine alone: cubist_rules() needs `rules` (registers the
@@ -242,6 +247,12 @@ DEFAULT_ENSEMBLE_SEED <- 307L
 ### integer too, is held to it. A double, as rlang's checkers take their
 ### bounds.
 SEED_MAX <- as.double(.Machine$integer.max)
+
+### The version of the rule that turns a run's seed into each unit's seed
+### (unit_seed(), R/utils-rng.R). Recorded on the object and in the settings a
+### checkpoint resumes under. Bump it whenever a unit would get another seed
+### from the same root: the hash or its key, a unit's name, or the kinds.
+SEED_RULE <- 1L
 
 ## Prediction Guardrails --------------------------------------------------------
 
