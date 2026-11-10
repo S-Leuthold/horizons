@@ -590,8 +590,12 @@ describe("a unit re-run from its recomputed seed", {
     regrown <- with_unit_seed(7L, unit, fit_quantile_forest(grown$features, grown$residuals,
                                                             seed = unit_seed(7L, unit)))
 
+    ## ranger's seed fixes the trees; the stage's stream fixes the node values
+    ## quantreg stores beside them, so both are compared
+    stored <- ft$models$uq[[id]]$quantile_model
     expect_identical(grown$seed, unit_seed(7L, unit))
-    expect_identical(regrown$forest, ft$models$uq[[id]]$quantile_model$forest)
+    expect_identical(regrown$forest, stored$forest)
+    expect_identical(regrown$random.node.values, stored$random.node.values)
 
   })
 
