@@ -53,8 +53,8 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{evaluate()} reads \code{allow_par}, \code{parallelize_over},
-\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces} and
-\code{max_worker_payload}, and refuses any other field that is set. The
+\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker} and \code{keep_traces}, and
+refuses any other field that is set. The
 control it ran with, defaults filled in, is recorded as
 \code{evaluation$control}.}
 }

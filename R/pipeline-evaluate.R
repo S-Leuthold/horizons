@@ -41,8 +41,8 @@
 #'   [ensemble()] take it unless given one.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
-#'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces` and
-#'   `max_worker_payload`, and refuses any other field that is set. The
+#'   `output_dir`, `verbose`, `debug`, `breaker` and `keep_traces`, and
+#'   refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as
 #'   `evaluation$control`.
 #'
@@ -962,14 +962,8 @@ evaluate <- function(x,
     ## -------------------------------------------------------------------
 
     ## The daemons are the user's: evaluate() neither sets nor resets them.
-    ## The globals ceiling is declared (max_worker_payload: the user's
-    ## future.globals.maxSize when they set one, else EVAL_WORKER_PAYLOAD_LIMIT,
-    ## from the measured payload) so a payload regression aborts with
-    ## future's clear "size of the globals" error rather than R's long-vector
-    ## message.
-    old_max_size <- getOption("future.globals.maxSize")
-    options(future.globals.maxSize = control$max_worker_payload)
-    on.exit(options(future.globals.maxSize = old_max_size), add = TRUE)
+    ## mirai has no payload limit; the payload tests in
+    ## test-evaluate-parallel.R are the guard on its size.
 
     if (verbose) {
 

@@ -46,8 +46,7 @@ describe("control_horizons()", {
       min_calib_rows       = 1,
       min_ad_rows          = "10",
       min_degradation_rows = -5,
-      min_resemblance_rows = NA_real_,
-      max_worker_payload   = 0
+      min_resemblance_rows = NA_real_
     )
 
     expect_setequal(names(bad), names(CONTROL_FIELDS))
@@ -210,27 +209,6 @@ describe("resolve_control()", {
     expect_error(resolve_control(NULL, "evaluate"), "getOption(\"horizons.verbose\")",
                  fixed = TRUE, class = "horizons_error_input")
     expect_false(resolve_control(control_horizons(verbose = FALSE), "evaluate")$verbose)
-
-  })
-
-  it("keeps a larger future.globals.maxSize as the payload limit, not tune's smaller one, and reports a bad one as the option's", {
-
-    withr::local_options(future.globals.maxSize = NULL)
-    expect_identical(resolve_control(NULL, "evaluate")$max_worker_payload, EVAL_WORKER_PAYLOAD_LIMIT)
-
-    ## What tune sets when it loads
-    withr::local_options(future.globals.maxSize = 1e9)
-    expect_identical(resolve_control(NULL, "evaluate")$max_worker_payload, EVAL_WORKER_PAYLOAD_LIMIT)
-
-    withr::local_options(future.globals.maxSize = 2 * 1024^3)
-    expect_identical(resolve_control(NULL, "evaluate")$max_worker_payload, 2 * 1024^3)
-
-    ## A bad option is reported as the option's, and a set field still wins
-    withr::local_options(future.globals.maxSize = NA_real_)
-    expect_error(resolve_control(NULL, "evaluate"), "getOption(\"future.globals.maxSize\")",
-                 fixed = TRUE, class = "horizons_error_input")
-    expect_identical(resolve_control(control_horizons(max_worker_payload = 5e8), "evaluate")$max_worker_payload,
-                     5e8)
 
   })
 

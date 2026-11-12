@@ -90,12 +90,6 @@ control_check_chunk_size <- function(x, arg, call) {
 
 }
 
-control_check_bytes <- function(x, arg, call) {
-
-  check_arg(rlang::check_number_decimal, x, min = 1, allow_infinite = TRUE, arg = arg, call = call)
-
-}
-
 CONTROL_VERBS <- c("evaluate", "fit", "ensemble", "select_training")
 
 ### `default` is a function, so a default read from an option is read when the
@@ -183,15 +177,6 @@ CONTROL_FIELDS <- list(
     default = function() SELECT_RESEMBLANCE_MIN_ROWS,
     check   = control_check_rows(2),
     verbs   = "select_training"
-  ),
-
-  ### A larger future.globals.maxSize the user set is kept. A smaller one is
-  ### not read as the user's: tune raises the option to 1e9 when it loads.
-  max_worker_payload = list(
-    default = function() max(getOption("future.globals.maxSize", 0), EVAL_WORKER_PAYLOAD_LIMIT),
-    option  = "future.globals.maxSize",
-    check   = control_check_bytes,
-    verbs   = "evaluate"
   )
 
 )
@@ -261,12 +246,6 @@ CONTROL_FIELDS <- list(
 #' @param min_resemblance_rows A whole number of at least 2. The fewest library
 #'   rows [select_training()]'s resemblance check takes its reference
 #'   distribution from. Default 30.
-#' @param max_worker_payload A number of bytes. The largest payload
-#'   [evaluate()] sends a worker on the configs axis. Default 1 GiB, or the
-#'   `future.globals.maxSize` option when it is larger. To lower the limit,
-#'   set this field: the option is raised to 1e9 whenever tune loads, so a
-#'   smaller value of it cannot be told from tune's.
-#'
 #' @return A `horizons_control` object.
 #'
 #' @examples
@@ -291,8 +270,7 @@ control_horizons <- function(...,
                              min_calib_rows       = NULL,
                              min_ad_rows          = NULL,
                              min_degradation_rows = NULL,
-                             min_resemblance_rows = NULL,
-                             max_worker_payload   = NULL) {
+                             min_resemblance_rows = NULL) {
 
   ### By name only, so a value never lands on a field by its position
   if (...length() > 0) {

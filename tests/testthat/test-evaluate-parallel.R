@@ -290,8 +290,6 @@ describe("evaluate() parallel worker footprint", {
       evaluate_single_config = function(...) stop("a configuration ran")
     )
 
-    withr::local_options(future.globals.maxSize = 12345)
-
     for (over in c("configs", "resamples")) {
 
       tmpdir <- withr::local_tempdir()
@@ -306,13 +304,11 @@ describe("evaluate() parallel worker footprint", {
 
       expect_match(conditionMessage(err), "Install the package first", fixed = TRUE)
 
-      ## Refused at the door: no tree, no manifest, the globals ceiling as set
+      ## Refused at the door: no tree, no manifest
       expect_identical(out, character())
       expect_false(file.exists(file.path(tmpdir, "eval_manifest.rds")))
 
     }
-
-    expect_identical(getOption("future.globals.maxSize"), 12345)
 
   })
 
@@ -728,45 +724,6 @@ describe("evaluate() - output_dir and the configs axis (#233)", {
 
     expect_identical(grep("Parallel:", out, value = TRUE, fixed = TRUE),
                      "│  Parallel: over resamples on mirai (2 workers)")
-
-  })
-
-})
-
-
-describe("evaluate() - the worker payload limit", {
-
-  it("dispatches under max_worker_payload, or a future.globals.maxSize the user set, and restores it", {
-
-    ## The configs axis runs only on an installed build
-    skip_if_dev_package()
-
-    obj <- make_eval_object(n_configs = 4)
-
-    run <- function(control) {
-      seen <- NULL
-      testthat::with_mocked_bindings(
-        tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control)),
-                 dispatched = function(e) NULL),
-        dispatch_configs        = function(...) {
-          seen <<- getOption("future.globals.maxSize")
-          rlang::abort("stop", class = "dispatched")
-        },
-        check_parallel_backend  = function(...) TRUE,
-        daemon_reports          = matching_daemons,
-        connected_daemons       = function() 2L,
-        .package = "horizons"
-      )
-      seen
-    }
-
-    withr::local_options(future.globals.maxSize = 2 * 1024^3)
-
-    expect_identical(run(control_horizons(allow_par = TRUE, output_dir = withr::local_tempdir(),
-                                          max_worker_payload = 7e8)), 7e8)
-    expect_identical(run(control_horizons(allow_par = TRUE, output_dir = withr::local_tempdir())),
-                     2 * 1024^3)
-    expect_identical(getOption("future.globals.maxSize"), 2 * 1024^3)
 
   })
 

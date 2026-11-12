@@ -17,8 +17,7 @@ control_horizons(
   min_calib_rows = NULL,
   min_ad_rows = NULL,
   min_degradation_rows = NULL,
-  min_resemblance_rows = NULL,
-  max_worker_payload = NULL
+  min_resemblance_rows = NULL
 )
 }
 \arguments{
@@ -79,12 +78,6 @@ often.}
 \item{min_resemblance_rows}{A whole number of at least 2. The fewest library
 rows \code{\link[=select_training]{select_training()}}'s resemblance check takes its reference
 distribution from. Default 30.}
-
-\item{max_worker_payload}{A number of bytes. The largest payload
-\code{\link[=evaluate]{evaluate()}} sends a worker on the configs axis. Default 1 GiB, or the
-\code{future.globals.maxSize} option when it is larger. To lower the limit,
-set this field: the option is raised to 1e9 whenever tune loads, so a
-smaller value of it cannot be told from tune's.}
 }
 \value{
 A \code{horizons_control} object.
