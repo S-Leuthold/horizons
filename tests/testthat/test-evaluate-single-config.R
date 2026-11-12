@@ -891,7 +891,7 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
   })
 
-  it("lets a bug or a worker's death in the search loop through, which tune would have recovered from", {
+  it("lets a bug or a systemic stop in the search loop through, which tune would have recovered from", {
 
     local_mocked_bindings(pred_gp = gp_fails_at(2L, function() {
       abort_horizons("Broken in the search loop.", kind = "internal")
@@ -900,10 +900,10 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
                  class = "horizons_error_internal")
 
     local_mocked_bindings(pred_gp = gp_fails_at(2L, function() {
-      stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
-                     list(message = "A future worker died.", call = NULL)))
+      abort_horizons("The run cannot go on.", kind = "run", class = "horizons_error_systemic")
     }), .package = "tune")
-    expect_error(run(grid_size = 2), "A future worker died.", fixed = TRUE, class = "FutureError")
+    expect_error(run(grid_size = 2), "The run cannot go on.", fixed = TRUE,
+                 class = "horizons_error_systemic")
 
   })
 

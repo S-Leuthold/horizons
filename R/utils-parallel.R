@@ -1,11 +1,15 @@
 ## ---------------------------------------------------------------------------
-## Parallelism helpers: axis resolution, plan inspection, thread pinning
+## Parallelism helpers: axis resolution, the daemons, the configs axis's
+## dispatch, thread pinning
 ## ---------------------------------------------------------------------------
 ##
-## The rule these implement: the user owns the backend and the topology; the
-## package owns only which axis of its work the registered future plan is
-## applied to. Nothing here ever calls
-## future::plan() to *set* a plan.
+## The rule these implement: the user owns the mirai daemons; the package owns
+## only which axis of its work they are applied to. horizons never calls
+## mirai::daemons(), and never uses with(daemons()), with_daemons() or
+## local_daemons(), whose scope would send tune's own tasks to another
+## profile. It reads the pool with mirai::info() by name, never status(), and
+## every call on the pool names `.compute = NULL`, the current profile, which
+## is the one tune reads.
 
 ## ---------------------------------------------------------------------------
 ## resolve_parallel_axis
@@ -15,7 +19,7 @@
 #'
 #' @description
 #' Pure function from the caller's request and the object's shape to the
-#' concrete dispatch decision. It never inspects the registered plan, so it is
+#' concrete dispatch decision. It never reads the daemons, so it is
 #' unit-testable with no backend and no installed build.
 #'
 #' `"auto"` picks by the measured cost model (2026-09-15): one config run
@@ -27,9 +31,8 @@
 #' rule is `n_configs >= cv_folds`. Dispatching configs needs a checkpoint
 #' directory, so `"auto"` chooses it only when there is one (#233).
 #'
-#' A nested plan registered by the caller does not change the axis: on the
-#' configs axis the worker runs tune sequentially, so a second plan level is
-#' never used. `control_horizons()` refuses `"both"` with that hint.
+#' On the configs axis the worker runs tune sequentially: a daemon has no
+#' daemons of its own. `control_horizons()` refuses `"both"`.
 #'
 #' @param parallelize_over One of `"auto"`, `"configs"`, `"resamples"`, as
 #'   `control_horizons()` checked it.
@@ -39,7 +42,8 @@
 #' @param has_output_dir Logical. Whether the run checkpoints.
 #'
 #' @return A list: `axis` (`"sequential"`, `"configs"` or `"resamples"`),
-#'   `dispatch_configs` (logical; use the furrr branch), `tune_allow_par`
+#'   `dispatch_configs` (logical; dispatch the configurations to the
+#'   daemons), `tune_allow_par`
 #'   (logical; what the single-config functions pass to tune's control), and
 #'   `tune_parallel_over` (`"resamples"` or `NULL`; the value *requested* of
 #'   tune, which may rewrite it, see the note on `tune:::.update_parallel_over`
@@ -96,68 +100,36 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 }
 
 ## ---------------------------------------------------------------------------
-## Plan inspection
+## The daemons
 ## ---------------------------------------------------------------------------
 
-#' Label the registered future plan
+#' The mirai daemons connected now
 #'
 #' @description
-#' `future::plan()` returns the outer strategy as a function, never a list,
-#' so nesting depth comes from `future::plan("list")`. Each level's class
-#' stack is e.g. `tweaked, multisession, cluster, multiprocess, future,
-#' function`; the first class after the wrapper classes names the strategy.
+#' `mirai::info()[["connections"]]` on the current profile, which is the
+#' number tune reads when it chooses mirai. The one place horizons reads the
+#' pool's size, so tests mock it here.
 #'
-#' @return A string such as `"sequential"`, `"multisession"`, or
-#'   `"multisession > multisession"` for a nested plan.
+#' @return Integer: `0L` when no daemons are set.
 #' @keywords internal
-registered_plan_label <- function() {
+#' @noRd
+connected_daemons <- function() {
 
-  levels <- future::plan("list")
+  counts <- mirai::info(.compute = NULL)
 
-  labels <- vapply(levels, function(level) {
+  if (is.null(counts)) return(0L)
 
-    cls <- setdiff(class(level), c("FutureStrategy", "tweaked", "future", "function"))
-    if (length(cls) == 0) "unknown" else cls[[1]]
-
-  }, character(1))
-
-  paste(labels, collapse = " > ")
+  as.integer(counts[["connections"]])
 
 }
 
-#' Workers the registered plan offers
+#' Check that a parallel run has daemons to run on
 #'
 #' @description
-#' `future::nbrOfWorkers()` for the level about to be used, which is the
-#' number `tune::choose_framework()` reads. For a nested plan this is the
-#' outer level; the inner count is visible only from inside a worker.
-#'
-#' @return Integer.
-#' @keywords internal
-registered_workers <- function() {
-
-  n <- future::nbrOfWorkers()
-
-  ## Some backends (batchtools-style HPC schedulers) report +Inf. Treat an
-  ## unbounded plan as usable and record it as NA rather than letting
-  ## as.integer(Inf) produce a warning and an NA that trips `>=`.
-  if (!is.finite(n)) return(NA_integer_)
-
-  as.integer(n)
-
-}
-
-#' Check that a parallel run has a backend to run on
-#'
-#' @description
-#' Called only when the caller asked for parallelism. The gate is
-#' `nbrOfWorkers() < 2`, not the plan's class: `plan(multisession,
-#' workers = 1)` is not `sequential`-classed but yields nothing, and tune
-#' returns `"sequential"` for it silently. That silence was issue #37.
-#'
-#' A fresh session and an explicit `plan(sequential)` are indistinguishable
-#' (same class, same recorded call), so the message is written to be true of
-#' both.
+#' Called only when the caller asked for parallelism. The gate is two
+#' connected daemons: with one, tune runs sequentially, silently, which was
+#' issue #37. A `future::plan()` is not read: tune is given `allow_par = TRUE`
+#' only when this passes, and then takes mirai, so it never uses a plan.
 #'
 #' Running sequentially is a substitution (something other than what was
 #' asked ran), so it is recorded on the verb's collector as a
@@ -165,42 +137,262 @@ registered_workers <- function() {
 #'
 #' @param verb Character. The verb, for the message (`"evaluate"`).
 #' @param collector The verb's collector, from `log_open()`.
-#' @param call The frame a refusal reports: the verb's.
 #' @return `TRUE` if parallel dispatch is possible, else `FALSE`, with the
 #'   warning recorded.
 #' @keywords internal
-check_parallel_backend <- function(verb, collector, call = rlang::caller_env()) {
+check_parallel_backend <- function(verb, collector) {
 
-  n     <- registered_workers()
-  label <- registered_plan_label()
+  n <- connected_daemons()
 
-  ## NA means the backend reported an unbounded worker count; that is usable.
-  if (is.na(n) || n >= 2L) {
-
-    ## tune's future path calls future.apply::future_lapply() and checks only
-    ## that `future` is installed (tune 2.1.0, loop_call()). horizons declares
-    ## future.apply in Imports for exactly this reason; the literal check here
-    ## is what R CMD check's static "declared Imports should be used" test
-    ## recognises, and it is a real guard for a broken library.
-    if (!requireNamespace("future.apply", quietly = TRUE)) {
-
-      abort_horizons(c(
-        "{.pkg future.apply} is not installed, but tune's future backend calls it.",
-        "i" = "Install it with {.code install.packages(\"future.apply\")}."
-      ), kind = "dependency", call = call)
-
-    }
-
-    return(TRUE)
-
-  }
+  if (n >= 2L) return(TRUE)
 
   log_warning(collector, "substitution", c(
-    "{.fn {verb}} was asked to run in parallel ({.code allow_par = TRUE}) but the registered future plan offers {n} worker{?s} ({.val {label}}), so it ran sequentially.",
-    "i" = "Register a backend before calling, for example {.code future::plan(future::multisession, workers = 4)}."
+    "{.fn {verb}} was asked to run in parallel ({.code allow_par = TRUE}) but {n} mirai daemon{?s} {?is/are} connected, so it ran sequentially.",
+    "i" = "Set daemons before calling, for example {.code mirai::daemons(4)}. A {.code future::plan()} is no longer used."
   ))
 
   FALSE
+
+}
+
+#' Wait until one of the tasks in flight resolves, or stop when no daemon is left
+#'
+#' @description
+#' Every wait horizons owns on the daemons goes through this one, so none
+#' blocks for ever. A task queued with no daemon connected waits for ever
+#' under mirai, which relaunches no daemon that exits (under `maxtasks`,
+#' `idletime` or `walltime`) or dies. So the wait polls, reading the
+#' connected daemons at every poll, and calls `no_daemons()`, which stops
+#' the run, when none is left while a task is unresolved. `race_mirai()`
+#' would block in that case.
+#'
+#' @param tasks List of `mirai` objects, at least one.
+#' @param no_daemons A function of no arguments that stops the run.
+#' @return `NULL`, invisibly, once a task has resolved.
+#' @keywords internal
+#' @noRd
+await_round <- function(tasks, no_daemons) {
+
+  repeat {
+
+    if (!all(vapply(tasks, mirai::unresolved, logical(1)))) return(invisible(NULL))
+
+    if (connected_daemons() == 0L) no_daemons()
+
+    Sys.sleep(DISPATCH_POLL_SECONDS)
+
+  }
+
+}
+
+#' Stop the call because no daemon is left to run its work
+#'
+#' @description
+#' Raised by a wait with work remaining and no daemon connected
+#' ([await_round()]), and before a unit of work on the daemons
+#' (`stop_on_worker_death()`). The likely cause is a daemon's own limit, which
+#' mirai does not restart it from; horizons starts no daemons of its own.
+#'
+#' @param results The rows finished so far, carried as `results`, or `NULL`
+#'   when the verb has none to carry.
+#' @param n_left Integer(1) or `NULL`. The configurations still to run, when
+#'   the caller knows them.
+#' @param output_dir The run's `output_dir`, or `NULL`.
+#' @param verb Character(1). The verb that stops.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_no_daemons`
+#'   (then `horizons_error_systemic`, kind `run`).
+#' @keywords internal
+#' @noRd
+abort_no_daemons <- function(results, n_left = NULL, output_dir = NULL, verb = "evaluate",
+                             call = rlang::caller_env()) {
+
+  abort_horizons(c(
+    if (is.null(n_left)) {
+      "No mirai daemon is connected, so {.fn {verb}} stopped before its work was done."
+    } else {
+      "No mirai daemon is connected, so {.fn {verb}} stopped with {n_left} configuration{?s} still to run."
+    },
+    "i" = "A daemon exits after {.arg maxtasks} tasks, or past {.arg idletime} or {.arg walltime}, and mirai does not start it again. Set daemons without those limits, or launch more with {.code mirai::launch_local()}.",
+    "i" = resume_hint(results, output_dir)
+  ), kind = "run", class = c("horizons_error_no_daemons", "horizons_error_systemic"),
+  results = results, call = call)
+
+}
+
+#' Where a stopped run's finished work is, for its message
+#'
+#' @param results The rows finished so far, or `NULL` when the verb has none.
+#' @param output_dir The run's `output_dir`, or `NULL`.
+#' @return Character(1) or `NULL`: a cli line, interpolated where the
+#'   caller's `output_dir` and `verb` are.
+#' @keywords internal
+#' @noRd
+resume_hint <- function(results, output_dir) {
+
+  if (!is.null(output_dir)) {
+    "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
+  } else if (!is.null(results)) {
+    "The rows finished so far are in this error's {.field results} field."
+  }
+
+}
+
+#' The condition a daemon's error was, raised again in this session
+#'
+#' @description
+#' mirai returns an error raised in a task as a `miraiError`: a string whose
+#' attributes are the condition's fields (`message`, `call`, `parent`,
+#' `results` and the rest) and its classes (`condition.class`). Rebuilt from
+#' them, it is caught by its class and prints its message as it would have
+#' in the task, so `horizons_error_missing_package`, the kinds no unit
+#' contains and a version refusal keep working across the boundary.
+#'
+#' @param err A `miraiError`.
+#' @return A condition object.
+#' @keywords internal
+#' @noRd
+mirai_condition <- function(err) {
+
+  fields <- attributes(err)
+  fields <- fields[setdiff(names(fields), c("class", "condition.class", "stack.trace"))]
+
+  structure(fields, class = err$condition.class)
+
+}
+
+## ---------------------------------------------------------------------------
+## The configs axis's dispatch
+## ---------------------------------------------------------------------------
+
+#' Run configurations on the daemons, a window at a time
+#'
+#' @description
+#' At most as many configurations are in flight as there are daemons
+#' connected, read again each round, so the window narrows when a daemon
+#' leaves and widens when one joins, and this session holds one serialized
+#' payload per daemon: submitting every configuration at once would hold all
+#' of them. Each is collected as it finishes and the next submitted. Every
+#' wait goes through [await_round()], so a window left with no daemon stops
+#' the run rather than waiting for ever.
+#'
+#' What a task returns is read here. A row is appended to `finished$rows`.
+#' A `miraiError` is the task's own error, raised again as the condition it
+#' was ([mirai_condition()]). Any other error value is the transport, and is
+#' raised as `horizons_error_systemic`: `errorValue` 19 is the daemon's
+#' death. A stop's rows so far are `finished$rows`, which the caller
+#' carries.
+#'
+#' Each task sends the worker function and its arguments, not a closure: the
+#' function's environment is horizons' namespace, which a daemon resolves to
+#' its installed horizons, so nothing in this frame or the caller's travels.
+#'
+#' @param configs The configurations still to run (`shared$configs`).
+#' @param shared The payload every task carries ([evaluate_config_worker()]).
+#' @param finished An environment whose `rows` the window appends each row
+#'   to, in the order they finish.
+#' @param no_daemons A function of `n_left`, the configurations not
+#'   finished, that stops the run.
+#' @return `NULL`, invisibly, once every configuration's row is in
+#'   `finished$rows`.
+#' @keywords internal
+#' @noRd
+dispatch_configs <- function(configs, shared, finished, no_daemons) {
+
+  n_configs <- nrow(configs)
+  start     <- seq_len(n_configs)
+
+  ### The task's call, quoted here: its names are the task's arguments
+  task_call <- quote(worker(config_i, shared))
+  tasks     <- list()
+  next_i    <- 1L
+  n_done    <- 0L
+
+  repeat {
+
+    ## Collect what has finished
+    for (key in names(tasks)) {
+
+      if (mirai::unresolved(tasks[[key]])) next
+
+      value        <- tasks[[key]]$data
+      tasks[[key]] <- NULL
+
+      if (mirai::is_mirai_error(value)) stop(mirai_condition(value))
+
+      if (mirai::is_error_value(value)) {
+        abort_task_ended(value, configs$config_id[as.integer(key)])
+      }
+
+      finished$rows <- c(finished$rows, list(value))
+      n_done        <- n_done + 1L
+
+    }
+
+    if (n_done == n_configs) return(invisible(NULL))
+
+    ## Submit while there are daemons free
+    width <- connected_daemons()
+
+    while (next_i <= n_configs && length(tasks) < width) {
+
+      i      <- start[next_i]
+      next_i <- next_i + 1L
+
+      tasks[[as.character(i)]] <- mirai::mirai(
+        task_call,
+        .args    = list(worker = evaluate_config_worker, config_i = i, shared = shared),
+        .compute = NULL
+      )
+
+    }
+
+    if (length(tasks) == 0L) no_daemons(n_configs - n_done)
+
+    await_round(tasks, function() no_daemons(n_configs - n_done))
+
+  }
+
+}
+
+#' Stop the call because a configuration's task ended without a result
+#'
+#' @param value The task's error value: `errorValue` 19 when its daemon
+#'   died, another for another transport failure.
+#' @param config_id Character(1). The configuration it was running.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`), which `stop_on_worker_death()` wraps with the rows so far.
+#' @keywords internal
+#' @noRd
+abort_task_ended <- function(value, config_id, call = rlang::caller_env()) {
+
+  code <- as.integer(value)
+
+  abort_horizons(
+    if (identical(code, 19L)) {
+      "The daemon running configuration {.val {config_id}} stopped while it ran ({.code errorValue} 19, Connection reset)."
+    } else {
+      "Configuration {.val {config_id}}'s task ended in mirai's {.code errorValue} {code} rather than a result."
+    },
+    kind = "run", class = "horizons_error_systemic", call = call
+  )
+
+}
+
+#' Rows in configuration order
+#'
+#' @param rows List of result rows, each with a `config_id`.
+#' @param config_ids Character. Every configuration's id, in configuration
+#'   order.
+#' @return `rows`, ordered as `config_ids`.
+#' @keywords internal
+#' @noRd
+in_config_order <- function(rows, config_ids) {
+
+  ids <- vapply(rows, function(row) row$config_id, character(1))
+
+  rows[order(match(ids, config_ids))]
 
 }
 

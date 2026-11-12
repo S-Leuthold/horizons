@@ -443,12 +443,12 @@ describe("evaluate() - its control", {
 
   it("runs sequentially when allow_par = TRUE has no backend, and says so once, on the log too", {
 
-    local_plan(future::sequential)
+    mirai::daemons(0)
 
     got <- collect_warnings(
       evaluate(make_eval_object(n = 60, n_configs = 1), prune = FALSE, seed = 42L,
                control = control_horizons(allow_par = TRUE)),
-      "offers 1 worker"
+      "mirai daemons are connected"
     )
     ev <- got$value
     w  <- got$warnings[[1]]
@@ -458,7 +458,7 @@ describe("evaluate() - its control", {
 
     expect_length(got$warnings, 1L)
     expect_s3_class(w, "horizons_warning_substitution")
-    expect_match(conditionMessage(w), "evaluate\\(\\).*offers 1 worker")
+    expect_match(conditionMessage(w), "evaluate\\(\\).*0 mirai daemons are connected")
     expect_identical(warned$verb, "evaluate")
     expect_identical(warned$topic, "substitution")
     expect_identical(w$log, warned)
@@ -3145,52 +3145,78 @@ describe("evaluate() - the circuit breaker", {
 
 })
 
+## On the resamples axis tune runs the folds on the daemons, and a death there
+## is no error of tune's own: the connected daemons fall across the
+## configuration. These mock the axis and the count; the two after them kill
+## a real daemon.
+
 describe("evaluate() - a worker's death", {
 
-  it("stops the run as systemic, chained to future's error, with the rows finished so far", {
+  it("stops the run as systemic when the daemons fall across a configuration, with the rows finished so far", {
 
     template <- ev60()$evaluation$results[1, ]
+    fallen   <- FALSE
 
-    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
-      if (config_row$config_id == "cfg_002") {
-        stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
-                       list(message = "A future worker died.", call = NULL)))
+    local_mocked_bindings(
+      check_parallel_backend = function(...) TRUE,
+      check_parallel_workers = function(...) invisible(NULL),
+      connected_daemons      = function() if (fallen) 1L else 2L,
+      evaluate_single_config = function(config_row, ...) {
+        if (config_row$config_id == "cfg_002") fallen <<- TRUE
+        mock_eval_row(template, config_row$config_id, "success")
       }
-      mock_eval_row(template, config_row$config_id, "success")
-    })
+    )
 
-    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L)),
-                        class = "horizons_error_systemic")
+    run <- function(output_dir = NULL) {
+      fallen <<- FALSE
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples",
+                                                           output_dir = output_dir)))
+    }
 
-    expect_true(rlang::cnd_inherits(err, "FutureError"))
-    ## Wrapped once: future's error is the direct parent, and the message is
-    ## not repeated
-    expect_s3_class(err$parent, "FutureError")
-    expect_length(gregexpr("A parallel worker stopped while", conditionMessage(err), fixed = TRUE)[[1]], 1L)
+    err <- expect_error(run(), class = "horizons_error_systemic")
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A parallel worker stopped while `evaluate()` was running", fixed = TRUE)
+    expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
+    expect_match(msg, "in this error's results field", fixed = TRUE)
     expect_identical(err$results$config_id, "cfg_001")
-    expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
-    expect_match(conditionMessage(err), "in this error's results field", fixed = TRUE)
+    ## No unit error to chain to: the configuration's row came back
+    expect_null(err$parent)
+    expect_length(gregexpr("A parallel worker stopped while", msg, fixed = TRUE)[[1]], 1L)
 
-    ## With an output_dir, the finished configurations are on disk to resume from
+    ## With an output_dir, the finished configurations are on disk to resume
+    ## from, and the configuration the fall spoiled is not
     dir <- withr::local_tempdir()
-    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
-                                                  control = control_horizons(output_dir = dir))),
-                        class = "horizons_error_systemic")
+    err <- expect_error(run(dir), class = "horizons_error_systemic")
     expect_match(gsub("\\s+", " ", conditionMessage(err)), "calling `evaluate()` again with it resumes from them",
                  fixed = TRUE)
     expect_identical(list.files(file.path(dir, "checkpoints")), "cfg_001.rds")
 
   })
 
-  it("carries a results table with every column and no rows when the first configuration's worker dies", {
+  it("carries a results table with every column and no rows when the daemons fall across the first configuration", {
 
-    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
-      stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
-                     list(message = "A future worker died.", call = NULL)))
-    })
+    fallen <- FALSE
 
-    err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L)),
-                        class = "horizons_error_systemic")
+    local_mocked_bindings(
+      check_parallel_backend = function(...) TRUE,
+      check_parallel_workers = function(...) invisible(NULL),
+      connected_daemons      = function() if (fallen) 1L else 2L,
+      evaluate_single_config = function(config_row, ...) {
+        fallen <<- TRUE
+        stop("Argument 1 must be a data frame or a named atomic vector.")
+      }
+    )
+
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+      class = "horizons_error_systemic"
+    )
+
+    ## Chained to the unit's error
+    expect_match(conditionMessage(err$parent), "Argument 1 must be a data frame", fixed = TRUE)
 
     one <- create_failed_result("cfg_001", "failed")
 
@@ -3200,19 +3226,60 @@ describe("evaluate() - a worker's death", {
 
   })
 
-  it("stops a resamples-axis run whose worker is killed (installed build)", {
+  it("stops with the rows so far when no daemon is connected as a configuration starts", {
+
+    template <- ev60()$evaluation$results[1, ]
+    emptied  <- FALSE
+    real_feed <- breaker_feed
+
+    local_mocked_bindings(
+      check_parallel_backend = function(...) TRUE,
+      check_parallel_workers = function(...) invisible(NULL),
+      connected_daemons      = function() if (emptied) 0L else 2L,
+      evaluate_single_config = function(config_row, ...) mock_eval_row(template, config_row$config_id, "success"),
+      ## The first configuration's row is in, and its daemons read, by the time
+      ## the breaker sees it: every daemon is gone before the second starts
+      breaker_feed           = function(...) {
+        emptied <<- TRUE
+        real_feed(...)
+      }
+    )
+
+    err <- expect_error(
+      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+      class = "horizons_error_no_daemons"
+    )
+
+    expect_s3_class(err, "horizons_error_systemic")
+    expect_identical(err$results$config_id, "cfg_001")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "No mirai daemon is connected, so `evaluate()` stopped", fixed = TRUE)
+    expect_match(msg, "`maxtasks` tasks, or past `idletime` or `walltime`", fixed = TRUE)
+    ## Not wrapped as a death
+    expect_null(err$parent)
+
+  })
+
+  it("stops a resamples-axis run whose daemon is killed in a fold (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
 
-    ## A recipe step that kills the worker it runs on, on an analysis set;
-    ## never the parent, which preps the whole training part. The function
-    ## is written into the step, so the worker needs nothing from here.
+    ## A recipe step that kills the daemon it runs on, on an analysis set,
+    ## once; never the parent, which preps the whole training part. The
+    ## function is written into the step, so the daemon needs nothing from
+    ## here. Once only: with every daemon gone, tune would wait for its
+    ## queued folds for ever (a documented limit).
+    killed <- withr::local_tempfile(pattern = "killed")
     kill <- bquote((function(x) {
-      if (length(x) < 45 && Sys.getpid() != .(Sys.getpid())) tools::pskill(Sys.getpid(), tools::SIGKILL)
+      if (length(x) < 45 && !file.exists(.(killed)) && Sys.getpid() != .(Sys.getpid())) {
+        file.create(.(killed))
+        tools::pskill(Sys.getpid(), tools::SIGKILL)
+      }
       x
     })(sample_id))
     real_recipe <- build_recipe
@@ -3221,34 +3288,33 @@ describe("evaluate() - a worker's death", {
     })
 
     err <- expect_error(
-      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
-                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+      with_deadline(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))), 120),
       class = "horizons_error_systemic"
     )
-    expect_true(rlang::cnd_inherits(err, "FutureError"))
-    ## Wrapped once: future's error is the direct parent, and the message is
-    ## not repeated
-    expect_s3_class(err$parent, "FutureError")
-    expect_length(gregexpr("A parallel worker stopped while", conditionMessage(err), fixed = TRUE)[[1]], 1L)
+
+    expect_true(file.exists(killed))
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
+    expect_length(gregexpr("A parallel worker stopped while", msg, fixed = TRUE)[[1]], 1L)
+    expect_identical(nrow(err$results), 0L)
 
   })
 
-  it("stops a resamples-axis run whose worker is killed during a Bayesian iteration, checkpointing nothing (installed build)", {
+  it("stops a resamples-axis run whose daemon is killed during a Bayesian iteration, checkpointing nothing (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
 
-    ## tune's search catches future's error there, so the death reaches
-    ## evaluate() only as future.apply's unclassed report of it (a warning
-    ## before future.apply 1.21.0, a message since), matched by its text: if
-    ## that wording or its form changes, this fails rather than the death
-    ## reading as a search that stopped early. The kill is armed at the
-    ## search's second Gaussian-process prediction, once an iteration has
-    ## run, and fires once, on a worker, from a recipe step that needs
-    ## nothing from here.
+    ## tune's search stops quietly there ("Optimization stopped
+    ## prematurely") and returns what it had, so the death is read from the
+    ## daemons connected, and the search it cut short is never kept. The kill
+    ## is armed at the search's second Gaussian-process prediction, once an
+    ## iteration has run, and fires once, on a daemon, from a recipe step that
+    ## needs nothing from here.
     armed  <- withr::local_tempfile(pattern = "armed")
     killed <- withr::local_tempfile(pattern = "killed")
     kill <- bquote((function(x) {
@@ -3276,20 +3342,18 @@ describe("evaluate() - a worker's death", {
 
     dir <- withr::local_tempdir()
     err <- expect_error(
-      suppressWarnings(evaluate(obj, seed = 42L,
-                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples",
-                                                           output_dir = dir))),
+      with_deadline(suppressWarnings(evaluate(obj, seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "resamples",
+                                                                         output_dir = dir))), 120),
       class = "horizons_error_systemic"
     )
 
     expect_true(file.exists(killed))
-    expect_match(conditionMessage(err), "A parallel worker stopped", fixed = TRUE)
-    expect_match(conditionMessage(err$parent), "A parallel worker stopped during the Bayesian search", fixed = TRUE)
-    ## Wrapped once: the unit's systemic error is the direct parent, and
-    ## future.apply's report is its cause
-    expect_s3_class(err$parent, "horizons_error_systemic")
-    expect_true(inherits(err$parent$parent, c("warning", "message")))
-    expect_match(conditionMessage(err$parent$parent), "^Caught [A-Za-z]*Future[A-Za-z]*Error\\. Canceling all iterations")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A parallel worker stopped", fixed = TRUE)
+    expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
+    ## The configuration's row, the search cut short, was never kept
+    expect_identical(nrow(err$results), 0L)
     expect_length(list.files(file.path(dir, "checkpoints")), 0L)
 
   })
@@ -3301,26 +3365,6 @@ describe("evaluate() - a worker's death", {
 
     expect_identical(class(err), class(boom))
     expect_null(err$parent)
-
-  })
-
-  it("is read from future.apply's report, a warning or a message, for every class of future's errors, and for no other", {
-
-    ## A warning before future.apply 1.21.0; a message, ending in a newline, since
-    caught <- function(class) simpleWarning(paste0("Caught ", class, ". Canceling all iterations ..."))
-    told   <- function(class) simpleMessage(paste0("Caught ", class, ". Canceling all iterations ...\n"))
-
-    for (class in c("FutureInterruptError", "FutureError", "FutureLaunchError", "RngFutureError",
-                    "UnexpectedFutureResultError", "GlobalEnvMisuseFutureError")) {
-      expect_true(worker_death_signal(caught(class)), label = class)
-      expect_true(worker_death_signal(told(class)), label = class)
-    }
-
-    ## future.apply reports an error the worker's own code raised the same way
-    expect_false(worker_death_signal(caught("simpleError")))
-    expect_false(worker_death_signal(told("simpleError")))
-    expect_false(worker_death_signal(caught("rlang_error")))
-    expect_false(worker_death_signal(simpleWarning("A FutureInterruptError was caught.")))
 
   })
 

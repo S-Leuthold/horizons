@@ -1386,7 +1386,7 @@ describe("fit_single_config() - the stages' units", {
 
     skip_unless_slow_tier()
 
-    ## A worker started under furrr_options(seed = TRUE) is on L'Ecuyer-CMRG.
+    ## A daemon set with daemons(seed = ) is on L'Ecuyer-CMRG.
     ## Each stage is a unit of its own, so the caller's state shows nowhere,
     ## the warm-start grid stage included, whose forests would otherwise draw
     ## their seeds from the stream: its scores, read from tune's result for

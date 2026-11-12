@@ -417,13 +417,12 @@ describe("run_unit()", {
 
   })
 
-  it("never contains a worker's death, which future raises as a FutureError", {
+  it("never contains a systemic stop raised inside it", {
 
-    died <- structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
-                      list(message = "A future worker died.", call = NULL))
-
-    expect_error(run_unit(stop(died), "configuration", "cfg_1"),
-                 class = "FutureInterruptError")
+    expect_error(run_unit(abort_horizons("The run cannot go on.", kind = "run",
+                                         class = "horizons_error_systemic"),
+                          "configuration", "cfg_1"),
+                 class = "horizons_error_systemic")
 
   })
 

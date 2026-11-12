@@ -210,8 +210,8 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
   ## Step 0b: Parallel backend
   ## -------------------------------------------------------------------------
-  ## The user owns the backend; confirm there is one and pin threads here
-  ## before tune spawns anything. Never touch the plan.
+  ## The user owns the daemons; confirm there are some and pin threads here.
+  ## Never set, resize or reset the daemons.
   ##
   ## Debug runs in this session: a backtrace from a worker shows the worker's
   ## plumbing, and no debugger attaches there. The user asked for debug, so
@@ -283,7 +283,7 @@ ensemble <- function(x,
     ))
 
   }, unit = "meta_learner", id = method, debug = debug, keep_traces = control$keep_traces),
-  results = NULL, verb = "ensemble")
+  results = NULL, verb = "ensemble", daemons = allow_par)
 
   if (meta$failed) abort_ensemble_failed(meta$records, method)
 

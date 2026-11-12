@@ -366,8 +366,8 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 0b: Parallel backend
   ## -----------------------------------------------------------------------
-  ## The user owns the backend. Confirm there is one to run on, pin threads
-  ## in this process before tune spawns anything, and never touch the plan.
+  ## The user owns the daemons. Confirm there are some to run on, pin
+  ## threads in this process, and never set, resize or reset the daemons.
   ##
   ## Debug runs in this session: a backtrace from a worker shows the worker's
   ## plumbing, and no debugger attaches there. The user asked for debug, so
@@ -382,10 +382,6 @@ fit <- function(x,
     allow_par <- check_parallel_backend("fit", collector)
 
     if (allow_par) {
-
-      ## tune's workers run horizons' recipe steps and the PLS engine, so
-      ## they must run this session's horizons
-      check_parallel_workers("fit")
 
       unpin_threads <- pin_parent_threads()
       on.exit(unpin_threads(), add = TRUE)
@@ -463,7 +459,17 @@ fit <- function(x,
   ## Every engine and selection step the members need, before any is
   ## fitted. Only the members: an evaluation that also holds a mars
   ## configuration does not need earth to fit the others.
-  check_config_packages(all_configs[all_configs$config_id %in% top_configs$config_id, ], "fit")
+  member_configs <- all_configs[all_configs$config_id %in% top_configs$config_id, ]
+
+  check_config_packages(member_configs, "fit")
+
+  ## tune's tasks on the daemons run horizons' recipe steps and the PLS
+  ## engine, and fit the members' engines, so every daemon must run this
+  ## session's horizons and load the members' packages: checked before
+  ## anything is drawn
+  if (allow_par) {
+    check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection), collector)
+  }
 
   ## configure() stores the screening and the final re-tune budgets
   ## separately; fit() used to pass the screening one to the re-tune, so the
@@ -834,7 +840,7 @@ fit <- function(x,
       min_degradation_rows = control$min_degradation_rows,
       debug                = debug,
       keep_traces          = control$keep_traces
-    ), member_results(results_list), verb = "fit")
+    ), member_results(results_list), verb = "fit", daemons = allow_par)
 
     results_list[[i]] <- config_result
 

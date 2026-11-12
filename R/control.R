@@ -43,7 +43,7 @@ control_check_parallelize_over <- function(x, arg, call) {
 
     abort_horizons(c(
       "{.arg {arg}} = {.val both} is not supported.",
-      "i" = "Nested parallelism is the user's to register: set a nested {.fn future::plan} and use {.val configs}."
+      "i" = "Use {.val configs} or {.val resamples}."
     ), kind = "input", call = call)
 
   }

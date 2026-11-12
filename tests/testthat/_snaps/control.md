@@ -24,7 +24,7 @@
     Condition
       Error in `control_horizons()`:
       ! `parallelize_over` = "both" is not supported.
-      i Nested parallelism is the user's to register: set a nested `future::plan()` and use "configs".
+      i Use "configs" or "resamples".
 
 ---
 

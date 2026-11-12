@@ -2,14 +2,16 @@
 ## Tests: evaluate() parallel execution
 ## ---------------------------------------------------------------------------
 
-## Parallel workers resolve horizons by name in the INSTALLED library, so
-## evaluate() refuses either parallel axis under devtools::load_all() (see the
-## guard tests below). The dispatching tests therefore run only against an installed
-## build: R CMD check, or devtools::test() after devtools::install().
+## Daemons resolve horizons by name in the INSTALLED library, so evaluate()
+## refuses either parallel axis under devtools::load_all() (see the guard
+## tests below). The dispatching tests therefore run only against an installed
+## build, with R_LIBS on it: R CMD check, or devtools::test() after
+## devtools::install().
 ## skip_if_dev_package() comes from helper-load-all.R, shared with
 ## test-pipeline-predict.R's fresh-process round trip.
 
-## local_plan() and keep_only_warning() come from helper-parallel.R. Runs that
+## local_test_daemons(), with_deadline() and keep_only_warning() come from
+## helper-parallel.R. Runs that
 ## several tests read are built once, on first use, through helper-memo.R;
 ## each accessor is defined just above the tests that read it.
 
@@ -212,9 +214,9 @@ describe("evaluate() parallel worker footprint", {
     shared <- worker_payload()
     shared$configs$model <- "lightgbm"
 
-    ## A callr process rather than a future: a future sent from a session
-    ## that has loaded bonsai can load it on the worker as well, which would
-    ## pass without the fix. bonsai registers lightgbm's engine only once
+    ## A callr process rather than a daemon: a task sent from a session that
+    ## has loaded bonsai can load it on the daemon as well, which would pass
+    ## without the fix. bonsai registers lightgbm's engine only once
     ## loaded, so the process reports whether it had.
     res <- callr::r(function(shared) {
       before <- isNamespaceLoaded("bonsai")
@@ -278,12 +280,12 @@ describe("evaluate() parallel worker footprint", {
   it("refuses a parallel run under devtools::load_all(), on either axis, before anything is drawn", {
 
     ## The seam reports load_all(), so this runs on an installed build too;
-    ## the plan is mocked, since the refusal comes before it would be used
+    ## the daemons are mocked, since the refusal comes before they would be
+    ## used
     local_mocked_bindings(
       running_under_load_all = function() TRUE,
       check_parallel_backend = function(...) TRUE,
-      registered_workers     = function() 2L,
-      registered_plan_label  = function() "multisession",
+      connected_daemons      = function() 2L,
       draw_eval_split        = function(...) stop("the split was drawn"),
       evaluate_single_config = function(...) stop("a configuration ran")
     )
@@ -318,10 +320,9 @@ describe("evaluate() parallel worker footprint", {
 
     local_mocked_bindings(
       running_under_load_all  = function() FALSE,
-      worker_horizons_version = function() "0.0.1",
+      daemon_reports          = function(...) daemons_on("0.0.1"),
       check_parallel_backend  = function(...) TRUE,
-      registered_workers      = function() 2L,
-      registered_plan_label   = function() "multisession",
+      connected_daemons       = function() 2L,
       draw_eval_split         = function(...) stop("the split was drawn")
     )
 
@@ -337,16 +338,15 @@ describe("evaluate() parallel worker footprint", {
 
   it("says on the console, under verbose only, how many configurations it sends out and where to monitor them", {
 
-    ## The dispatch is stopped at furrr, so this runs under load_all() too
+    ## The dispatch is stopped at the window, so this runs under load_all()
+    ## too
     local_mocked_bindings(
       running_under_load_all  = function() FALSE,
-      worker_horizons_version = function() as.character(utils::packageVersion("horizons")),
+      daemon_reports          = matching_daemons,
       check_parallel_backend  = function(...) TRUE,
-      registered_workers      = function() 2L,
-      registered_plan_label   = function() "multisession"
+      connected_daemons       = function() 2L,
+      dispatch_configs        = function(...) rlang::abort("stop", class = "dispatched")
     )
-    local_mocked_bindings(future_map = function(...) rlang::abort("stop", class = "dispatched"),
-                          .package = "furrr")
 
     run <- function(verbose) {
       dir <- withr::local_tempdir(.local_envir = parent.frame())
@@ -367,13 +367,59 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("asks a worker of the registered plan which horizons it loads", {
+  it("asks every daemon which horizons it loads and which of the run's packages it lacks (installed build)", {
 
-    ## On a sequential plan the future runs here, so it loads this one
-    local_plan(future::sequential)
+    skip_on_cran()
+    skip_if_dev_package()
+    local_test_daemons(2)
 
-    expect_identical(horizons:::worker_horizons_version(),
-                     as.character(utils::packageVersion("horizons")))
+    reports <- with_deadline(daemon_reports(c("rules", "horizonsFakePkgXYZ123")), 30)
+
+    ## One report from each daemon, which loads the build R_LIBS names
+    expect_length(reports, 2L)
+    expect_length(unique(vapply(reports, function(r) r$pid, integer(1))), 2L)
+    expect_false(Sys.getpid() %in% vapply(reports, function(r) r$pid, integer(1)))
+    for (r in reports) {
+      expect_identical(r$version, as.character(utils::packageVersion("horizons")))
+      expect_identical(r$missing, "horizonsFakePkgXYZ123")
+    }
+
+  })
+
+  it("refuses a run whose daemons lack a package, naming it and how many daemons lack it, and notes a daemon left unchecked", {
+
+    ## The reports mocked, so this runs under load_all() too
+    local_mocked_bindings(running_under_load_all = function() FALSE,
+                          connected_daemons      = function() 2L)
+
+    needed  <- needed_packages(c("svm_rbf", "plsr"), "none")
+    lacking <- function(...) list(
+      list(pid = 11L, version = as.character(utils::packageVersion("horizons")), missing = "kernlab"),
+      list(pid = 12L, version = as.character(utils::packageVersion("horizons")), missing = character(0))
+    )
+
+    local_mocked_bindings(daemon_reports = lacking)
+    err <- expect_error(check_parallel_workers("evaluate", needed, log_open("evaluate")),
+                        class = "horizons_error_missing_package")
+    expect_s3_class(err, "horizons_error_dependency")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "1 of the 2 mirai daemons checked cannot load 1 package `evaluate()` needs.", fixed = TRUE)
+    expect_match(msg, "kernlab, needed for svm_rbf", fixed = TRUE)
+
+    ## One daemon of the two answered: the other went unchecked, which is a
+    ## note, not a refusal
+    local_mocked_bindings(daemon_reports = function(...) daemons_on(pids = 11L))
+    collector <- log_open("evaluate")
+    expect_no_error(check_parallel_workers("evaluate", needed, collector))
+    rows <- log_close(collector)
+    expect_identical(rows$type, "note")
+    expect_match(rows$message, "checked 1 of the 2 mirai daemons connected", fixed = TRUE)
+
+    ## Every daemon checked: nothing on the log
+    local_mocked_bindings(daemon_reports = matching_daemons)
+    collector <- log_open("evaluate")
+    check_parallel_workers("evaluate", needed, collector)
+    expect_identical(nrow(log_close(collector)), 0L)
 
   })
 
@@ -396,44 +442,31 @@ describe("evaluate() - workers is gone", {
 
 })
 
-## future::plan("list") as a record that holds no live state, for the shared
-## runs below to keep. Each level's backend is an environment that counts the
-## futures run under it, so a stored plan list would change whenever the plan
-## was used again, and a memoised value must not change. The record keeps
-## each level's strategy and backend by identity, as identical() compares
-## them, and its class and set-up state, so a failure says what moved.
-plan_record <- function() {
+## The default profile's daemons as a run found or left them: how many were
+## set, whether any are, their dispatcher (a new one after any reset) and how
+## many are connected. The shared runs below keep it, so a run that set,
+## resized or reset the daemons shows.
+daemons_record <- function() {
 
-  lapply(future::plan("list"), function(strategy) {
-    list(strategy = rlang::obj_address(strategy),
-         class    = class(strategy),
-         init     = attr(strategy, "init"),
-         backend  = rlang::obj_address(attr(strategy, "backend")))
-  })
+  list(n          = mirai::nextget("n"),
+       set        = mirai::daemons_set(),
+       dispatcher = mirai::nextget("dispatcher"),
+       connected  = connected_daemons())
 
 }
 
-## One allow_par = TRUE run under a sequential plan, read by the two tests
-## below (helper-memo.R). The builder registers the sequential plan itself and
-## puts the caller's back, recording the plan as the run found it and left
-## it. future sets a registered plan up on its first use (nbrOfWorkers() is
-## one), which marks it as set up; the builder takes that step before it
-## records the plan, so the records compare the plan as a user who has used
-## it holds it, and only a change evaluate() makes shows. Builders must be
-## quiet, so the warnings evaluate() gave are kept (their messages, in order)
-## rather than shown, and replay_warnings() signals them again inside the
-## test that expects one.
+## One allow_par = TRUE run with no daemons set, read by the two tests below
+## (helper-memo.R), recording the daemons as the run found and left them.
+## Builders must be quiet, so the warnings evaluate() gave are kept (their
+## messages, in order) rather than shown, and replay_warnings() signals them
+## again inside the test that expects one.
 allow_par_run <- function() memo_fixture("allow_par_run", build_allow_par_run)
 
 build_allow_par_run <- function() {
 
-  old <- future::plan(future::sequential)
-  on.exit(future::plan(old), add = TRUE)
-  future::nbrOfWorkers()
-
-  plan_before <- plan_record()
-  obj         <- make_eval_object(n_configs = 2)
-  warnings    <- list()
+  daemons_before <- daemons_record()
+  obj            <- make_eval_object(n_configs = 2)
+  warnings       <- list()
 
   ## xgboost, not the fixture's cubist: the results are compared with a run
   ## made later in the session, and Cubist's neighbour cutoff comes from a
@@ -450,7 +483,7 @@ build_allow_par_run <- function() {
   )
 
   list(obj = obj, result = result, warnings = warnings,
-       plan_before = plan_before, plan_after = plan_record())
+       daemons_before = daemons_before, daemons_after = daemons_record())
 
 }
 
@@ -463,30 +496,30 @@ replay_warnings <- function(run) {
 
 describe("evaluate() - allow_par without a usable backend", {
 
-  it("warns naming the plan, runs sequentially, and never registers or alters the plan", {
+  it("warns naming the daemons connected, runs sequentially, and never sets or alters daemons", {
 
     run <- allow_par_run()
 
     expect_warning(
       result <- keep_only_warning(
         replay_warnings(run),
-        "offers 1 worker"
+        "0 mirai daemons are connected"
       ),
-      "offers 1 worker"
+      "0 mirai daemons are connected"
     )
 
     expect_s3_class(result, "horizons_eval")
     expect_equal(result$evaluation$parallelize_over, "sequential")
     expect_identical(result$evaluation$workers, 1L)
 
-    expect_identical(run$plan_after, run$plan_before)
+    expect_identical(run$daemons_after, run$daemons_before)
+    expect_false(run$daemons_after$set)
 
   })
 
   it("gives the same results as allow_par = FALSE", {
 
     run <- allow_par_run()
-    local_plan(future::sequential)
     obj <- run$obj
 
     seq_result <- suppressWarnings(
@@ -505,7 +538,7 @@ describe("evaluate() - allow_par without a usable backend", {
 
 describe("evaluate() - the parallel axis's setup", {
 
-  it("names the axis, plan and workers, records them, and pins the threads only while it runs", {
+  it("names the axis, the daemons and their count, records them, and pins the threads only while it runs", {
 
     ## The backend and the runner mocked: the runner records the thread
     ## option it sees and stops the run once the header is out
@@ -523,8 +556,7 @@ describe("evaluate() - the parallel axis's setup", {
         ),
         check_parallel_backend  = function(...) TRUE,
         check_parallel_workers  = function(...) invisible(NULL),
-        registered_workers      = function() workers,
-        registered_plan_label   = function() "multisession",
+        connected_daemons       = function() workers,
         evaluate_single_config  = function(...) {
           inside <<- getOption("ranger.num.threads")
           rlang::abort("stop", class = "header_rendered")
@@ -543,25 +575,22 @@ describe("evaluate() - the parallel axis's setup", {
     withr::local_options(ranger.num.threads = 7L)
 
     two        <- run(TRUE, 2L)
-    unbounded  <- run(TRUE, NA_integer_)
     sequential <- run(FALSE, 2L)
 
-    expect_identical(two$line, "│  Parallel: over resamples on multisession (2 workers)")
-    expect_identical(unbounded$line, "│  Parallel: over resamples on multisession (unbounded)")
+    expect_identical(two$line, "│  Parallel: over resamples on mirai (2 workers)")
     expect_identical(sequential$line, character())
 
-    ## allow_par = FALSE never inspects the plan
-    expect_identical(two$manifest, list(plan = "multisession", workers = 2L, axis = "resamples"))
-    expect_identical(unbounded$manifest$workers, NA_integer_)
+    ## allow_par = FALSE never reads the daemons
+    expect_identical(two$manifest, list(plan = "mirai", workers = 2L, axis = "resamples"))
     expect_identical(sequential$manifest,
                      list(plan = "sequential", workers = 1L, axis = "sequential"))
 
-    expect_identical(c(two$inside, unbounded$inside, sequential$inside), c(1L, 1L, 7L))
+    expect_identical(c(two$inside, sequential$inside), c(1L, 7L))
     expect_identical(getOption("ranger.num.threads"), 7L)
 
   })
 
-  it("runs a debug run in this session, whatever allow_par says, without inspecting the plan", {
+  it("runs a debug run in this session, whatever allow_par says, without reading the daemons", {
 
     dir <- withr::local_tempdir()
 
@@ -572,7 +601,7 @@ describe("evaluate() - the parallel axis's setup", {
                                                              output_dir = dir, verbose = TRUE))),
         header_rendered = function(e) NULL
       ),
-      check_parallel_backend = function(...) stop("the plan was inspected"),
+      check_parallel_backend = function(...) stop("the daemons were read"),
       check_parallel_workers = function(...) stop("the workers were asked"),
       evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
       .package = "horizons"
@@ -589,9 +618,9 @@ describe("evaluate() - the parallel axis's setup", {
 
 })
 
-## A worker cannot stop the others, so a checkpoint it could not write is
-## found only once every configuration has run: the evaluation is returned,
-## with one warning. The sequential path stops at the first failed write
+## On the configs axis a checkpoint a worker could not write is reported once
+## every configuration has run: the evaluation is returned, with one warning.
+## The sequential path stops at the first failed write
 ## (test-pipeline-evaluate.R).
 
 describe("evaluate() - a checkpoint a configs-axis worker could not write", {
@@ -606,18 +635,20 @@ describe("evaluate() - a checkpoint a configs-axis worker could not write", {
     ## under load_all() too
     local_mocked_bindings(
       running_under_load_all  = function() FALSE,
-      worker_horizons_version = function() as.character(utils::packageVersion("horizons")),
+      daemon_reports          = matching_daemons,
       check_parallel_backend  = function(...) TRUE,
-      registered_workers      = function() 2L,
-      registered_plan_label   = function() "multisession",
+      connected_daemons       = function() 2L,
       evaluate_single_config  = function(config_row, ...) {
         row <- template
         row$config_id <- config_row$config_id
         row
+      },
+      dispatch_configs        = function(configs, shared, finished, no_daemons) {
+        for (i in seq_len(nrow(configs))) {
+          finished$rows <- c(finished$rows, list(evaluate_config_worker(i, shared)))
+        }
       }
     )
-    local_mocked_bindings(future_map = function(.x, .f, ..., .options = NULL) lapply(.x, .f, ...),
-                          .package = "furrr")
 
     tmpdir <- withr::local_tempdir()
     store  <- file.path(tmpdir, "checkpoints")
@@ -667,7 +698,7 @@ describe("evaluate() - output_dir and the configs axis (#233)", {
     obj <- make_eval_object(n_configs = 4)
 
     local_mocked_bindings(
-      check_parallel_backend = function(...) stop("the plan was inspected"),
+      check_parallel_backend = function(...) stop("the daemons were read"),
       evaluate_single_config = function(...) stop("a configuration ran")
     )
 
@@ -690,14 +721,13 @@ describe("evaluate() - output_dir and the configs axis (#233)", {
       ),
       check_parallel_backend = function(...) TRUE,
       check_parallel_workers = function(...) invisible(NULL),
-      registered_workers     = function() 2L,
-      registered_plan_label  = function() "multisession",
+      connected_daemons      = function() 2L,
       evaluate_single_config = function(...) rlang::abort("stop", class = "header_rendered"),
       .package = "horizons"
     ))
 
     expect_identical(grep("Parallel:", out, value = TRUE, fixed = TRUE),
-                     "│  Parallel: over resamples on multisession (2 workers)")
+                     "│  Parallel: over resamples on mirai (2 workers)")
 
   })
 
@@ -716,18 +746,15 @@ describe("evaluate() - the worker payload limit", {
     run <- function(control) {
       seen <- NULL
       testthat::with_mocked_bindings(
-        testthat::with_mocked_bindings(
-          tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control)),
-                   dispatched = function(e) NULL),
-          future_map = function(...) {
-            seen <<- getOption("future.globals.maxSize")
-            rlang::abort("stop", class = "dispatched")
-          },
-          .package = "furrr"
-        ),
-        check_parallel_backend = function(...) TRUE,
-        registered_workers     = function() 2L,
-        registered_plan_label  = function() "multisession",
+        tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control)),
+                 dispatched = function(e) NULL),
+        dispatch_configs        = function(...) {
+          seen <<- getOption("future.globals.maxSize")
+          rlang::abort("stop", class = "dispatched")
+        },
+        check_parallel_backend  = function(...) TRUE,
+        daemon_reports          = matching_daemons,
+        connected_daemons       = function() 2L,
         .package = "horizons"
       )
       seen
@@ -750,40 +777,36 @@ describe("evaluate() - the worker payload limit", {
 ## Configs axis (installed build only)
 ## =========================================================================
 
-## One four-config run on a two-worker plan, parallelize_over = "auto"
-## (4 configs >= 3 folds, so the configs axis), read by the test below, which
-## gets a private copy of its output_dir (helper-memo.R). The builder
-## registers the plan itself and puts the caller's back, recording the
-## plan (plan_record(), set up first, as in allow_par_run() above) and the
-## worker count as the run found and left them. It muffles the plan's
-## warnings as well as the run's: a warning in a build would fail every test
-## that reads it.
+## One four-config run on two daemons, parallelize_over = "auto" (4 configs
+## >= 3 folds, so the configs axis), read by the test below, which gets a
+## private copy of its output_dir (helper-memo.R). The builder sets the
+## daemons itself and resets them, recording them (daemons_record(), as in
+## allow_par_run() above) as the run found and left them. It muffles the
+## run's warnings: a warning in a build would fail every test that reads it.
 configs_axis_run <- function(.env = parent.frame()) {
   memo_dir("configs_axis_run", build_configs_axis_run, .env = .env)
 }
 
 build_configs_axis_run <- function(dir) {
 
-  old <- suppressWarnings(future::plan(future::multisession, workers = 2))
-  on.exit(suppressWarnings(future::plan(old)), add = TRUE)
-  future::nbrOfWorkers()
+  local_test_daemons(2)
 
-  plan_before <- plan_record()
-  obj         <- make_eval_object(n_configs = 4)
+  daemons_before <- daemons_record()
+  obj            <- make_eval_object(n_configs = 4)
 
-  result <- suppressWarnings(
+  result <- with_deadline(suppressWarnings(
     evaluate(obj,
              seed = 42L, control = control_horizons(allow_par = TRUE, output_dir = dir))
-  )
+  ), 120)
 
-  list(obj = obj, result = result, plan_before = plan_before,
-       plan_after = plan_record(), workers_after = future::nbrOfWorkers())
+  list(obj = obj, result = result, daemons_before = daemons_before,
+       daemons_after = daemons_record())
 
 }
 
 describe("evaluate() - configs axis", {
 
-  it("writes a schema-4 manifest describing the plan, the axis, the data and the settings, one result and one checkpoint per config, and leaves the user's plan exactly as it found it", {
+  it("writes a schema-4 manifest describing the daemons, the axis, the data and the settings, one result and one checkpoint per config, and leaves the user's daemons exactly as it found them", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -804,7 +827,7 @@ describe("evaluate() - configs axis", {
                            logical(1), manifest$settings)))
     expect_equal(manifest$axis, "configs")
     expect_equal(manifest$parallelize_over_requested, "auto")
-    expect_equal(manifest$plan, "multisession")
+    expect_equal(manifest$plan, "mirai")
     expect_identical(manifest$workers, 2L)
     expect_null(manifest$outer)
     expect_null(manifest$inner)
@@ -821,8 +844,170 @@ describe("evaluate() - configs axis", {
     checkpoint_files <- list.files(file.path(tmpdir, "checkpoints"), pattern = "\\.rds$")
     expect_equal(length(checkpoint_files), 4)
 
-    expect_identical(run$value$plan_after, run$value$plan_before)
-    expect_identical(run$value$workers_after, 2L)
+    expect_identical(run$value$daemons_after, run$value$daemons_before)
+    expect_identical(run$value$daemons_after$connected, 2L)
+
+  })
+
+})
+
+
+## =========================================================================
+## The configs axis's dispatch on mirai
+## =========================================================================
+## What each task carries, the stop when no daemon is left, a daemon's death
+## and what crosses back from a task. The real-daemon tests run plsr, whose
+## cells of the cost table tie, so they start in grid order.
+
+## A plsr grid of `n` configurations, small enough to run in seconds
+plsr_object <- function(n) {
+  obj <- make_eval_object(n = 60, n_configs = n)
+  obj$config$configs$model <- "plsr"
+  obj
+}
+
+describe("evaluate() - the configs axis on mirai", {
+
+  it("sends each task the worker function and its payload, nothing from evaluate()'s frame", {
+
+    ## The task is recorded and the run stopped there, so this runs under
+    ## load_all() too
+    sent <- NULL
+
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      daemon_reports          = matching_daemons,
+      check_parallel_backend  = function(...) TRUE,
+      connected_daemons       = function() 2L
+    )
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      sent <<- list(expr = .expr, args = .args, compute = .compute)
+      rlang::abort("stop", class = "dispatched")
+    }, .package = "mirai")
+
+    tryCatch(
+      suppressWarnings(evaluate(make_eval_object(n_configs = 4), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                           output_dir = withr::local_tempdir(), verbose = FALSE))),
+      dispatched = function(e) NULL
+    )
+
+    expect_identical(sent$expr, quote(worker(config_i, shared)))
+    expect_named(sent$args, c("worker", "config_i", "shared"))
+    expect_identical(sent$args$worker, evaluate_config_worker)
+    expect_true(isNamespace(environment(sent$args$worker)))
+    expect_setequal(names(sent$args$shared), SHARED_ARG_NAMES)
+    expect_null(sent$compute)
+
+  })
+
+  it("stops with the rows so far when no daemon is left to run the rest (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## Two daemons that exit after two tasks each: the check at the door
+    ## takes one of each, the first two configurations the others, and
+    ## nothing is left for the third
+    local_test_daemons(2, maxtasks = 2)
+
+    dir <- withr::local_tempdir()
+    err <- expect_error(
+      with_deadline(suppressWarnings(evaluate(plsr_object(3), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 60),
+      class = "horizons_error_no_daemons"
+    )
+
+    expect_s3_class(err, "horizons_error_systemic")
+    expect_identical(err$results$config_id, c("cfg_001", "cfg_002"))
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "No mirai daemon is connected, so `evaluate()` stopped with 1 configuration still to run.",
+                 fixed = TRUE)
+    expect_match(msg, "`maxtasks` tasks, or past `idletime` or `walltime`", fixed = TRUE)
+    expect_match(msg, "resumes from them", fixed = TRUE)
+
+  })
+
+  it("stops as systemic when a configuration's daemon dies, with the rows finished before it (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    store <- file.path(dir, "checkpoints")
+
+    ## On the daemons, the third configuration kills its daemon once the
+    ## first two are checkpointed, and a poll later, so their rows are in
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("evaluate_single_config", envir = ns)
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        if (config_row$config_id == "cfg_003") {
+          until <- Sys.time() + 30
+          while (!all(file.exists(file.path(store, c("cfg_001.rds", "cfg_002.rds")))) && Sys.time() < until) {
+            Sys.sleep(0.05)
+          }
+          Sys.sleep(1)
+          tools::pskill(Sys.getpid(), tools::SIGKILL)
+        }
+        real(config_row, ...)
+      }, ns = "horizons")
+    }, store = store)[], 30)
+
+    err <- expect_error(
+      with_deadline(suppressWarnings(evaluate(plsr_object(3), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 120),
+      class = "horizons_error_systemic"
+    )
+
+    ## Wrapped once: the window's reading of the daemon's death is the parent
+    expect_match(conditionMessage(err), "A parallel worker stopped while `evaluate()` was running", fixed = TRUE)
+    expect_s3_class(err$parent, "horizons_error_systemic")
+    expect_match(gsub("\\s+", " ", conditionMessage(err$parent)),
+                 "The daemon running configuration \"cfg_003\" stopped while it ran (`errorValue` 19, Connection reset).",
+                 fixed = TRUE)
+    expect_null(err$parent$parent)
+    expect_setequal(err$results$config_id, c("cfg_001", "cfg_002"))
+
+  })
+
+  it("puts a warning a configuration's unit raised on a daemon on the log, as a sequential run does (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+
+    ## On the daemons, the second configuration's recipe step raises a
+    ## horizons warning inside its unit
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("build_recipe", envir = ns)
+      utils::assignInNamespace("build_recipe", function(config_row, ...) {
+        if (config_row$config_id == "cfg_002") {
+          get("warn_in_unit", envir = ns)("substitution", "A test substitution on a daemon.")
+        }
+        real(config_row, ...)
+      }, ns = "horizons")
+    })[], 30)
+
+    ev <- with_deadline(suppressWarnings(evaluate(plsr_object(3), seed = 42L,
+                                                  control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                             output_dir = withr::local_tempdir(),
+                                                                             verbose = FALSE))), 120)
+
+    row <- ev$log[grepl("A test substitution on a daemon.", ev$log$message, fixed = TRUE), ]
+
+    expect_identical(nrow(row), 1L)
+    expect_identical(row$topic, "substitution")
+    expect_identical(row$ids[[1]], "cfg_002")
 
   })
 
@@ -832,17 +1017,18 @@ describe("evaluate() - configs axis", {
 ## =========================================================================
 ## A package missing on a worker
 ## =========================================================================
-## evaluate() checks the configurations' packages in this session, so a worker
-## whose library lacks one fails every configuration that needs it: the run
-## stops as systemic, with the rows so far. The signal differs by axis. On the
-## resamples axis tune's workers attach the workflow's packages with
-## library(), which raises base R's packageNotFoundError; on the configs axis
-## tune runs inside the worker and refuses at its own door, by text. Both are
-## read here from real workers whose library hides kernlab.
+## evaluate() checks the configurations' packages in this session, and on
+## every daemon at the door, so a run whose daemons lack one is refused before
+## anything is drawn. A daemon whose library loses one after the door fails
+## every configuration that needs it: on the configs axis tune runs inside the
+## worker and refuses at its own door, by text, the worker's error comes back
+## from the daemon with its class, and the run stops as systemic, with the
+## rows so far. Read here from real daemons whose library hides kernlab.
 
 ## A library holding every package this session sees but `hidden`, and the
-## site library variable pointing at it, for workers started in the test. A
-## worker's library paths always end in the site libraries and base R's.
+## library variables pointing at it, for daemons started in the test.
+## Daemons are new Rscript processes, which take their libraries from these
+## variables, not from this session's .libPaths().
 local_hidden_package_lib <- function(hidden, .env = parent.frame()) {
 
   dir <- withr::local_tempdir(.local_envir = .env)
@@ -854,50 +1040,75 @@ local_hidden_package_lib <- function(hidden, .env = parent.frame()) {
     }
   }
 
-  withr::local_envvar(R_LIBS_SITE = dir, .local_envir = .env)
+  withr::local_envvar(R_LIBS = dir, R_LIBS_USER = dir, R_LIBS_SITE = dir, .local_envir = .env)
 
   dir
 
 }
 
+## A plsr and an svm_rbf configuration, the second needing kernlab
+kernlab_object <- function() {
+  obj <- make_eval_object(n = 60, n_configs = 2)
+  obj$config$configs$model <- c("plsr", "svm_rbf")
+  obj
+}
+
 describe("evaluate() - a package missing on a worker", {
 
-  it("stops the run as systemic, with the rows so far, on either axis, when a worker lacks a package this session has (installed build)", {
+  it("refuses a run whose daemons lack a package this session has, on either axis, before anything is drawn (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
     skip_if_not_installed("kernlab")
 
-    lib <- local_hidden_package_lib("kernlab")
-    local_plan(future::multisession, workers = 2, rscript_libs = c(lib, .Library))
+    local_hidden_package_lib("kernlab")
+    local_test_daemons(2)
+    local_mocked_bindings(draw_eval_split = function(...) stop("the split was drawn"))
 
-    ## The fixture reaches the state under test: a worker runs this horizons
+    for (over in c("resamples", "configs")) {
+
+      err <- expect_error(
+        with_deadline(suppressWarnings(evaluate(kernlab_object(), seed = 42L,
+                                                control = control_horizons(allow_par = TRUE, parallelize_over = over,
+                                                                           output_dir = withr::local_tempdir()))), 60),
+        class = "horizons_error_missing_package"
+      )
+
+      msg <- gsub("\\s+", " ", conditionMessage(err))
+      expect_match(msg, "2 of the 2 mirai daemons checked cannot load 1 package `evaluate()` needs.", fixed = TRUE,
+                   info = over)
+      expect_match(msg, "kernlab, needed for svm_rbf", fixed = TRUE, info = over)
+
+    }
+
+  })
+
+  it("stops a configs-axis run as systemic, with the worker's class, when a daemon lacks a package after the door (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("kernlab")
+
+    local_hidden_package_lib("kernlab")
+    local_test_daemons(2)
+
+    ## The fixture reaches the state under test: a daemon runs this horizons
     ## without kernlab, which this session has
-    expect_false(future::value(future::future(requireNamespace("kernlab", quietly = TRUE), seed = FALSE)))
-    expect_identical(future::value(future::future(as.character(utils::packageVersion("horizons")), seed = FALSE)),
+    expect_false(with_deadline(mirai::mirai(requireNamespace("kernlab", quietly = TRUE))[], 30))
+    expect_identical(with_deadline(mirai::mirai(as.character(utils::packageVersion("horizons")))[], 30),
                      as.character(utils::packageVersion("horizons")))
 
-    obj <- make_eval_object(n = 60, n_configs = 2)
-    obj$config$configs$model <- c("plsr", "svm_rbf")
+    ## The door's check reports kernlab present, as it was before the
+    ## daemon's library lost it
+    local_mocked_bindings(daemon_reports = matching_daemons)
 
-    ## The resamples axis: plsr runs first and is kept
+    ## tune's own refusal in the worker, its class kept
     err <- expect_error(
-      suppressWarnings(evaluate(obj, seed = 42L,
-                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
-      class = "horizons_error_systemic"
-    )
-
-    expect_s3_class(err$parent, "horizons_error_missing_package")
-    expect_true(rlang::cnd_inherits(err, "packageNotFoundError"))
-    expect_identical(err$results$config_id, "cfg_001")
-
-    ## The configs axis: tune's own refusal in the worker
-    dir <- withr::local_tempdir()
-    err <- expect_error(
-      suppressWarnings(evaluate(obj, seed = 42L,
-                                control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
-                                                           output_dir = dir))),
+      with_deadline(suppressWarnings(evaluate(kernlab_object(), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = withr::local_tempdir()))), 120),
       class = "horizons_error_systemic"
     )
 
@@ -949,12 +1160,12 @@ describe("evaluate() - cross-mode checkpoint resume", {
     ## Both axes share the one store (#42): the per-config files.
     expect_setequal(list.files(tmpdir), c("checkpoints", "eval_manifest.rds"))
 
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
 
-    par_result <- suppressWarnings(
+    par_result <- with_deadline(suppressWarnings(
       evaluate(obj,
                seed = 42L, control = control_horizons(allow_par = TRUE, output_dir = tmpdir))
-    )
+    ), 120)
 
     expect_equal(seq_result$evaluation$best_config,
                  par_result$evaluation$best_config)
@@ -983,7 +1194,7 @@ describe("monitor_evaluate()", {
     ## rate, an ETA, the best config and recent completions. The clock and
     ## the screen-clearing form feed are scrubbed.
     manifest <- list(
-      axis = "configs", plan = "multisession", workers = 4L,
+      axis = "configs", plan = "mirai", workers = 4L,
       data_n_rows = 120, data_fields = list(outcome = "SOC"),
       data_hash = "0123456789abcdef0123",
       settings = list(grid_size = 10L, outcome_range = c(-Inf, Inf)),
@@ -1034,7 +1245,7 @@ describe("monitor_evaluate()", {
     path     <- file.path(tmpdir, "eval_manifest.rds")
     manifest <- readRDS(path)
     manifest$axis    <- "configs"
-    manifest$plan    <- "multisession"
+    manifest$plan    <- "mirai"
     manifest$workers <- 10L
     saveRDS(manifest, path)
 
@@ -1046,7 +1257,7 @@ describe("monitor_evaluate()", {
     expect_equal(result$n_complete, 3)
     expect_equal(result$n_total, 4)
     expect_false(is.na(result$best_config))
-    expect_true(any(grepl("over configs on multisession (10 workers)", output, fixed = TRUE)))
+    expect_true(any(grepl("over configs on mirai (10 workers)", output, fixed = TRUE)))
 
     ## Two runs sharing one output_dir are otherwise indistinguishable here.
     expect_true(any(grepl(paste0(manifest$data_n_rows, " training rows of SOC"),
@@ -1149,7 +1360,7 @@ describe("monitor_evaluate()", {
 ## =========================================================================
 ## Results do not depend on the axis (review finding, 2026-09-15)
 ## =========================================================================
-## tune's future path advances the parent RNG stream differently from the
+## tune's parallel path advances the parent RNG stream differently from the
 ## sequential loop, so when the stages shared one stream the Bayesian stage
 ## and last_fit() drew from a different position on the resamples axis. Each
 ## stage is now a unit of its own (with_unit_seed()), seeded on entry. This
@@ -1179,7 +1390,7 @@ describe("evaluate() - results are identical across axes", {
   row_cols <- c("rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
                 "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
 
-  it("resamples axis, chosen by auto on a real two-worker plan, matches the sequential run exactly (installed build)", {
+  it("resamples axis, chosen by auto on two daemons, matches the sequential run exactly (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -1187,13 +1398,13 @@ describe("evaluate() - results are identical across axes", {
     run        <- axes_seq_run()
     obj        <- run$obj
     seq_result <- run$result
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
 
     ## One config against three folds: auto resolves to the resamples axis,
     ## which needs no output_dir
-    par_result <- suppressWarnings(
+    par_result <- with_deadline(suppressWarnings(
       evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE))
-    )
+    ), 120)
 
     expect_equal(par_result$evaluation$parallelize_over, "resamples")
     expect_identical(par_result$evaluation$workers, 2L)
@@ -1212,12 +1423,12 @@ describe("evaluate() - results are identical across axes", {
     run        <- axes_seq_run()
     obj        <- run$obj
     seq_result <- run$result
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
     tmpdir <- withr::local_tempdir()
 
-    par_result <- suppressWarnings(
+    par_result <- with_deadline(suppressWarnings(
       evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "configs", output_dir = tmpdir))
-    )
+    ), 120)
 
     ## One config against three folds: "auto" would pick resamples
     expect_equal(par_result$evaluation$parallelize_over, "configs")
@@ -1235,8 +1446,7 @@ describe("evaluate() - results are identical across axes", {
 ## The recipe settings reach a worker in another process (#62)
 ## =========================================================================
 ## The in-process test above shows the worker forwards the settings; this one
-## shows they survive the trip to a multisession worker and change what it
-## computes. On "raw" a window of 13 trims 12 of the 20 columns rather than 8,
+## shows they survive the trip to a daemon and change what it computes. On "raw" a window of 13 trims 12 of the 20 columns rather than 8,
 ## so the configured run and the default run model different predictors. plsr
 ## reads every predictor it keeps, where a tuned rf on this little data can
 ## come out predicting the mean whatever its predictors.
@@ -1268,12 +1478,12 @@ describe("evaluate() - recipe settings on the configs axis", {
       evaluate(default_obj, seed = 42L, control = control_horizons(allow_par = FALSE))
     )
 
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
     tmpdir <- withr::local_tempdir()
 
-    par_result <- suppressWarnings(
+    par_result <- with_deadline(suppressWarnings(
       evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "configs", output_dir = tmpdir))
-    )
+    ), 120)
 
     ## One config against three folds: "auto" would pick resamples
     expect_equal(par_result$evaluation$parallelize_over, "configs")

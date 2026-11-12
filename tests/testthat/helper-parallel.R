@@ -1,16 +1,52 @@
 ## ---------------------------------------------------------------------------
-## Test helpers: registered future plans and warning filtering
+## Test helpers: mirai daemons, deadlines and warning filtering
 ## ---------------------------------------------------------------------------
-## The package never registers a plan; tests that need one register it for
-## the duration of the calling test and restore the previous one. Two
-## workers is the CRAN-conformant maximum under _R_CHECK_LIMIT_CORES_. There
-## is no withr::local_plan(); future::plan() returns the previous strategy
-## when setting a new one, which is what the restore relies on.
+## The package never sets daemons; tests that need some set them for the
+## duration of the calling test and reset them on its exit. Two daemons is
+## the CRAN-conformant maximum under _R_CHECK_LIMIT_CORES_. Daemons are new
+## Rscript processes, which load the horizons R_LIBS names, so the tests that
+## run work on them need an installed build with R_LIBS on it.
 
-local_plan <- function(..., .env = parent.frame()) {
-  old <- future::plan(...)
-  withr::defer(future::plan(old), envir = .env)
-  invisible(old)
+## Set `n` daemons on the default profile until the calling frame exits, and
+## wait until they are connected. autoexit = NA: a daemon finishes exiting
+## when the reset drops its connection, where mirai's default kills it 200 ms
+## after daemons(0), cutting off the trace file a daemon writes on exit under
+## covr. Named apart from mirai's own local_daemons(), which switches the
+## active profile instead. Setting daemons moves the caller's random stream by
+## one draw, so a test of the stream sets its seed after this.
+local_test_daemons <- function(n = 2L, ..., .env = parent.frame()) {
+
+  mirai::daemons(n, ..., autoexit = NA)
+  withr::defer(mirai::daemons(0), envir = .env)
+
+  with_deadline(
+    while (connected_daemons() < n) Sys.sleep(0.05),
+    seconds = 30
+  )
+
+  invisible(n)
+
+}
+
+## What daemon_reports() returns from daemons that load horizons `version`
+## and lack nothing, one report per process id: the mock of the door's check
+## for tests that do not start daemons.
+daemons_on <- function(version = as.character(utils::packageVersion("horizons")), pids = 1:2) {
+  lapply(as.integer(pids), function(pid) list(pid = pid, version = version, missing = character(0)))
+}
+
+matching_daemons <- function(...) daemons_on()
+
+## Evaluate `expr` with a deadline, so a wait that never ends fails the test
+## instead of stalling the run. setTimeLimit() ends both a polling wait and
+## mirai's blocking collect.
+with_deadline <- function(expr, seconds = 60) {
+
+  setTimeLimit(elapsed = seconds, transient = TRUE)
+  on.exit(setTimeLimit(elapsed = Inf), add = TRUE)
+
+  expr
+
 }
 
 ## Evaluate `expr` letting only warnings that match `keep` (a condition class

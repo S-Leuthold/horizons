@@ -36,14 +36,10 @@
 ##      names the fixture, so that output does not land on whichever test
 ##      happens to build first. Muffle expected noise inside the builder.
 ##      Package startup messages are let through, since they depend on which
-##      test loaded the package first. The same goes for warnings a package
-##      gives once per process: parallelly warns the first time it reads the
-##      CPU set (on some Linux machines, about the cgroups CPU set), so a
-##      builder that starts a parallel plan would abort only when it made
-##      the first parallel call in its process, and the cached error would
-##      then fail every user. The helper therefore calls
-##      future::availableCores() once, muffled, before the first build in a
-##      process. Muffle any other once-per-process warning in the builder.
+##      test loaded the package first. Muffle a warning a package gives once
+##      per process in the builder, or a build would abort only when it was
+##      the first in its process, and the cached error would then fail every
+##      user.
 ##   5. Returned values are read-only. Lists and tibbles copy on modify, but
 ##      environments are modified in place: never modify an environment
 ##      inside a returned object. With HORIZONS_MEMO_VERIFY=true, every hit
@@ -71,7 +67,6 @@
 .horizons_memo$cache     <- new.env(parent = emptyenv())
 .horizons_memo$root      <- NULL
 .horizons_memo$jit_level <- NULL
-.horizons_memo$primed    <- FALSE
 
 
 ## ---------------------------------------------------------------------------
@@ -211,8 +206,6 @@ memo_build <- function(name, build, run, template = NULL) {
     on.exit(if (!finished) unlink(template, recursive = TRUE), add = TRUE)
   }
 
-  memo_prime_process()
-
   if (memo_verify_on()) {
     memo_jit_off()
   }
@@ -250,21 +243,6 @@ memo_build <- function(name, build, run, template = NULL) {
 
   finished <- outcome$ok
   entry
-
-}
-
-memo_prime_process <- function() {
-
-  if (.horizons_memo$primed) {
-    return(invisible(NULL))
-  }
-  .horizons_memo$primed <- TRUE
-
-  ### parallelly warns once per process when it first reads the CPU set
-  ### (rule 4); take that warning here, outside any build.
-  suppressWarnings(future::availableCores())
-
-  invisible(NULL)
 
 }
 

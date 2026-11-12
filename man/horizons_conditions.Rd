@@ -73,12 +73,19 @@ early, because the first configurations or members to run failed the
 same way across at least two models (the circuit breaker,
 \code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
 \code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died or lacks a
-package the run needs, or \code{\link[=evaluate]{evaluate()}} could not write to its
+package the run needs, or no mirai daemon was left to run its work
+(\code{horizons_error_no_daemons}, below), or \code{\link[=evaluate]{evaluate()}} could not write to its
 \code{output_dir} (on the configs axis a checkpoint a worker could not
 write is a \code{skipped} warning instead, since every configuration has
 run by then). The rows finished so far travel
 as \code{results}; \code{NULL} from \code{ensemble()}, which has none before its
 meta-learner is built.}
+\item{\code{horizons_error_no_daemons}}{(run, and \code{horizons_error_systemic})
+A parallel \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or \code{\link[=ensemble]{ensemble()}} had work left and no
+mirai daemon connected to run it: the daemons exited under
+\code{maxtasks}, \code{idletime} or \code{walltime}, which mirai does not restart
+them from, or were stopped. The rows finished so far travel as
+\code{results} (\code{NULL} from \code{ensemble()}).}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
 warnings under \code{options(warn = 2)}. Instead of turning the first warning
 into an error that loses the result, the verb aborts with the finished
@@ -96,10 +103,11 @@ every sample failed quality control on every replicate and
 needs is not installed: a model's engine, or the package a feature
 selection step trains with (Boruta). \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}},
 \code{\link[=ensemble]{ensemble()}} and \code{predict()} check before any work starts, and refuse
-once, naming every missing package and what needs it. A package found
-missing later, where a unit ran (a parallel worker's library, or a
-package the check does not know of), raises it too, and the verbs that
-dispatch units then stop with \code{horizons_error_systemic}.}
+once, naming every missing package and what needs it; a parallel
+\code{\link[=evaluate]{evaluate()}} or \code{\link[=fit]{fit()}} checks every mirai daemon too. A package found
+missing later, where a unit ran (a daemon's library, or a package the
+check does not know of), raises it too, and the verbs that dispatch
+units then stop with \code{horizons_error_systemic}.}
 }
 }
 

@@ -71,10 +71,10 @@ describe("control_horizons()", {
 
   })
 
-  it("refuses parallelize_over = 'both' with the nesting hint, and anything but one axis", {
+  it("refuses parallelize_over = 'both', naming the two axes, and anything but one axis", {
 
-    expect_error(control_horizons(parallelize_over = "both"), "Nested parallelism",
-                 class = "horizons_error_input")
+    expect_error(control_horizons(parallelize_over = "both"), "Use \"configs\" or \"resamples\".",
+                 fixed = TRUE, class = "horizons_error_input")
     expect_error(control_horizons(parallelize_over = c("configs", "resamples")), "parallelize_over",
                  class = "horizons_error_input")
 

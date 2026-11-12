@@ -421,10 +421,10 @@ evaluate <- function(x,
   recipe_cfg <- evaluation_recipe(x)
 
   ## -----------------------------------------------------------------------
-  ## Step 3b: Resolve the parallel axis against the registered plan
+  ## Step 3b: Resolve the parallel axis against the user's daemons
   ## -----------------------------------------------------------------------
-  ## The user owns the backend; evaluate() only chooses the axis. The
-  ## resolver is pure; the backend check reads the plan and downgrades to
+  ## The user owns the daemons; evaluate() only chooses the axis. The
+  ## resolver is pure; the backend check reads the daemons and downgrades to
   ## sequential, with a warning, when there is nothing to run on.
 
   ## Debug runs in this session: a backtrace from a worker shows the
@@ -450,10 +450,12 @@ evaluate <- function(x,
   ## On either axis the workers run horizons code (on the resamples axis,
   ## tune's workers run the recipe steps and the PLS engine), so they must
   ## run this session's horizons: checked here, before anything is drawn.
-  if (axis$axis != "sequential") check_parallel_workers()
+  if (axis$axis != "sequential") {
+    check_parallel_workers("evaluate", needed_packages(configs$model, configs$feature_selection), collector)
+  }
 
-  plan_label    <- if (axis$axis == "sequential") "sequential" else registered_plan_label()
-  plan_workers  <- if (axis$axis == "sequential") 1L else registered_workers()
+  plan_label    <- if (axis$axis == "sequential") "sequential" else "mirai"
+  plan_workers  <- if (axis$axis == "sequential") 1L else connected_daemons()
 
   if (axis$axis != "sequential") {
 
@@ -711,11 +713,9 @@ evaluate <- function(x,
 
     if (axis$axis != "sequential") {
 
-      ## A parallel axis has two workers or more, or an unbounded count
-      workers_label <- if (is.na(plan_workers)) "unbounded" else paste0(plan_workers, " workers")
-
+      ## A parallel axis has two daemons or more
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
-                 " (", workers_label, ")\n"))
+                 " (", plan_workers, " workers)\n"))
 
     } else if (allow_par && debug) {
 
@@ -733,7 +733,7 @@ evaluate <- function(x,
   ## Written on EVERY run with an output_dir, whichever axis, and refreshed
   ## each time, so the monitor can watch a resamples-axis or sequential run
   ## and never reports a stale axis from an earlier run in the same
-  ## directory. It records the axis and the user's plan, and the training-data
+  ## directory. It records the axis and the user's daemons, and the training-data
   ## fingerprint, so the monitor can say which rows the run in this directory
   ## is scoring, with the data fields and the tuning settings. The monitor
   ## gates checkpoint rows against them, as evaluate() does, and re-reads the
@@ -831,8 +831,9 @@ evaluate <- function(x,
 
       }
 
-      ## Evaluate this config. A worker of the resamples axis that dies stops
-      ## the run, with the rows so far.
+      ## Evaluate this config. On the resamples axis tune runs its folds on
+      ## the daemons, and a daemon that dies or leaves stops the run, with the
+      ## rows so far.
       result_row <- stop_on_worker_death(evaluate_single_config(
         config_row      = cfg,
         split           = split,
@@ -850,7 +851,7 @@ evaluate <- function(x,
         outcome_range   = outcome_range,
         debug           = debug,
         keep_traces     = control$keep_traces
-      ), results_so_far(results_list), output_dir)
+      ), results_so_far(results_list), output_dir, daemons = axis$axis == "resamples")
 
       ## Stamp before anything else sees the row, so the in-memory results and
       ## the checkpointed copy carry the same provenance.
@@ -957,10 +958,10 @@ evaluate <- function(x,
   } else {
 
     ## -------------------------------------------------------------------
-    ## Parallel path — furrr::future_map() across configs
+    ## Parallel path: the configurations across the user's daemons
     ## -------------------------------------------------------------------
 
-    ## The plan is the user's: evaluate() neither sets nor restores one.
+    ## The daemons are the user's: evaluate() neither sets nor resets them.
     ## The globals ceiling is declared (max_worker_payload: the user's
     ## future.globals.maxSize when they set one, else EVAL_WORKER_PAYLOAD_LIMIT,
     ## from the measured payload) so a payload regression aborts with
@@ -995,7 +996,7 @@ evaluate <- function(x,
     ## `split` and `cv_fold_obj` included — would ship to every worker no matter
     ## what is passed explicitly.
 
-    ## The workers resolve the horizons namespace by NAME, which finds the
+    ## The daemons resolve the horizons namespace by NAME, which finds the
     ## INSTALLED library; check_parallel_workers() refused a session they
     ## could not match before anything ran.
 
@@ -1025,23 +1026,31 @@ evaluate <- function(x,
 
     }
 
-    ## A worker that dies loses every value in memory; what it and the
-    ## others finished is in their checkpoints.
-    parallel_results <- stop_on_worker_death(furrr::future_map(
-      seq_len(nrow(pending_configs)),
-      evaluate_config_worker,
-      shared   = shared_args,
-      .options = furrr::furrr_options(seed = TRUE, chunk_size = 1)
-    ), results_so_far(lapply(completed_ids, function(id) checkpoint_results[[id]])),
-    output_dir)
+    ## The rows resumed and those finished in this call, which any stop
+    ## carries; the window appends each as it finishes.
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- lapply(completed_ids, function(id) checkpoint_results[[id]])
+
+    rows_so_far <- function() results_so_far(in_config_order(finished$rows, configs$config_id))
+    eval_frame  <- rlang::current_env()
+
+    ## A daemon that dies loses what it held; the rows finished so far are in
+    ## `finished`, and checkpointed.
+    stop_on_worker_death(
+      dispatch_configs(pending_configs, shared_args, finished, no_daemons = function(n_left) {
+        abort_no_daemons(rows_so_far(), n_left, output_dir, call = eval_frame)
+      }),
+      rows_so_far(), output_dir
+    )
 
     ## A worker whose checkpoint could not be written said so on its row
     ## (evaluate_config_worker()). Every configuration has run by now, so
     ## the evaluation is returned, and one warning names what a resumed run
     ## would evaluate again
-    not_saved <- lapply(parallel_results, attr, "checkpoint_failed")
+    results_list <- in_config_order(finished$rows, configs$config_id)
+    not_saved    <- lapply(results_list, attr, "checkpoint_failed")
 
-    parallel_results <- lapply(parallel_results, function(row) {
+    results_list <- lapply(results_list, function(row) {
       attr(row, "checkpoint_failed") <- NULL
       row
     })
@@ -1049,16 +1058,10 @@ evaluate <- function(x,
     unsaved <- !vapply(not_saved, is.null, logical(1))
 
     log_unsaved_checkpoints(collector,
-                            ids            = vapply(parallel_results[unsaved], `[[`, character(1), "config_id"),
+                            ids            = vapply(results_list[unsaved], `[[`, character(1), "config_id"),
                             reasons        = unlist(not_saved[unsaved]),
                             checkpoint_dir = checkpoint_dir,
                             output_dir     = output_dir)
-
-    ## Combine: checkpoint results + parallel results
-    results_list <- c(
-      lapply(completed_ids, function(id) checkpoint_results[[id]]),
-      parallel_results
-    )
 
   }
 
@@ -1718,7 +1721,7 @@ abort_output_write <- function(path, reason, results, call = rlang::caller_env()
 #'
 #' @description
 #' On the configs axis a worker that cannot write its checkpoint says so on
-#' the row it returns, and `furrr::future_map()` returns only once every
+#' the row it returns, and the parent reads those rows once every
 #' configuration has run. With nothing left to save by then, the evaluation
 #' is returned, and the checkpoints asked for that were not written are one
 #' `skipped` warning: a run resumed from `output_dir` evaluates those
@@ -1989,90 +1992,113 @@ abort_breaker_trip <- function(breaker,
 #' Stop the call when a parallel worker dies, or lacks a package
 #'
 #' @description
-#' future raises a worker's death as a `FutureError`, which no unit contains
-#' (`NEVER_CONTAINED`). A death that tune caught during a Bayesian search
-#' reaches here as the unit's `horizons_error_systemic`, which no unit
-#' contains either ([worker_death_signal()]). A package missing where a unit
-#' ran, which the verb checked in the session before the run, reaches here
-#' as the unit's `horizons_error_missing_package` ([missing_package_signal()]).
-#' Each is turned into `horizons_error_systemic`, chained to the error, with
-#' the rows finished so far when the verb has rows; every other error passes
-#' through untouched.
-#' `bayes_search()` is the one raiser of `horizons_error_systemic` inside
-#' `expr`, for that death; a unit that raises it for another reason needs a
-#' subclass of its own, or it would be read here as a worker's death.
+#' Wraps one unit of work: a configuration, a member, the meta-learner, or the
+#' configs axis's whole dispatch. A death, or a package missing where the work
+#' ran, is turned into `horizons_error_systemic`, with the rows finished so
+#' far when the verb has rows; every other error passes through untouched.
 #'
-#' @param expr The work that dispatches to workers.
+#' How a death shows depends on where the work ran. On the configs axis the
+#' window ([dispatch_configs()]) reads each task's value, and raises a
+#' daemon's death (`errorValue` 19) as `horizons_error_systemic`, which is
+#' wrapped here once. The window is the one raiser of
+#' `horizons_error_systemic` inside `expr`; a unit that raises it for another
+#' reason needs a subclass of its own, or it would be read here as a death.
+#' Under tune (`daemons = TRUE`: the resamples axis, `fit()` and
+#' `ensemble()`) a death is not an error: tune binds the dead task's value,
+#' which fails as dplyr's "Argument 1 must be a data frame" and is contained
+#' as the unit's failure, or, inside a Bayesian iteration, stops the search
+#' quietly. So the connected daemons are read before the unit and after it,
+#' on its return and on its error, and fewer after is a death. A daemon that
+#' exits under `maxtasks`, `idletime` or `walltime` lowers the count too, and
+#' the count cannot tell the two apart. With none connected before the unit
+#' the run stops at once ([abort_no_daemons()]), whose
+#' `horizons_error_no_daemons` passes through here untouched.
+#'
+#' A package missing where a unit ran, which the verb checked in the session
+#' before the run, reaches here as the unit's `horizons_error_missing_package`
+#' ([missing_package_signal()]).
+#'
+#' @param expr The work that dispatches to daemons.
 #' @param results The results table finished so far, carried as `results`;
-#'   evaluated only when a worker dies. `NULL` when the verb has no rows to
+#'   evaluated only when the run stops. `NULL` when the verb has no rows to
 #'   carry (`ensemble()`), and then the message promises none.
 #' @param output_dir The run's `output_dir`, or `NULL`.
 #' @param verb Character(1). The verb that stops: `"evaluate"`, `"fit"` or
 #'   `"ensemble"`.
+#' @param daemons Logical(1). Whether tune runs this unit's work on the
+#'   daemons, so a death is read from the connected daemons.
 #' @param call The frame the error reports.
 #' @return The value of `expr`.
 #' @keywords internal
 #' @noRd
 stop_on_worker_death <- function(expr, results, output_dir = NULL, verb = "evaluate",
-                                 call = rlang::caller_env()) {
+                                 daemons = FALSE, call = rlang::caller_env()) {
 
-  ## One handler for both classes. try_fetch() nests its handlers, so with
-  ## one per class the systemic error raised for a FutureError would be
-  ## caught by the other and wrapped a second time.
-  died <- function(e) {
+  if (daemons) {
 
-    missing <- inherits(e, "horizons_error_missing_package")
+    before <- connected_daemons()
 
-    if (!missing && !inherits(e, c("FutureError", "horizons_error_systemic"))) return(rlang::zap())
-
-    cause <- if (missing) condition_summary(e)
-
-    abort_horizons(c(
-      if (missing) {
-        "A package {.fn {verb}} needs is not installed where its work ran, so the run cannot go on."
-      } else {
-        "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on."
-      },
-      "x" = if (missing) "{cause}",
-      ### Either the run was parallel, or the door's lists missed the package
-      "i" = if (missing) {
-        "{.fn {verb}} checked this session for the packages it knows of before the run. If the run was parallel, a worker's library lacks this one: install it there. If not, {.fn {verb}} does not check for it, which is a bug in horizons: install it, and please report it."
-      },
-      "i" = if (!is.null(output_dir)) {
-        "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
-      } else if (!is.null(results)) {
-        "The rows finished so far are in this error's {.field results} field."
-      }
-    ), kind = "run", class = "horizons_error_systemic", parent = e,
-    results = results, call = call)
+    if (before == 0L) abort_no_daemons(results, output_dir = output_dir, verb = verb, call = call)
 
   }
 
-  rlang::try_fetch(expr, error = died)
+  fell <- function() daemons && connected_daemons() < before
+
+  ## One handler for every case. try_fetch() nests its handlers, so with one
+  ## per class the systemic error raised for one would be caught by another
+  ## and wrapped a second time.
+  died <- function(e) {
+
+    if (inherits(e, "horizons_error_no_daemons")) return(rlang::zap())
+
+    missing <- inherits(e, "horizons_error_missing_package")
+
+    if (!missing && !inherits(e, "horizons_error_systemic") && !fell()) return(rlang::zap())
+
+    abort_worker_death(e, missing, results, output_dir, verb, daemons, call)
+
+  }
+
+  value <- rlang::try_fetch(expr, error = died)
+
+  if (fell()) abort_worker_death(NULL, FALSE, results, output_dir, verb, daemons, call)
+
+  value
 
 }
 
-#' Whether a condition is future.apply's report of a future's error
+#' Stop the call because a worker died, or lacks a package
 #'
-#' @description
-#' future.apply reports `"Caught <class>. Canceling all iterations ..."`
-#' before it raises a future's error again: as a warning before 1.21.0, and
-#' as a message since. tune's Bayesian search catches that error in a
-#' `try()` and goes on, so on the resamples axis a worker's death during an
-#' iteration reaches the unit only as this report, which has no class in
-#' either version and is matched by its text. Only the classes of future's
-#' own errors (`FutureError` and its subclasses, `FutureInterruptError`
-#' among them) match: an error raised in a worker's own code is caught and
-#' reported the same way.
-#'
-#' @param cnd A warning or a message.
-#' @return Logical(1).
+#' @param cause The unit's error, or `NULL` when the death left none.
+#' @param missing Logical(1). Whether `cause` is a package missing where the
+#'   unit ran.
+#' @param results,output_dir,verb,call As [stop_on_worker_death()]'s.
+#' @param daemons Logical(1). Whether the death was read from the connected
+#'   daemons, which cannot tell a death from a daemon's own exit.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`), chained to `cause`.
 #' @keywords internal
 #' @noRd
-worker_death_signal <- function(cnd) {
+abort_worker_death <- function(cause, missing, results, output_dir, verb, daemons, call) {
 
-  grepl("^Caught [A-Za-z]*Future[A-Za-z]*Error\\. Canceling all iterations",
-        conditionMessage(cnd))
+  summary <- if (missing) condition_summary(cause)
+
+  abort_horizons(c(
+    if (missing) {
+      "A package {.fn {verb}} needs is not installed where its work ran, so the run cannot go on."
+    } else {
+      "A parallel worker stopped while {.fn {verb}} was running, so the run cannot go on."
+    },
+    "x" = if (missing) "{summary}",
+    ### Either the run was parallel, or the door's lists missed the package
+    "i" = if (missing) {
+      "{.fn {verb}} checked this session for the packages it knows of before the run. If the run was parallel, a worker's library lacks this one: install it there. If not, {.fn {verb}} does not check for it, which is a bug in horizons: install it, and please report it."
+    } else if (daemons) {
+      "Fewer mirai daemons were connected after the work than before it: one died, or exited under {.arg maxtasks}, {.arg idletime} or {.arg walltime}, which the count cannot tell apart."
+    },
+    "i" = resume_hint(results, output_dir)
+  ), kind = "run", class = "horizons_error_systemic", parent = cause,
+  results = results, call = call)
 
 }
 
@@ -3202,24 +3228,33 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 ## The workers a parallel run dispatches to
 ## -------------------------------------------------------------------------
 
-#' Refuse a parallel run whose workers cannot run this session's horizons
+#' Refuse a parallel run whose daemons cannot run this session's horizons
 #'
 #' @description
-#' On either parallel axis the workers run horizons code: the configs-axis
+#' On either parallel axis the daemons run horizons code: the configs-axis
 #' worker body, and on the resamples axis the recipe steps and the PLS engine
-#' that tune's workers call. They load horizons by name, so they run the
+#' that tune's tasks call. They load horizons by name, so they run the
 #' installed copy. Under `devtools::load_all()` that copy is not this source
-#' tree, and a worker would run stale code silently; otherwise one worker is
-#' asked which version it loads (one future, about 0.05 s on a running plan,
-#' drawing nothing from the parent's RNG) and a mismatch is refused. Both are
-#' `horizons_error_dependency`: an environment that cannot run the call.
+#' tree, and a daemon would run stale code silently. Otherwise every daemon
+#' connected is asked, one task each ([daemon_reports()]), which horizons it
+#' loads and which of the packages the run needs it cannot load, and either
+#' is refused before anything is drawn. A package a daemon lacks would
+#' otherwise reach the run only as tune's failure to bind the daemon's error
+#' ("Argument 1 must be a data frame"), never naming the package. A daemon
+#' busy with the user's own work when the tasks were sent may take none of
+#' them while another takes two; that is a note on the log, naming how many
+#' were checked. Each refusal is `horizons_error_dependency`: an environment
+#' that cannot run the call.
 #'
 #' @param verb Character(1). The verb asking, `"evaluate"` or `"fit"`.
+#' @param needed Named list: package name -> what needs it, as
+#'   [needed_packages()] returns it for the run's configurations.
+#' @param collector The verb's collector, from `log_open()`.
 #' @param call The frame a refusal reports: the verb's.
 #' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
-check_parallel_workers <- function(verb = "evaluate", call = rlang::caller_env()) {
+check_parallel_workers <- function(verb, needed, collector, call = rlang::caller_env()) {
 
   if (running_under_load_all()) {
 
@@ -3231,10 +3266,30 @@ check_parallel_workers <- function(verb = "evaluate", call = rlang::caller_env()
 
   }
 
-  parent <- as.character(utils::packageVersion("horizons"))
-  worker <- worker_horizons_version()
+  n_connected <- connected_daemons()
+  reports     <- daemon_reports(names(needed), verb, call = call)
+  n_checked   <- length(unique(vapply(reports, function(r) r$pid, integer(1))))
 
-  if (!identical(worker, parent)) abort_worker_version(worker, parent, call = call)
+  ## horizons itself first: a daemon without it can load nothing of the run's
+  lacking <- Filter(function(r) length(r$missing) > 0, reports)
+
+  if (length(lacking) > 0) {
+    abort_daemon_packages(lacking, n_checked, needed, verb, call = call)
+  }
+
+  parent <- as.character(utils::packageVersion("horizons"))
+  worker <- setdiff(vapply(reports, function(r) r$version, character(1)), parent)
+
+  if (length(worker) > 0) abort_worker_version(worker[1], parent, call = call)
+
+  if (n_checked < n_connected) {
+
+    log_note(collector, c(
+      "{.fn {verb}} checked {n_checked} of the {n_connected} mirai daemons connected for its horizons and packages.",
+      "i" = "A package missing on a daemon left unchecked fails the work it runs with tune's error, which does not name the package."
+    ))
+
+  }
 
   invisible(NULL)
 
@@ -3252,15 +3307,103 @@ running_under_load_all <- function() {
 
 }
 
-#' The horizons version a worker of the registered plan loads
+#' Ask each daemon which horizons it loads and which packages it lacks
 #'
-#' @return Character(1). A seam, so a test can report another version.
+#' @description
+#' One task on each daemon connected (`mirai::everywhere()`, which sends one
+#' to every daemon and waits for a busy one; plain tasks this short would let
+#' one daemon take several and leave others unchecked), each returning its process
+#' id, the horizons version it loads and which of `packages` (horizons
+#' first) it cannot load, loading the rest as `check_packages()` does in
+#' the session. Its arguments are local to the task, so nothing is left in
+#' a daemon's global environment. A daemon set with `maxtasks` spends one
+#' task on it. Every wait goes through [await_round()], so a pool left with
+#' no daemon stops the call rather than waiting for ever. A daemon's own
+#' error is raised again as the condition it was; any other error value is
+#' refused.
+#'
+#' @param packages Character. The packages the run needs.
+#' @param verb Character(1). The verb asking.
+#' @param call The frame a refusal reports.
+#' @return List, one report per task: `pid` (integer), `version`
+#'   (character, `NA` when horizons cannot be loaded) and `missing`
+#'   (character). A seam, so a test can report other daemons.
 #' @keywords internal
 #' @noRd
-worker_horizons_version <- function() {
+daemon_reports <- function(packages, verb = "evaluate", call = rlang::caller_env()) {
 
-  future::value(future::future(as.character(utils::packageVersion("horizons")),
-                               seed = FALSE))
+  packages <- unique(c("horizons", packages))
+
+  ## A mirai_map, whose `[` collects; its elements are plain mirai
+  tasks <- unclass(mirai::everywhere({
+    loads <- vapply(packages, requireNamespace, logical(1), quietly = TRUE)
+    list(pid     = Sys.getpid(),
+         version = if (loads[["horizons"]]) as.character(utils::packageVersion("horizons")) else NA_character_,
+         missing = packages[!loads])
+  }, .args = list(packages = packages), .compute = NULL))
+
+  no_daemons <- function() abort_no_daemons(NULL, verb = verb, call = call)
+
+  repeat {
+    pending <- Filter(mirai::unresolved, tasks)
+    if (length(pending) == 0) break
+    await_round(pending, no_daemons)
+  }
+
+  lapply(tasks, function(task) {
+
+    value <- task$data
+
+    if (mirai::is_mirai_error(value)) stop(mirai_condition(value))
+
+    if (mirai::is_error_value(value)) {
+
+      code <- as.integer(value)
+
+      abort_horizons(
+        "A daemon could not say which horizons it loads: its task ended in mirai's {.code errorValue} {code}.",
+        kind = "dependency", call = call
+      )
+
+    }
+
+    value
+
+  })
+
+}
+
+#' Refuse a parallel run whose daemons lack packages this session has
+#'
+#' @param lacking The reports, from [daemon_reports()], of the daemons that
+#'   cannot load a package the run needs.
+#' @param n_checked Integer(1). The daemons checked.
+#' @param needed Named list: package name -> what needs it.
+#' @param verb Character(1). The verb that refuses.
+#' @param call The frame the refusal reports.
+#' @return Does not return; aborts with class
+#'   `horizons_error_missing_package` (kind `dependency`).
+#' @keywords internal
+#' @noRd
+abort_daemon_packages <- function(lacking, n_checked, needed, verb, call = rlang::caller_env()) {
+
+  n_lacking <- length(unique(vapply(lacking, function(r) r$pid, integer(1))))
+  missing   <- unique(unlist(lapply(lacking, function(r) r$missing)))
+  n_missing <- length(missing)
+
+  ## The names and reasons are the package's own strings, as in
+  ## check_packages(); the {.pkg} spans are rendered by the abort
+  bullets <- vapply(missing, function(pkg) {
+    reasons <- needed[[pkg]]
+    paste0("{.pkg ", pkg, "}", if (length(reasons)) paste0(", needed for ", paste(reasons, collapse = ", ")))
+  }, character(1))
+  names(bullets) <- rep("x", length(bullets))
+
+  abort_horizons(c(
+    "{n_lacking} of the {n_checked} mirai daemon{?s} checked cannot load {n_missing} package{?s} {.fn {verb}} needs.",
+    bullets,
+    "i" = "A daemon loads packages from the libraries its environment named when {.fn mirai::daemons} started it. Install {cli::qty(n_missing)}{?it/them} there, or set daemons that have {?it/them}."
+  ), kind = "dependency", class = "horizons_error_missing_package", call = call)
 
 }
 
@@ -3288,19 +3431,19 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #' Evaluate One Configuration Inside a Parallel Worker
 #'
 #' @description
-#' The body `evaluate()`'s parallel branch dispatches, kept at top level on
-#' purpose.
+#' The body `evaluate()`'s configs axis sends each daemon
+#' ([dispatch_configs()]), kept at top level on purpose.
 #'
 #' R serializes a closure together with its enclosing environment. A function
 #' defined inside `evaluate()` therefore carries every local in that frame to
 #' every worker — including the split and the resample object — regardless of
 #' what is passed explicitly. Measured on the KSSL clay training set at 2 cm-1
-#' (17,788 x 1,701), that was a 2.26 GiB payload per future against 232 MB of
-#' genuinely needed inputs, and it was what tripped
-#' `future.globals.maxSize` (1e9, installed by `tune` at load).
+#' (17,788 x 1,701), that was a 2.26 GiB payload per task against 232 MB of
+#' genuinely needed inputs.
 #'
-#' Because this function lives in the package namespace, `future` resolves it by
-#' name rather than serializing it, so the payload is exactly `shared`.
+#' Because this function lives in the package namespace, its environment is
+#' serialized as a reference to the namespace, which the daemon resolves by
+#' name, so the payload is `shared` and the function's own code.
 #'
 #' Resolving by name has one cost, and it is the reason `evaluate()` refuses to
 #' dispatch under `pkgload`: the worker loads the **installed** horizons, not the
@@ -3370,8 +3513,8 @@ evaluate_config_worker <- function(config_i, shared) {
   ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
   ## so setting OPENBLAS_NUM_THREADS here, after the library is loaded in
   ## this worker, changed nothing when measured (2026-09-15). What can be
-  ## set at runtime in the worker is set here. future already sets
-  ## mc.cores = 1 in every multisession worker.
+  ## set at runtime in the worker is set here. A daemon keeps the thread
+  ## settings the session had when daemons() was called.
   if (requireNamespace("data.table", quietly = TRUE)) {
     data.table::setDTthreads(1L)
   }
@@ -3417,8 +3560,8 @@ evaluate_config_worker <- function(config_i, shared) {
   result_row <- stamp_eval_settings(result_row, shared$settings)
 
   ## A checkpoint that cannot be written is said on the row, for the parent
-  ## to report once every worker has returned: an error here would leave
-  ## furrr with no row from any of them, and a worker cannot stop the others.
+  ## to report once every configuration has run, as the configs axis has
+  ## always done.
   if (!is.null(shared$checkpoint_dir)) {
 
     failed <- write_checkpoint_row(result_row, shared$checkpoint_dir)

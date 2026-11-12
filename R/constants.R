@@ -294,6 +294,12 @@ SHARED_ARG_NAMES <- c(
   "pkg_version"
 )
 
+# Seconds between the configs axis's polls of the tasks in flight and the
+# daemons connected (await_round(), R/utils-parallel.R). mirai's info() costs
+# microseconds, so the poll is cheap against configurations of seconds to
+# hours.
+DISPATCH_POLL_SECONDS <- 0.1
+
 # Vocabulary of control_horizons(parallelize_over = ). "both" (a nested plan) is
 # deliberately absent for v1; control_horizons() refuses it with a hint.
 PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")

@@ -2,29 +2,24 @@
 % Please edit documentation in R/utils-parallel.R
 \name{check_parallel_backend}
 \alias{check_parallel_backend}
-\title{Check that a parallel run has a backend to run on}
+\title{Check that a parallel run has daemons to run on}
 \usage{
-check_parallel_backend(verb, collector, call = rlang::caller_env())
+check_parallel_backend(verb, collector)
 }
 \arguments{
 \item{verb}{Character. The verb, for the message (\code{"evaluate"}).}
 
 \item{collector}{The verb's collector, from \code{log_open()}.}
-
-\item{call}{The frame a refusal reports: the verb's.}
 }
 \value{
 \code{TRUE} if parallel dispatch is possible, else \code{FALSE}, with the
 warning recorded.
 }
 \description{
-Called only when the caller asked for parallelism. The gate is
-\code{nbrOfWorkers() < 2}, not the plan's class: \code{plan(multisession, workers = 1)} is not \code{sequential}-classed but yields nothing, and tune
-returns \code{"sequential"} for it silently. That silence was issue #37.
-
-A fresh session and an explicit \code{plan(sequential)} are indistinguishable
-(same class, same recorded call), so the message is written to be true of
-both.
+Called only when the caller asked for parallelism. The gate is two
+connected daemons: with one, tune runs sequentially, silently, which was
+issue #37. A \code{future::plan()} is not read: tune is given \code{allow_par = TRUE}
+only when this passes, and then takes mirai, so it never uses a plan.
 
 Running sequentially is a substitution (something other than what was
 asked ran), so it is recorded on the verb's collector as a

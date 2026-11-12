@@ -5,7 +5,7 @@
     Output
       ──────────────────────────────────────────────────
         evaluate() monitor — <time>
-        Parallel:  over configs on multisession (4 workers)
+        Parallel:  over configs on mirai (4 workers)
         Data:      120 training rows of SOC, hash 0123456789ab
         Settings:  grid_size = 10, outcome_range = -Inf, Inf
       ──────────────────────────────────────────────────

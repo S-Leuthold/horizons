@@ -427,7 +427,7 @@ describe("step_select_boruta() inside resampling (#75)", {
     folds <- rsample::vfold_cv(d, v = 3)
 
     ## allow_par = FALSE keeps the fits in this process, where the mock is,
-    ## whatever future plan an earlier test left registered.
+    ## whatever daemons an earlier test left set.
     res <- tune::fit_resamples(
       workflows::workflow(boruta_recipe(d), parsnip::linear_reg()),
       resamples = folds,

@@ -379,35 +379,6 @@ describe("memo_dir()", {
 })
 
 
-describe("parallel builds", {
-
-  it("are not aborted by parallelly's once-per-process warning on the first parallel call", {
-
-    skip_on_cran()
-    skip_if_not_installed("callr")
-
-    ## A fresh process, so this build makes its first parallel call. On a
-    ## machine where parallelly warns about the cgroups CPU set, the build
-    ## would abort without the helper's priming call; elsewhere the test
-    ## passes either way.
-    helper <- normalizePath(test_path("helper-memo.R"))
-
-    worker_pid <- callr::r(function(helper) {
-      source(helper)
-      memo_fixture("first-parallel-call", function() {
-        old <- future::plan(future::multisession, workers = 2)
-        on.exit(future::plan(old))
-        future::value(future::future(Sys.getpid()))
-      })
-    }, args = list(helper = helper))
-
-    expect_type(worker_pid, "integer")
-
-  })
-
-})
-
-
 describe("memo_reset()", {
 
   it("clears every entry and removes the template directories", {

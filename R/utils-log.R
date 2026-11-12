@@ -434,16 +434,13 @@ flatten_message <- function(message) {
 #' @description
 #' A bug, a door error and a missing package are not local to a unit: each
 #' would hit every unit the same way, so it propagates with its class, chain
-#' and backtrace intact. Nor is a parallel worker's death, which future
-#' raises as a `FutureError`, or a unit raises as `horizons_error_systemic`
-#' when tune caught future's error: the run cannot go on, and the verb stops
-#' it as systemic. A package found missing mid-run, which reaches a unit in
+#' and backtrace intact. Nor is a systemic stop raised inside one: the run
+#' cannot go on. A package found missing mid-run, which reaches a unit in
 #' another package's classes, is recognised by [missing_package_signal()].
 #'
 #' @keywords internal
 #' @noRd
-NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependency", "systemic")),
-                     "FutureError")
+NEVER_CONTAINED <- paste0("horizons_error_", c("internal", "input", "dependency", "systemic"))
 
 #' Whether a failure is a package missing where the unit ran
 #'
@@ -462,8 +459,7 @@ NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependenc
 #' On the configs axis tune runs inside the worker as it would in a session,
 #' and refuses at its own door before anything is fitted, unclassed. Those
 #' refusals are matched by their text, `TUNE_MISSING_PACKAGE`, anywhere in
-#' the chain, as future.apply's report of a worker's death is
-#' ([worker_death_signal()]).
+#' the chain.
 #'
 #' @param cnd A condition.
 #' @return Logical(1).

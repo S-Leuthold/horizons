@@ -1,11 +1,9 @@
 ## ---------------------------------------------------------------------------
 ## Tests: parallelism helpers (R/utils-parallel.R)
 ## ---------------------------------------------------------------------------
-## These run with no backend registered and no installed build: the axis
-## resolver is a pure function, and the plan helpers only read the plan.
-## Tests that register a plan restore the previous one with withr::defer().
-
-## local_plan() comes from helper-parallel.R.
+## These run with no installed build: the axis resolver is a pure function,
+## and the backend helpers only read the daemons. Tests that set daemons reset
+## them on exit (local_test_daemons(), helper-parallel.R).
 
 ## =========================================================================
 ## resolve_parallel_axis()
@@ -82,44 +80,29 @@ describe("resolve_parallel_axis()", {
 })
 
 ## =========================================================================
-## Plan inspection
+## The daemons
 ## =========================================================================
 
-describe("registered_plan_label() / registered_workers()", {
+describe("connected_daemons()", {
 
-  it("describes a sequential plan", {
+  it("is 0 with no daemons set", {
 
-    local_plan(future::sequential)
+    mirai::daemons(0)
 
-    expect_equal(registered_plan_label(), "sequential")
-    expect_identical(registered_workers(), 1L)
+    expect_identical(connected_daemons(), 0L)
 
   })
 
-  it("describes a flat multisession plan with its worker count, which check_parallel_backend() passes silently", {
+  it("counts the daemons connected, which check_parallel_backend() passes silently at two", {
 
     skip_on_cran()
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
 
-    expect_equal(registered_plan_label(), "multisession")
-    expect_identical(registered_workers(), 2L)
+    expect_identical(connected_daemons(), 2L)
 
-    ## Two workers are enough: no warning, and TRUE
-    expect_silent(ok <- check_parallel_backend("evaluate()"))
+    ## Two daemons are enough: no warning, and TRUE
+    expect_silent(ok <- check_parallel_backend("evaluate", log_open("evaluate")))
     expect_true(ok)
-
-  })
-
-  it("describes a nested plan level by level and reports the outer count", {
-
-    skip_on_cran()
-    local_plan(list(
-      future::tweak(future::multisession, workers = 2),
-      future::tweak(future::sequential)
-    ))
-
-    expect_equal(registered_plan_label(), "multisession > sequential")
-    expect_identical(registered_workers(), 2L)
 
   })
 
@@ -127,60 +110,45 @@ describe("registered_plan_label() / registered_workers()", {
 
 describe("check_parallel_backend()", {
 
-  it("records a substitution and returns FALSE when nothing useful is registered", {
+  it("records a substitution and returns FALSE with no daemons, naming the call to set them", {
 
-    local_plan(future::sequential)
+    mirai::daemons(0)
     collector <- log_open("evaluate")
 
     expect_no_warning(ok <- check_parallel_backend("evaluate", collector))
     expect_false(ok)
 
     rows <- log_close(collector)
+    msg  <- gsub("\\s+", " ", rows$message)
     expect_identical(rows$topic, "substitution")
-    expect_match(rows$message, "offers 1 worker", fixed = TRUE)
-    expect_match(rows$message, "so it ran sequentially", fixed = TRUE)
-    expect_match(rows$message, "Register a backend before calling", fixed = TRUE)
+    expect_match(msg, "but 0 mirai daemons are connected, so it ran sequentially", fixed = TRUE)
+    expect_match(msg, "Set daemons before calling, for example `mirai::daemons(4)`", fixed = TRUE)
+    expect_match(msg, "A `future::plan()` is no longer used.", fixed = TRUE)
 
   })
 
-  it("records it for a multisession plan with a single worker (the #37 shape)", {
+  it("records it for a single daemon (the #37 shape)", {
 
     skip_on_cran()
-    local_plan(future::multisession, workers = 1)
+    local_test_daemons(1)
     collector <- log_open("fit")
 
     expect_false(check_parallel_backend("fit", collector))
     rows <- log_close(collector)
-    expect_match(rows$message, "fit().*1 worker")
+    expect_match(rows$message, "fit().*1 mirai daemon is connected")
 
   })
 
-  it("refuses a usable plan when future.apply, which tune's future backend calls, is not installed", {
+  it("never sets, resizes or resets the daemons", {
 
-    real <- base::requireNamespace
-    local_mocked_bindings(
-      requireNamespace = function(package, ...) {
-        !identical(package, "future.apply") && real(package, ...)
-      },
-      .package = "base"
-    )
-    local_mocked_bindings(registered_workers = function() 2L)
-
-    err <- expect_error(check_parallel_backend("evaluate", log_open("evaluate")),
-                        "future.apply is not installed, but tune's future backend calls it.",
-                        fixed = TRUE, class = "horizons_error_dependency")
-    expect_match(conditionMessage(err), "install.packages(\"future.apply\")", fixed = TRUE)
-
-  })
-
-  it("never registers or alters the plan", {
-
-    local_plan(future::sequential)
-    before <- future::plan("list")
+    skip_on_cran()
+    local_test_daemons(2)
+    before <- list(n = mirai::nextget("n"), set = mirai::daemons_set(), connected = connected_daemons())
 
     check_parallel_backend("evaluate", log_open("evaluate"))
 
-    expect_identical(future::plan("list"), before)
+    expect_identical(list(n = mirai::nextget("n"), set = mirai::daemons_set(), connected = connected_daemons()),
+                     before)
 
   })
 
