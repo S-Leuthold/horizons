@@ -345,7 +345,7 @@ meta_formula <- function() {
 #'   runs the meta-learner in the unit `ensemble/meta-folds`
 #'   ([with_unit_seed()]), so the tuning resamples and the genuine meta-OOF
 #'   are reproducible, and an engine that takes a seed (xgboost) is given
-#'   that unit's ([seed_engine()]).
+#'   that unit's (`seed_engine()`).
 #' @param debug Logical. From `ensemble()`'s control: a failure inside tune,
 #'   or a candidate left out for a missing fold, stops the call.
 #' @param call The frame a member's failure to predict the test rows reports
