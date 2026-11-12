@@ -404,11 +404,15 @@ describe("the parallel backend", {
       registered_plan_label  = function() "mirai"
     )
 
+    withr::defer(mirai::daemons(0))
+
     for (setting in list(list(n = 2L, seed = NULL), list(n = 3L, seed = NULL),
                          list(n = 2L, seed = 1L),   list(n = 3L, seed = 1L))) {
 
-      mirai::daemons(setting$n, seed = setting$seed)
-      withr::defer(mirai::daemons(0))
+      ## autoexit = NA: a daemon finishes exiting when the reset drops its
+      ## connection, where the default kills it after 200 ms, cutting off the
+      ## trace file a daemon writes on exit under covr
+      mirai::daemons(setting$n, seed = setting$seed, autoexit = NA)
 
       withr::local_seed(5)
       before <- .Random.seed
@@ -421,6 +425,9 @@ describe("the parallel backend", {
       expect_identical(ev$evaluation$parallelize_over, "resamples", info = label)
       expect_identical(eval_rows(ev), eval_rows(base$ev), info = label)
       expect_identical(.Random.seed, before, info = label)
+
+      ## The folds ran on the daemons, not in this process
+      expect_gt(mirai::info()[["completed"]], 0L, label = paste("the tasks completed with", label))
 
       mirai::daemons(0)
 

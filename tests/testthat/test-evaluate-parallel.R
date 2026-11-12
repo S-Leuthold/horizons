@@ -1150,12 +1150,12 @@ describe("monitor_evaluate()", {
 ## Results do not depend on the axis (review finding, 2026-09-15)
 ## =========================================================================
 ## tune's future path advances the parent RNG stream differently from the
-## sequential loop, so before the per-stage re-pinning the Bayesian stage and
-## last_fit() drew from a different position on the resamples axis. This
+## sequential loop, so when the stages shared one stream the Bayesian stage
+## and last_fit() drew from a different position on the resamples axis. Each
+## stage is now a unit of its own (with_unit_seed()), seeded on entry. This
 ## fixture uses rf (deterministic given a seed) with Bayesian iterations ON,
 ## where the axes diverged on the tune of that time, and asserts the whole
-## result row is identical. On later tune releases the axes no longer diverge
-## here without the re-pinning, so this pins the result, not the re-pinning.
+## result row is identical, so it pins the result, not the mechanism.
 ## The sequential run both tests compare against is built once, by whichever
 ## of them runs first (helper-memo.R), so a skipped test costs nothing.
 

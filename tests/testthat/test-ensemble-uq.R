@@ -228,28 +228,34 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
   it("the calibration partition differs from the tuning partition (Route B)", {
 
-    ens_ref <- ens_built("weighted")
+    ## xgb: a meta-learner that draws folds of its own, for its out-of-fold
+    ## pass (and its tuning, when optimised)
+    ens_ref <- ens_built("xgb")
     uq  <- ens_ref$ensemble$uq
     oof <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
 
     meta_frame        <- oof$predictors
     meta_frame$.truth <- oof$truth
 
-    fold_of <- function(unit) {
+    ## The meta-learner's folds, which the ensemble does not store, redrawn
+    ## from their unit; each meta row's fold, by position in the meta frame
+    tuning <- with_unit_seed(ens_ref$ensemble$seed, "ensemble/meta-folds", suppressWarnings(
+      rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+    ))
 
-      folds <- with_unit_seed(ens_ref$ensemble$seed, unit, suppressWarnings(
-        rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
-      ))
-
-      assign <- integer(nrow(meta_frame))
-      for (k in seq_len(nrow(folds))) {
-        assign[as.integer(folds$splits[[k]], data = "assessment")] <- k
-      }
-      assign
-
+    tuning_fold <- integer(nrow(meta_frame))
+    for (k in seq_len(nrow(tuning))) {
+      tuning_fold[as.integer(tuning$splits[[k]], data = "assessment")] <- k
     }
 
-    expect_false(identical(fold_of("ensemble/meta-folds"), fold_of("ensemble/cvplus")))
+    ## The calibration partition ensemble() drew, as it stored it, by .row
+    calibration_fold <- uq$calib$fold[match(oof$row, uq$calib$.row)]
+
+    ## Both name folds 1 to 5 the same way, so the comparison below is of
+    ## the assignments alone
+    expect_false(anyNA(calibration_fold))
+    expect_identical(sort(unique(calibration_fold)), sort(unique(tuning_fold)))
+    expect_false(identical(calibration_fold, tuning_fold))
 
   })
 
