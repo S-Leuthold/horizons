@@ -63,7 +63,7 @@ it finished when it fails, and says so (#209).
 }
 \details{
 Each phase is a stage of the member's own (\code{warmstart-tune}, \code{bayes};
-\code{\link[=with_unit_seed]{with_unit_seed()}}), with its seed given to the engine and to the search,
+\code{with_unit_seed()}), with its seed given to the engine and to the search,
 so the search does not depend on what the grid stage drew, nor on the
 axis it ran on (#151).
 3. Choose the hyperparameters by RMSE among the candidates scored on every

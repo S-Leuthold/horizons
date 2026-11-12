@@ -34,7 +34,7 @@ train_Fit).}
 \item{level_default}{Numeric. Default coverage level. Default 0.90.}
 
 \item{seed}{Integer or NULL. ranger's seed for the quantile forest.
-\code{fit()} runs this in the member's \code{forest} stage (\code{\link[=with_unit_seed]{with_unit_seed()}})
+\code{fit()} runs this in the member's \code{forest} stage (\code{with_unit_seed()})
 and passes that stage's seed, so the forest, its trees and the node
 values it stores, depends on the stage alone. NULL keeps ranger's
 default of drawing its seed from the stream.}

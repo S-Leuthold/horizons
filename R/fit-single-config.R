@@ -39,7 +39,7 @@
 #'   same calibration set as UQ.
 #' @param allow_par Logical. Passed to tune control functions.
 #' @param seed Integer. The run's seed, from which each stage's seed is
-#'   derived with the stage's name ([with_unit_seed()]).
+#'   derived with the stage's name (`with_unit_seed()`).
 #' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
 #'   to [build_recipe()]. `fit()` reads it from `configure()`'s
 #'   `config$recipe`, the value `evaluate()` ran with. Default 9.

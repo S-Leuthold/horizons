@@ -65,7 +65,7 @@ value before dispatch (parameter-free configs become \code{"resamples"};
 single-split rsets become \code{"everything"}).}
 
 \item{seed}{Integer. The run's seed, from which each stage's seed is
-derived with the stage's name (\code{\link[=with_unit_seed]{with_unit_seed()}}).}
+derived with the stage's name (\code{with_unit_seed()}).}
 
 \item{sg_window}{Odd integer. Savitzky-Golay window in grid points, passed
 to \code{\link[=build_recipe]{build_recipe()}}. \code{evaluate()} reads it from \code{configure()}'s

@@ -39,7 +39,7 @@
 #'   plan when `TRUE`. Default `FALSE`.
 #' @param seed Integer. The run's seed, recorded on the contract;
 #'   [fit_tuned_meta_learner()] gives xgboost the meta-learner unit's seed
-#'   ([unit_seed()]).
+#'   (`unit_seed()`).
 #' @param debug Logical. From `ensemble()`'s control; see
 #'   [fit_tuned_meta_learner()].
 #' @param call The frame a member's failure to predict the test rows reports

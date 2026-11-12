@@ -153,7 +153,7 @@ fit_quantile_forest <- function(features, residuals, seed = NULL) {
 #'   (e.g. "none", "log", "log10", "sqrt").
 #' @param level_default Numeric. Default coverage level. Default 0.90.
 #' @param seed Integer or NULL. ranger's seed for the quantile forest.
-#'   `fit()` runs this in the member's `forest` stage ([with_unit_seed()])
+#'   `fit()` runs this in the member's `forest` stage (`with_unit_seed()`)
 #'   and passes that stage's seed, so the forest, its trees and the node
 #'   values it stores, depends on the stage alone. NULL keeps ranger's
 #'   default of drawing its seed from the stream.

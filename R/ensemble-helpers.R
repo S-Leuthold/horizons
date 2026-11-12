@@ -343,7 +343,7 @@ meta_formula <- function() {
 #'   Default `FALSE`.
 #' @param seed Integer. The run's seed, recorded on the contract. `ensemble()`
 #'   runs the meta-learner in the unit `ensemble/meta-folds`
-#'   ([with_unit_seed()]), so the tuning resamples and the genuine meta-OOF
+#'   (`with_unit_seed()`), so the tuning resamples and the genuine meta-OOF
 #'   are reproducible, and an engine that takes a seed (xgboost) is given
 #'   that unit's (`seed_engine()`).
 #' @param debug Logical. From `ensemble()`'s control: a failure inside tune,
