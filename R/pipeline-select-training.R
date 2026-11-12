@@ -2388,7 +2388,7 @@ report_selection <- function(sel, n_targets, seed_line = NULL) {
   ps    <- sel$pool_sizes
   scope <- s$scope
 
-  if (!is.null(seed_line)) cat(paste0("│  ├─ ", seed_line, "\n"))
+  if (!is.null(seed_line)) cat(paste0("\u2502  \u251C\u2500 ", seed_line, "\n"))
 
   for (i in seq_len(nrow(ps))) {
 

@@ -51,12 +51,13 @@
 #' Every draw `evaluate()`, `fit()` and `ensemble()` make is seeded from the
 #' run's seed and the draw's own name, so a run repeats from the seed it
 #' records, whatever the order of the configurations, the workers or the
-#' session's random number generator. The one exception is `cubist` with
-#' `neighbors > 0`: its neighbour distance cutoff comes from a generator
-#' inside the Cubist C code that no seed reaches, which carries on from every
-#' Cubist fit made before it in the same R process, so its predictions can
-#' differ slightly between runs. Its rules, and its predictions at
-#' `neighbors = 0`, are stable. See GitHub issue #51.
+#' session's random number generator. The one exception is every `cubist`
+#' configuration: its tuning searches `neighbors` from 0 to 9, and the
+#' neighbour distance cutoff comes from a generator inside the Cubist C code
+#' that no seed reaches, which carries on from every Cubist fit made before it
+#' in the same R process. So its scores can differ slightly between runs, and
+#' with them, when candidates are close, the one chosen. Its rules are
+#' stable, which keeps the difference small. See GitHub issue #51.
 #'
 #' **Choosing models for large spectral libraries:**
 #'

@@ -381,9 +381,9 @@ rebuild_split <- function(x, call = rlang::caller_env()) {
 #' stratum is an unstratified draw. See the section header above for the
 #' cases.
 #'
-#' `make_strata()` draws a random stratum for each pooled value, and
-#' `evaluate()` draws its CV folds from the stream its split leaves without
-#' reseeding, so the caller's RNG state is restored on exit. Its warning is
+#' `make_strata()` draws a random stratum for each pooled value, so the
+#' caller's RNG state is restored on exit: a draw then starts from its unit's
+#' seed ([with_unit_seed()]) whatever `make_strata()` drew here. Its warning is
 #' muffled here only because this is a second look at the outcome: the draw
 #' itself raises it.
 #'
@@ -410,8 +410,9 @@ outcome_stratifies <- function(outcome) {
 #' @description
 #' Runs `stratified()`, the rsample call with `strata`, and on an error runs
 #' `unstratified()`, the same call without, as each draw site did inline.
-#' The caller seeds the RNG first; [outcome_stratifies()] leaves it as found,
-#' so the draws consume the stream they always did. An error from the check
+#' The caller runs it inside the draw's unit ([with_unit_seed()]);
+#' [outcome_stratifies()] leaves the stream as found, so the draw starts at
+#' the unit's seed whatever the check drew. An error from the check
 #' itself counts as unstratified rather than aborting: the stratified draw
 #' calls `make_strata()` with the same arguments, so it fails too and is
 #' retried without strata, as it was before the check existed.

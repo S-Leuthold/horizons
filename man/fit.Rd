@@ -42,7 +42,9 @@ Default TRUE.}
 
 \item{seed}{\code{NULL} or a whole number: the run's seed. The CV folds, the
 calibration split and each member's stages are seeded from it and their
-own names, so a member's results depend on the seed alone. The
+own names, so a member's results depend on the seed alone (except
+\code{cubist}, whose neighbour step no seed reaches; see the reproducibility
+note in \code{\link[=configure]{configure()}}). The
 train/test split is \code{evaluate()}'s, except on a cold start, where \code{fit()}
 draws that split as \code{evaluate()} would at this seed. \code{NULL} (the
 default) takes the seed the object records (\code{evaluate()}'s, or a re-fit's

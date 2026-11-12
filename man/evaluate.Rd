@@ -41,7 +41,9 @@ receive test-set metrics from grid-search best. Default 1.0 (the
 train/test split, the CV folds and each configuration's stages) is
 seeded from it and its own name, so a configuration's results depend on
 the seed alone, not on the other configurations, the order they run in,
-the workers or the session's generator. \code{NULL} (the default) takes the
+the workers or the session's generator (except \code{cubist}, whose neighbour
+step no seed reaches; see the reproducibility note in \code{\link[=configure]{configure()}}).
+\code{NULL} (the default) takes the
 seed the object records (a \code{\link[=select_training]{select_training()}} result's), else one
 integer from the session's random stream, which is left where it was:
 \code{set.seed()} before the call chooses it, and calls with nothing drawn
@@ -162,8 +164,10 @@ wants one registers it with \code{future::plan(list(...))} and uses
 
 Results do not depend on the backend, the number of workers, which worker
 runs a configuration or the order the work finishes in: every draw is
-seeded from the run's \code{seed} and its own name, where it is made. A
-backend's own seed (\code{mirai::daemons(seed = )}, say) has no effect on them.
+seeded from the run's \code{seed} and its own name, where it is made (except
+\code{cubist}, whose neighbour step no seed reaches; see the reproducibility
+note in \code{\link[=configure]{configure()}}). A backend's own seed (\code{mirai::daemons(seed = )},
+say) has no effect on them.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{# Laptop: four cores, parallelise the folds inside each config.
 future::plan(future::multisession, workers = 4)

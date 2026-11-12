@@ -166,7 +166,9 @@
 #'   Default TRUE.
 #' @param seed `NULL` or a whole number: the run's seed. The CV folds, the
 #'   calibration split and each member's stages are seeded from it and their
-#'   own names, so a member's results depend on the seed alone. The
+#'   own names, so a member's results depend on the seed alone (except
+#'   `cubist`, whose neighbour step no seed reaches; see the reproducibility
+#'   note in [configure()]). The
 #'   train/test split is `evaluate()`'s, except on a cold start, where `fit()`
 #'   draws that split as `evaluate()` would at this seed. `NULL` (the
 #'   default) takes the seed the object records (`evaluate()`'s, or a re-fit's
