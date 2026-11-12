@@ -80,6 +80,47 @@ describe("resolve_parallel_axis()", {
 })
 
 ## =========================================================================
+## dispatch_order()
+## =========================================================================
+
+describe("dispatch_order()", {
+
+  it("has a positive cost for every model and feature selection configure() admits", {
+
+    keys <- as.vector(outer(VALID_MODELS, VALID_FEATURE_SELECTION, paste, sep = "/"))
+
+    expect_setequal(names(CONFIG_COST_SECONDS), keys)
+    expect_true(all(is.finite(CONFIG_COST_SECONDS) & CONFIG_COST_SECONDS > 0))
+
+  })
+
+  it("starts the longest configurations first, and keeps grid order among equal costs", {
+
+    configs <- tibble::tibble(
+      model             = c("plsr", "cubist", "xgboost", "lightgbm", "mars"),
+      feature_selection = c("pca",  "none",   "none",    "none",     "pca")
+    )
+
+    ## cubist with no selection is the costliest cell, mars with PCA the
+    ## cheapest; xgboost and lightgbm cost the same, so grid order holds
+    expect_identical(dispatch_order(configs), c(2L, 3L, 4L, 1L, 5L))
+
+    ## Two rows of one cell keep their grid order too
+    expect_identical(dispatch_order(configs[c(1, 1, 2), ]), c(3L, 1L, 2L))
+
+  })
+
+  it("refuses a configuration whose cell the table lacks, as a bug", {
+
+    configs <- tibble::tibble(model = "rf", feature_selection = "lasso")
+
+    expect_error(dispatch_order(configs), "has no cost for", class = "horizons_error_internal")
+
+  })
+
+})
+
+## =========================================================================
 ## The daemons
 ## =========================================================================
 

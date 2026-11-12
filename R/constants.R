@@ -300,6 +300,38 @@ SHARED_ARG_NAMES <- c(
 # hours.
 DISPATCH_POLL_SECONDS <- 0.1
 
+# Seconds one configuration took, by model and feature selection, from which
+# the configs axis starts the longest configurations first (dispatch_order(),
+# R/utils-parallel.R). Measured whole, preps and Bayesian candidates included,
+# on 0.12.0's coverage grid: 835 training rows, 1,701 predictors, snv_deriv1,
+# 10 folds, a grid of 10 and 15 Bayesian iterations, one configuration per
+# worker. lightgbm failed every configuration of that run, so its cells are
+# xgboost's, which its fits are within 20% of. Every configuration in a run
+# shares its rows and predictors, so only the order the table gives is used
+# and it is not scaled by them. A new model or selection adds its cells
+# (test-utils-parallel.R holds the table to VALID_MODELS x
+# VALID_FEATURE_SELECTION).
+CONFIG_COST_SECONDS <- c(
+  "rf/none"           = 12861, "rf/pca"          = 672, "rf/correlation"          = 1974,
+  "rf/boruta"         = 11089, "rf/cars"         = 5379,
+  "cubist/none"       = 18772, "cubist/pca"      = 679, "cubist/correlation"      = 4634,
+  "cubist/boruta"     = 17954, "cubist/cars"     = 13245,
+  "xgboost/none"      = 6273,  "xgboost/pca"     = 357, "xgboost/correlation"     = 1807,
+  "xgboost/boruta"    = 11910, "xgboost/cars"    = 6310,
+  "plsr/none"         = 93,    "plsr/pca"        = 162, "plsr/correlation"        = 159,
+  "plsr/boruta"       = 2820,  "plsr/cars"       = 632,
+  "elastic_net/none"  = 72,    "elastic_net/pca" = 114, "elastic_net/correlation" = 157,
+  "elastic_net/boruta" = 3854, "elastic_net/cars" = 669,
+  "svm_rbf/none"      = 344,   "svm_rbf/pca"     = 175, "svm_rbf/correlation"     = 167,
+  "svm_rbf/boruta"    = 3807,  "svm_rbf/cars"    = 731,
+  "mlp/none"          = 2377,  "mlp/pca"         = 381, "mlp/correlation"         = 3037,
+  "mlp/boruta"        = 5805,  "mlp/cars"        = 7038,
+  "lightgbm/none"     = 6273,  "lightgbm/pca"    = 357, "lightgbm/correlation"    = 1807,
+  "lightgbm/boruta"   = 11910, "lightgbm/cars"   = 6310,
+  "mars/none"         = 364,   "mars/pca"        = 16,  "mars/correlation"        = 52,
+  "mars/boruta"       = 604,   "mars/cars"       = 289
+)
+
 # Vocabulary of control_horizons(parallelize_over = ). "both" is deliberately
 # absent for v1; control_horizons() refuses it with a hint.
 PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")

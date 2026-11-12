@@ -100,6 +100,49 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 }
 
 ## ---------------------------------------------------------------------------
+## dispatch_order
+## ---------------------------------------------------------------------------
+
+#' The order the configs axis starts its configurations in
+#'
+#' @description
+#' Longest first: by `CONFIG_COST_SECONDS`, the seconds a configuration of
+#' each model and feature selection took, so the longest start first and the
+#' short ones fill the daemons at the end. Ties keep grid order, so the order
+#' is deterministic. The results do not depend on it: each configuration's
+#' draws are seeded from the run's seed and its own name, and the rows are put
+#' back in configuration order before they are bound.
+#'
+#' @param configs The configurations to run, with `model` and
+#'   `feature_selection` columns.
+#' @return Integer: the row positions of `configs`, in the order to start
+#'   them.
+#' @keywords internal
+#' @noRd
+dispatch_order <- function(configs) {
+
+  keys <- paste(configs$model, configs$feature_selection, sep = "/")
+  cost <- CONFIG_COST_SECONDS[keys]
+
+  ### configure() admits only the models and selections the table holds, so a
+  ### key it lacks is a cell missing from the table
+  if (anyNA(cost)) {
+
+    missing <- unique(keys[is.na(cost)])
+
+    abort_horizons(
+      "{.code CONFIG_COST_SECONDS} has no cost for {.val {missing}}.",
+      kind = "internal"
+    )
+
+  }
+
+  ### order() leaves ties in their original order, which is grid order
+  order(-cost)
+
+}
+
+## ---------------------------------------------------------------------------
 ## The daemons
 ## ---------------------------------------------------------------------------
 
