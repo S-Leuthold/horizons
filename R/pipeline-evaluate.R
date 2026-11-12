@@ -568,8 +568,9 @@ evaluate <- function(x,
     ## Read only when pruning, so it cannot have changed a row otherwise.
     prune_threshold = if (isTRUE(prune)) prune_threshold else NA_real_,
     seed            = seed,
-    ## The rule that turns the seed into each unit's draws: a row from an
-    ## earlier rule lacks it, and is re-evaluated.
+    ## The rule that turns the seed into each unit's draws: a row drawn
+    ## under another rule, or before there was one, is dropped and
+    ## re-evaluated (checkpoint_row_verdict()).
     seed_rule       = SEED_RULE,
     ## configure()'s recipe settings (#62). pca_threshold is recorded for
     ## every row, PCA or not: conservative, since a row that never ran PCA
@@ -1341,7 +1342,10 @@ read_checkpoint_store <- function(output_dir) {
 #' every data field and every setting) was written by another version of
 #' horizons and cannot be checked against this run, so it is dropped and its
 #' config re-evaluated; so is every row when the run has no fingerprint of its
-#' own (no sample id column). Every other row passes a fixed gate order: the
+#' own (no sample id column), and every row drawn under another seeding rule
+#' than the run's (`seed_rule`, `SEED_RULE`), whose split and folds are
+#' others, so that a bump of the rule re-evaluates rather than refuses. Every
+#' other row passes a fixed gate order: the
 #' training-data fingerprint, then the tuning settings, then the scoring
 #' schema. The fingerprint is compared field by field: the fields carry
 #' everything `data_hash` does, and the hash sorts the ids in the session's
@@ -1366,12 +1370,19 @@ checkpoint_row_verdict <- function(row, data_fp, settings) {
   row_fp   <- checkpoint_row_fingerprint(row)
   data_cmp <- compare_record(row_fp$data_fields, data_fp$data_fields)
   stored   <- checkpoint_row_settings(row)
-  cmp      <- compare_record(stored, settings)
+  cmp      <- compare_record(stored, settings[names(settings) != "seed_rule"])
+
+  ## The seeding rule is a schema, not a setting: a row drawn under another
+  ## rule, or before there was one, was scored on another split, so it is
+  ## dropped before its data are compared rather than refused as written on
+  ## other rows
+  same_rule <- is.null(settings[["seed_rule"]]) ||
+    identical(stored[["seed_rule"]], settings[["seed_rule"]])
 
   checkable <- !is.na(row_fp$data_hash) && !is.na(data_fp$data_hash) &&
     length(data_cmp$missing) == 0 && length(cmp$missing) == 0
 
-  verdict <- if (!checkable) {
+  verdict <- if (!checkable || !same_rule) {
     "foreign_schema"
   } else if (length(data_cmp$differ) > 0) {
     "data_mismatch"

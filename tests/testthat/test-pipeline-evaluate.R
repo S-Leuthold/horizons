@@ -1812,14 +1812,31 @@ describe("checkpoint scoring schema", {
         r$data_hash   <- "other"
         r$data_fields <- list(list(ids = "j", outcome = "SOC"))
         r
+      }),
+      ## Drawn under another seed rule, so on another split: dropped too,
+      ## whether its rows differ from this run's or not
+      variant("other_rule",  function(r) {
+        r$settings[[1]]$seed_rule <- SEED_RULE + 1L
+        r$data_hash   <- "other"
+        r$data_fields <- list(list(ids = "j", outcome = "SOC"))
+        r
+      }),
+      variant("other_rule_same_rows", function(r) {
+        r$settings[[1]]$seed_rule <- SEED_RULE + 1L
+        r
       })
     )
 
     gated <- gate_checkpoint_rows(candidates, run_fp, settings)
 
     expect_named(gated$kept, "keep")
-    expect_equal(gated$n_foreign, 10L)
+    expect_equal(gated$n_foreign, 12L)
     expect_length(gated$refused, 0)
+
+    ## Under the rule's own version the verdict is the schema's, before the
+    ## data are compared
+    other_rule <- candidates[[length(candidates) - 1L]]$row
+    expect_identical(checkpoint_row_verdict(other_rule, run_fp, settings)$verdict, "foreign_schema")
 
     ## A run with no fingerprint of its own resumes nothing
     unverifiable <- gate_checkpoint_rows(candidates[1], list(data_hash = NA_character_),
@@ -1890,29 +1907,35 @@ describe("checkpoint scoring schema", {
 
   })
 
-  it("on resume, re-evaluates configs whose checkpoint was written before the seed rule", {
+  it("on resume, re-evaluates configs whose checkpoint was written before the seed rule, or under another", {
 
-    ck     <- ck_b()
-    obj    <- ck$value$obj
-    tmpdir <- ck$dir
+    ## A row as an earlier version wrote it (no seed_rule among its settings),
+    ## and one a later rule wrote: each with a split drawn another way, so its
+    ## rows differ from this run's
+    for (rule in list(NULL, SEED_RULE + 1L)) {
 
-    ## A row as an earlier version wrote it: no seed_rule among its settings,
-    ## and a split drawn another way, so its rows differ from this run's
-    f   <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
-    row <- readRDS(f)
-    row$settings[[1]]$seed_rule <- NULL
-    row$data_hash               <- "0000deadbeef"
-    row$data_fields[[1]]$ids    <- "0000deadbeef"
-    row$cv_rpd                  <- 999
-    saveRDS(row, f)
+      ck     <- ck_b()
+      obj    <- ck$value$obj
+      tmpdir <- ck$dir
 
-    out <- capture.output(
-      second <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir, verbose = TRUE)))
-    )
+      f   <- file.path(tmpdir, "checkpoints", "cfg_001.rds")
+      row <- readRDS(f)
+      row$settings[[1]]$seed_rule <- rule
+      row$data_hash               <- "0000deadbeef"
+      row$data_fields[[1]]$ids    <- "0000deadbeef"
+      row$cv_rpd                  <- 999
+      saveRDS(row, f)
 
-    expect_true(any(grepl("Dropped 1 checkpoint row written under an earlier schema", out, fixed = TRUE)))
-    expect_false(any(second$evaluation$results$cv_rpd == 999))
-    expect_identical(second$evaluation$results$settings[[1]]$seed_rule, as.double(SEED_RULE))
+      out <- capture.output(
+        second <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = tmpdir, verbose = TRUE)))
+      )
+
+      info <- if (is.null(rule)) "no seed_rule" else paste("seed_rule", rule)
+      expect_true(any(grepl("Dropped 1 checkpoint row written under an earlier schema", out, fixed = TRUE)), info = info)
+      expect_false(any(second$evaluation$results$cv_rpd == 999), info = info)
+      expect_identical(second$evaluation$results$settings[[1]]$seed_rule, as.double(SEED_RULE), info = info)
+
+    }
 
   })
 
