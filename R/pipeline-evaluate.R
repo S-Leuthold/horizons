@@ -3465,8 +3465,9 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   is no `debug` either, since a debug run never dispatches.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
-#'   records still on it for the parent to lift, and, when its checkpoint
-#'   could not be written, why, as the attribute `"checkpoint_failed"`.
+#'   records still on it for the parent to lift, any warning raised outside
+#'   the unit added to its `warnings`, and, when its checkpoint could not be
+#'   written, why, as the attribute `"checkpoint_failed"`.
 #' @keywords internal
 #' @noRd
 
@@ -3509,55 +3510,72 @@ evaluate_config_worker <- function(config_i, shared) {
 
   }
 
-  ## Thread pinning that works happens in the PARENT before dispatch
-  ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
-  ## so setting OPENBLAS_NUM_THREADS here, after the library is loaded in
-  ## this worker, changed nothing when measured (2026-09-15). What can be
-  ## set at runtime in the worker is set here. A daemon keeps the thread
-  ## settings the session had when daemons() was called.
-  if (requireNamespace("data.table", quietly = TRUE)) {
-    data.table::setDTthreads(1L)
-  }
-  options(ranger.num.threads = 1L)
+  ## mirai relays no condition from a task, so a warning raised here outside
+  ## the configuration's unit (a package's while it loads, say) is kept on
+  ## the row, as another package's warning inside the unit is, rather than
+  ## lost. The unit records and muffles its own.
+  outside <- character(0)
 
-  cfg <- shared$configs[config_i, ]
+  result_row <- withCallingHandlers({
 
-  ## The packages the configuration needs, loaded here as evaluate()'s door
-  ## check loaded them in the parent (check_packages()). A worker is a fresh
-  ## process, and some of them work only once loaded: bonsai registers
-  ## lightgbm's engine with parsnip when it loads, so without this every
-  ## lightgbm configuration failed at workflow creation on a worker.
-  for (pkg in names(needed_packages(cfg$model, cfg$feature_selection))) {
-    requireNamespace(pkg, quietly = TRUE)
-  }
+    ## Thread pinning that works happens in the PARENT before dispatch
+    ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
+    ## so setting OPENBLAS_NUM_THREADS here, after the library is loaded in
+    ## this worker, changed nothing when measured (2026-09-15). What can be
+    ## set at runtime in the worker is set here. A daemon keeps the thread
+    ## settings the session had when daemons() was called.
+    if (requireNamespace("data.table", quietly = TRUE)) {
+      data.table::setDTthreads(1L)
+    }
+    options(ranger.num.threads = 1L)
 
-  ## Reconstruct the split and folds from indices. Fold membership is
-  ## reproduced by construction, not by replaying the RNG.
-  resamples <- rebuild_resamples(shared$data, shared$resample_idx)
+    cfg <- shared$configs[config_i, ]
 
-  result_row <- evaluate_single_config(
-    config_row      = cfg,
-    split           = resamples$split,
-    cv_folds        = resamples$cv_folds,
-    role_map        = shared$role_map,
-    grid_size       = shared$grid_size,
-    bayesian_iter   = shared$bayesian_iter,
-    prune           = shared$prune,
-    prune_threshold = shared$prune_threshold,
-    allow_par       = FALSE,     # configs axis: tune runs sequentially inside
-    seed            = shared$seed,
-    sg_window       = shared$sg_window,
-    pca_threshold   = shared$pca_threshold,
-    outcome_range   = shared$outcome_range,
-    keep_traces     = shared$keep_traces
-  )
+    ## The packages the configuration needs, loaded here as evaluate()'s door
+    ## check loaded them in the parent (check_packages()). A worker is a fresh
+    ## process, and some of them work only once loaded: bonsai registers
+    ## lightgbm's engine with parsnip when it loads, so without this every
+    ## lightgbm configuration failed at workflow creation on a worker.
+    for (pkg in names(needed_packages(cfg$model, cfg$feature_selection))) {
+      requireNamespace(pkg, quietly = TRUE)
+    }
 
-  ## Both provenance records are sent rather than rebuilt. The data
-  ## fingerprint hashes the whole predictor matrix, which is a once-per-run
-  ## cost, not a per-config one; and a setting added to the list in
-  ## evaluate() reaches the worker's rows with no change here.
-  result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
-  result_row <- stamp_eval_settings(result_row, shared$settings)
+    ## Reconstruct the split and folds from indices. Fold membership is
+    ## reproduced by construction, not by replaying the RNG.
+    resamples <- rebuild_resamples(shared$data, shared$resample_idx)
+
+    result_row <- evaluate_single_config(
+      config_row      = cfg,
+      split           = resamples$split,
+      cv_folds        = resamples$cv_folds,
+      role_map        = shared$role_map,
+      grid_size       = shared$grid_size,
+      bayesian_iter   = shared$bayesian_iter,
+      prune           = shared$prune,
+      prune_threshold = shared$prune_threshold,
+      allow_par       = FALSE,     # configs axis: tune runs sequentially inside
+      seed            = shared$seed,
+      sg_window       = shared$sg_window,
+      pca_threshold   = shared$pca_threshold,
+      outcome_range   = shared$outcome_range,
+      keep_traces     = shared$keep_traces
+    )
+
+    ## Both provenance records are sent rather than rebuilt. The data
+    ## fingerprint hashes the whole predictor matrix, which is a once-per-run
+    ## cost, not a per-config one; and a setting added to the list in
+    ## evaluate() reaches the worker's rows with no change here.
+    result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
+    result_row <- stamp_eval_settings(result_row, shared$settings)
+
+    result_row
+
+  }, warning = function(w) {
+    outside <<- c(outside, condition_summary(w))
+    rlang::cnd_muffle(w)
+  })
+
+  if (length(outside) > 0) result_row$warnings <- list(c(result_row$warnings[[1]], outside))
 
   ## A checkpoint that cannot be written is said on the row, for the parent
   ## to report once every configuration has run, as the configs axis has

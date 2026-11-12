@@ -977,6 +977,53 @@ describe("evaluate() - the configs axis on mirai", {
 
   })
 
+  it("keeps a warning raised outside a configuration's unit on its row, where mirai would drop it (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## In this session first: the worker body muffles the warning and keeps
+    ## it on the row
+    real_rebuild <- rebuild_resamples
+    local_mocked_bindings(rebuild_resamples = function(...) {
+      warning("A package warned while the folds were rebuilt.")
+      real_rebuild(...)
+    })
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ...) {
+        tibble::tibble(config_id = config_row$config_id, status = "success",
+                       warnings = list("The unit's own warning."))
+      }
+    )
+
+    expect_no_warning(row <- evaluate_config_worker(1L, worker_payload()))
+    expect_identical(row$warnings[[1]][1], "The unit's own warning.")
+    expect_match(row$warnings[[1]][2], "A package warned while the folds were rebuilt.", fixed = TRUE)
+
+    ## Then across a daemon, on a real configuration
+    local_test_daemons(2)
+
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("rebuild_resamples", envir = ns)
+      utils::assignInNamespace("rebuild_resamples", function(...) {
+        warning("A package warned while the folds were rebuilt.")
+        real(...)
+      }, ns = "horizons")
+    })[], 30)
+
+    ev <- with_deadline(suppressWarnings(evaluate(plsr_object(2), seed = 42L,
+                                                  control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                             output_dir = withr::local_tempdir(),
+                                                                             verbose = FALSE))), 120)
+
+    for (w in ev$evaluation$results$warnings) {
+      expect_true(any(grepl("A package warned while the folds were rebuilt.", w, fixed = TRUE)))
+    }
+
+  })
+
   it("puts a warning a configuration's unit raised on a daemon on the log, as a sequential run does (installed build)", {
 
     skip_unless_slow_tier()
