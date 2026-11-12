@@ -105,14 +105,16 @@
 #' way across at least two models, `fit()` stops with
 #' `horizons_error_systemic` and the members so far as `results`
 #' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
-#' member), and it stops the same way when a parallel worker dies or lacks a
-#' package the members need. With
+#' member), and it stops the same way when a daemon dies or is found lacking
+#' a package the members need. With
 #' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
 #' first failure, inside tuning included, stops the call with its backtrace.
 #' Before a parallel run `fit()` refuses a session loaded with
-#' `devtools::load_all()`, and one whose workers load another version of
-#' horizons (`horizons_error_dependency`), since tune's workers run horizons'
-#' recipe steps.
+#' `devtools::load_all()`, and, asking every daemon connected one task each,
+#' daemons that load another version of horizons
+#' (`horizons_error_dependency`) or cannot load a package the members need
+#' (`horizons_error_missing_package`), since tune's tasks run horizons'
+#' recipe steps and the members' engines.
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -184,14 +186,24 @@
 #'   `models$control`.
 #'
 #' @section Parallelism:
-#' With `control_horizons(allow_par = TRUE)`, tune parallelises the CV folds
-#' inside each member's re-tune and OOF pass on whatever `future::plan()` the
-#' caller has registered; `fit()` never registers a plan. If the plan offers
-#' fewer than two workers, `fit()` runs sequentially and warns, with class
-#' `horizons_warning_substitution`; the warning is also a row of the object's
-#' `log`. `fit()` parallelises folds only in this version; a configs axis
-#' across the `n_best` members is gated on the fitted-object memory contract
-#' (a fitted object is hundreds of MB and would cross to workers).
+#' With `control_horizons(allow_par = TRUE)`, tune runs the CV folds inside
+#' each member's re-tune and OOF pass on the [mirai](https://mirai.r-lib.org)
+#' daemons the caller has set (`mirai::daemons(4)` before the call); a
+#' `future::plan()` is not used, and `fit()` never sets, resizes or resets
+#' the daemons. With fewer than two connected, `fit()` runs sequentially and
+#' warns, with class `horizons_warning_substitution`; the warning is also a
+#' row of the object's `log`. A daemon that dies during a member, read as
+#' fewer daemons connected after it than before, stops the call with
+#' `horizons_error_systemic` and the members so far; so does one exiting
+#' under `maxtasks`, `idletime` or `walltime`, which the count cannot tell
+#' apart, and with none connected as a member starts the call stops with
+#' `horizons_error_no_daemons`. A pool whose daemons all exit during one of
+#' tune's calls waits inside tune, and a daemon whose library loses a package
+#' after the check before the run fails the member with tune's "Argument 1
+#' must be a data frame or a named atomic vector". `fit()` parallelises folds
+#' only in this version; a configs axis across the `n_best` members is gated
+#' on the fitted-object memory contract (a fitted object is hundreds of MB
+#' and would cross to workers).
 #'
 #' @section Outcome range:
 #' Every prediction `fit()` scores (out-of-fold, test and calibration) is

@@ -451,10 +451,12 @@ NEVER_CONTAINED <- paste0("horizons_error_", c("internal", "input", "dependency"
 #' would fail every unit that needs it, so it is not the unit's failure. It
 #' reaches the unit in another package's class, anywhere in the chain:
 #' base R's `packageNotFoundError`, which `library()` and `loadNamespace()`
-#' raise (tune's workers attach every package the workflow needs with
-#' `library()`, so a run on the resamples axis meets it there), and rlang's
-#' `rlib_error_package_not_found`, which `rlang::check_installed()` raises (a
-#' selection step's own check, when its recipe is prepped in the unit).
+#' raise, and rlang's `rlib_error_package_not_found`, which
+#' `rlang::check_installed()` raises (a selection step's own check, when its
+#' recipe is prepped in the unit). On the resamples axis a package missing on
+#' a daemon does not reach the unit as either: tune binds the daemon's error
+#' with the folds' results and fails on that, which is why the verbs check
+#' every daemon's packages before the run (`check_parallel_workers()`).
 #'
 #' On the configs axis tune runs inside the worker as it would in a session,
 #' and refuses at its own door before anything is fitted, unclassed. Those

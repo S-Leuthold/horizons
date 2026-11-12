@@ -194,14 +194,16 @@ package that is not installed, naming each (\code{horizons_error_missing_package
 way across at least two models, \code{fit()} stops with
 \code{horizons_error_systemic} and the members so far as \code{results}
 (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to fit every
-member), and it stops the same way when a parallel worker dies or lacks a
-package the members need. With
+member), and it stops the same way when a daemon dies or is found lacking
+a package the members need. With
 \code{control_horizons(debug = TRUE)} the re-tunes run in this session and the
 first failure, inside tuning included, stops the call with its backtrace.
 Before a parallel run \code{fit()} refuses a session loaded with
-\code{devtools::load_all()}, and one whose workers load another version of
-horizons (\code{horizons_error_dependency}), since tune's workers run horizons'
-recipe steps.
+\code{devtools::load_all()}, and, asking every daemon connected one task each,
+daemons that load another version of horizons
+(\code{horizons_error_dependency}) or cannot load a package the members need
+(\code{horizons_error_missing_package}), since tune's tasks run horizons'
+recipe steps and the members' engines.
 }
 
 \section{Cold start from one configuration}{
@@ -238,14 +240,24 @@ choosing among them is what \code{evaluate()} is for.
 
 \section{Parallelism}{
 
-With \code{control_horizons(allow_par = TRUE)}, tune parallelises the CV folds
-inside each member's re-tune and OOF pass on whatever \code{future::plan()} the
-caller has registered; \code{fit()} never registers a plan. If the plan offers
-fewer than two workers, \code{fit()} runs sequentially and warns, with class
-\code{horizons_warning_substitution}; the warning is also a row of the object's
-\code{log}. \code{fit()} parallelises folds only in this version; a configs axis
-across the \code{n_best} members is gated on the fitted-object memory contract
-(a fitted object is hundreds of MB and would cross to workers).
+With \code{control_horizons(allow_par = TRUE)}, tune runs the CV folds inside
+each member's re-tune and OOF pass on the \href{https://mirai.r-lib.org}{mirai}
+daemons the caller has set (\code{mirai::daemons(4)} before the call); a
+\code{future::plan()} is not used, and \code{fit()} never sets, resizes or resets
+the daemons. With fewer than two connected, \code{fit()} runs sequentially and
+warns, with class \code{horizons_warning_substitution}; the warning is also a
+row of the object's \code{log}. A daemon that dies during a member, read as
+fewer daemons connected after it than before, stops the call with
+\code{horizons_error_systemic} and the members so far; so does one exiting
+under \code{maxtasks}, \code{idletime} or \code{walltime}, which the count cannot tell
+apart, and with none connected as a member starts the call stops with
+\code{horizons_error_no_daemons}. A pool whose daemons all exit during one of
+tune's calls waits inside tune, and a daemon whose library loses a package
+after the check before the run fails the member with tune's "Argument 1
+must be a data frame or a named atomic vector". \code{fit()} parallelises folds
+only in this version; a configs axis across the \code{n_best} members is gated
+on the fitted-object memory contract (a fitted object is hundreds of MB
+and would cross to workers).
 }
 
 \section{Outcome range}{

@@ -53,8 +53,8 @@ response scale (tuning metrics are scored there via
 in \code{evaluate()}.}
 
 \item{allow_par}{Logical. Passed to \code{tune::control_grid()} and
-\code{tune::control_bayes()} to enable parallel CV folds on the registered
-\code{future::plan()}. \code{evaluate()} sets this from the resolved axis: \code{FALSE}
+\code{tune::control_bayes()} to run the CV folds on the user's mirai
+daemons. \code{evaluate()} sets this from the resolved axis: \code{FALSE}
 on the configs axis (tune ships nothing inward), \code{TRUE} on the
 resamples axis.}
 

@@ -23,12 +23,13 @@ control_horizons(
 \arguments{
 \item{...}{Not used: every field is set by name.}
 
-\item{allow_par}{\code{logical(1)}. Run on the registered \code{future} plan. The
-user owns the plan; the verb never sets one. Default \code{FALSE}.
+\item{allow_par}{\code{logical(1)}. Run on the mirai daemons the user set, as
+with \code{mirai::daemons(4)} before the call; the verb never sets, resizes or
+resets them, and a \code{future::plan()} is not used. Default \code{FALSE}.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=ensemble]{ensemble()}}.}
 
 \item{parallelize_over}{\code{character(1)}. The axis of \code{\link[=evaluate]{evaluate()}}'s work the
-plan is applied to: \code{"auto"} (the default), \code{"configs"} or \code{"resamples"}.
+daemons are applied to: \code{"auto"} (the default), \code{"configs"} or \code{"resamples"}.
 \code{"auto"} never chooses \code{"configs"} without \code{output_dir}, and
 \code{"configs"} asked for explicitly needs one.}
 
@@ -96,7 +97,7 @@ writes (\code{evaluation$control}, \code{models$control}, \code{ensemble$control
 \code{selection$settings$control}).
 }
 \examples{
-## Quiet, on the registered plan
+## Quiet, on the daemons set with mirai::daemons()
 ctrl <- control_horizons(allow_par = TRUE, verbose = FALSE)
 
 \dontrun{

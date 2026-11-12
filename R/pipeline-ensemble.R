@@ -91,11 +91,19 @@
 #'   first failure, inside tuning included, stops the call with its
 #'   backtrace; with `keep_traces = TRUE` a failure's backtrace is kept as
 #'   text in the abort's `results`. With `allow_par = TRUE`, the meta-learner's CV tuning and its
-#'   out-of-fold pass parallelise over folds on whatever `future::plan()` the
-#'   caller has registered; `ensemble()` never registers a plan, and runs
-#'   sequentially, warning with class `horizons_warning_substitution`, if the
-#'   plan offers fewer than two workers. The control it ran with, defaults
-#'   filled in, is recorded as `ensemble$control`.
+#'   out-of-fold pass run their folds on the mirai daemons the caller has set
+#'   (`mirai::daemons(4)`); a `future::plan()` is not used, and `ensemble()`
+#'   never sets, resizes or resets the daemons, and runs sequentially,
+#'   warning with class `horizons_warning_substitution`, if fewer than two
+#'   are connected. A daemon that dies during the meta-learner, or exits
+#'   under `maxtasks`, `idletime` or `walltime`, stops the call with
+#'   `horizons_error_systemic`, and with none connected as it starts, with
+#'   `horizons_error_no_daemons`. A pool whose daemons all exit during one of
+#'   tune's calls waits inside tune, and `ensemble()` checks no daemon's
+#'   packages, so a daemon that cannot load one the meta-learner needs fails
+#'   it with tune's "Argument 1 must be a data frame or a named atomic
+#'   vector". The control it ran with, defaults filled in, is recorded as
+#'   `ensemble$control`.
 #'
 #' @return A `horizons_ensemble` object (inherits from `horizons_fit`) with the
 #'   fitted ensemble in the `ensemble` slot. Before anything is built,

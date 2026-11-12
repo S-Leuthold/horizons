@@ -49,7 +49,7 @@ that unit's (\code{seed_engine()}).}
 
 \item{allow_par}{Logical. From \code{ensemble()}'s control; both tune calls
 build their control through \code{meta_tune_control()} with it, so the
-meta-learner never dispatches onto a registered plan unless asked.
+meta-learner never dispatches onto the daemons unless asked.
 Default \code{FALSE}.}
 
 \item{debug}{Logical. From \code{ensemble()}'s control: a failure inside tune,

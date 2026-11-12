@@ -300,8 +300,8 @@ SHARED_ARG_NAMES <- c(
 # hours.
 DISPATCH_POLL_SECONDS <- 0.1
 
-# Vocabulary of control_horizons(parallelize_over = ). "both" (a nested plan) is
-# deliberately absent for v1; control_horizons() refuses it with a hint.
+# Vocabulary of control_horizons(parallelize_over = ). "both" is deliberately
+# absent for v1; control_horizons() refuses it with a hint.
 PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 
 # Scoring schema stamped into every evaluate() result row and checked when
@@ -328,7 +328,8 @@ SCORING_SCHEMA <- 6L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records
-# the axis and the user's plan, the training-data fingerprint and its fields,
+# the axis and its backend (`plan`: "sequential" or "mirai", with the workers'
+# count), the training-data fingerprint and its fields,
 # and the tuning settings. Bump it when a field the monitor reads changes; the
 # monitor refuses a manifest of any other schema.
 EVAL_MANIFEST_SCHEMA <- 4L

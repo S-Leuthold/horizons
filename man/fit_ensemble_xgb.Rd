@@ -33,8 +33,8 @@ conservative fixed defaults (\code{FALSE}). Default \code{TRUE}.}
 (\code{unit_seed()}).}
 
 \item{allow_par}{Logical. Passed through from \code{ensemble()}'s control to
-the meta-learner's tune controls; folds parallelise on the registered
-plan when \code{TRUE}. Default \code{FALSE}.}
+the meta-learner's tune controls; folds run on the mirai daemons when
+\code{TRUE}. Default \code{FALSE}.}
 
 \item{debug}{Logical. From \code{ensemble()}'s control; see
 \code{\link[=fit_tuned_meta_learner]{fit_tuned_meta_learner()}}.}

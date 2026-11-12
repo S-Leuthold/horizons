@@ -52,11 +52,19 @@ set. With \code{debug = TRUE} the meta-learner runs in this session and its
 first failure, inside tuning included, stops the call with its
 backtrace; with \code{keep_traces = TRUE} a failure's backtrace is kept as
 text in the abort's \code{results}. With \code{allow_par = TRUE}, the meta-learner's CV tuning and its
-out-of-fold pass parallelise over folds on whatever \code{future::plan()} the
-caller has registered; \code{ensemble()} never registers a plan, and runs
-sequentially, warning with class \code{horizons_warning_substitution}, if the
-plan offers fewer than two workers. The control it ran with, defaults
-filled in, is recorded as \code{ensemble$control}.}
+out-of-fold pass run their folds on the mirai daemons the caller has set
+(\code{mirai::daemons(4)}); a \code{future::plan()} is not used, and \code{ensemble()}
+never sets, resizes or resets the daemons, and runs sequentially,
+warning with class \code{horizons_warning_substitution}, if fewer than two
+are connected. A daemon that dies during the meta-learner, or exits
+under \code{maxtasks}, \code{idletime} or \code{walltime}, stops the call with
+\code{horizons_error_systemic}, and with none connected as it starts, with
+\code{horizons_error_no_daemons}. A pool whose daemons all exit during one of
+tune's calls waits inside tune, and \code{ensemble()} checks no daemon's
+packages, so a daemon that cannot load one the meta-learner needs fails
+it with tune's "Argument 1 must be a data frame or a named atomic
+vector". The control it ran with, defaults filled in, is recorded as
+\code{ensemble$control}.}
 }
 \value{
 A \code{horizons_ensemble} object (inherits from \code{horizons_fit}) with the

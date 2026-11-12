@@ -202,11 +202,12 @@ CONTROL_FIELDS <- list(
 #' `selection$settings$control`).
 #'
 #' @param ... Not used: every field is set by name.
-#' @param allow_par `logical(1)`. Run on the registered `future` plan. The
-#'   user owns the plan; the verb never sets one. Default `FALSE`.
+#' @param allow_par `logical(1)`. Run on the mirai daemons the user set, as
+#'   with `mirai::daemons(4)` before the call; the verb never sets, resizes or
+#'   resets them, and a `future::plan()` is not used. Default `FALSE`.
 #'   [evaluate()], [fit()], [ensemble()].
 #' @param parallelize_over `character(1)`. The axis of [evaluate()]'s work the
-#'   plan is applied to: `"auto"` (the default), `"configs"` or `"resamples"`.
+#'   daemons are applied to: `"auto"` (the default), `"configs"` or `"resamples"`.
 #'   `"auto"` never chooses `"configs"` without `output_dir`, and
 #'   `"configs"` asked for explicitly needs one.
 #' @param verbose `logical(1)`. Print the verb's progress tree. Default
@@ -249,7 +250,7 @@ CONTROL_FIELDS <- list(
 #' @return A `horizons_control` object.
 #'
 #' @examples
-#' ## Quiet, on the registered plan
+#' ## Quiet, on the daemons set with mirai::daemons()
 #' ctrl <- control_horizons(allow_par = TRUE, verbose = FALSE)
 #'
 #' \dontrun{

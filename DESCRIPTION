@@ -14,7 +14,7 @@ Description: Builds and compares predictive models from mid-infrared (MIR)
     the best configurations with conformal prediction intervals and an
     applicability-domain check, and stacks them into ensembles. Training sets
     can also be drawn from a reference spectral library. Built on the
-    'tidymodels' framework, with parallel execution through 'future'.
+    'tidymodels' framework, with parallel execution through 'mirai'.
 License: MIT + file LICENSE
 URL: https://github.com/S-Leuthold/horizons
 BugReports: https://github.com/S-Leuthold/horizons/issues

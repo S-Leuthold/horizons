@@ -37,8 +37,8 @@
 #'   `tuning_metric_set()`). Only used when `prune = TRUE`. Default 1.0, as
 #'   in `evaluate()`.
 #' @param allow_par Logical. Passed to `tune::control_grid()` and
-#'   `tune::control_bayes()` to enable parallel CV folds on the registered
-#'   `future::plan()`. `evaluate()` sets this from the resolved axis: `FALSE`
+#'   `tune::control_bayes()` to run the CV folds on the user's mirai
+#'   daemons. `evaluate()` sets this from the resolved axis: `FALSE`
 #'   on the configs axis (tune ships nothing inward), `TRUE` on the
 #'   resamples axis.
 #' @param parallel_over Character. tune's `parallel_over`, passed through to

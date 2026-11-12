@@ -148,7 +148,7 @@ build_oof_matrix <- function(object, members) {
 #' @description
 #' tune's control constructors default to `allow_par = TRUE`, so before
 #' 2026-09-15 the meta-learner tuning and OOF pass dispatched onto any
-#' registered `future::plan()` with no argument to say otherwise. Both calls
+#' registered backend with no argument to say otherwise. Both calls
 #' now build their control here, from the `allow_par` field of `ensemble()`'s
 #' control, and the result is what the tests assert on.
 #'
@@ -339,7 +339,7 @@ meta_formula <- function() {
 #'   coef)` that reads the member weighting from the fitted model.
 #' @param allow_par Logical. From `ensemble()`'s control; both tune calls
 #'   build their control through `meta_tune_control()` with it, so the
-#'   meta-learner never dispatches onto a registered plan unless asked.
+#'   meta-learner never dispatches onto the daemons unless asked.
 #'   Default `FALSE`.
 #' @param seed Integer. The run's seed, recorded on the contract. `ensemble()`
 #'   runs the meta-learner in the unit `ensemble/meta-folds`

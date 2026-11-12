@@ -81,24 +81,27 @@
 #'   `log` and a line in the progress tree, and its config is re-evaluated.
 #'
 #' @section Parallelism:
-#' With `control_horizons(allow_par = TRUE)`, `evaluate()` dispatches onto
-#' whatever `future::plan()` the caller has registered. If no usable backend
-#' is registered (fewer than two workers), it runs sequentially and warns,
-#' with class `horizons_warning_substitution`, naming the plan it found; the
-#' warning is also a row of the object's `log`. Without it, `evaluate()` runs
-#' in the calling process and never inspects the plan. It never registers or
-#' alters a plan.
+#' With `control_horizons(allow_par = TRUE)`, `evaluate()` runs on the
+#' [mirai](https://mirai.r-lib.org) daemons the caller has set: set them
+#' before the call with `mirai::daemons(4)`, or for one call with
+#' `with(mirai::daemons(4), evaluate(...))`. A `future::plan()` is not used.
+#' With fewer than two daemons connected it runs sequentially and warns, with
+#' class `horizons_warning_substitution`, naming the call that would set
+#' them; the warning is also a row of the object's `log`. Without
+#' `allow_par`, `evaluate()` runs in the calling process and never reads the
+#' daemons. It never sets, resizes or resets them.
 #'
-#' The user owns the backend and the topology; `evaluate()` owns only which
-#' axis the plan is applied to, through `control_horizons(parallelize_over = )`.
+#' The user owns the daemons; `evaluate()` owns only which axis they are
+#' applied to, through `control_horizons(parallelize_over = )`.
 #'
-#' * `"configs"`: one future per config on the registered plan, with tune
-#'   running sequentially inside each. The per-worker payload is one config's
-#'   worth and tune ships nothing to inner workers. The mode for a large
-#'   config grid on a many-core machine.
-#' * `"resamples"`: configs run sequentially; inside each, tune parallelises
-#'   the CV folds on the registered plan. Useful width is capped at
-#'   `cv_folds`. The mode for a few cores and a short grid.
+#' * `"configs"`: one task per config on the daemons, with tune running
+#'   sequentially inside each. At most one config per connected daemon is in
+#'   flight, so this session holds one config's payload per daemon, and the
+#'   rows come back in configuration order. The mode for a large config grid
+#'   on a many-core machine.
+#' * `"resamples"`: configs run sequentially; inside each, tune runs the CV
+#'   folds on the daemons. Useful width is capped at `cv_folds`. The mode
+#'   for a few cores and a short grid.
 #' * `"auto"` (default): `"configs"` when the number of configs is at least
 #'   `cv_folds` and there is an `output_dir` to checkpoint into, otherwise
 #'   `"resamples"`. Derived from the measured cost model: configs wins
@@ -107,36 +110,66 @@
 #'   the worker count cancels. `"configs"` asked for explicitly without an
 #'   `output_dir` is refused before anything runs (#233).
 #'
-#' A nested plan (configs across an outer level, folds across an inner one)
-#' is not built or endorsed by the package in this version. A caller who
-#' wants one registers it with `future::plan(list(...))` and uses
-#' `"configs"`.
-#'
-#' Results do not depend on the backend, the number of workers, which worker
+#' Results do not depend on the backend, the number of daemons, which daemon
 #' runs a configuration or the order the work finishes in: every draw is
 #' seeded from the run's `seed` and its own name, where it is made (except
 #' `cubist`, whose neighbour step no seed reaches; see the reproducibility
-#' note in [configure()]). A backend's own seed (`mirai::daemons(seed = )`,
-#' say) has no effect on them.
+#' note in [configure()]). The daemons' own seed (`mirai::daemons(seed = )`)
+#' has no effect on them.
 #'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
-#' future::plan(future::multisession, workers = 4)
+#' mirai::daemons(4)
 #' hd |> evaluate(control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))
 #'
-#' # Thirty cores, one config per worker, checkpointed.
-#' future::plan(future::multisession, workers = 30)
+#' # Thirty cores, one config per daemon, checkpointed.
+#' mirai::daemons(30)
 #' hd |> evaluate(control = control_horizons(allow_par = TRUE, output_dir = "output/run"))
+#'
+#' # Daemons for this call only.
+#' with(mirai::daemons(4), evaluate(hd, control = control_horizons(allow_par = TRUE)))
 #' ```
 #'
 #' Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 #' one in the calling process (via `RhpcBLASctl` when installed) and restored
-#' on exit. On either axis the workers load the *installed* package, so a
-#' parallel run refuses, before anything is drawn, under
-#' `devtools::load_all()` or when a worker loads another version of horizons
-#' than the session (class `horizons_error_dependency`). With
+#' on exit; daemons keep the thread settings the session had when
+#' `mirai::daemons()` was called. On either axis the daemons load the
+#' *installed* package, so a parallel run refuses, before anything is drawn,
+#' under `devtools::load_all()`. Every daemon connected is then asked, one
+#' task each, which horizons it loads and whether it can load the packages
+#' the configurations need; a daemon on another version of horizons is
+#' refused (`horizons_error_dependency`), and so is one that lacks a package
+#' (`horizons_error_missing_package`, naming each and how many daemons lack
+#' it). A daemon set with `maxtasks` spends one task on the check. With
 #' `control_horizons(debug = TRUE)`, `evaluate()` runs in this session
 #' whatever `allow_par` says.
+#'
+#' A daemon that dies stops the run with `horizons_error_systemic`, the rows
+#' finished so far as its `results` (and in `output_dir`): on the configs
+#' axis when its configuration's task comes back as mirai's `errorValue` 19,
+#' on the resamples axis when fewer daemons are connected after a
+#' configuration than before it, since tune reads a death as a failure of
+#' its own. That count cannot tell a death from a daemon exiting under
+#' `maxtasks`, `idletime` or `walltime`, so on the resamples axis such an exit
+#' stops the run too; on the configs axis it narrows the dispatch. When work
+#' remains and no daemon is connected, the run stops with
+#' `horizons_error_no_daemons` (also `horizons_error_systemic`), the rows so
+#' far as its `results`: mirai does not start again a daemon that exits
+#' under those settings, so set daemons without them for a long run, or
+#' launch more with `mirai::launch_local()`. Two waits are tune's, not
+#' `evaluate()`'s: a pool whose daemons all exit during one of tune's calls
+#' on the resamples axis waits inside tune, and a daemon whose library loses
+#' a package after the check fails the configurations it runs there with
+#' tune's "Argument 1 must be a data frame or a named atomic vector", which
+#' does not name the package (on the configs axis it stops the run as
+#' systemic).
+#'
+#' mirai relays no warning, message or output from a task. On the configs
+#' axis what a configuration's unit records reaches the `log` as on the
+#' sequential path, and a warning raised in its task outside the unit is
+#' kept on the configuration's `warnings`. Messages and printed output are
+#' not relayed, and a warning raised while a daemon loads horizons itself is
+#' dropped.
 #'
 #' @section Response outliers:
 #' When `validate()` was asked to remove response outliers
@@ -181,14 +214,12 @@
 #' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
 #' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
 #' run every configuration; the configs axis has no breaker), and their
-#' failures are not checkpointed. A parallel worker that lacks a package the
-#' configurations need, which this session has, stops the run the same way.
-#' So does a parallel worker that dies, during a Bayesian iteration too: tune
-#' catches future's error there, so the death is read from what future.apply
-#' reports first
-#' ("Caught FutureInterruptError. Canceling all iterations ...", a warning
-#' before future.apply 1.21.0 and a message since), which has no class and
-#' is matched by its text. When some configurations failed and
+#' failures are not checkpointed. A daemon that lacks a package the
+#' configurations need, which this session has, is refused before the run
+#' (see "Parallelism"); one found lacking it mid-run stops the run the same
+#' way.
+#' So does a daemon that dies, during a Bayesian iteration too (see
+#' "Parallelism"). When some configurations failed and
 #' the rest are returned, one `horizons_warning_partial_failure` names them
 #' with each distinct cause. A configuration whose Bayesian search stopped
 #' early keeps the iterations it finished; one whose search failed before any
@@ -245,8 +276,8 @@
 #' @return A `horizons_eval` object (inherits from `horizons_data`) with
 #'   `evaluation$results`, `evaluation$best_config`, `evaluation$split`, and
 #'   associated metadata populated, including `evaluation$parallelize_over`
-#'   (the axis actually used), `evaluation$workers` (the worker count the
-#'   registered plan offered; 1 when sequential) and `evaluation$recipe` (the
+#'   (the axis actually used), `evaluation$workers` (the daemons connected
+#'   when the run began; 1 when sequential) and `evaluation$recipe` (the
 #'   `sg_window`, its width in cm-1 on the evaluated axis as `sg_window_cm`,
 #'   and the `pca_threshold` every config's recipe ran with) and
 #'   `evaluation$response_trim` (the training-partition response trim, or

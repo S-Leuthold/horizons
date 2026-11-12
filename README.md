@@ -74,7 +74,7 @@ To run the whole pipeline on synthetic spectra, with no data of your own, see [`
 - `add_response()` joins laboratory measurements to the spectra.
 - `configure()` sets up the factorial comparison across models (random forest, Cubist, XGBoost, LightGBM, PLS regression, elastic net, SVM, neural network, MARS), spectral preprocessing (raw, Savitzky-Golay, SNV, first and second derivatives), feature selection (PCA, correlation, Boruta, CARS) and response transformations (log, log10, square root).
 - `validate()` checks the data and the grid before anything runs.
-- `evaluate()` tunes and cross-validates every configuration, in parallel on any [future](https://future.futureverse.org) backend.
+- `evaluate()` tunes and cross-validates every configuration, in parallel on [mirai](https://mirai.r-lib.org) daemons.
 - `fit()` refits the best configurations, with conformal prediction intervals and an applicability-domain check.
 - `ensemble()` stacks fitted models into an ensemble.
 - `predict()` predicts new samples, with intervals and applicability flags.
@@ -112,7 +112,7 @@ horizons stands on a lot of other people's work.
 
 The spectral side relies on [prospectr](https://github.com/l-ramirez-lopez/prospectr) (Antoine Stevens and Leonardo Ramirez-Lopez) for preprocessing and [opusreader2](https://github.com/spectral-cockpit/opusreader2) (Philipp Baumann, Thomas Knecht and Pierre Roudier) for reading OPUS files. Library mode uses the [Open Soil Spectral Library](https://soilspectroscopy.org) (José Safanelli, Jonathan Sanderman and colleagues) and the MIR library of the [USDA NRCS Kellogg Soil Survey Laboratory](https://ncsslabdatamart.sc.egov.usda.gov).
 
-The modeling is built on [tidymodels](https://www.tidymodels.org) (Max Kuhn and the tidymodels team), and the parallelism on [future](https://future.futureverse.org) (Henrik Bengtsson). Feature selection includes [Boruta](https://gitlab.com/mbq/Boruta/) (Miron Kursa and Witold Rudnicki) and competitive adaptive reweighted sampling (CARS; Li et al., 2009). The prediction intervals use quantile forests from [ranger](https://github.com/imbs-hl/ranger) (Marvin Wright and colleagues) with conformalized quantile regression (Romano, Patterson and Candès, 2019), and the applicability-domain check uses the shrinkage covariance estimator in [corpcor](https://strimmerlab.github.io/software/corpcor/) (Juliane Schäfer, Korbinian Strimmer and colleagues).
+The modeling is built on [tidymodels](https://www.tidymodels.org) (Max Kuhn and the tidymodels team), and the parallelism on [mirai](https://mirai.r-lib.org) (Charlie Gao). Feature selection includes [Boruta](https://gitlab.com/mbq/Boruta/) (Miron Kursa and Witold Rudnicki) and competitive adaptive reweighted sampling (CARS; Li et al., 2009). The prediction intervals use quantile forests from [ranger](https://github.com/imbs-hl/ranger) (Marvin Wright and colleagues) with conformalized quantile regression (Romano, Patterson and Candès, 2019), and the applicability-domain check uses the shrinkage covariance estimator in [corpcor](https://strimmerlab.github.io/software/corpcor/) (Juliane Schäfer, Korbinian Strimmer and colleagues).
 
 Part of the development of horizons was supported by the USDA National Institute of Food and Agriculture and the National Science Foundation National AI Research Institutes Competitive Award no. 2023-67021-39829.
 
