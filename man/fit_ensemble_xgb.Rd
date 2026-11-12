@@ -28,8 +28,9 @@ fit_ensemble_xgb(
 \item{optimize}{Logical. Tune the xgboost hyperparameters (\code{TRUE}) or use
 conservative fixed defaults (\code{FALSE}). Default \code{TRUE}.}
 
-\item{seed}{Integer. The run's seed, recorded on the contract; xgboost's
-engine seed is the meta-learner unit's (\code{\link[=unit_seed]{unit_seed()}}).}
+\item{seed}{Integer. The run's seed, recorded on the contract;
+\code{\link[=fit_tuned_meta_learner]{fit_tuned_meta_learner()}} gives xgboost the meta-learner unit's seed
+(\code{\link[=unit_seed]{unit_seed()}}).}
 
 \item{allow_par}{Logical. Passed through from \code{ensemble()}'s control to
 the meta-learner's tune controls; folds parallelise on the registered

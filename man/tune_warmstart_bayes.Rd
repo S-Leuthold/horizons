@@ -14,7 +14,7 @@ tune_warmstart_bayes(
   allow_par = FALSE,
   recipe = NULL,
   debug = FALSE,
-  seed = 42L,
+  seed,
   config_id
 )
 }
@@ -38,8 +38,7 @@ inside tune with its class; \code{NULL} when it was prepped before tuning.}
 
 \item{debug}{Logical. Stop at the first failure rather than fall back.}
 
-\item{seed}{Integer. The run's seed, from which each phase's is derived.
-Default 42.}
+\item{seed}{Integer. The run's seed, from which each phase's is derived.}
 
 \item{config_id}{Character. The member's configuration id, which names
 its phases' units.}

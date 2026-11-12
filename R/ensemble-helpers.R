@@ -344,7 +344,8 @@ meta_formula <- function() {
 #' @param seed Integer. The run's seed, recorded on the contract. `ensemble()`
 #'   runs the meta-learner in the unit `ensemble/meta-folds`
 #'   ([with_unit_seed()]), so the tuning resamples and the genuine meta-OOF
-#'   are reproducible.
+#'   are reproducible, and an engine that takes a seed (xgboost) is given
+#'   that unit's ([seed_engine()]).
 #' @param debug Logical. From `ensemble()`'s control: a failure inside tune,
 #'   or a candidate left out for a missing fold, stops the call.
 #' @param call The frame a member's failure to predict the test rows reports
@@ -384,9 +385,12 @@ fit_tuned_meta_learner <- function(object,
   meta_frame        <- oof$predictors
   meta_frame$.truth <- oof$truth
 
+  ## An engine that takes a seed (the xgb meta-learner's) is given the
+  ## unit's, rather than drawing one
   meta_wflow <- workflows::workflow() |>
     workflows::add_model(spec) |>
-    workflows::add_formula(meta_formula())
+    workflows::add_formula(meta_formula()) |>
+    seed_engine(unit_seed(seed, "ensemble/meta-folds"))
 
   ## Combined predictions are clamped to the outcome's range, as every served
   ## prediction is (#76); a floor at 0 under the default range. The tuning

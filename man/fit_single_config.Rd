@@ -17,7 +17,7 @@ fit_single_config(
   compute_uq = FALSE,
   compute_ad = FALSE,
   allow_par = FALSE,
-  seed = 42L,
+  seed,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
   outcome_range = DEFAULT_OUTCOME_RANGE,

@@ -590,7 +590,8 @@ describe("tune_warmstart_bayes() - return contract", {
       bayesian_iter = 0L,
       metric_set    = ts$metric_set,
       allow_par     = FALSE,
-      config_id     = "tune_test_001"
+      config_id     = "tune_test_001",
+      seed          = 42L
     ))
 
     expect_true(is.list(result))
@@ -641,7 +642,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
         bayesian_iter = 2L,
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
-        config_id     = "tune_test_001"
+        config_id     = "tune_test_001",
+        seed          = 42L
       ), "horizons_warning_substitution"),
       class = "horizons_warning_substitution"
     )
@@ -674,7 +676,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
         bayesian_iter = 2L,
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
-        config_id     = "tune_test_001"
+        config_id     = "tune_test_001",
+        seed          = 42L
       ),
       class = "horizons_warning_substitution"
     )
@@ -701,7 +704,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
         debug         = TRUE,
-        config_id     = "tune_test_001"
+        config_id     = "tune_test_001",
+        seed          = 42L
       ),
       "The GP model requires 2+ initial points", fixed = TRUE
     )
@@ -723,7 +727,8 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
       bayesian_iter = 2L,
       metric_set    = ts$metric_set,
       allow_par     = FALSE,
-      config_id     = "tune_test_001"
+      config_id     = "tune_test_001",
+      seed          = 42L
     ), unit = "member", id = "tune_test_001")
 
     expect_true(out$failed)
@@ -753,7 +758,8 @@ describe("tune_warmstart_bayes() - a starting grid that errors", {
         bayesian_iter = 0L,
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
-        config_id     = "tune_test_001"
+        config_id     = "tune_test_001",
+        seed          = 42L
       ),
       "the grid broke", fixed = TRUE
     )
@@ -780,7 +786,8 @@ describe("tune_warmstart_bayes() - fallback behavior", {
       bayesian_iter = 0L,
       metric_set    = ts$metric_set,
       allow_par     = FALSE,
-      config_id     = "tune_test_001"
+      config_id     = "tune_test_001",
+      seed          = 42L
     )
 
     expect_true(is.list(result))
@@ -817,7 +824,8 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
         bayesian_iter = budget,
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
-        config_id     = "tune_test_001"
+        config_id     = "tune_test_001",
+        seed          = 42L
       ),
       class = "horizons_warning_substitution"
     )

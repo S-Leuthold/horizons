@@ -342,7 +342,8 @@ describe("evaluate_single_config() - failure paths", {
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
       grid_size     = 2,
-      bayesian_iter = 0
+      bayesian_iter = 0,
+      seed          = 42L
     )
 
     expect_equal(result$status, "failed")
@@ -362,7 +363,8 @@ describe("evaluate_single_config() - failure paths", {
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
       grid_size     = 2,
-      bayesian_iter = 0
+      bayesian_iter = 0,
+      seed          = 42L
     )
 
     expect_equal(result$status, "failed")
@@ -392,7 +394,8 @@ describe("evaluate_single_config() - failure paths", {
         cv_folds      = setup$folds,
         role_map      = setup$role_map,
         grid_size     = 2,
-        bayesian_iter = 0
+        bayesian_iter = 0,
+        seed          = 42L
       )
 
       expect_equal(result$status, "failed", label = model)
@@ -417,7 +420,8 @@ describe("evaluate_single_config() - failure paths", {
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
       grid_size     = 2,
-      bayesian_iter = 0
+      bayesian_iter = 0,
+      seed          = 42L
     )
 
     expect_true(is.na(result$rmse))
@@ -1390,7 +1394,8 @@ describe("evaluate_single_config() - parallel_over", {
         split         = setup$split,
         cv_folds      = setup$folds,
         role_map      = setup$role_map,
-        parallel_over = "folds"
+        parallel_over = "folds",
+        seed          = 42L
       ),
       "`parallel_over` must be one of"
     )
@@ -1494,7 +1499,8 @@ describe("evaluate_single_config() - run time", {
         cv_folds      = setup$folds,
         role_map      = setup$role_map,
         grid_size     = 2,
-        bayesian_iter = 0
+        bayesian_iter = 0,
+        seed          = 42L
       ),
       Sys.time = function() {
         reads <<- reads + 1L
@@ -1826,7 +1832,8 @@ describe("evaluate_single_config() - a selection step's warning comes from the f
         cv_folds      = wide$folds,
         role_map      = wide$role_map,
         grid_size     = 2,
-        bayesian_iter = 0
+        bayesian_iter = 0,
+        seed          = 42L
       )
 
       rec <- attr(result, "unit_records")

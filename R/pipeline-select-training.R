@@ -2293,7 +2293,7 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #' @param St [Matrix.] Target scores.
 #' @param metric,chunk_size Passed to `nearest_neighbours()`.
 #' @param seed [Integer.] The run's seed, from which the reference sample's
-#'   is derived. Default: `1L`.
+#'   is derived.
 #' @param min_rows [Integer.] The fewest rows the reference distribution is
 #'   taken from; below it the check is skipped and says why. Default:
 #'   `SELECT_RESEMBLANCE_MIN_ROWS`.
@@ -2307,7 +2307,7 @@ build_groups <- function(group_of_target, membership, pool_ids, scope) {
 #'   `beyond` (tibble: `target_id`, `nearest`), and `skipped`: `NULL`, or
 #'   why the check did not run.
 #' @noRd
-check_resemblance <- function(sp, St, metric, chunk_size, seed = 1L, eligible = NULL,
+check_resemblance <- function(sp, St, metric, chunk_size, seed, eligible = NULL,
                               min_rows = SELECT_RESEMBLANCE_MIN_ROWS) {
 
   Sp  <- if (is.null(eligible)) sp$scores else sp$scores[eligible, , drop = FALSE]

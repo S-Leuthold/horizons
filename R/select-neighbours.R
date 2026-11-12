@@ -811,7 +811,7 @@ spare_neighbourhoods <- function(St, Sp, free, held, k, metric, sdev, chunk_size
 #'   this returns one cluster. Default: `30L`.
 #' @param seed [Integer.] The run's seed: the k-means at each `K` is the unit
 #'   `select_training/clusters/k-<K>` ([with_unit_seed()]), so a specified
-#'   `clusters` and the search's `K` draw alike. Default: `1L`.
+#'   `clusters` and the search's `K` draw alike.
 #' @param k_max [Integer.] Upper bound of the silhouette search.
 #'   Default: `10L`.
 #'
@@ -824,7 +824,7 @@ spare_neighbourhoods <- function(St, Sp, free, held, k, metric, sdev, chunk_size
 cluster_targets <- function(St,
                             clusters    = NULL,
                             cluster_min = 30L,
-                            seed        = 1L,
+                            seed,
                             k_max       = 10L) {
 
   n   <- nrow(St)

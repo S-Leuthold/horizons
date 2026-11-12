@@ -37,8 +37,9 @@
 #' @param allow_par Logical. Passed through from `ensemble()`'s control to
 #'   the meta-learner's tune controls; folds parallelise on the registered
 #'   plan when `TRUE`. Default `FALSE`.
-#' @param seed Integer. The run's seed, recorded on the contract; xgboost's
-#'   engine seed is the meta-learner unit's ([unit_seed()]).
+#' @param seed Integer. The run's seed, recorded on the contract;
+#'   [fit_tuned_meta_learner()] gives xgboost the meta-learner unit's seed
+#'   ([unit_seed()]).
 #' @param debug Logical. From `ensemble()`'s control; see
 #'   [fit_tuned_meta_learner()].
 #' @param call The frame a member's failure to predict the test rows reports
@@ -64,9 +65,8 @@ fit_ensemble_xgb <- function(object,
   ## expression text and flags the arg tunable even when optimize = FALSE,
   ## tripping fit_resamples with "arguments have been tagged for tuning".
   ## Branching keeps each spec's args literal. (See ensemble-penalized.R.)
-  ## xgboost is given the meta-learner unit's seed rather than drawing one.
-
-  engine_seed <- unit_seed(seed, "ensemble/meta-folds")
+  ## fit_tuned_meta_learner() gives xgboost the meta-learner unit's seed, as
+  ## every seeded engine is given its stage's (seed_engine()).
 
   spec <- if (optimize) {
 
@@ -75,7 +75,7 @@ fit_ensemble_xgb <- function(object,
       tree_depth = tune::tune(),
       learn_rate = tune::tune()
     ) |>
-      parsnip::set_engine("xgboost", seed = !!engine_seed) |>
+      parsnip::set_engine("xgboost") |>
       parsnip::set_mode("regression")
 
   } else {
@@ -85,7 +85,7 @@ fit_ensemble_xgb <- function(object,
       tree_depth = 3,
       learn_rate = 0.05
     ) |>
-      parsnip::set_engine("xgboost", seed = !!engine_seed) |>
+      parsnip::set_engine("xgboost") |>
       parsnip::set_mode("regression")
 
   }

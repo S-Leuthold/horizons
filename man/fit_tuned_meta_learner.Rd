@@ -44,7 +44,8 @@ fit_tuned_meta_learner(
 \item{seed}{Integer. The run's seed, recorded on the contract. \code{ensemble()}
 runs the meta-learner in the unit \code{ensemble/meta-folds}
 (\code{\link[=with_unit_seed]{with_unit_seed()}}), so the tuning resamples and the genuine meta-OOF
-are reproducible.}
+are reproducible, and an engine that takes a seed (xgboost) is given
+that unit's (\code{\link[=seed_engine]{seed_engine()}}).}
 
 \item{allow_par}{Logical. From \code{ensemble()}'s control; both tune calls
 build their control through \code{meta_tune_control()} with it, so the

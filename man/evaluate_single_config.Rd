@@ -15,7 +15,7 @@ evaluate_single_config(
   prune_threshold = 1,
   allow_par = FALSE,
   parallel_over = "resamples",
-  seed = 42L,
+  seed,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
   outcome_range = DEFAULT_OUTCOME_RANGE,

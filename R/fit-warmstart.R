@@ -312,7 +312,6 @@ point_matches <- function(point, grid) {
 #'   inside tune with its class; `NULL` when it was prepped before tuning.
 #' @param debug Logical. Stop at the first failure rather than fall back.
 #' @param seed Integer. The run's seed, from which each phase's is derived.
-#'   Default 42.
 #' @param config_id Character. The member's configuration id, which names
 #'   its phases' units.
 #'
@@ -332,7 +331,7 @@ tune_warmstart_bayes <- function(workflow,
                                  allow_par = FALSE,
                                  recipe    = NULL,
                                  debug     = FALSE,
-                                 seed      = 42L,
+                                 seed,
                                  config_id) {
 
   n_folds    <- nrow(cv_resamples)
