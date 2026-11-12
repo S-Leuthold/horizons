@@ -64,12 +64,13 @@
 #' @param optimize Logical. Tune the meta-learner's hyperparameters by CV on
 #'   the out-of-fold matrix (`TRUE`), or use fixed defaults (`FALSE`).
 #'   Default `TRUE`.
-#' @param seed Integer. Random seed for the meta-learner's CV folds (used by
-#'   the `penalized` and `xgb` engines for both tuning and the genuine
-#'   out-of-fold meta predictions; recorded on the contract for all methods).
-#'   Ensemble UQ draws its calibration partition at `seed + 1000`, disjoint
-#'   from the tuning folds. Mirrors the `seed` argument of [fit()] and
-#'   [evaluate()]. Default `DEFAULT_ENSEMBLE_SEED` (307).
+#' @param seed `NULL` or a whole number: the run's seed. The meta-learner
+#'   (its CV folds, tuning and out-of-fold predictions) and the CV+
+#'   intervals (their calibration folds and each fold's refit) are seeded
+#'   from it and their own names. `NULL` (the default) takes the seed the
+#'   object records (`fit()`'s, or a re-built ensemble's own); a seed given
+#'   here overrides it and is recorded as `ensemble$seed`, as in [fit()] and
+#'   [evaluate()].
 #' @param compute_uq Logical. Calibrate CV+ conformal prediction intervals for
 #'   the ensemble (see [fit_ensemble_uq()]), stored in `$ensemble$uq` and
 #'   consumed by `predict()`. When they cannot be calibrated (fewer than
@@ -120,13 +121,18 @@
 ensemble <- function(x,
                      method     = "penalized",
                      optimize   = TRUE,
-                     seed       = DEFAULT_ENSEMBLE_SEED,
+                     seed       = NULL,
                      compute_uq = TRUE,
                      control    = control_horizons()) {
 
   ## -------------------------------------------------------------------------
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
+
+  ## The caller's random state is left as found, as evaluate() leaves it,
+  ## and a session that has never drawn is given its stream first
+  ensure_rng_stream()
+  local_rng_state()
 
   ## How the run goes: the fields ensemble() reads, defaults filled in, and
   ## the record of it on the ensemble
@@ -164,10 +170,10 @@ ensemble <- function(x,
   ## Both are recorded on the ensemble, which the validator checks only after
   ## the meta-learner is built, and fit_ensemble_uq() rebuilds the fold
   ## models from them; checked here so a bad value is refused before any
-  ## engine runs. The seed, as at every verb, is a whole number set.seed()
-  ## takes unchanged.
+  ## engine runs. The seed, as at every verb, is NULL or a whole number
+  ## set.seed() takes unchanged.
   check_arg(rlang::check_bool, optimize)
-  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX, allow_null = TRUE)
   check_arg(rlang::check_bool, compute_uq)
 
   ## The fit contract, and through it the evaluation and base contracts at
@@ -176,6 +182,10 @@ ensemble <- function(x,
   ## reported as such rather than as the response bound it breaks; an unusable
   ## range is the validator's finding (check_outcome_range() leaves it).
   x <- validate_horizons_fit(x)
+
+  ## The run's root: the seed given, else the object's. A fit records one,
+  ## so nothing is drawn from the session here.
+  seed <- resolve_seed(seed, x)$seed
 
   ## The members: fitted, with a stored workflow and out-of-fold predictions.
   ## A combination needs two of them.
@@ -254,24 +264,23 @@ ensemble <- function(x,
   ## nothing usable, so the call aborts with the record. Its warnings are
   ## recorded, not raised as they come, and a worker's death is systemic.
   ##
-  ## `seed` is threaded explicitly into each engine (rather than a set.seed()
-  ## side-effect here) so the meta-learner's CV folds - which seed the Phase-2
-  ## conformal calibration - are reproducible regardless of any RNG use between
-  ## here and the vfold_cv() call. The tuned engines set the seed immediately
-  ## before drawing folds; the weighted engine is deterministic and ignores it.
+  ## The meta-learner draws in one unit of its own, ensemble/meta-folds
+  ## (with_unit_seed()): its CV folds, its tuning, its refit and its
+  ## out-of-fold pass. The xgb engine is given the unit's seed; glmnet and
+  ## the weighted engine draw nothing after the folds.
 
   meta <- stop_on_worker_death(run_unit({
 
     oof <- unit_step("oof_matrix", build_oof_matrix(x, members))
 
-    switch(
+    with_unit_seed(seed, "ensemble/meta-folds", switch(
       method,
       penalized = fit_ensemble_penalized(x, members, oof, rank_metric, optimize, seed,
                                          allow_par = allow_par, debug = debug),
       weighted  = fit_ensemble_weighted(x, members, oof, rank_metric, optimize, seed),
       xgb       = fit_ensemble_xgb(x, members, oof, rank_metric, optimize, seed,
                                    allow_par = allow_par, debug = debug)
-    )
+    ))
 
   }, unit = "meta_learner", id = method, debug = debug, keep_traces = control$keep_traces),
   results = NULL, verb = "ensemble")

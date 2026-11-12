@@ -809,8 +809,9 @@ spare_neighbourhoods <- function(St, Sp, free, held, k, metric, sdev, chunk_size
 #'   choose by silhouette. Default: `NULL`.
 #' @param cluster_min [Integer.] Floor on cluster size. A batch below twice
 #'   this returns one cluster. Default: `30L`.
-#' @param seed [Integer.] Seed for k-means; the caller's RNG state is
-#'   restored afterwards. Default: `1L`.
+#' @param seed [Integer.] The run's seed: the k-means at each `K` is the unit
+#'   `select_training/clusters/k-<K>` ([with_unit_seed()]), so a specified
+#'   `clusters` and the search's `K` draw alike.
 #' @param k_max [Integer.] Upper bound of the silhouette search.
 #'   Default: `10L`.
 #'
@@ -823,7 +824,7 @@ spare_neighbourhoods <- function(St, Sp, free, held, k, metric, sdev, chunk_size
 cluster_targets <- function(St,
                             clusters    = NULL,
                             cluster_min = 30L,
-                            seed        = 1L,
+                            seed,
                             k_max       = 10L) {
 
   n   <- nrow(St)
@@ -841,17 +842,17 @@ cluster_targets <- function(St,
 
   if (n < 2L * cluster_min) return(one("too few targets for two clusters at this floor"))
 
-  ## Preserve the caller's RNG state -----------------------------------------
-
-  local_rng_state()
+  kmeans_at <- function(K) {
+    with_unit_seed(seed, c("select_training", "clusters", paste0("k-", K)),
+                   stats::kmeans(St, centers = K, nstart = 25L, iter.max = 100L))
+  }
 
   sil <- NA_real_
 
   if (!is.null(clusters)) {
 
     K <- as.integer(clusters)
-    set.seed(seed)
-    km         <- stats::kmeans(St, centers = K, nstart = 25L, iter.max = 100L)
+    km         <- kmeans_at(K)
     cluster_of <- km$cluster
     reason     <- "specified"
 
@@ -866,8 +867,7 @@ cluster_targets <- function(St,
 
     for (K in 2:Kmax) {
 
-      set.seed(seed)
-      km <- stats::kmeans(St, centers = K, nstart = 25L, iter.max = 100L)
+      km <- kmeans_at(K)
       s  <- mean(cluster::silhouette(km$cluster, dd)[, 3])
 
       if (is.null(best) || s > best$sil) best <- list(cluster_of = km$cluster, K = K, sil = s)

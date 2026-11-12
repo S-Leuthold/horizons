@@ -121,7 +121,8 @@ describe("fit_tuned_meta_learner() - refusals", {
       method          = "penalized",
       spec            = spec,
       grid            = NULL,
-      extract_weights = extract_weights_penalized
+      extract_weights = extract_weights_penalized,
+      seed            = 307L
     ), unit = "meta_learner", id = "penalized"))
 
     failure <- out$records[out$records$type == "failure", , drop = FALSE]
@@ -164,7 +165,8 @@ describe("fit_tuned_meta_learner() - the step a failure is named by", {
       method          = "penalized",
       spec            = parsnip::set_engine(spec, "glmnet"),
       grid            = tidyr::expand_grid(penalty = c(1e-4, 1e-2), mixture = 1),
-      extract_weights = extract_weights_penalized
+      extract_weights = extract_weights_penalized,
+      seed            = 307L
     ), unit = "meta_learner", id = "penalized"))
 
     expect_true(out$failed)
@@ -257,7 +259,7 @@ describe("fit_ensemble_weighted() - the step a failure is named by", {
     oof     <- build_oof_matrix(fitted, members)
 
     out <- run_unit(
-      fit_ensemble_weighted(fitted, members, oof, rank_metric = "rpd", optimize = FALSE),
+      fit_ensemble_weighted(fitted, members, oof, rank_metric = "rpd", optimize = FALSE, seed = 307L),
       unit = "meta_learner", id = "weighted"
     )
 
@@ -362,7 +364,8 @@ describe("fit_tuned_meta_learner() - the warnings tune noted", {
       method          = "penalized",
       spec            = spec,
       grid            = tibble::tibble(penalty = 1e-2, mixture = 1),
-      extract_weights = extract_weights_penalized
+      extract_weights = extract_weights_penalized,
+      seed            = 307L
     ))
 
     log <- attr(contract, "warning_log")
@@ -422,17 +425,19 @@ describe("fit_tuned_meta_learner() - the clamped combination (#104)", {
       parsnip::set_engine("glmnet")
     grid <- tidyr::expand_grid(penalty = c(1e-4, 1e-2), mixture = c(0, 1))
 
-    ## suppressWarnings(): rsample's note that the meta rows are too few for
-    ## its default strata breaks
-    suppressWarnings(fit_tuned_meta_learner(
+    ## In the meta-learner's unit, as ensemble() runs it. suppressWarnings():
+    ## rsample's note that the meta rows are too few for its default strata
+    ## breaks
+    with_unit_seed(307L, "ensemble/meta-folds", suppressWarnings(fit_tuned_meta_learner(
       fitted, members, oof,
       rank_metric     = "rpd",
       optimize        = TRUE,
       method          = "penalized",
       spec            = spec,
       grid            = grid,
-      extract_weights = extract_weights_penalized
-    ))
+      extract_weights = extract_weights_penalized,
+      seed            = 307L
+    )))
 
     expect_named(seen, c("grid", "oof"), ignore.order = TRUE)
 
@@ -490,7 +495,7 @@ describe("ensemble engines - run time", {
     }
 
     weighted <- on_the_clock(
-      fit_ensemble_weighted(fitted, members, oof, rank_metric = "rpd", optimize = FALSE)
+      fit_ensemble_weighted(fitted, members, oof, rank_metric = "rpd", optimize = FALSE, seed = 307L)
     )
 
     spec <- parsnip::linear_reg(penalty = 0.01, mixture = 1) |>
@@ -505,7 +510,8 @@ describe("ensemble engines - run time", {
       method          = "penalized",
       spec            = spec,
       grid            = NULL,
-      extract_weights = extract_weights_penalized
+      extract_weights = extract_weights_penalized,
+      seed            = 307L
     )))
 
     expect_equal(weighted$runtime_secs, 90)

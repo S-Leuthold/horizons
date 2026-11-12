@@ -66,7 +66,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 ## ---------------------------------------------------------------------------
 
 make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
-                            n_na = 0L) {
+                            n_na = 0L, models = c("rf", "cubist")) {
 
   set.seed(seed)
 
@@ -90,8 +90,7 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     role     = c("id", rep("predictor", n_wn), "outcome")
   )
 
-  ## Configs: rf + cubist (fast, tunable)
-  models <- c("rf", "cubist")
+  ## Configs: rf + cubist by default (fast, tunable)
   configs <- tibble::tibble(
     config_id         = paste0("cfg_", sprintf("%03d", seq_len(n_configs))),
     model             = models[seq_len(n_configs)],

@@ -174,6 +174,10 @@ predict.horizons_fit <- function(object,
   ## Step 0: Preflight
   ## -------------------------------------------------------------------------
 
+  ## The caller's random state is left as found: predicting draws only what
+  ## moves the stream (ranger's unused seed, the interval forest's draws)
+  local_rng_state()
+
   ## The object as it arrives (#234): a fit edited by hand, or saved by an
   ## earlier version, is refused with the remedy rather than served. The
   ## validator's gate covers the class, and it refuses an empty or unnamed

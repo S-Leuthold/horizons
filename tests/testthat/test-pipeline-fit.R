@@ -715,12 +715,12 @@ describe("fit() - scores on evaluate()'s split", {
 
     expect_false(is.null(r$models$uq))
 
-    ## Split C is reproducible from calib_split_seed() and evaluate()'s
-    ## training rows alone.
-    set.seed(calib_split_seed(42L))
-    split_C <- rsample::initial_split(rsample::training(obj$evaluation$split),
-                                      prop = CALIB_PROP,
-                                      strata = dplyr::all_of("SOC"))
+    ## Split C is reproducible from its unit, fit/calibration, and
+    ## evaluate()'s training rows alone.
+    split_C <- with_unit_seed(42L, "fit/calibration",
+                              rsample::initial_split(rsample::training(obj$evaluation$split),
+                                                     prop = CALIB_PROP,
+                                                     strata = dplyr::all_of("SOC")))
 
     test_ids  <- rsample::testing(r$evaluation$split)$sample_id
     calib_ids <- rsample::testing(split_C)$sample_id
@@ -734,13 +734,6 @@ describe("fit() - scores on evaluate()'s split", {
     expect_length(intersect(calib_ids, fit_ids), 0L)
     expect_setequal(c(test_ids, calib_ids, fit_ids),
                     obj$evaluation$split$data$sample_id)
-
-  })
-
-  it("calib_split_seed() is a documented offset of the user's seed", {
-
-    expect_identical(calib_split_seed(307L), 308L)
-    expect_identical(calib_split_seed(42), 43L)
 
   })
 
@@ -988,16 +981,13 @@ describe("fit() - allow_par without a usable backend", {
 
 ## On a real two-worker plan tune runs the re-tune and the OOF fits on
 ## workers, which advances the parent's RNG stream differently from the
-## sequential loop. fit_single_config() re-pins the seed before each
-## stochastic stage so the result does not depend on that; without the
-## re-pin before the OOF fits, the rf member's CV metrics differ between the
-## two runs. The sequential run is the shared fit60().
+## sequential loop. Each stage of fit_single_config() is a unit of its own,
+## so the result does not depend on that.
 ##
-## The re-pin before the warm-start Bayesian search (#151) cannot be seen
-## here on tune 2.1.0: tune_bayes() seeds each iteration from its control
-## seed, and the two paths reach the search with the same one, so the two
-## runs agree with or without it. test-fit-warmstart.R's "does not depend on the caller's
-## random stream" is the test that fails without it.
+## rf and xgboost, engines the run's seed governs. Cubist, fit60()'s second
+## member, takes its neighbour cutoff from a process-wide generator no seed
+## reaches, so a cubist with neighbours depends on the fits made before it in
+## its process (configure()'s reproducibility note).
 
 describe("fit() - on a two-worker plan", {
 
@@ -1007,20 +997,26 @@ describe("fit() - on a two-worker plan", {
     skip_on_cran()
     skip_if_dev_package()
 
-    shared <- fit60()
+    obj <- make_fit_object(n = 60, n_configs = 2, models = c("rf", "xgboost"))
+    obj$config$tuning$final_bayesian_iter <- 2L
+
+    seq_fit <- suppressWarnings(
+      fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
+    )
+
     local_plan(future::multisession, workers = 2)
 
     par_fit <- suppressWarnings(
-      fit(shared$obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(allow_par = TRUE))
+      fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(allow_par = TRUE))
     )
 
     cols <- c("config_id", "status", "rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
               "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")
 
-    expect_equal(par_fit$models$results[cols], shared$fit$models$results[cols])
+    expect_equal(par_fit$models$results[cols], seq_fit$models$results[cols])
     expect_equal(par_fit$models$results$best_params,
-                 shared$fit$models$results$best_params)
-    expect_equal(par_fit$models$cv_predictions, shared$fit$models$cv_predictions)
+                 seq_fit$models$results$best_params)
+    expect_equal(par_fit$models$cv_predictions, seq_fit$models$cv_predictions)
 
   })
 
@@ -1043,7 +1039,8 @@ describe("fit() - on a two-worker plan", {
 make_selection_stub <- function() {
 
   list(
-    settings         = list(method = "neighbours", n_target = 10L),
+    settings         = list(method = "neighbours", n_target = 10L,
+                            seed = 1L, seed_rule = SEED_RULE),
     membership       = tibble::tibble(target_id = character(0),
                                       property  = character(0),
                                       pool_id   = character(0),
@@ -1583,32 +1580,31 @@ describe("check_degradation()", {
 
   })
 
-  it("draws from its seed alone, whatever the caller's RNG kind and state, and leaves the caller's random stream untouched", {
+  it("draws its bootstrap from the stream it is given, which the member's degradation stage seeds", {
 
-    ## A caller at another point of its stream, or on the L'Ecuyer-CMRG kind
-    ## a parallel worker runs, gets the same interval; another seed gets
-    ## another
-    first  <- withr::with_seed(1, check_degradation(cv_4, truth, poor, seed = 7L))
-    second <- withr::with_seed(2, check_degradation(cv_4, truth, poor, seed = 7L))
-    worker <- withr::with_seed(3, .rng_kind = "L'Ecuyer-CMRG",
-                               check_degradation(cv_4, truth, poor, seed = 7L))
-    other  <- withr::with_seed(1, check_degradation(cv_4, truth, poor, seed = 8L))
+    ## The stage's stream gives one interval whatever the caller's, the
+    ## L'Ecuyer-CMRG kind a parallel worker runs included; another root gives
+    ## another. fit_single_config() runs the check in this stage
+    ## (test-fit-single-config.R).
+    in_stage <- function(root) {
+      with_unit_seed(root, c("fit", "cfg", "degradation"), check_degradation(cv_4, truth, poor))
+    }
+
+    first  <- withr::with_seed(1, in_stage(7L))
+    second <- withr::with_seed(2, in_stage(7L))
+    worker <- withr::with_seed(3, .rng_kind = "L'Ecuyer-CMRG", in_stage(7L))
+    other  <- withr::with_seed(1, in_stage(8L))
 
     expect_true(first$degraded)
     expect_identical(second, first)
     expect_identical(worker, first)
     expect_false(identical(other$reason, first$reason))
 
-    set.seed(9); a <- stats::runif(1)
-    set.seed(9); invisible(check_degradation(cv_4, truth, poor)); b <- stats::runif(1)
-    expect_identical(a, b)
-
-    ## A caller with no stream yet is left with none
-    withr::with_preserve_seed({
-      rm(".Random.seed", envir = globalenv())
-      invisible(check_degradation(cv_4, truth, poor))
-      expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-    })
+    ## Outside a stage, the stream decides
+    expect_identical(withr::with_seed(9, check_degradation(cv_4, truth, poor)),
+                     withr::with_seed(9, check_degradation(cv_4, truth, poor)))
+    expect_false(identical(withr::with_seed(9, check_degradation(cv_4, truth, poor))$reason,
+                           withr::with_seed(10, check_degradation(cv_4, truth, poor))$reason))
 
   })
 

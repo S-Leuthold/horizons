@@ -267,14 +267,20 @@ test_that("select_training(space = 'pls') needs exactly one property and an inte
 })
 
 
-test_that("select_training() records its control and its seed, 307 by default", {
+test_that("select_training() records its control and its seed: the one given, else one from the session's stream", {
 
   fx  <- select_fixture(n_pool = 60)
-  out <- quiet_select(fx, k = 5, properties = "clay")
+  out <- quiet_select(fx, k = 5, properties = "clay", seed = 307)
 
   expect_s3_class(out$selection$settings$control, "horizons_control")
   expect_identical(names(out$selection$settings$control), names(resolve_control(NULL, "select_training")))
   expect_identical(out$selection$settings$seed, 307L)
+  expect_identical(out$selection$settings$seed_rule, SEED_RULE)
+
+  ## Unseeded, the seed is drawn from the session's stream, so set.seed()
+  ## chooses it
+  drawn <- withr::with_seed(5, quiet_select(fx, k = 5, properties = "clay"))
+  expect_identical(drawn$selection$settings$seed, withr::with_seed(5, sample.int(100000L, 1L)))
 
 })
 
@@ -850,6 +856,14 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
   c2 <- check_resemblance(big, st, metric = "euclidean", chunk_size = 500L, seed = 7L)
   expect_false(isTRUE(all.equal(a$threshold, c2$threshold)))
 
+  ## The reference sample is the unit select_training/resemblance: re-run
+  ## from its seed, it gives the same threshold
+  ref <- with_unit_seed(1L, "select_training/resemblance",
+                        big$scores[sort(sample.int(2500L, 2000L)), , drop = FALSE])
+  nn  <- nearest_neighbours(ref, big$scores, k = 2L, metric = "euclidean",
+                            sdev = big$sdev, chunk_size = 500L)
+  expect_equal(a$threshold, unname(stats::quantile(nn$dist[, 2], 0.99, na.rm = TRUE)))
+
   ## A session with no RNG state is left with none, whether the reference was
   ## sampled (over the cap) or not
   withr::local_preserve_seed()
@@ -1281,7 +1295,7 @@ test_that("a replicate cluster is excluded entirely and absent from the union", 
 test_that("scope = 'cluster' subtracts twins from the union too", {
 
   fx  <- select_fixture(n_pool = 100, seed = 3, n_replicates = 3)
-  out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 2, properties = "clay")
+  out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 2, properties = "clay", seed = 307)
 
   self <- c(fx$twin_pool_id, fx$replicate_pool_ids)
 
@@ -2610,7 +2624,8 @@ test_that("the return validates and runs through the ordinary chain, and predict
   ## which predict() must leave alone (#236)
   fx <- select_fixture(n_pool = 300, target_range = c(4096, 504))
 
-  expect_warning(out <- quiet_select(fx, k = 30, properties = "clay"),
+  ## The draw's seed is the one evaluate() takes below
+  expect_warning(out <- quiet_select(fx, k = 30, properties = "clay", seed = 307),
                  class = "horizons_warning_coverage")
 
   expect_no_error(validate_horizons_data(out))
@@ -2665,7 +2680,7 @@ test_that("the return validates and runs through the ordinary chain, and predict
 test_that("scope = 'cluster' yields one group per target cluster", {
 
   fx  <- select_fixture(n_pool = 100)
-  out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 2)
+  out <- quiet_select(fx, k = 10, scope = "cluster", cluster_min = 2, seed = 307)
 
   g <- out$selection$groups
   expect_identical(nrow(g), 2L)
@@ -2794,7 +2809,8 @@ test_that("verbose = TRUE reports the pool, the space and the draw", {
 
   fx <- select_fixture(n_pool = 60)
 
-  expect_snapshot(out <- select_training(fx$targets, fx$pool, k = 5,
+  ## A seed given, so the tree prints none drawn from the session
+  expect_snapshot(out <- select_training(fx$targets, fx$pool, k = 5, seed = 307,
                                          control = control_horizons(verbose = TRUE)))
 
 })
@@ -2828,7 +2844,8 @@ test_that("permuting the pool's responses collapses the evaluated CV", {
 
   cv_rpd <- function(pool) {
 
-    out <- select_training(fx$targets, pool, k = 40, properties = "clay")
+    ## The draw's seed is the one evaluate() takes below
+    out <- select_training(fx$targets, pool, k = 40, properties = "clay", seed = 307)
 
     utils::capture.output({
       cfg <- configure(out, outcome = "clay", models = "rf", cv_folds = 3L,

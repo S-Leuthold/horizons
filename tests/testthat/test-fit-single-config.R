@@ -1377,21 +1377,21 @@ describe("fit_single_config() - UQ and AD as units of their own (#145)", {
 
 
 ## =========================================================================
-## The RNG pin
+## The stages' units
 ## =========================================================================
 
-describe("fit_single_config() - the RNG pin", {
+describe("fit_single_config() - the stages' units", {
 
   it("returns the same fit whatever the caller's RNG kind and state", {
 
     skip_unless_slow_tier()
 
     ## A worker started under furrr_options(seed = TRUE) is on L'Ecuyer-CMRG.
-    ## The runner pins kind and seed on entry. The Bayesian search, the OOF
-    ## fits and the final fit re-pin (#151), so the entry pin shows in the
-    ## warm-start grid stage, whose forests draw their seeds from the stream:
-    ## its scores, read from tune's result for that stage (the first
-    ## tune_grid() call), differ between the two callers without the pin.
+    ## Each stage is a unit of its own, so the caller's state shows nowhere,
+    ## the warm-start grid stage included, whose forests would otherwise draw
+    ## their seeds from the stream: its scores, read from tune's result for
+    ## that stage (the first tune_grid() call), would differ between the two
+    ## callers.
     setup     <- fsc()$setup
     real_grid <- tune::tune_grid
 
@@ -1463,6 +1463,54 @@ describe("fit_single_config() - the RNG pin", {
     expect_identical(drawn, 5L)
     expect_identical(result$status, "success")
     expect_identical(result$test_metrics, shared$result$test_metrics)
+
+  })
+
+  it("starts each stage from its own seed, and gives the final fit's engine that stage's seed", {
+
+    shared     <- fsc()
+    config     <- make_fit_config()
+    real_grid  <- build_warmstart_grid
+    real_check <- check_degradation
+    at         <- list()
+
+    local_mocked_bindings(
+      build_warmstart_grid = function(...) {
+        at$grid <<- get(".Random.seed", envir = globalenv())
+        real_grid(...)
+      },
+      check_degradation = function(...) {
+        at$degradation <<- get(".Random.seed", envir = globalenv())
+        real_check(...)
+      }
+    )
+
+    result <- withr::with_seed(5, fit_single_config(
+      config_row          = config,
+      split_F             = shared$setup$split_F,
+      cv_resamples        = shared$setup$folds,
+      calib_data          = NULL,
+      role_map            = shared$setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = FALSE,
+      allow_par           = FALSE,
+      seed                = 42L
+    ))
+
+    entry <- function(name) {
+      withr::with_seed(unit_seed(42L, c("fit", config$config_id, name)),
+                       .rng_kind = "Mersenne-Twister", .rng_normal_kind = "Inversion",
+                       .rng_sample_kind = "Rejection", get(".Random.seed", envir = globalenv()))
+    }
+
+    expect_identical(result$status, "success")
+    expect_identical(at$grid, entry("warmstart-grid"))
+    expect_identical(at$degradation, entry("degradation"))
+
+    engine <- workflows::extract_spec_parsnip(result$fitted_workflow)$eng_args
+    expect_identical(rlang::eval_tidy(engine$seed), unit_seed(42L, c("fit", config$config_id, "final-fit")))
 
   })
 

@@ -10,7 +10,7 @@ fit_ensemble_penalized(
   oof,
   rank_metric,
   optimize = TRUE,
-  seed = DEFAULT_ENSEMBLE_SEED,
+  seed,
   allow_par = FALSE,
   debug = FALSE,
   call = rlang::caller_env()
@@ -28,8 +28,8 @@ fit_ensemble_penalized(
 \item{optimize}{Logical. Tune penalty/mixture (\code{TRUE}) or use fixed
 defaults (\code{FALSE}). Default \code{TRUE}.}
 
-\item{seed}{Integer. Seed for the CV folds (passed through to
-\code{\link[=fit_tuned_meta_learner]{fit_tuned_meta_learner()}} so the meta-OOF is reproducible).}
+\item{seed}{Integer. The run's seed, recorded on the contract (passed
+through to \code{\link[=fit_tuned_meta_learner]{fit_tuned_meta_learner()}}).}
 
 \item{allow_par}{Logical. Passed through from \code{ensemble()}'s control to
 the meta-learner's tune controls; folds parallelise on the registered

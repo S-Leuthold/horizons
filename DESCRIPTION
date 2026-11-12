@@ -96,6 +96,7 @@ Collate:
     'utils-models.R'
     'pls-engine.R'
     'utils-recipes.R'
+    'utils-rng.R'
     'utils-resamples.R'
     'utils-parallel.R'
     'utils-subset.R'

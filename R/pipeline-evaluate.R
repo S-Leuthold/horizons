@@ -26,8 +26,19 @@
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
 #'   "no better than the mean" line).
-#' @param seed Integer. Random seed for train/test split and CV folds.
-#'   Default 307L.
+#' @param seed `NULL` or a whole number: the run's seed. Every draw (the
+#'   train/test split, the CV folds and each configuration's stages) is
+#'   seeded from it and its own name, so a configuration's results depend on
+#'   the seed alone, not on the other configurations, the order they run in,
+#'   the workers or the session's generator (except `cubist`, whose neighbour
+#'   step no seed reaches; see the reproducibility note in [configure()]).
+#'   `NULL` (the default) takes the
+#'   seed the object records (a [select_training()] result's), else one
+#'   integer from the session's random stream, which is left where it was:
+#'   `set.seed()` before the call chooses it, and calls with nothing drawn
+#'   between them repeat. A seed drawn from the session is printed in the
+#'   tree. The seed is recorded as `evaluation$seed`, and [fit()] and
+#'   [ensemble()] take it unless given one.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
 #'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces` and
@@ -47,7 +58,10 @@
 #'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
 #'   and `outcome_range`) and this run's response trim
 #'   (`response_threshold`, `NA` when none was requested); either mismatch
-#'   aborts, naming what differs.
+#'   aborts, naming what differs. A run left to draw its seed from the
+#'   session draws another in a new session, so its split moves: the
+#'   refusal then names the seed the checkpoints were tuned with, to pass as
+#'   `seed =`.
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
@@ -97,6 +111,13 @@
 #' is not built or endorsed by the package in this version. A caller who
 #' wants one registers it with `future::plan(list(...))` and uses
 #' `"configs"`.
+#'
+#' Results do not depend on the backend, the number of workers, which worker
+#' runs a configuration or the order the work finishes in: every draw is
+#' seeded from the run's `seed` and its own name, where it is made (except
+#' `cubist`, whose neighbour step no seed reaches; see the reproducibility
+#' note in [configure()]). A backend's own seed (`mirai::daemons(seed = )`,
+#' say) has no effect on them.
 #'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
@@ -252,10 +273,18 @@ evaluate <- function(x,
                      metric          = "rpd",
                      prune           = TRUE,
                      prune_threshold = 1.0,
-                     seed            = 307L,
+                     seed            = NULL,
                      control         = control_horizons()) {
 
   start_time <- Sys.time()
+
+  ## The caller's random state is left as found: every draw that shapes a
+  ## result is a unit of its own (with_unit_seed()), and what only moves the
+  ## stream (a recipe step's id, an engine's discarded seed) is undone on exit.
+  ## A session that has never drawn is given its stream first, so the stream
+  ## the root is drawn from is the one left, and an unseeded call repeats.
+  ensure_rng_stream()
+  local_rng_state()
 
   ## How the run goes: the fields evaluate() reads, defaults filled in, and
   ## the record of it on the evaluation
@@ -300,9 +329,13 @@ evaluate <- function(x,
   check_arg(rlang::check_bool, prune)
   check_arg(rlang::check_number_decimal, prune_threshold, min = 0, allow_infinite = FALSE)
 
-  ## The seed, as at every verb, is a whole number set.seed() takes
-  ## unchanged.
-  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
+  ## The seed, as at every verb, is NULL or a whole number set.seed() takes
+  ## unchanged. The run's root is resolved once, here, before anything
+  ## draws: the seed given, else the object's, else one from the session.
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX, allow_null = TRUE)
+
+  root <- resolve_seed(seed, x)
+  seed <- root$seed
 
   configs <- x$config$configs
 
@@ -442,8 +475,7 @@ evaluate <- function(x,
   ## the split as drawn: the fences come from the training partition's labels
   ## alone, and only training rows outside them leave, before the folds below
   ## are drawn. fit()'s cold start makes the same call after the same draw.
-  ## The trim draws nothing from the RNG, so the folds follow the stream they
-  ## always did; without a request the split is the draw.
+  ## Without a request the split is the draw.
 
   trim_request <- response_trim_request(x)
 
@@ -484,16 +516,16 @@ evaluate <- function(x,
   ## Step 5: Create CV folds
   ## -----------------------------------------------------------------------
 
-  ## Drawn from the stream the split left. The fallback notes print inside
-  ## the tree, after its header (#91).
+  ## A unit of their own. The fallback notes print inside the tree, after its
+  ## header (#91).
 
-  cv_drawn <- draw_stratified(
+  cv_drawn <- with_unit_seed(seed, "evaluate/folds", draw_stratified(
     outcome      = train_data[[outcome_col]],
     stratified   = function() rsample::vfold_cv(train_data, v = cv_folds,
                                                 strata = dplyr::all_of(outcome_col),
                                                 breaks = STRATA_BREAKS, pool = STRATA_POOL),
     unstratified = function() rsample::vfold_cv(train_data, v = cv_folds)
-  )
+  ))
   cv_fold_obj <- cv_drawn$draw
 
   ## A stratified draw that came out unstratified, because it failed or
@@ -540,6 +572,10 @@ evaluate <- function(x,
     ## Read only when pruning, so it cannot have changed a row otherwise.
     prune_threshold = if (isTRUE(prune)) prune_threshold else NA_real_,
     seed            = seed,
+    ## The rule that turns the seed into each unit's draws: a row drawn
+    ## under another rule, or before there was one, is dropped and
+    ## re-evaluated (checkpoint_row_verdict()).
+    seed_rule       = SEED_RULE,
     ## configure()'s recipe settings (#62). pca_threshold is recorded for
     ## every row, PCA or not: conservative, since a row that never ran PCA
     ## re-runs rather than resumes when only the threshold changed.
@@ -610,6 +646,11 @@ evaluate <- function(x,
     cat(paste0("\u250C Evaluation ",
                paste(rep("\u2500", 50), collapse = ""), "\n"))
     cat("\u2502\n")
+
+    seed_line <- seed_tree_line(root)
+
+    if (!is.null(seed_line)) cat(paste0("\u2502  ", seed_line, "\n"))
+
     if (n_dropped > 0) {
 
       cat(paste0("\u2502  ",
@@ -1121,6 +1162,10 @@ evaluate <- function(x,
     ## What every config's recipe ran with, the window's width included, so
     ## the results of an sg_window sweep can be told apart after the fact.
     recipe           = recipe_cfg,
+    ## The run's root and the rule that turned it into each unit's draws:
+    ## fit() and ensemble() take the root unless given one
+    seed             = seed,
+    seed_rule        = SEED_RULE,
     control          = control,
     runtime_secs     = total_runtime,
     timestamp        = Sys.time()
@@ -1301,7 +1346,10 @@ read_checkpoint_store <- function(output_dir) {
 #' every data field and every setting) was written by another version of
 #' horizons and cannot be checked against this run, so it is dropped and its
 #' config re-evaluated; so is every row when the run has no fingerprint of its
-#' own (no sample id column). Every other row passes a fixed gate order: the
+#' own (no sample id column), and every row drawn under another seeding rule
+#' than the run's (`seed_rule`, `SEED_RULE`), whose split and folds are
+#' others, so that a bump of the rule re-evaluates rather than refuses. Every
+#' other row passes a fixed gate order: the
 #' training-data fingerprint, then the tuning settings, then the scoring
 #' schema. The fingerprint is compared field by field: the fields carry
 #' everything `data_hash` does, and the hash sorts the ids in the session's
@@ -1326,12 +1374,19 @@ checkpoint_row_verdict <- function(row, data_fp, settings) {
   row_fp   <- checkpoint_row_fingerprint(row)
   data_cmp <- compare_record(row_fp$data_fields, data_fp$data_fields)
   stored   <- checkpoint_row_settings(row)
-  cmp      <- compare_record(stored, settings)
+  cmp      <- compare_record(stored, settings[names(settings) != "seed_rule"])
+
+  ## The seeding rule is a schema, not a setting: a row drawn under another
+  ## rule, or before there was one, was scored on another split, so it is
+  ## dropped before its data are compared rather than refused as written on
+  ## other rows
+  same_rule <- is.null(settings[["seed_rule"]]) ||
+    identical(stored[["seed_rule"]], settings[["seed_rule"]])
 
   checkable <- !is.na(row_fp$data_hash) && !is.na(data_fp$data_hash) &&
     length(data_cmp$missing) == 0 && length(cmp$missing) == 0
 
-  verdict <- if (!checkable) {
+  verdict <- if (!checkable || !same_rule) {
     "foreign_schema"
   } else if (length(data_cmp$differ) > 0) {
     "data_mismatch"
@@ -1440,6 +1495,7 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
         source        = first$source,
         differ        = first$data_differ,
         settings_diff = diffs,
+        stored_seed   = if ("seed" %in% first$settings_differ) first$stored_settings$seed,
         call          = call
       )
 
@@ -2365,6 +2421,9 @@ checkpoint_row_fingerprint <- function(row) {
 #' @param settings_diff Settings the same row records with another value,
 #'   from [describe_settings_diff()]. A changed `seed` moves the split, so it
 #'   surfaces here as a data mismatch; naming it says why.
+#' @param stored_seed The seed the checkpoint was tuned with when it differs
+#'   from this run's, else `NULL`: a run whose seed was drawn from the session
+#'   resumes only with it given.
 #' @param call The frame to report the error from (`evaluate()`'s).
 #' @return Never returns; aborts with class `horizons_error_input`.
 #' @keywords internal
@@ -2372,6 +2431,7 @@ checkpoint_row_fingerprint <- function(row) {
 abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
                                            differ = character(0),
                                            settings_diff = character(0),
+                                           stored_seed = NULL,
                                            call = rlang::caller_env()) {
 
   what <- describe_data_diff(stored$data_fields, current$data_fields, differ)
@@ -2389,6 +2449,7 @@ abort_checkpoint_data_mismatch <- function(stored, current, output_dir, source,
     "Checkpoints in {.path {output_dir}} were written on different training data.",
     found,
     if (length(settings_diff) > 0) c("i" = "That checkpoint was also tuned with {settings_diff}, which may be why."),
+    if (!is.null(stored_seed)) c("i" = "Pass {.code seed = {stored_seed}} to resume it."),
     "i" = "Resuming would reuse cross-validated results, and warm-start {.fn fit}, from hyperparameters tuned on the wrong rows.",
     if ("outcome" %in% differ) c("i" = "Keep one {.arg output_dir} per outcome."),
     "i" = "Use a different {.arg output_dir}, or delete the stale checkpoints in {.path {output_dir}}."
@@ -2852,7 +2913,8 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #'
 #' @description
 #' The split `evaluate()` scores on and `fit()` reuses: the rows with an
-#' observed outcome ([modelling_rows()]), then `set.seed(seed)`, then
+#' observed outcome ([modelling_rows()]), then, in the unit
+#' `evaluate/split` ([with_unit_seed()]),
 #' a `SPLIT_PROP` split stratified on the outcome, falling back to an
 #' unstratified one when the stratified draw fails. The split can also come
 #' out unstratified with no failure: rsample drops the strata itself when it
@@ -2863,16 +2925,13 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #' which happened (#91; see [draw_stratified()]). `fit()` calls it when it
 #' starts cold from a configured object with one configuration (#45), so that
 #' fit holds out exactly the rows `evaluate()` would have at the same seed.
-#' The draw was inline in `evaluate()` before, and it is unchanged.
-#'
-#' It seeds the global RNG, as `evaluate()` always has: `evaluate()`'s CV
-#' folds are drawn from the state it leaves.
+#' The caller's stream is left as found.
 #'
 #' @param analysis Data frame. The object's analysis table. Rows whose
 #'   outcome is `NA` are dropped here; a table the callers have already
 #'   filtered for their sample-size gate passes through uncopied.
 #' @param outcome_col Character. Name of the outcome column.
-#' @param seed Integer. The seed passed to `evaluate()` (or to `fit()` on a
+#' @param seed Integer. The run's seed, `evaluate()`'s (or `fit()`'s on a
 #'   cold start).
 #' @param call The frame a refusal reports: the verb's.
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
@@ -2889,15 +2948,13 @@ draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_en
 
   modelled <- modelling_rows(analysis, outcome_col, call = call)
 
-  set.seed(seed)
-
-  drawn <- draw_stratified(
+  drawn <- with_unit_seed(seed, "evaluate/split", draw_stratified(
     outcome      = modelled$data[[outcome_col]],
     stratified   = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP,
                                                      strata = dplyr::all_of(outcome_col),
                                                      breaks = STRATA_BREAKS, pool = STRATA_POOL),
     unstratified = function() rsample::initial_split(modelled$data, prop = SPLIT_PROP)
-  )
+  ))
 
   list(split           = drawn$draw,
        n_dropped       = modelled$n_dropped,
@@ -3291,10 +3348,10 @@ evaluate_config_worker <- function(config_i, shared) {
 
   }
 
-  ## A mis-keyed entry arrives as NULL. Most then error, but `seed` and
-  ## `grid_size` do not: set.seed(NULL) reseeds from the clock and
+  ## A mis-keyed entry arrives as NULL. Most then error (a NULL `seed` at
+  ## the first unit's seed), but `grid_size` does not:
   ## tune_grid(grid = NULL) invents its own grid, so the run would succeed
-  ## while being unreproducible or tuned over the wrong space. The parent
+  ## while tuned over the wrong space. The parent
   ## asserts the same keys before dispatch, so a mismatch here means the
   ## transport changed the payload.
   if (!setequal(names(shared), SHARED_ARG_NAMES)) {

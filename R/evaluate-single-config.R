@@ -46,7 +46,8 @@
 #'   `"everything"` ships the whole rset to every task. tune may rewrite the
 #'   value before dispatch (parameter-free configs become `"resamples"`;
 #'   single-split rsets become `"everything"`).
-#' @param seed Integer. Random seed for reproducibility.
+#' @param seed Integer. The run's seed, from which each stage's seed is
+#'   derived with the stage's name (`with_unit_seed()`).
 #' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
 #'   to [build_recipe()]. `evaluate()` reads it from `configure()`'s
 #'   `config$recipe`. Default 9.
@@ -89,7 +90,7 @@ evaluate_single_config <- function(config_row,
                                    prune_threshold = 1.0,
                                    allow_par       = FALSE,
                                    parallel_over   = "resamples",
-                                   seed            = 42L,
+                                   seed,
                                    sg_window       = DEFAULT_SG_WINDOW,
                                    pca_threshold   = DEFAULT_PCA_THRESHOLD,
                                    outcome_range   = DEFAULT_OUTCOME_RANGE,
@@ -100,13 +101,6 @@ evaluate_single_config <- function(config_row,
 
   parallel_over <- rlang::arg_match0(parallel_over, c("resamples", "everything"),
                                      arg_nm = "parallel_over")
-
-  ## The RNG kind is pinned, not just the seed. furrr_options(seed = TRUE)
-  ## switches a worker to L'Ecuyer-CMRG, and set.seed() with kind = NULL leaves
-  ## that in place — so the same seed produced different streams in the parent
-  ## (Mersenne-Twister) and in a worker, and sequential and parallel runs were
-  ## not numerically equal. Naming the kind makes them agree.
-  set.seed(seed, kind = "Mersenne-Twister")
 
   config_id      <- config_row$config_id
   outcome_col    <- role_map$variable[role_map$role == "outcome"]
@@ -119,6 +113,13 @@ evaluate_single_config <- function(config_row,
   ## lines, gathered as the unit runs, and, once it returns, the warnings the
   ## unit caught as they were raised.
   warning_log <- new_warning_log()
+
+  ## Each stage that draws is a unit of its own, named under the
+  ## configuration's id (with_unit_seed()), so its draws depend on the run's
+  ## seed and the stage alone: not on the stages before it, the order of the
+  ## configurations, or the worker that runs them. The engines that take a
+  ## seed get the stage's (seed_engine()).
+  stage <- function(name) c("evaluate", config_id, name)
 
   ## tune catches the warnings raised inside its resampling (a recipe step
   ## warning during prep, say) and keeps them in .notes, where run_unit()
@@ -169,7 +170,8 @@ evaluate_single_config <- function(config_row,
       ## This prep sets the bounds, and is not the model returned, so the
       ## selection steps' warnings are not taken from it (the final fit's
       ## record is read instead, below)
-      prepped <- unit_step("prep", quiet_selection_warnings(recipes::prep(recipe)))
+      prepped <- unit_step("prep", with_unit_seed(seed, stage("bounds-prep"),
+                                                  quiet_selection_warnings(recipes::prep(recipe))))
       baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
 
       param_set <- unit_step("finalize_parameters", {
@@ -214,27 +216,34 @@ evaluate_single_config <- function(config_row,
       ## numbers a note's model stage in the order of this grid, which is how
       ## a configuration's warnings are read for the candidate it chose
       ## (#109; candidate_of()).
-      grid <- whole_space %||% tune::.check_grid(grid = grid_size, workflow = wflow, pset = param_set)
+      grid <- whole_space %||% with_unit_seed(seed, stage("grid"),
+        tune::.check_grid(grid = grid_size, workflow = wflow, pset = param_set))
 
-      results <- suppressMessages(
-        tune::tune_grid(
-          object     = wflow,
-          resamples  = cv_folds,
-          grid       = grid,
-          metrics    = tune_metrics,
-          param_info = param_set,
-          control    = tune::control_grid(
-            save_pred     = FALSE,
-            save_workflow = FALSE,
-            verbose       = FALSE,
-            allow_par     = allow_par,
-            parallel_over = parallel_over
+      results <- with_unit_seed(seed, stage("tune"), {
+
+        results <- suppressMessages(
+          tune::tune_grid(
+            object     = seed_engine(wflow, unit_seed(seed, stage("tune"))),
+            resamples  = cv_folds,
+            grid       = grid,
+            metrics    = tune_metrics,
+            param_info = param_set,
+            control    = tune::control_grid(
+              save_pred     = FALSE,
+              save_workflow = FALSE,
+              verbose       = FALSE,
+              allow_par     = allow_par,
+              parallel_over = parallel_over
+            )
           )
         )
-      )
 
-      check_tune_result(results, "all models failed during CV",
-                        recipe = if (!prepped_now) recipe, debug = debug)
+        check_tune_result(results, "all models failed during CV",
+                          recipe = if (!prepped_now) recipe, debug = debug)
+
+        results
+
+      })
 
       ## A candidate scored on fewer folds than were drawn takes no part in
       ## the prune gate or the choice of hyperparameters (#101), so a grid
@@ -298,24 +307,20 @@ evaluate_single_config <- function(config_row,
 
     if (!skip_bayesian && search_iter > 0) {
 
-      ## Re-pin before every stochastic stage. tune's future path advances the
-      ## parent stream past where the sequential loop leaves it (future_lapply()
-      ## draws worker seeds from it), so a stage seeded only by what came before
-      ## would differ between allow_par = TRUE and FALSE. Pinning here makes
-      ## the axis a pure performance choice (review finding, 2026-09-15).
-      set.seed(seed, kind = "Mersenne-Twister")
+      bayes_seed <- unit_seed(seed, stage("bayes"))
 
-      search <- unit_step("tune_bayes", bayes_search(
-        workflow      = wflow,
+      search <- unit_step("tune_bayes", with_unit_seed(seed, stage("bayes"), bayes_search(
+        workflow      = seed_engine(wflow, bayes_seed),
         resamples     = cv_folds,
         initial       = grid_results,
         iter          = search_iter,
         param_info    = param_set,
         metrics       = tune_metrics,
+        seed          = bayes_seed,
         allow_par     = allow_par,
         parallel_over = parallel_over,
         debug         = debug
-      ))
+      )))
 
       final_tune_results <- search$results
       n_dropped          <- search$n_dropped
@@ -376,22 +381,20 @@ evaluate_single_config <- function(config_row,
     ## held-out test set
     ## -----------------------------------------------------------------------
 
-    final_wflow <- unit_step("finalize_workflow", tune::finalize_workflow(wflow, best_params))
-
-    ## Re-pin: last_fit() draws the engine seed from the parent stream, whose
-    ## position now depends on which axis the tuning ran on (see Step 6).
-    set.seed(seed, kind = "Mersenne-Twister")
+    final_wflow <- unit_step("finalize_workflow",
+                             seed_engine(tune::finalize_workflow(wflow, best_params),
+                                         unit_seed(seed, stage("final-fit"))))
 
     ## Messages muffled, as around the two tuning calls: tune reports its
     ## notes on the console as it goes, and the row records them instead.
     ## A final fit that fails inside last_fit() fails the configuration
     ## (#102): fit() would otherwise choose it and fail its final fit again.
-    last_fit_obj <- unit_step("last_fit", {
+    last_fit_obj <- unit_step("last_fit", with_unit_seed(seed, stage("final-fit"), {
       results <- suppressMessages(tune::last_fit(final_wflow, split = split))
       check_tune_result(results, "the final fit failed",
                         recipe = if (!prepped_now) recipe, debug = debug)
       results
-    })
+    }))
     collect_notes_from(last_fit_obj, scope = "test set")
 
     ## What the final fit's selection step did, read from its trained recipe:

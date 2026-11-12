@@ -435,6 +435,12 @@ build_allow_par_run <- function() {
   obj         <- make_eval_object(n_configs = 2)
   warnings    <- list()
 
+  ## xgboost, not the fixture's cubist: the results are compared with a run
+  ## made later in the session, and Cubist's neighbour cutoff comes from a
+  ## process-wide generator no seed reaches, so a cubist with neighbours
+  ## depends on the fits before it (configure()'s reproducibility note)
+  obj$config$configs$model <- c("rf", "xgboost")
+
   result <- withCallingHandlers(
     evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE)),
     warning = function(w) {
@@ -1144,12 +1150,12 @@ describe("monitor_evaluate()", {
 ## Results do not depend on the axis (review finding, 2026-09-15)
 ## =========================================================================
 ## tune's future path advances the parent RNG stream differently from the
-## sequential loop, so before the per-stage re-pinning the Bayesian stage and
-## last_fit() drew from a different position on the resamples axis. This
+## sequential loop, so when the stages shared one stream the Bayesian stage
+## and last_fit() drew from a different position on the resamples axis. Each
+## stage is now a unit of its own (with_unit_seed()), seeded on entry. This
 ## fixture uses rf (deterministic given a seed) with Bayesian iterations ON,
 ## where the axes diverged on the tune of that time, and asserts the whole
-## result row is identical. On later tune releases the axes no longer diverge
-## here without the re-pinning, so this pins the result, not the re-pinning.
+## result row is identical, so it pins the result, not the mechanism.
 ## The sequential run both tests compare against is built once, by whichever
 ## of them runs first (helper-memo.R), so a skipped test costs nothing.
 
@@ -1231,7 +1237,9 @@ describe("evaluate() - results are identical across axes", {
 ## The in-process test above shows the worker forwards the settings; this one
 ## shows they survive the trip to a multisession worker and change what it
 ## computes. On "raw" a window of 13 trims 12 of the 20 columns rather than 8,
-## so the configured run and the default run model different predictors.
+## so the configured run and the default run model different predictors. plsr
+## reads every predictor it keeps, where a tuned rf on this little data can
+## come out predicting the mean whatever its predictors.
 
 describe("evaluate() - recipe settings on the configs axis", {
 
@@ -1245,6 +1253,7 @@ describe("evaluate() - recipe settings on the configs axis", {
                   "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
 
     obj <- make_eval_object(n = 60, n_wn = 20, n_configs = 1)
+    obj$config$configs$model <- "plsr"
     obj$config$recipe <- list(sg_window = 13L, pca_threshold = 0.995)
 
     seq_result <- suppressWarnings(

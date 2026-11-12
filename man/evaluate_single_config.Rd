@@ -15,7 +15,7 @@ evaluate_single_config(
   prune_threshold = 1,
   allow_par = FALSE,
   parallel_over = "resamples",
-  seed = 42L,
+  seed,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
   outcome_range = DEFAULT_OUTCOME_RANGE,
@@ -64,7 +64,8 @@ the control objects. \code{"resamples"} (default) ships one rsplit per task;
 value before dispatch (parameter-free configs become \code{"resamples"};
 single-split rsets become \code{"everything"}).}
 
-\item{seed}{Integer. Random seed for reproducibility.}
+\item{seed}{Integer. The run's seed, from which each stage's seed is
+derived with the stage's name (\code{with_unit_seed()}).}
 
 \item{sg_window}{Odd integer. Savitzky-Golay window in grid points, passed
 to \code{\link[=build_recipe]{build_recipe()}}. \code{evaluate()} reads it from \code{configure()}'s

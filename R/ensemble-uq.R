@@ -260,6 +260,8 @@ cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
 #' @param contract The `$ensemble` contract list (for `method` and `model`).
 #' @param optimize Logical. The build-time optimize flag (drives the weighted
 #'   fold-weight rule).
+#' @param seed Integer. The run's seed: fold `k`'s refit is the unit
+#'   `ensemble/cvplus/fold-<k>`.
 #' @param outcome_range Numeric length-2 vector the fold predictions are
 #'   clamped to. Default `DEFAULT_OUTCOME_RANGE`.
 #'
@@ -274,7 +276,7 @@ cv_plus_bounds <- function(fold_matrix, fold_id, residuals, level) {
 #'
 #' @noRd
 fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contract,
-                               optimize, outcome_range = DEFAULT_OUTCOME_RANGE) {
+                               optimize, seed, outcome_range = DEFAULT_OUTCOME_RANGE) {
 
   method      <- contract$method
   members     <- contract$weights$member
@@ -305,7 +307,12 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
     assessment <- rsample::assessment(split)
     assess_idx <- as.integer(split, data = "assessment")
 
-    fold_models[[k]] <- if (method == "weighted") {
+    ## Each refit is a unit of its own, so what one fold's model draws
+    ## (xgboost, given the unit's seed) moves no other fold's, nor the
+    ## stream ensemble/cvplus goes on to draw from
+    fold_unit <- c("ensemble", "cvplus", paste0("fold-", k))
+
+    fold_models[[k]] <- with_unit_seed(seed, fold_unit, if (method == "weighted") {
 
       ## Fold model = weights re-derived inside the fold's analysis set.
       derive_member_weights(
@@ -317,9 +324,9 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 
     } else {
 
-      parsnip::fit(base_wflow, data = analysis)
+      parsnip::fit(seed_engine(base_wflow, unit_seed(seed, fold_unit)), data = analysis)
 
-    }
+    })
 
     ## Shared fold-prediction primitive: dispatch + clamp semantics live in
     ## one place. Clamping before the residual is deliberate — the deployed
@@ -358,9 +365,9 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 #' Compute the CV+ Ensemble UQ Bundle (Silent Core)
 #'
 #' @description
-#' The core of ensemble UQ: draws a fresh fold partition of the meta frame at
-#' `conformal_seed` (disjoint-by-construction from the tuning folds — Route
-#' B), runs the per-fold calibration pass, gates on calibration size and
+#' The core of ensemble UQ: draws a fresh fold partition of the meta frame in
+#' the unit `ensemble/cvplus` (disjoint-by-construction from the tuning folds —
+#' Route B), runs the per-fold calibration pass, gates on calibration size and
 #' order-statistic validity, computes leave-self-out diagnostics, and packs
 #' the bundle. It runs inside `ensemble()`'s CV+ unit: a gate that fails is a
 #' run failure with the counts and the remedy, and a fold refit that fails
@@ -391,7 +398,8 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 #' @param oof The out-of-fold matrix list from [build_oof_matrix()].
 #' @param contract The `$ensemble` contract list.
 #' @param optimize Logical. Build-time optimize flag.
-#' @param conformal_seed Integer. Seed for the fresh calibration partition.
+#' @param seed Integer. The run's seed (`ensemble$seed`), from which the
+#'   unit's seed is derived.
 #' @param level Numeric in (0, 1). Target coverage stored as the bundle's
 #'   `level_default`.
 #' @param outcome_range Numeric length-2 vector the fold predictions are
@@ -411,7 +419,7 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 compute_ensemble_uq <- function(oof,
                                 contract,
                                 optimize,
-                                conformal_seed,
+                                seed,
                                 level          = DEFAULT_UQ_LEVEL,
                                 outcome_range  = DEFAULT_OUTCOME_RANGE,
                                 min_calib_rows = N_CALIB_MIN,
@@ -459,55 +467,62 @@ compute_ensemble_uq <- function(oof,
 
   }
 
-  ## Fresh partition, disjoint-by-construction from the tuning folds (which
-  ## were drawn at the base seed). Stratify on .truth, mirroring the
-  ## meta-learner's own fold draw, and reported from this unit as it is.
-  set.seed(conformal_seed)
-
-  drawn_cal <- draw_stratified(
-    outcome      = meta_frame$.truth,
-    stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
-                                                breaks = STRATA_BREAKS, pool = STRATA_POOL),
-    unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
-  )
-  report_strata_in_unit(drawn_cal, "CV+ calibration folds")
-
-  folds_cal <- drawn_cal$draw
-
-  fold_fit <- unit_step("cv_plus_fold_models", fit_uq_fold_models(
-    meta_frame    = meta_frame,
-    oof_row       = oof$row,
-    oof_sample_id = oof$sample_id,
-    folds         = folds_cal,
-    contract      = contract,
-    optimize      = optimize,
-    outcome_range = outcome_range
-  ))
-
-  fold_models <- fold_fit$fold_models
-  calib       <- fold_fit$calib
-
-  ## Every calibration row's member predictions, for the leave-self-out
-  ## diagnostic below: the meta frame's rows, then the trimmed rows'.
-  ## calib_pos is each calibration row's position among them.
+  ## The draws are one unit, ensemble/cvplus (with_unit_seed()): a fresh
+  ## partition, disjoint-by-construction from the tuning folds, which another
+  ## unit drew; the fold refits, each a unit of its own nested in this one;
+  ## and the trimmed rows' folds. The partition stratifies on .truth,
+  ## mirroring the meta-learner's own fold draw, and is reported from this
+  ## unit as it is.
   member_cols <- paste0("member_", contract$weights$member)
-  members_all <- meta_frame[, member_cols, drop = FALSE]
-  calib_pos   <- match(calib$.row, oof$row)
 
-  ## The rows the response trim set aside, scored by fold models that never
-  ## trained on them (#103). Drawn after the fold models, in the same
-  ## stream, and only when there are some.
-  if (!is.null(trimmed)) {
+  with_unit_seed(seed, "ensemble/cvplus", {
 
-    trimmed_calib <- unit_step("cv_plus_trimmed", calibrate_trimmed_rows(
-      trimmed, fold_models, contract$method, outcome_range
+    drawn_cal <- draw_stratified(
+      outcome      = meta_frame$.truth,
+      stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
+                                                  breaks = STRATA_BREAKS, pool = STRATA_POOL),
+      unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
+    )
+    report_strata_in_unit(drawn_cal, "CV+ calibration folds")
+
+    folds_cal <- drawn_cal$draw
+
+    fold_fit <- unit_step("cv_plus_fold_models", fit_uq_fold_models(
+      meta_frame    = meta_frame,
+      oof_row       = oof$row,
+      oof_sample_id = oof$sample_id,
+      folds         = folds_cal,
+      contract      = contract,
+      optimize      = optimize,
+      seed          = seed,
+      outcome_range = outcome_range
     ))
 
-    calib_pos   <- c(calib_pos, nrow(members_all) + seq_len(nrow(trimmed_calib)))
-    members_all <- dplyr::bind_rows(members_all, trimmed$predictors[, member_cols, drop = FALSE])
-    calib       <- dplyr::bind_rows(calib, trimmed_calib)
+    fold_models <- fold_fit$fold_models
+    calib       <- fold_fit$calib
 
-  }
+    ## Every calibration row's member predictions, for the leave-self-out
+    ## diagnostic below: the meta frame's rows, then the trimmed rows'.
+    ## calib_pos is each calibration row's position among them.
+    members_all <- meta_frame[, member_cols, drop = FALSE]
+    calib_pos   <- match(calib$.row, oof$row)
+
+    ## The rows the response trim set aside, scored by fold models that never
+    ## trained on them (#103). Drawn after the partition, from the stream it
+    ## left, and only when there are some.
+    if (!is.null(trimmed)) {
+
+      trimmed_calib <- unit_step("cv_plus_trimmed", calibrate_trimmed_rows(
+        trimmed, fold_models, contract$method, outcome_range
+      ))
+
+      calib_pos   <- c(calib_pos, nrow(members_all) + seq_len(nrow(trimmed_calib)))
+      members_all <- dplyr::bind_rows(members_all, trimmed$predictors[, member_cols, drop = FALSE])
+      calib       <- dplyr::bind_rows(calib, trimmed_calib)
+
+    }
+
+  })
 
   ## Drop rows whose residual is not finite, then re-gate: both the size
   ## minimum and the order-statistic indices must survive the drop. The index
@@ -596,7 +611,6 @@ compute_ensemble_uq <- function(oof,
     calib           = calib,
     n_calib         = n_calib,
     level_default   = level,
-    seed            = conformal_seed,
     oof_coverage    = if (is.null(idx_loo)) NA_real_ else mean(covered, na.rm = TRUE),
     mean_width      = if (is.null(idx_loo)) NA_real_ else mean(widths, na.rm = TRUE),
     timestamp       = Sys.time()
@@ -734,8 +748,8 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #' @description
 #' Populates `$ensemble$uq` with a CV+ conformal bundle calibrated on the
 #' meta-learner's honest out-of-fold residuals: a fresh 5-fold partition of
-#' the meta frame (drawn at `ensemble seed + 1000`, disjoint from the tuning
-#' folds), per-fold refits of the finalized combiner with the fold models
+#' the meta frame (drawn in its own unit from the ensemble's seed, disjoint
+#' from the tuning folds), per-fold refits of the finalized combiner with the fold models
 #' retained, and the signed residuals CQR-style. After a response trim, the
 #' training rows it set aside calibrate as well (see
 #' `compute_ensemble_uq()`, #103). Consumed by
@@ -781,7 +795,7 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #'   (`"cv_plus"`), `ensemble_method`, `members`, `fold_models`, `calib`
 #'   (`.row`, `sample_id`, `fold`, `.pred_oof`, `truth`, `residual`; `.row`
 #'   is `NA` for a trimmed row), `n_calib`,
-#'   `level_default`, `seed`, `oof_coverage`, `mean_width`, `timestamp`.
+#'   `level_default`, `oof_coverage`, `mean_width`, `timestamp`.
 #'
 #' @keywords internal
 fit_ensemble_uq <- function(x,
@@ -793,9 +807,6 @@ fit_ensemble_uq <- function(x,
   oof <- unit_step("oof_matrix", build_oof_matrix(x, members))
 
   trimmed <- unit_step("cv_plus_trimmed", ensemble_trimmed_rows(x, members))
-
-  ## The seed ensemble() recorded, which the ensemble validator requires
-  conformal_seed <- x$ensemble$seed + 1000L
 
   ## The build-time flag, so a weighted ensemble's fold weights are
   ## re-derived by the rule the deployed weights came from. For
@@ -810,7 +821,8 @@ fit_ensemble_uq <- function(x,
     oof            = oof,
     contract       = x$ensemble,
     optimize       = optimize,
-    conformal_seed = conformal_seed,
+    ## The seed ensemble() recorded, which the ensemble validator requires
+    seed           = x$ensemble$seed,
     level          = level,
     outcome_range  = outcome_range,
     min_calib_rows = min_calib_rows,

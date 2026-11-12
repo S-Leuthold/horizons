@@ -38,7 +38,8 @@
 #' @param compute_ad Logical. Whether to fit the applicability domain, on the
 #'   same calibration set as UQ.
 #' @param allow_par Logical. Passed to tune control functions.
-#' @param seed Integer. Random seed for reproducibility.
+#' @param seed Integer. The run's seed, from which each stage's seed is
+#'   derived with the stage's name (`with_unit_seed()`).
 #' @param sg_window Odd integer. Savitzky-Golay window in grid points, passed
 #'   to [build_recipe()]. `fit()` reads it from `configure()`'s
 #'   `config$recipe`, the value `evaluate()` ran with. Default 9.
@@ -97,7 +98,7 @@ fit_single_config <- function(config_row,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
                               allow_par           = FALSE,
-                              seed                = 42L,
+                              seed,
                               sg_window           = DEFAULT_SG_WINDOW,
                               pca_threshold       = DEFAULT_PCA_THRESHOLD,
                               outcome_range       = DEFAULT_OUTCOME_RANGE,
@@ -109,12 +110,6 @@ fit_single_config <- function(config_row,
                               keep_traces          = FALSE) {
 
   start_time <- Sys.time()
-
-  ## Pin the RNG kind as well as the seed, for the same reason as
-  ## evaluate_single_config(): a worker started under
-  ## furrr_options(seed = TRUE) is on L'Ecuyer-CMRG, and set.seed() alone
-  ## would not reset it.
-  set.seed(seed, kind = "Mersenne-Twister")
 
   config_id      <- config_row$config_id
   outcome_col    <- role_map$variable[role_map$role == "outcome"]
@@ -128,6 +123,12 @@ fit_single_config <- function(config_row,
   ## lines, gathered as the unit runs, and, once it returns, the warnings the
   ## unit caught as they were raised.
   warning_log <- new_warning_log()
+
+  ## Each stage that draws is a unit of its own, named under the member's
+  ## config_id, as evaluate_single_config()'s are: its draws depend on the
+  ## run's seed and the stage alone. "fit" in the name keeps them apart from
+  ## the configuration's stages in evaluate().
+  stage <- function(name) c("fit", config_id, name)
 
   ## tune catches the warnings raised inside its resampling and keeps them in
   ## .notes, where run_unit() never sees them. Both the re-tune and the
@@ -194,7 +195,8 @@ fit_single_config <- function(config_row,
       ## This prep sets the bounds, and is not the model returned, so the
       ## selection steps' warnings are not taken from it (the final fit's
       ## record is read instead)
-      prepped <- unit_step("prep", quiet_selection_warnings(recipes::prep(recipe)))
+      prepped <- unit_step("prep", with_unit_seed(seed, stage("bounds-prep"),
+                                                  quiet_selection_warnings(recipes::prep(recipe))))
       baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
 
       param_set <- unit_step("finalize_parameters", {
@@ -233,8 +235,9 @@ fit_single_config <- function(config_row,
 
     whole_space     <- exhaustive_grid(param_set, grid_size + final_bayesian_iter)
     search_iter     <- if (is.null(whole_space)) final_bayesian_iter else 0L
-    initial_grid    <- unit_step("warm_start_tune", whole_space %||% build_warmstart_grid(
-      best_params_eval, param_set, max_points = grid_size
+    initial_grid    <- unit_step("warm_start_tune", whole_space %||% with_unit_seed(
+      seed, stage("warmstart-grid"),
+      build_warmstart_grid(best_params_eval, param_set, max_points = grid_size)
     ))
     warm_start      <- usable_best_params(best_params_eval, param_set)
     start_grid_size <- nrow(initial_grid)
@@ -249,7 +252,8 @@ fit_single_config <- function(config_row,
       allow_par     = allow_par,
       recipe        = if (!prepped_now) recipe,
       debug         = debug,
-      seed          = seed
+      seed          = seed,
+      config_id     = config_id
     ))
 
     best_params <- retune$best_params
@@ -279,15 +283,11 @@ fit_single_config <- function(config_row,
 
     finalized_wf <- unit_step("finalize_workflow", tune::finalize_workflow(wflow, best_params))
 
-    ## Re-pin before every stochastic stage so results do not depend on which
-    ## axis the previous stage ran on (see evaluate_single_config(), Step 8).
-    set.seed(seed, kind = "Mersenne-Twister")
-
     ## Messages muffled, as around the tuning calls: tune reports its notes
     ## on the console as it goes, and the member records them instead.
-    cv_fit <- unit_step("oof_predictions", {
+    cv_fit <- unit_step("oof_predictions", with_unit_seed(seed, stage("oof"), {
       results <- suppressMessages(tune::fit_resamples(
-        finalized_wf,
+        seed_engine(finalized_wf, unit_seed(seed, stage("oof"))),
         resamples = cv_resamples,
         control   = tune::control_resamples(
           save_pred     = TRUE,
@@ -308,7 +308,7 @@ fit_single_config <- function(config_row,
       }
 
       results
-    })
+    }))
 
     collect_notes_from(cv_fit)
 
@@ -373,11 +373,10 @@ fit_single_config <- function(config_row,
     ## Step 7: Fit final model on full training data
     ## -----------------------------------------------------------------------
 
-    set.seed(seed, kind = "Mersenne-Twister")
-
-    final_fit <- unit_step("final_fit", suppressMessages(quiet_selection_warnings(
-      workflows::fit(finalized_wf, data = train_data)
-    )))
+    final_fit <- unit_step("final_fit", with_unit_seed(seed, stage("final-fit"),
+      suppressMessages(quiet_selection_warnings(
+        workflows::fit(seed_engine(finalized_wf, unit_seed(seed, stage("final-fit"))), data = train_data)
+      ))))
 
     ## What the final fit's selection step did, raised once, from its trained
     ## recipe, as evaluate() raises it
@@ -427,10 +426,10 @@ fit_single_config <- function(config_row,
     ## extreme. The diagnostic RPD is then taken over the test rows inside the
     ## same fences; test_metrics, which is what is reported, stays untrimmed.
 
-    degradation <- unit_step("degradation", check_degradation(
-      cv_metrics, test_truth, test_preds, response_fences, seed = seed,
+    degradation <- unit_step("degradation", with_unit_seed(seed, stage("degradation"), check_degradation(
+      cv_metrics, test_truth, test_preds, response_fences,
       min_n = min_degradation_rows
-    ))
+    )))
 
     ## A check that could not run leaves degraded NA, not FALSE, which would
     ## read as checked and fine; the row and fit()'s log say why
@@ -452,18 +451,20 @@ fit_single_config <- function(config_row,
 
     if (compute_uq && !is.null(calib_data)) {
 
-      uq_result <- run_addon(fit_uq(
+      ## Nothing in it draws before the quantile forest, so the stage is the
+      ## forest's
+      uq_result <- run_addon(with_unit_seed(seed, stage("forest"), fit_uq(
         fitted_workflow = final_fit,
         oof_predictions = cv_predictions,
         calib_data      = calib_data,
         role_map        = role_map,
         transformation  = transformation,
         level_default   = DEFAULT_UQ_LEVEL,
-        seed            = seed,
+        seed            = unit_seed(seed, stage("forest")),
         outcome_range   = outcome_range,
         min_calib_rows  = min_calib_rows,
         debug           = debug
-      ), "uq", skipped_add_on("Prediction intervals (UQ) were"))
+      )), "uq", skipped_add_on("Prediction intervals (UQ) were"))
 
       ## Measured coverage on the held-out test rows (#118). The intervals are
       ## built by predict_intervals(), the function predict() serves them with,
@@ -689,8 +690,9 @@ test_interval_coverage_missing <- function() {
 #' sampling variance; the CV standard error describes the CV mean, not that
 #' estimate. So the test RPD is bootstrapped over the test rows, and the
 #' config is flagged only when the whole `DEGRADATION_LEVEL` interval lies
-#' below the CV mean RPD (#119). The bootstrap draws from its own seed and
-#' restores the caller's RNG state, so it changes nothing downstream.
+#' below the CV mean RPD (#119). The bootstrap draws from the stream as it
+#' finds it; `fit_single_config()` runs it in the member's `degradation`
+#' stage ([with_unit_seed()]).
 #'
 #' After a response trim (#77) the folds ran on rows inside the training
 #' fences while the test rows are untrimmed, so with `response_fences` the
@@ -708,7 +710,6 @@ test_interval_coverage_missing <- function() {
 #'   predictions, original scale.
 #' @param response_fences Numeric `c(lower = , upper = )`, or `NULL` when no
 #'   rows were trimmed.
-#' @param seed Integer. Seed for the bootstrap draws.
 #' @param n_boot Integer. Number of bootstrap resamples.
 #' @param level Numeric. Coverage of the bootstrap interval.
 #' @param min_n Integer. The fewest usable test rows the check bootstraps
@@ -721,7 +722,7 @@ test_interval_coverage_missing <- function() {
 #' @keywords internal
 #' @noRd
 check_degradation <- function(cv_metrics, test_truth, test_preds,
-                              response_fences = NULL, seed = 42L,
+                              response_fences = NULL,
                               n_boot = DEGRADATION_BOOT_N,
                               level  = DEGRADATION_LEVEL,
                               min_n  = DEGRADATION_MIN_N) {
@@ -776,10 +777,6 @@ check_degradation <- function(cv_metrics, test_truth, test_preds,
   test_rpd <- rpd_vec(truth, preds)
 
   if (!is.finite(test_rpd)) return(cannot_run("the test RPD is not finite"))
-
-  ## Bootstrap with a local seed; the caller's stream is restored on exit.
-  local_rng_state()
-  set.seed(seed, kind = "Mersenne-Twister")
 
   ## The same RPD as rpd_vec(), inline: SD of the outcomes over the RMSE, Inf
   ## for a perfect fit, 0 for constant outcomes.

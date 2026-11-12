@@ -494,11 +494,11 @@ describe("fit() - cold start with UQ and AD (#45)", {
   test_ids     <- rsample::testing(cold$evaluation$split)$sample_id
   fit_ids      <- unique(cold$models$cv_predictions$sample_id)
 
-  ## Split C, reproduced from calib_split_seed() and the training part alone
-  set.seed(calib_split_seed(42L))
-  split_C   <- rsample::initial_split(rsample::training(cold$evaluation$split),
-                                      prop = CALIB_PROP,
-                                      strata = dplyr::all_of("SOC"))
+  ## Split C, reproduced from its unit and the training part alone
+  split_C   <- with_unit_seed(42L, "fit/calibration",
+                              rsample::initial_split(rsample::training(cold$evaluation$split),
+                                                     prop = CALIB_PROP,
+                                                     strata = dplyr::all_of("SOC")))
   calib_ids <- rsample::testing(split_C)$sample_id
 
   it("partitions the modelled frame into disjoint test, calibration and fit rows", {

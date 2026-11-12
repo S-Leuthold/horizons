@@ -115,7 +115,7 @@ describe("fit_ensemble_uq() - bundle contract", {
     expect_setequal(
       names(uq),
       c("method", "ensemble_method", "members", "fold_models", "calib",
-        "n_calib", "level_default", "seed", "oof_coverage", "mean_width",
+        "n_calib", "level_default", "oof_coverage", "mean_width",
         "timestamp", "test_coverage", "test_mean_width", "n_test")
     )
 
@@ -130,7 +130,6 @@ describe("fit_ensemble_uq() - bundle contract", {
     expect_identical(uq$ensemble_method, "weighted")
     expect_equal(length(uq$fold_models), 5)
     expect_equal(uq$level_default, DEFAULT_UQ_LEVEL)
-    expect_equal(uq$seed, 307L + 1000L)
     expect_setequal(uq$members, ens_ref$ensemble$weights$member)
 
   })
@@ -147,12 +146,13 @@ describe("fit_ensemble_uq() - bundle contract", {
 
   })
 
-  it("records optimize and seed on the ensemble contract", {
+  it("records optimize and seed on the ensemble contract, the seed the fit's", {
 
     ens_ref <- ens_built("weighted")
 
     expect_identical(ens_ref$ensemble$optimize, FALSE)
-    expect_identical(ens_ref$ensemble$seed, 307L)
+    expect_identical(ens_ref$ensemble$seed, ens_ref$models$seed)
+    expect_identical(ens_ref$ensemble$seed_rule, SEED_RULE)
 
   })
 
@@ -177,7 +177,7 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
   })
 
-  it("the stored seed reproduces the fold assignment exactly", {
+  it("the ensemble's seed reproduces the fold assignment exactly, in the unit ensemble/cvplus", {
 
     ens_ref <- ens_built("weighted")
     uq  <- ens_ref$ensemble$uq
@@ -186,10 +186,9 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
     meta_frame        <- oof$predictors
     meta_frame$.truth <- oof$truth
 
-    set.seed(uq$seed)
-    folds_redrawn <- suppressWarnings(
+    folds_redrawn <- with_unit_seed(ens_ref$ensemble$seed, "ensemble/cvplus", suppressWarnings(
       rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
-    )
+    ))
 
     for (k in seq_len(nrow(folds_redrawn))) {
 
@@ -229,29 +228,83 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 
   it("the calibration partition differs from the tuning partition (Route B)", {
 
-    ens_ref <- ens_built("weighted")
+    ## xgb: a meta-learner that draws folds of its own, for its out-of-fold
+    ## pass (and its tuning, when optimised)
+    ens_ref <- ens_built("xgb")
     uq  <- ens_ref$ensemble$uq
     oof <- build_oof_matrix(ens_ref, ens_ref$ensemble$weights$member)
 
     meta_frame        <- oof$predictors
     meta_frame$.truth <- oof$truth
 
-    fold_of <- function(seed) {
+    ## The meta-learner's folds, which the ensemble does not store, redrawn
+    ## from their unit; each meta row's fold, by position in the meta frame
+    tuning <- with_unit_seed(ens_ref$ensemble$seed, "ensemble/meta-folds", suppressWarnings(
+      rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
+    ))
 
-      set.seed(seed)
-      folds <- suppressWarnings(
-        rsample::vfold_cv(meta_frame, v = 5, strata = ".truth")
-      )
-
-      assign <- integer(nrow(meta_frame))
-      for (k in seq_len(nrow(folds))) {
-        assign[as.integer(folds$splits[[k]], data = "assessment")] <- k
-      }
-      assign
-
+    tuning_fold <- integer(nrow(meta_frame))
+    for (k in seq_len(nrow(tuning))) {
+      tuning_fold[as.integer(tuning$splits[[k]], data = "assessment")] <- k
     }
 
-    expect_false(identical(fold_of(307L), fold_of(uq$seed)))
+    ## The calibration partition ensemble() drew, as it stored it, by .row
+    calibration_fold <- uq$calib$fold[match(oof$row, uq$calib$.row)]
+
+    ## Both name folds 1 to 5 the same way, so the comparison below is of
+    ## the assignments alone
+    expect_false(anyNA(calibration_fold))
+    expect_identical(sort(unique(calibration_fold)), sort(unique(tuning_fold)))
+    expect_false(identical(calibration_fold, tuning_fold))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## The units ensemble() draws in
+## ---------------------------------------------------------------------------
+## The meta-learner draws in ensemble/meta-folds and CV+ in ensemble/cvplus,
+## each fold refit in ensemble/cvplus/fold-<k>, from the ensemble's seed and
+## the unit's name alone.
+
+describe("ensemble() - the units it draws in", {
+
+  it("builds the same ensemble whatever the session's random stream", {
+
+    ## A penalized meta-learner's out-of-fold predictions follow its folds,
+    ## and the CV+ calibration rows follow the partition. suppressWarnings():
+    ## rsample's note that the 43 meta rows are too few for its default
+    ## strata breaks.
+    build <- function(session_seed) {
+      withr::with_seed(session_seed, suppressWarnings(
+        ensemble(ens_fitted(), method = "penalized", optimize = FALSE, compute_uq = TRUE)
+      ))$ensemble
+    }
+
+    a <- build(1L)
+    b <- build(2L)
+
+    expect_identical(a$oof_predictions, b$oof_predictions)
+    expect_identical(a$uq$calib, b$uq$calib)
+
+  })
+
+  it("gives the xgb meta-learner its unit's seed, and each CV+ fold refit its own", {
+
+    ens     <- ens_built("xgb")$ensemble
+    seed_of <- function(wflow) rlang::eval_tidy(workflows::extract_spec_parsnip(wflow)$eng_args$seed)
+
+    expect_identical(seed_of(ens$model), unit_seed(ens$seed, "ensemble/meta-folds"))
+
+    for (k in seq_along(ens$uq$fold_models)) {
+
+      expect_identical(seed_of(ens$uq$fold_models[[k]]),
+                       unit_seed(ens$seed, c("ensemble", "cvplus", paste0("fold-", k))),
+                       info = k)
+
+    }
 
   })
 
@@ -268,7 +321,8 @@ describe("fit_ensemble_uq() - fold honesty and Route B", {
 ## on them scores each.
 
 #' A weighted ensemble with CV+ intervals over a fit whose evaluation trimmed
-#' eight training rows far above the rest. plsr and elastic net keep it fast.
+#' the training rows among eight far above the rest (the trim never touches a
+#' test row). plsr and elastic net keep it fast.
 #' @noRd
 build_trimmed_ens <- function() {
 
@@ -299,7 +353,10 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     ids <- ens$evaluation$response_trim$trimmed_ids
     oof <- build_oof_matrix(ens, uq$members)
 
-    expect_length(ids, 8L)
+    ## Every one of the eight the split put in training
+    extreme <- sprintf("S%03d", 1:8)
+    expect_setequal(ids, setdiff(extreme, rsample::testing(ens$evaluation$split)$sample_id))
+    expect_gte(length(ids), 2L)
 
     at <- match(ids, uq$calib$sample_id)
 
@@ -307,9 +364,11 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     expect_identical(which(is.na(uq$calib$.row)), sort(at))
     expect_true(all(uq$calib$fold[at] %in% seq_along(uq$fold_models)))
 
-    ## Balanced across the five folds: eight rows give 2, 2, 2, 1, 1
+    ## Balanced across the five folds: n rows give each fold n %/% 5 or one
+    ## more
+    n_ids <- length(ids)
     expect_identical(sort(as.integer(table(factor(uq$calib$fold[at], levels = 1:5)))),
-                     c(1L, 1L, 2L, 2L, 2L))
+                     sort(rep(n_ids %/% 5L, 5L) + rep(c(1L, 0L), c(n_ids %% 5L, 5L - n_ids %% 5L))))
 
     ## The meta rows are all there, each once, with their sample_ids
     expect_setequal(uq$calib$.row[-at], oof$row)
@@ -411,10 +470,11 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
 
   })
 
-  it("calibrates an ensemble without a trim on its meta rows alone, as the fold pass at the stored seed does", {
+  it("calibrates an ensemble without a trim on its meta rows alone, as the fold pass in its unit does", {
 
     ## The trimmed rows' folds are drawn only when there are some, after the
-    ## fold models, so an ensemble without a trim calibrates as it always has
+    ## fold models, so an ensemble without a trim calibrates on the fold pass
+    ## alone
     ens_ref <- ens_built("weighted")
     uq      <- ens_ref$ensemble$uq
     oof     <- build_oof_matrix(ens_ref, uq$members)
@@ -422,10 +482,11 @@ describe("fit_ensemble_uq() - the rows a response trim set aside (#103)", {
     meta_frame        <- oof$predictors
     meta_frame$.truth <- oof$truth
 
-    set.seed(uq$seed)
-    folds <- suppressWarnings(rsample::vfold_cv(meta_frame, v = 5, strata = ".truth"))
-    plain <- fit_uq_fold_models(meta_frame, oof$row, oof$sample_id, folds,
-                                ens_ref$ensemble, ens_ref$ensemble$optimize)
+    plain <- with_unit_seed(ens_ref$ensemble$seed, "ensemble/cvplus", {
+      folds <- suppressWarnings(rsample::vfold_cv(meta_frame, v = 5, strata = ".truth"))
+      fit_uq_fold_models(meta_frame, oof$row, oof$sample_id, folds,
+                         ens_ref$ensemble, ens_ref$ensemble$optimize, seed = ens_ref$ensemble$seed)
+    })
 
     expect_false(anyNA(uq$calib$.row))
     expect_identical(uq$calib, plain$calib)
@@ -527,8 +588,10 @@ describe("fit_ensemble_uq() - coverage", {
       oof     <- build_oof_matrix(ens, uq$members)
       trimmed <- ensemble_trimmed_rows(ens, uq$members)
 
-      ## The trimmed ensemble calibrates on its eight trimmed rows
-      expect_identical(sum(is.na(uq$calib$.row)), c(plain = 0L, trimmed = 8L)[[name]], info = name)
+      ## The trimmed ensemble calibrates on every row its trim set aside
+      n_trimmed <- length(ens$evaluation$response_trim$trimmed_ids %||% character(0))
+      expect_identical(sum(is.na(uq$calib$.row)), c(plain = 0L, trimmed = n_trimmed)[[name]], info = name)
+      if (name == "trimmed") expect_gte(n_trimmed, 2L)
 
       member_mat <- dplyr::bind_rows(oof$predictors, trimmed$predictors)
       member_mat <- member_mat[, paste0("member_", uq$members), drop = FALSE]
@@ -849,7 +912,7 @@ describe("ensemble UQ - degradation and gates", {
 
     err <- expect_error(
       compute_ensemble_uq(oof = oof_small, contract = ens_ref$ensemble,
-                          optimize = FALSE, conformal_seed = 1307L),
+                          optimize = FALSE, seed = 307L),
       class = "horizons_error_run"
     )
     expect_match(conditionMessage(err), "has 25 rows to calibrate on, fewer than `min_calib_rows` (30)",
@@ -862,7 +925,7 @@ describe("ensemble UQ - degradation and gates", {
     ## rsample's note that 25 rows are too few for its default strata breaks
     expect_false(is.null(suppressWarnings(compute_ensemble_uq(
       oof = oof_small, contract = ens_ref$ensemble, optimize = FALSE,
-      conformal_seed = 1307L, min_calib_rows = 10L
+      seed = 307L, min_calib_rows = 10L
     ))))
 
   })
@@ -884,7 +947,7 @@ describe("ensemble UQ - degradation and gates", {
       ## suppressWarnings(): rsample's note that 25 rows are too few for its
       ## default strata breaks
       suppressWarnings(compute_ensemble_uq(oof = small, contract = ens_ref$ensemble,
-                                           optimize = FALSE, conformal_seed = 1307L,
+                                           optimize = FALSE, seed = 307L,
                                            trimmed = trimmed))
     }
 
@@ -918,7 +981,7 @@ describe("ensemble UQ - degradation and gates", {
 
     run <- function() {
       compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
-                          optimize = FALSE, conformal_seed = 1307L)
+                          optimize = FALSE, seed = 307L)
     }
 
     spoil  <- 1:3
@@ -953,7 +1016,7 @@ describe("ensemble UQ - degradation and gates", {
       ## suppressWarnings(): rsample's note that so few rows are too few for
       ## its default strata breaks
       suppressWarnings(compute_ensemble_uq(oof = first(n), contract = ens_ref$ensemble,
-                                           optimize = FALSE, conformal_seed = 1307L, ...))
+                                           optimize = FALSE, seed = 307L, ...))
     }
 
     ## 18 rows meet a minimum of 9 but not the 19 CV+ needs at 0.90: lowering
@@ -989,7 +1052,7 @@ describe("ensemble UQ - degradation and gates", {
     notes <- character()
     uq <- withCallingHandlers(
       suppressWarnings(compute_ensemble_uq(oof = oof19, contract = ens_ref$ensemble,
-                                           optimize = FALSE, conformal_seed = 1307L,
+                                           optimize = FALSE, seed = 307L,
                                            min_calib_rows = 19L)),
       horizons_note = function(n) notes <<- c(notes, conditionMessage(n))
     )
@@ -1023,7 +1086,7 @@ describe("ensemble UQ - degradation and gates", {
     ## for its default strata breaks
     out <- suppressWarnings(run_unit(
       compute_ensemble_uq(oof = oof, contract = ens_ref$ensemble,
-                          optimize = FALSE, conformal_seed = 1307L),
+                          optimize = FALSE, seed = 307L),
       unit = "intervals", id = "ensemble"
     ))
 

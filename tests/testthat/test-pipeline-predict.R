@@ -70,6 +70,7 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
                                  settings = list(eval_settings(
                                    cv_folds = 3L, grid_size = 3L, bayesian_iter = 0L,
                                    prune = FALSE, prune_threshold = NA_real_, seed = seed,
+                                   seed_rule = SEED_RULE,
                                    sg_window = DEFAULT_SG_WINDOW,
                                    pca_threshold = DEFAULT_PCA_THRESHOLD,
                                    outcome_range = DEFAULT_OUTCOME_RANGE,
@@ -86,6 +87,9 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
     n_test       = nrow(df) - as.integer(round(nrow(df) * 0.8)),
     recipe       = list(sg_window = DEFAULT_SG_WINDOW, sg_window_cm = NA_real_,
                         pca_threshold = DEFAULT_PCA_THRESHOLD),
+    ## The run's seed, which fit() takes
+    seed         = as.integer(seed),
+    seed_rule    = SEED_RULE,
     runtime_secs = 1,
     timestamp    = Sys.time()
   )
@@ -946,18 +950,34 @@ describe("predict.horizons_fit() - response bound guardrail", {
     ## The training rows are the ones the final model was fit on, whose ids
     ## the out-of-fold predictions carry (#68); UQ is on here, so the
     ## calibration rows are out.
-    eval_obj <- make_predict_eval()
-    analysis <- eval_obj$data$analysis
-    fit_rows <- analysis$sample_id %in% unique(fitted_fixture$models$cv_predictions$sample_id)
-    expected <- max(analysis$SOC[fit_rows]) * RESPONSE_BOUND_MARGIN
+    ##
+    ## A bound over Split F's whole training part and one over the fit rows
+    ## differ when the training part's largest outcome is a calibration row.
+    ## The shared fit's largest calibration outcome is raised above every
+    ## other, which keeps it in the top stratum of the calibration split, so
+    ## the refit draws that split as it was. The stored split records the
+    ## outcome too, and is raised with it.
+    eval_obj  <- make_predict_eval()
+    analysis  <- eval_obj$data$analysis
+    train_ids <- rsample::training(fitted_fixture$evaluation$split)$sample_id
+    calib_ids <- setdiff(train_ids, fitted_fixture$models$cv_predictions$sample_id)
+    top_calib <- which(analysis$sample_id %in% calib_ids)
+    top_calib <- top_calib[which.max(analysis$SOC[top_calib])]
+    eval_obj$data$analysis$SOC[top_calib]    <- max(analysis$SOC) + 1
+    eval_obj$evaluation$split$data$SOC[top_calib] <- max(analysis$SOC) + 1
 
-    ## Precondition: the fixture discriminates. The largest training-part
-    ## outcome sits in the calibration rows, so a bound over Split F's whole
-    ## training part would differ from one over the fit rows.
-    train_F <- rsample::training(fitted_fixture$evaluation$split)
-    expect_gt(max(train_F$SOC), max(analysis$SOC[fit_rows]))
+    ## suppressWarnings(): tibble's note that the hand-built evaluation has
+    ## no best_params column, as the shared fit raises it
+    refit <- suppressWarnings(fit(eval_obj, n_best = 1L, compute_uq = TRUE))
 
-    expect_equal(fitted_fixture$models$response_bound, expected)
+    soc      <- eval_obj$data$analysis$SOC
+    ids      <- eval_obj$data$analysis$sample_id
+    fit_rows <- ids %in% unique(refit$models$cv_predictions$sample_id)
+
+    ## Precondition: the fixture discriminates
+    expect_gt(max(soc[ids %in% train_ids]), max(soc[fit_rows]))
+
+    expect_equal(refit$models$response_bound, max(soc[fit_rows]) * RESPONSE_BOUND_MARGIN)
 
   })
 

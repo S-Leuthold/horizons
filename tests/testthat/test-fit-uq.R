@@ -605,32 +605,36 @@ describe("fit_uq() - a prediction step that fails", {
 ## The quantile forest's seed
 ## =========================================================================
 ## ranger's `seed` fixes the trees, but quantreg draws the node values it
-## stores from R's stream, so without a seed of its own the forest depended on
-## what the member's fit drew before it.
+## stores from R's stream, so fit() grows the forest in the member's `forest`
+## stage (with_unit_seed()), with that stage's seed given to ranger as well.
 
 describe("fit_quantile_forest() - the seed", {
 
   setup     <- suppressWarnings(make_uq_setup())
   features  <- mold_predictors(setup$fitted_wf)
   residuals <- setup$oof_predictions$truth - setup$oof_predictions$.pred
+  stage     <- c("fit", "uq_test", "forest")
+
+  grow <- function(root) {
+    with_unit_seed(root, stage, fit_quantile_forest(features, residuals, seed = unit_seed(root, stage)))
+  }
 
   run_uq <- function() {
-    suppressWarnings(fit_uq(
+    with_unit_seed(7L, stage, suppressWarnings(fit_uq(
       fitted_workflow = setup$fitted_wf,
       oof_predictions = setup$oof_predictions,
       calib_data      = setup$calib_data,
       role_map        = setup$role_map,
-      seed            = 7L
-    ))
+      seed            = unit_seed(7L, stage)
+    )))
   }
 
-  it("gives the same forest for the same seed, whatever the caller's stream", {
+  it("gives the same forest in the same stage, whatever the caller's stream", {
 
-    a <- withr::with_seed(1, fit_quantile_forest(features, residuals, seed = 7L))
-    b <- withr::with_seed(2, fit_quantile_forest(features, residuals, seed = 7L))
-    c <- withr::with_seed(3, .rng_kind = "L'Ecuyer-CMRG",
-                          fit_quantile_forest(features, residuals, seed = 7L))
-    d <- withr::with_seed(1, fit_quantile_forest(features, residuals, seed = 8L))
+    a <- withr::with_seed(1, grow(7L))
+    b <- withr::with_seed(2, grow(7L))
+    c <- withr::with_seed(3, .rng_kind = "L'Ecuyer-CMRG", grow(7L))
+    d <- withr::with_seed(1, grow(8L))
 
     expect_identical(b$random.node.values, a$random.node.values)
     expect_identical(c$random.node.values, a$random.node.values)
@@ -638,34 +642,21 @@ describe("fit_quantile_forest() - the seed", {
     expect_identical(c$forest$split.values, a$forest$split.values)
     expect_false(identical(d$random.node.values, a$random.node.values))
 
-    ## So the calibration scores fit_uq() stores depend on its seed alone
+    ## So the calibration scores fit_uq() stores depend on the stage alone
     expect_identical(withr::with_seed(2, run_uq())$scores,
                      withr::with_seed(1, run_uq())$scores)
 
   })
 
-  it("leaves the caller's stream and kind as found", {
+  it("draws its node values from the stream, which the stage seeds", {
 
-    withr::with_seed(5, {
-      before <- .Random.seed
-      fit_quantile_forest(features, residuals, seed = 7L)
-      expect_identical(.Random.seed, before)
-    })
+    ## The same ranger seed under two streams: the trees agree, the stored
+    ## node values do not, so the stage's seed is what fixes them
+    a <- withr::with_seed(1, fit_quantile_forest(features, residuals, seed = 7L))
+    b <- withr::with_seed(2, fit_quantile_forest(features, residuals, seed = 7L))
 
-    withr::with_seed(5, .rng_kind = "L'Ecuyer-CMRG", {
-      before <- .Random.seed
-      fit_quantile_forest(features, residuals, seed = 7L)
-      expect_identical(.Random.seed, before)
-      expect_identical(RNGkind()[1], "L'Ecuyer-CMRG")
-    })
-
-    withr::with_preserve_seed({
-      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-        rm(".Random.seed", envir = globalenv())
-      }
-      fit_quantile_forest(features, residuals, seed = 7L)
-      expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-    })
+    expect_identical(b$forest$split.values, a$forest$split.values)
+    expect_false(identical(b$random.node.values, a$random.node.values))
 
   })
 

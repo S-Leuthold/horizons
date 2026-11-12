@@ -164,11 +164,18 @@
 #'   shrinkage covariance + held-out OOD thresholds) per config, so `predict()`
 #'   can emit `.ad_distance` / `.ad_flag`. Shares the UQ calibration split.
 #'   Default TRUE.
-#' @param seed Integer. Random seed for the CV folds and, through
-#'   `calib_split_seed()` (`seed + 1L`), for the calibration split. The
-#'   train/test split is `evaluate()`'s, so it does not depend on this seed,
-#'   except on a cold start, where `fit()` draws that split at this seed as
-#'   `evaluate()` would. Default 307L.
+#' @param seed `NULL` or a whole number: the run's seed. The CV folds, the
+#'   calibration split and each member's stages are seeded from it and their
+#'   own names, so a member's results depend on the seed alone (except
+#'   `cubist`, whose neighbour step no seed reaches; see the reproducibility
+#'   note in [configure()]). The
+#'   train/test split is `evaluate()`'s, except on a cold start, where `fit()`
+#'   draws that split as `evaluate()` would at this seed. `NULL` (the
+#'   default) takes the seed the object records (`evaluate()`'s, or a re-fit's
+#'   own), and on a cold start from an object that records none, one integer
+#'   from the session's random stream, which is left where it was and
+#'   printed in the tree. A seed given here overrides the object's and is
+#'   recorded as `models$seed`, which [ensemble()] takes.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
 #'   `keep_traces`, `min_calib_rows`, `min_ad_rows` and
@@ -239,10 +246,15 @@ fit <- function(x,
                 metric     = NULL,
                 compute_uq = TRUE,
                 compute_ad = TRUE,
-                seed       = 307L,
+                seed       = NULL,
                 control    = control_horizons()) {
 
   start_time <- Sys.time()
+
+  ## The caller's random state is left as found, as evaluate() leaves it,
+  ## and a session that has never drawn is given its stream first
+  ensure_rng_stream()
+  local_rng_state()
 
   ## How the run goes: the fields fit() reads, defaults filled in, and the
   ## record of it on the models
@@ -285,9 +297,9 @@ fit <- function(x,
   check_arg(rlang::check_bool, compute_uq)
   check_arg(rlang::check_bool, compute_ad)
 
-  ## The seed, as at every verb, is a whole number set.seed() takes
+  ## The seed, as at every verb, is NULL or a whole number set.seed() takes
   ## unchanged.
-  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX)
+  check_arg(rlang::check_number_whole, seed, min = -SEED_MAX, max = SEED_MAX, allow_null = TRUE)
 
   ## The object as it arrives (#234): on the evaluate() path its evaluation
   ## record, and through it the base contract; on a cold start the base
@@ -295,6 +307,11 @@ fit <- function(x,
   ## refused here, before the checks below read it and before anything is
   ## re-tuned.
   x <- if (cold_start) validate_horizons_data(x) else validate_horizons_eval(x)
+
+  ## The run's root, once, before anything draws: the seed given, else the
+  ## object's (evaluate()'s, or a re-fit's own), else one from the session
+  root <- resolve_seed(seed, x)
+  seed <- root$seed
 
   ## The outcome has to lie inside the range every prediction is clamped to,
   ## checked on either path before anything is drawn or fitted (#76).
@@ -494,8 +511,8 @@ fit <- function(x,
   ## Calibration partitioning: split train_F into train_Fit / calib_Fit.
   ## UQ and AD share this one held-out split (D7) \u2014 both calibrate on calib_Fit
   ## and never train on it. Built whenever either capability is requested.
-  ## Seeded on its own, so the calibration rows depend on `seed` and train_F
-  ## alone, not on RNG state an earlier draw left behind.
+  ## A unit of its own, so the calibration rows depend on `seed` and train_F
+  ## alone.
   ##
   ## After a response trim (#77) the pool is the untrimmed training part,
   ## train_F plus the trimmed rows. Split conformal needs calibration rows
@@ -511,15 +528,13 @@ fit <- function(x,
 
   if (compute_uq || compute_ad) {
 
-    set.seed(calib_split_seed(seed))
-
-    calib_drawn <- draw_stratified(
+    calib_drawn <- with_unit_seed(seed, "fit/calibration", draw_stratified(
       outcome      = calib_pool[[outcome_col]],
       stratified   = function() rsample::initial_split(calib_pool, prop = CALIB_PROP,
                                                        strata = dplyr::all_of(outcome_col),
                                                        breaks = STRATA_BREAKS, pool = STRATA_POOL),
       unstratified = function() rsample::initial_split(calib_pool, prop = CALIB_PROP)
-    )
+    ))
     split_C <- calib_drawn$draw
 
     train_Fit  <- rsample::training(split_C)
@@ -592,18 +607,13 @@ fit <- function(x,
                   n_trimmed  = length(trimmed_ids),
                   n_calib    = if (is.null(calib_data)) 0L else sum(calib_kept))
 
-  ## Seeded here: with the split reused, no draw precedes this one when UQ
-  ## and AD are off, so the folds would otherwise follow the caller's RNG.
-
-  set.seed(seed)
-
-  cv_drawn <- draw_stratified(
+  cv_drawn <- with_unit_seed(seed, "fit/folds", draw_stratified(
     outcome      = train_Fit[[outcome_col]],
     stratified   = function() rsample::vfold_cv(train_Fit, v = cv_folds,
                                                 strata = dplyr::all_of(outcome_col),
                                                 breaks = STRATA_BREAKS, pool = STRATA_POOL),
     unstratified = function() rsample::vfold_cv(train_Fit, v = cv_folds)
-  )
+  ))
   cv_resamples <- cv_drawn$draw
 
   ## A stratified draw that fell back to an unstratified one says so once,
@@ -623,6 +633,10 @@ fit <- function(x,
     cat(paste0("\u250C fit ",
                paste(rep("\u2500", 57), collapse = ""), "\n"))
     cat("\u2502\n")
+
+    seed_line <- seed_tree_line(root)
+
+    if (!is.null(seed_line)) cat(paste0("\u2502  ", seed_line, "\n"))
 
     if (n_dropped > 0) {
 
@@ -1099,6 +1113,10 @@ fit <- function(x,
     uq                = uq_list,
     ad                = ad_list,
     selection_present = selection_present,
+    ## The run's root and its rule: ensemble() takes the root unless given
+    ## one, and a re-fit takes it too
+    seed              = seed,
+    seed_rule         = SEED_RULE,
     control           = control,
     timestamp         = Sys.time(),
     runtime_secs      = total_runtime
@@ -1293,7 +1311,7 @@ member_row <- function(res) {
 #' @param metric The `metric` passed to `fit()`, already checked. `NULL`
 #'   keeps the `rank_metric` a cold-started fit recorded, or `"rpd"`.
 #'   Recorded as `rank_metric`; with one configuration it ranks nothing.
-#' @param seed The `seed` passed to `fit()`.
+#' @param seed The run's root, which `fit()` resolved.
 #' @param collector `fit()`'s collector, from `log_open()`, which records a
 #'   response trim that could not run.
 #' @param call The call the conditions are attributed to. Default: the
@@ -1396,6 +1414,10 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
       n_test        = nrow(rsample::testing(split)),
       response_trim = trimmed$record,
       recipe        = recipe_record,
+      ## The root the split was drawn from, and its rule, as evaluate()
+      ## records them
+      seed          = seed,
+      seed_rule     = SEED_RULE,
       ## No evaluate() ran, so there is no control it ran with
       control       = NULL,
       runtime_secs  = 0,
@@ -1721,30 +1743,6 @@ log_calibration_skip <- function(collector, compute_uq, compute_ad, n_calib,
   invisible(collector)
 
 }
-
-## ---------------------------------------------------------------------------
-## calib_split_seed \u2014 Split C's seed, derived from the user's seed
-## ---------------------------------------------------------------------------
-
-#' Seed for fit()'s calibration split
-#'
-#' @description
-#' `fit()` scores on `evaluate()`'s train/test split and carves the
-#' calibration set that UQ and AD share (Split C) out of its training part.
-#' Split C is seeded on its own, with `seed + 1L`, so the calibration rows
-#' depend only on `seed` and those training rows, not on RNG state left by an
-#' earlier draw. The offset is documented rather than hidden so a caller who
-#' needs to reproduce the partition can.
-#'
-#' @param seed Integer seed passed to `fit()`.
-#' @return Integer seed for Split C.
-#' @keywords internal
-calib_split_seed <- function(seed) {
-
-  as.integer(seed) + 1L
-
-}
-
 
 ## ---------------------------------------------------------------------------
 ## format_test_coverage(): the console line for measured interval coverage

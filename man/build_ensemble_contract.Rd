@@ -50,13 +50,14 @@ these. Default NULL.}
 ensemble UQ can re-derive fold weights (weighted method) by the same
 rule.}
 
-\item{seed}{Integer. The build-time seed, recorded so ensemble UQ can
-derive a calibration partition disjoint from the tuning folds.}
+\item{seed}{Integer. The run's seed, recorded so ensemble UQ can draw its
+calibration partition in its own unit, \code{ensemble/cvplus}, with the
+seeding rule's version (\code{seed_rule}).}
 }
 \value{
 A list matching the \code{ensemble} slot contract: \code{method}, \code{model},
 \code{weights}, \code{predictions}, \code{metrics}, \code{member_metrics}, \code{improvement},
-\code{oof_predictions}, \code{optimize}, \code{seed}, \code{uq} (populated by
+\code{oof_predictions}, \code{optimize}, \code{seed}, \code{seed_rule}, \code{uq} (populated by
 \code{\link[=fit_ensemble_uq]{fit_ensemble_uq()}}), \code{control} and \code{warnings} (filled by \code{\link[=ensemble]{ensemble()}}),
 \code{timestamp}, \code{runtime_secs}.
 }

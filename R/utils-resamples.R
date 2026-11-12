@@ -354,45 +354,6 @@ rebuild_split <- function(x, call = rlang::caller_env()) {
 
 
 ## ---------------------------------------------------------------------------
-## The caller's RNG state
-## ---------------------------------------------------------------------------
-
-
-#' Restore the caller's RNG state when a function exits
-#'
-#' @description
-#' Records `.Random.seed` (or its absence) and registers its restore on
-#' `frame`'s exit, after any exit handlers already there. Restoring
-#' `.Random.seed` restores the RNG kind with it, and a stream that was absent
-#' is removed again. A function that seeds or draws for its own purposes calls
-#' this first, so the caller's stream is left as found.
-#'
-#' @param frame The frame whose exit restores the state: the caller's by
-#'   default, or a `local()` block's when called inside one.
-#' @return `NULL`, invisibly.
-#' @keywords internal
-#' @noRd
-
-local_rng_state <- function(frame = parent.frame()) {
-
-  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
-
-  restore <- function() {
-    if (had_seed) assign(".Random.seed", old_seed, envir = globalenv())
-    else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv())
-  }
-
-  ## Registered on the caller's frame, as withr's local_ functions do; written
-  ## out because withr is only a Suggests.
-  do.call(base::on.exit, list(as.call(list(restore)), add = TRUE), envir = frame)
-
-  invisible(NULL)
-
-}
-
-
-## ---------------------------------------------------------------------------
 ## Stratified draws: whether the strata held
 ## ---------------------------------------------------------------------------
 ##
@@ -420,9 +381,9 @@ local_rng_state <- function(frame = parent.frame()) {
 #' stratum is an unstratified draw. See the section header above for the
 #' cases.
 #'
-#' `make_strata()` draws a random stratum for each pooled value, and
-#' `evaluate()` draws its CV folds from the stream its split leaves without
-#' reseeding, so the caller's RNG state is restored on exit. Its warning is
+#' `make_strata()` draws a random stratum for each pooled value, so the
+#' caller's RNG state is restored on exit: a draw then starts from its unit's
+#' seed ([with_unit_seed()]) whatever `make_strata()` drew here. Its warning is
 #' muffled here only because this is a second look at the outcome: the draw
 #' itself raises it.
 #'
@@ -449,8 +410,9 @@ outcome_stratifies <- function(outcome) {
 #' @description
 #' Runs `stratified()`, the rsample call with `strata`, and on an error runs
 #' `unstratified()`, the same call without, as each draw site did inline.
-#' The caller seeds the RNG first; [outcome_stratifies()] leaves it as found,
-#' so the draws consume the stream they always did. An error from the check
+#' The caller runs it inside the draw's unit ([with_unit_seed()]);
+#' [outcome_stratifies()] leaves the stream as found, so the draw starts at
+#' the unit's seed whatever the check drew. An error from the check
 #' itself counts as unstratified rather than aborting: the stratified draw
 #' calls `make_strata()` with the same arguments, so it fails too and is
 #' retried without strata, as it was before the check existed.

@@ -31,6 +31,11 @@ MODEL_SPECS <- list(
   mars        = list(fn = "mars",         engine = "earth")
 )
 
+# The engines that take a seed, which each stage gives them (seed_engine(),
+# R/utils-rng.R) rather than letting parsnip or bonsai draw one from the
+# stream. Keyed by engine, not model, so the xgb meta-learner shares it.
+SEEDED_ENGINES <- c("ranger", "xgboost", "lightgbm")
+
 # The packages each model needs, to fit it and to predict from it (#65),
 # keyed by the same short names as MODEL_SPECS and VALID_MODELS. Not derivable
 # from MODEL_SPECS$engine alone: cubist_rules() needs `rules` (registers the
@@ -230,18 +235,19 @@ DEFAULT_AD_LEVEL <- 0.99
 ### AD is disabled rather than returning a meaningless domain.
 N_AD_TRAIN_MIN <- 10L
 
-## Ensemble ----------------------------------------------------------------------
-
-### Default seed for ensemble() — the meta-learner's tuning/OOF folds. Ensemble
-### UQ draws its calibration partition at this seed + 1000. Centralized so the
-### verb default and the engines' defaults cannot drift independently.
-DEFAULT_ENSEMBLE_SEED <- 307L
+## Seeds -------------------------------------------------------------------------
 
 ### The largest magnitude a verb's seed may have: set.seed() takes a whole
 ### number within R's integer range unchanged. fit()'s n_best, taken as an
 ### integer too, is held to it. A double, as rlang's checkers take their
 ### bounds.
 SEED_MAX <- as.double(.Machine$integer.max)
+
+### The version of the rule that turns a run's seed into each unit's seed
+### (unit_seed(), R/utils-rng.R). Recorded on the object and in the settings a
+### checkpoint resumes under. Bump it whenever a unit would get another seed
+### from the same root: the hash or its key, a unit's name, or the kinds.
+SEED_RULE <- 1L
 
 ## Prediction Guardrails --------------------------------------------------------
 
@@ -265,9 +271,8 @@ DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
 # The keys evaluate()'s parallel branch sends to evaluate_config_worker().
 # Assembled in one place and asserted in the worker, because a mis-keyed entry
-# arrives as NULL and two of them fail SILENTLY rather than erroring: a NULL
-# `seed` makes set.seed(NULL) reseed from the clock (the run succeeds and is not
-# reproducible), and a NULL `grid_size` makes tune_grid() invent its own grid.
+# arrives as NULL and one fails SILENTLY rather than erroring: a NULL
+# `grid_size` makes tune_grid() invent its own grid.
 
 SHARED_ARG_NAMES <- c(
   "data",
@@ -311,7 +316,9 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      fails the configuration (#102).
 #   5  2026-10-21: an untransformed response's tuning metrics score the
 #      estimate clamped to outcome_range, as every other score is (#104).
-SCORING_SCHEMA <- 5L
+#   6  2026-11-09: every draw is seeded from the run's seed and its unit's
+#      name (SEED_RULE 1), so the split, the folds and each stage move.
+SCORING_SCHEMA <- 6L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

@@ -178,6 +178,8 @@ new_horizons_data <- function(analysis = NULL,
                       workers          = NULL,  ## integer or NA: worker count of the plan
                       parallelize_over = NULL,  ## character: axis actually parallelized
                       recipe           = NULL,  ## list: sg_window, sg_window_cm, pca_threshold the configs ran with
+                      seed             = NULL,  ## integer: the run's root seed, which every draw is seeded from with its name; fit() takes it unless given one
+                      seed_rule        = NULL,  ## integer: SEED_RULE, the version of the rule that turned the root into each draw's seed
                       control          = NULL,  ## horizons_control evaluate() ran with, or NULL
                       runtime_secs     = NULL,  ## numeric
                       timestamp        = NULL), ## POSIXct
@@ -198,6 +200,8 @@ new_horizons_data <- function(analysis = NULL,
                   uq                = NULL,  ## list of UQ bundles (one per config), or NULL
                   ad                = NULL,  ## list of AD bundles (one per config), or NULL
                   selection_present = NULL,  ## logical: training rows came from select_training()
+                  seed              = NULL,  ## integer: the run's root seed; ensemble() and a re-fit take it unless given one
+                  seed_rule         = NULL,  ## integer: SEED_RULE
                   control           = NULL,  ## horizons_control fit() ran with, or NULL
                   timestamp         = NULL,  ## POSIXct
                   runtime_secs      = NULL), ## numeric
@@ -216,7 +220,8 @@ new_horizons_data <- function(analysis = NULL,
                     improvement     = NULL,
                     oof_predictions = NULL,
                     optimize        = NULL,   ## build-time optimize flag (for UQ fold re-derivation)
-                    seed            = NULL,   ## build-time seed (UQ partitions at seed + 1000)
+                    seed            = NULL,   ## integer: the run's root seed, which fit_ensemble_uq() re-derives the CV+ units' seeds from
+                    seed_rule       = NULL,   ## integer: SEED_RULE
                     uq              = NULL,   ## CV+ conformal bundle from fit_ensemble_uq(), or NULL
                     control         = NULL,   ## horizons_control ensemble() ran with, or NULL
                     warnings        = NULL,   ## the ensemble's own warnings, as a member's, or NULL
@@ -1167,6 +1172,18 @@ check_selection_shape <- function(selection, sample_ids = NULL) {
 
     errors <- c(errors, control_finding(selection$settings$control, "selection$settings"))
 
+    ## The run's root, which evaluate() takes, and its rule; a record made
+    ## before they were kept has neither
+    unrecorded <- setdiff(c("seed", "seed_rule"), names(selection$settings))
+
+    if (length(unrecorded) > 0) {
+
+      errors <- c(errors, cli::format_inline("{.field selection$settings} records no {.field {unrecorded}}"))
+
+    }
+
+    errors <- c(errors, seed_record_findings(selection$settings, "selection$settings"))
+
   }
 
   tables <- list(
@@ -1515,6 +1532,37 @@ contract_keys <- function(slot) {
 }
 
 
+#' The findings on a slot's seed record
+#'
+#' @description
+#' Every modelling verb records the run's root (`seed`) and the seeding
+#' rule's version (`seed_rule`) on its slot: the root a whole number a verb's
+#' `seed` accepts, which later verbs take ([recorded_seed()]), and the
+#' version a whole number of at least 1. Each is checked when its key is
+#' there; a missing key is the completeness check's finding.
+#'
+#' @param record The slot, or `selection$settings`.
+#' @param where How the findings name it, e.g. `"evaluation"`.
+#' @return Character vector of findings, empty when both hold.
+#' @noRd
+seed_record_findings <- function(record, where) {
+
+  whole <- function(v, min, max) {
+    is.numeric(v) && length(v) == 1 && !is.na(v) && v == trunc(v) && v >= min && v <= max
+  }
+
+  c(
+    if ("seed" %in% names(record) && !whole(record$seed, -SEED_MAX, SEED_MAX)) {
+      cli::format_inline("{.field {where}$seed} must be a single whole number, the run's seed")
+    },
+    if ("seed_rule" %in% names(record) && !whole(record$seed_rule, 1, Inf)) {
+      cli::format_inline("{.field {where}$seed_rule} must be a single whole number of at least 1")
+    }
+  ) %||% character()
+
+}
+
+
 #' Validate a horizons_ensemble object's contract
 #'
 #' @description
@@ -1539,8 +1587,9 @@ contract_keys <- function(slot) {
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `ensemble` slot is present (see [contract_keys()]): `method`,
 #'    `model`, `weights`, `predictions`, `metrics`, `member_metrics`,
-#'    `improvement`, `oof_predictions`, `optimize`, `seed`, `uq`, `control`,
-#'    `warnings`, `timestamp`, `runtime_secs`. Extra keys are tolerated.
+#'    `improvement`, `oof_predictions`, `optimize`, `seed`, `seed_rule`, `uq`,
+#'    `control`, `warnings`, `timestamp`, `runtime_secs`. Extra keys are
+#'    tolerated.
 #' 2. **method**: one of `weighted`, `penalized`, `xgb`.
 #' 3. **weights**: data frame with character `member` + numeric `coef`,
 #'    at least 2 rows, unique members, no NA coefficients.
@@ -1555,8 +1604,10 @@ contract_keys <- function(slot) {
 #' 8. **improvement**: single numeric; `NA` when the ensemble or every
 #'    member has no value of the rank metric.
 #' 9. **oof_predictions**: NULL, or data frame with `.row`, `.pred`, `truth`.
-#' 10. **optimize / seed**: a single logical and a single numeric, the
-#'     build-time settings [fit_ensemble_uq()] rebuilds the fold models with.
+#' 10. **optimize / seed**: a single logical and the run's root, a single
+#'     whole number, the build-time settings [fit_ensemble_uq()] rebuilds the
+#'     fold models with; `seed_rule` a whole number of at least 1
+#'     ([seed_record_findings()]).
 #' 11. **uq**: NULL, or a CV+ bundle — a list with `method == "cv_plus"` and
 #'     the core fields `fold_models`, `calib`, `n_calib`, `level_default`
 #'     (see [fit_ensemble_uq()]), whose `members` match the weights' and
@@ -1780,11 +1831,7 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 
   }
 
-  if (!is.numeric(ens$seed) || length(ens$seed) != 1) {
-
-    errors <- c(errors, cli::format_inline("{.field seed} must be a single numeric"))
-
-  }
+  errors <- c(errors, seed_record_findings(ens, "ensemble"))
 
   ## uq: NULL or a CV+ bundle ----------------------------------------------------------
 
@@ -1923,7 +1970,10 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
 #'    the `evaluation` slot is present (see [contract_keys()]): `results`,
 #'    `best_config`, `rank_metric`, `screened`, `split`, `n_train`, `n_test`,
-#'    `response_trim`, `recipe`, `runtime_secs`, `timestamp`. The
+#'    `response_trim`, `recipe`, `seed`, `seed_rule`, `control`,
+#'    `runtime_secs`, `timestamp`. `seed` must be a single whole number and
+#'    `seed_rule` one of at least 1 ([seed_record_findings()]); an
+#'    evaluation made before they were recorded is refused. The
 #'    run-provenance keys `parallelize_over` and `workers` are tolerated when
 #'    absent ([fit()]'s cold start writes neither, since no [evaluate()] ran)
 #'    and validated when present: `parallelize_over` one of `"sequential"`,
@@ -2099,6 +2149,11 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
     }
 
   }
+
+  ## seed / seed_rule (the run's root, which fit() takes) -----------------------
+  ## Both evaluate() and the cold start write them.
+
+  errors <- c(errors, seed_record_findings(ev, "evaluation"))
 
   ## response_trim (the training-partition trim, #77) ---------------------------
   ## NULL when no trim was requested. fit() reads trimmed_ids to line the
@@ -2393,11 +2448,12 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
-#'    the `models` slot is present (see [contract_keys()]), 13 in all:
+#'    the `models` slot is present (see [contract_keys()]), 16 in all:
 #'    `workflows`, `n_models`, `best_config`, `rank_metric`,
 #'    `predictor_schema`, `response_bound`, `cv_predictions`, `results`,
-#'    `uq`, `ad`, `selection_present`, `timestamp`, `runtime_secs`.
-#'    [fit()] writes every one. Extra keys are tolerated.
+#'    `uq`, `ad`, `selection_present`, `seed`, `seed_rule`, `control`,
+#'    `timestamp`, `runtime_secs`. [fit()] writes every one, so a fit made
+#'    before the seed was recorded is refused. Extra keys are tolerated.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
 #' 4. **rank_metric**: a length-1 character.
@@ -2408,7 +2464,8 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    lower bound and no higher than its upper bound. Under the default
 #'    range, `c(0, Inf)`, that is a single positive finite numeric; under
 #'    `c(-Inf, Inf)` any finite bound, negative included.
-#' 7. **selection_present**: `TRUE` or `FALSE`.
+#' 7. **selection_present**: `TRUE` or `FALSE`. **seed** a single whole
+#'    number and **seed_rule** one of at least 1 ([seed_record_findings()]).
 #' 8. **I6 — workflow ⊆ config**: every workflow key is a defined config id
 #'    in `x$config$configs$config_id`, the grid the eval validator requires.
 #' 9. **I7 — uq ⊆ workflows**: `uq` is NULL, or a named list whose keys are a
@@ -2579,6 +2636,10 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
     errors <- c(errors, cli::format_inline("{.field selection_present} must be TRUE or FALSE"))
 
   }
+
+  ## seed / seed_rule (the run's root, which ensemble() takes) ------------------
+
+  errors <- c(errors, seed_record_findings(md, "models"))
 
   ## The evaluation split ---------------------------------------------------------
   ## Split F, the partition the members were scored on and ensemble()

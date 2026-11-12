@@ -35,8 +35,8 @@
 #' @param allow_par Logical. Passed through from `ensemble()`'s control to
 #'   the meta-learner's tune controls; folds parallelise on the registered
 #'   plan when `TRUE`. Default `FALSE`.
-#' @param seed Integer. Seed for the CV folds (passed through to
-#'   [fit_tuned_meta_learner()] so the meta-OOF is reproducible).
+#' @param seed Integer. The run's seed, recorded on the contract (passed
+#'   through to [fit_tuned_meta_learner()]).
 #' @param debug Logical. From `ensemble()`'s control; see
 #'   [fit_tuned_meta_learner()].
 #' @param call The frame a member's failure to predict the test rows reports
@@ -51,7 +51,7 @@ fit_ensemble_penalized <- function(object,
                                    oof,
                                    rank_metric,
                                    optimize  = TRUE,
-                                   seed      = DEFAULT_ENSEMBLE_SEED,
+                                   seed,
                                    allow_par = FALSE,
                                    debug     = FALSE,
                                    call      = rlang::caller_env()) {

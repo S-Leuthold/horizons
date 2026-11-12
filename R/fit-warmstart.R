@@ -86,20 +86,12 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
     ## parameter's candidate at offset 0 is the best value's round trip
     ## through its scale, and can differ from it in the last bits.
     ##
-    ## The seed is scoped and the caller's stream restored. A bare set.seed(1)
-    ## here clobbered it partway through fit_single_config(), so everything
-    ## downstream — tune_grid()'s sampling, tune_bayes()'s GP initialisation —
-    ## became independent of the user's `seed` when the grid overflowed
-    ## max_points and dependent on it when it didn't. See #51.
+    ## The sample draws from the stream as it finds it: fit_single_config()
+    ## builds the grid in the member's `warmstart-grid` stage
+    ## (with_unit_seed()).
 
-    sampled <- local({
-
-      local_rng_state()
-      set.seed(1, kind = "Mersenne-Twister")
-      others <- full_grid[!point_matches(best_row, full_grid), , drop = FALSE]
-      dplyr::slice_sample(others, n = max_points - 1L)
-
-    })
+    others    <- full_grid[!point_matches(best_row, full_grid), , drop = FALSE]
+    sampled   <- dplyr::slice_sample(others, n = max_points - 1L)
     full_grid <- dplyr::bind_rows(best_row, sampled)
 
   }
@@ -299,11 +291,13 @@ point_matches <- function(point, grid) {
 #'    `tune::tune_grid()`. A result in which every model failed fails the
 #'    member, with tune's cause (`check_tune_result()`), and so does a grid
 #'    with no candidate scored on every fold (#101).
-#' 2. If `bayesian_iter > 0`, re-pin the random stream to `seed` and refine
-#'    with `bayes_search()`, which keeps what it finished when it fails, and
-#'    says so (#209). The re-pin makes the search independent of where the
-#'    grid stage left the stream, which differs between the sequential and
-#'    parallel paths (#151).
+#' 2. If `bayesian_iter > 0`, refine with `bayes_search()`, which keeps what
+#'    it finished when it fails, and says so (#209).
+#'
+#' Each phase is a stage of the member's own (`warmstart-tune`, `bayes`;
+#' `with_unit_seed()`), with its seed given to the engine and to the search,
+#' so the search does not depend on what the grid stage drew, nor on the
+#' axis it ran on (#151).
 #' 3. Choose the hyperparameters by RMSE among the candidates scored on every
 #'    fold (`select_complete()`).
 #'
@@ -317,8 +311,9 @@ point_matches <- function(point, grid) {
 #' @param recipe The member's untrained recipe, to reproduce a step's failure
 #'   inside tune with its class; `NULL` when it was prepped before tuning.
 #' @param debug Logical. Stop at the first failure rather than fall back.
-#' @param seed Integer. The member's seed, set before the Bayesian search.
-#'   Default 42.
+#' @param seed Integer. The run's seed, from which each phase's is derived.
+#' @param config_id Character. The member's configuration id, which names
+#'   its phases' units.
 #'
 #' @return List with `tune_results` (the result the hyperparameters were
 #'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
@@ -336,16 +331,19 @@ tune_warmstart_bayes <- function(workflow,
                                  allow_par = FALSE,
                                  recipe    = NULL,
                                  debug     = FALSE,
-                                 seed      = 42L) {
+                                 seed,
+                                 config_id) {
 
-  n_folds <- nrow(cv_resamples)
+  n_folds    <- nrow(cv_resamples)
+  tune_stage <- c("fit", config_id, "warmstart-tune")
+  bayes_seed <- unit_seed(seed, c("fit", config_id, "bayes"))
 
   ## --- Phase 1: the starting grid --------------------------------------------
 
-  grid_results <- unit_step("warm_start_grid", {
+  grid_results <- unit_step("warm_start_grid", with_unit_seed(seed, tune_stage, {
 
     results <- suppressMessages(tune::tune_grid(
-      workflow,
+      seed_engine(workflow, unit_seed(seed, tune_stage)),
       resamples = cv_resamples,
       grid      = initial_grid,
       metrics   = metric_set,
@@ -369,7 +367,7 @@ tune_warmstart_bayes <- function(workflow,
 
     results
 
-  })
+  }))
 
   ## --- Phase 2: Bayesian optimization (if requested) -----------------------
 
@@ -378,26 +376,20 @@ tune_warmstart_bayes <- function(workflow,
 
   if (bayesian_iter > 0) {
 
-    ## Re-pinned before the stochastic stage, as evaluate_single_config()
-    ## re-pins before its search: tune's future path advances the parent
-    ## stream past where the sequential loop leaves it, so a search seeded
-    ## only by what came before could differ between allow_par = TRUE and
-    ## FALSE (#151).
-    set.seed(seed, kind = "Mersenne-Twister")
-
-    search <- unit_step("warm_start_bayes", bayes_search(
-      workflow      = workflow,
+    search <- unit_step("warm_start_bayes", with_unit_seed(seed, c("fit", config_id, "bayes"), bayes_search(
+      workflow      = seed_engine(workflow, bayes_seed),
       resamples     = cv_resamples,
       initial       = grid_results,
       iter          = bayesian_iter,
       param_info    = param_set,
       metrics       = metric_set,
+      seed          = bayes_seed,
       allow_par     = allow_par,
       parallel_over = "resamples",
       debug         = debug,
       search        = "the warm-start Bayesian search",
       grid          = "its starting grid"
-    ))
+    )))
 
     tune_results <- search$results
     n_dropped    <- search$n_dropped
@@ -455,11 +447,13 @@ tune_warmstart_bayes <- function(workflow,
 #' interrupt is recorded as it arrives and raised again once tune has
 #' returned: the search the user stopped is not kept as a result.
 #'
-#' The caller re-pins the seed first where it needs one, and grids a space
-#' small enough to try whole instead of searching it ([exhaustive_grid()]).
+#' The caller runs it inside its stage's unit ([with_unit_seed()]) and passes
+#' that unit's seed, and grids a space small enough to try whole instead of
+#' searching it ([exhaustive_grid()]).
 #'
 #' @param workflow,resamples,initial,iter,param_info,metrics Passed to
 #'   [tune::tune_bayes()].
+#' @param seed Integer. The stage's seed, for [tune::control_bayes()].
 #' @param allow_par,parallel_over Passed to [tune::control_bayes()].
 #' @param debug Logical(1). Stop at the first failure rather than fall back.
 #' @param search,grid Character(1). How the messages name the search and the
@@ -475,6 +469,7 @@ bayes_search <- function(workflow,
                          iter,
                          param_info,
                          metrics,
+                         seed,
                          allow_par     = FALSE,
                          parallel_over = "resamples",
                          debug         = FALSE,
@@ -521,6 +516,7 @@ bayes_search <- function(workflow,
             verbose       = FALSE,
             verbose_iter  = TRUE,
             no_improve    = BAYES_NO_IMPROVE_LIMIT,
+            seed          = seed,
             allow_par     = allow_par,
             parallel_over = parallel_over
           )

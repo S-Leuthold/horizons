@@ -10,7 +10,7 @@ fit_ensemble_weighted(
   oof,
   rank_metric,
   optimize = TRUE,
-  seed = DEFAULT_ENSEMBLE_SEED,
+  seed,
   call = rlang::caller_env()
 )
 }
@@ -28,9 +28,9 @@ improvement comparison).}
 \item{optimize}{Logical. Inverse-RMSE weighting (\code{TRUE}) or equal weights
 (\code{FALSE}). Default \code{TRUE}.}
 
-\item{seed}{Integer. Recorded on the contract (the engine itself is
-deterministic); ensemble UQ derives its calibration partition from it.
-Default \code{DEFAULT_ENSEMBLE_SEED} (307).}
+\item{seed}{Integer. The run's seed, recorded on the contract (the engine
+itself is deterministic); ensemble UQ derives its calibration partition
+from it.}
 
 \item{call}{The frame a member's failure to predict the test rows reports
 (\code{ensemble()}'s).}

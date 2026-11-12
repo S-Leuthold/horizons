@@ -10,7 +10,7 @@ fit(
   metric = NULL,
   compute_uq = TRUE,
   compute_ad = TRUE,
-  seed = 307L,
+  seed = NULL,
   control = control_horizons()
 )
 }
@@ -40,11 +40,18 @@ shrinkage covariance + held-out OOD thresholds) per config, so \code{predict()}
 can emit \code{.ad_distance} / \code{.ad_flag}. Shares the UQ calibration split.
 Default TRUE.}
 
-\item{seed}{Integer. Random seed for the CV folds and, through
-\code{calib_split_seed()} (\code{seed + 1L}), for the calibration split. The
-train/test split is \code{evaluate()}'s, so it does not depend on this seed,
-except on a cold start, where \code{fit()} draws that split at this seed as
-\code{evaluate()} would. Default 307L.}
+\item{seed}{\code{NULL} or a whole number: the run's seed. The CV folds, the
+calibration split and each member's stages are seeded from it and their
+own names, so a member's results depend on the seed alone (except
+\code{cubist}, whose neighbour step no seed reaches; see the reproducibility
+note in \code{\link[=configure]{configure()}}). The
+train/test split is \code{evaluate()}'s, except on a cold start, where \code{fit()}
+draws that split as \code{evaluate()} would at this seed. \code{NULL} (the
+default) takes the seed the object records (\code{evaluate()}'s, or a re-fit's
+own), and on a cold start from an object that records none, one integer
+from the session's random stream, which is left where it was and
+printed in the tree. A seed given here overrides the object's and is
+recorded as \code{models$seed}, which \code{\link[=ensemble]{ensemble()}} takes.}
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug}, \code{breaker},

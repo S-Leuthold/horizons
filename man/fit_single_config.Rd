@@ -17,7 +17,7 @@ fit_single_config(
   compute_uq = FALSE,
   compute_ad = FALSE,
   allow_par = FALSE,
-  seed = 42L,
+  seed,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
   outcome_range = DEFAULT_OUTCOME_RANGE,
@@ -62,7 +62,8 @@ same calibration set as UQ.}
 
 \item{allow_par}{Logical. Passed to tune control functions.}
 
-\item{seed}{Integer. Random seed for reproducibility.}
+\item{seed}{Integer. The run's seed, from which each stage's seed is
+derived with the stage's name (\code{with_unit_seed()}).}
 
 \item{sg_window}{Odd integer. Savitzky-Golay window in grid points, passed
 to \code{\link[=build_recipe]{build_recipe()}}. \code{fit()} reads it from \code{configure()}'s

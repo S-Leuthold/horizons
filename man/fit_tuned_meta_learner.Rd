@@ -14,7 +14,7 @@ fit_tuned_meta_learner(
   spec,
   grid,
   extract_weights,
-  seed = DEFAULT_ENSEMBLE_SEED,
+  seed,
   allow_par = FALSE,
   debug = FALSE,
   call = rlang::caller_env()
@@ -41,8 +41,11 @@ fit_tuned_meta_learner(
 
 \item{extract_weights}{A function \verb{(meta_fit, members) -> tibble(member, coef)} that reads the member weighting from the fitted model.}
 
-\item{seed}{Integer. Seed set immediately before the CV folds are drawn, so
-the tuning resamples and the genuine meta-OOF are reproducible.}
+\item{seed}{Integer. The run's seed, recorded on the contract. \code{ensemble()}
+runs the meta-learner in the unit \code{ensemble/meta-folds}
+(\code{with_unit_seed()}), so the tuning resamples and the genuine meta-OOF
+are reproducible, and an engine that takes a seed (xgboost) is given
+that unit's (\code{seed_engine()}).}
 
 \item{allow_par}{Logical. From \code{ensemble()}'s control; both tune calls
 build their control through \code{meta_tune_control()} with it, so the
