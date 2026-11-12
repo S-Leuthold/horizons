@@ -249,7 +249,9 @@ fit <- function(x,
 
   start_time <- Sys.time()
 
-  ## The caller's random state is left as found, as evaluate() leaves it
+  ## The caller's random state is left as found, as evaluate() leaves it,
+  ## and a session that has never drawn is given its stream first
+  ensure_rng_stream()
   local_rng_state()
 
   ## How the run goes: the fields fit() reads, defaults filled in, and the

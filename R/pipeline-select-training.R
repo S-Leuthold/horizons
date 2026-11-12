@@ -382,7 +382,9 @@ select_training <- function(x, library,
   ## the verb hands work to
   call <- rlang::current_env()
 
-  ## The caller's random state is left as found, as evaluate() leaves it
+  ## The caller's random state is left as found, as evaluate() leaves it,
+  ## and a session that has never drawn is given its stream first
+  ensure_rng_stream()
   local_rng_state()
 
   ## How the run goes: the fields select_training() reads, defaults filled

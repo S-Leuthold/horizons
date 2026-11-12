@@ -15,9 +15,12 @@
 
 
 ## The caller's stream and all three kinds as found after `run()`, from a
-## stream under kinds no unit uses; and an absent stream left absent.
-## `run()` is called once for each.
-expect_rng_left_alone <- function(run) {
+## stream under kinds no unit uses. Then a session with no stream: a verb
+## that resolves a seed (`resolves_seed`) gives it one before it saves the
+## caller's state, as R's own random functions would, so two unseeded calls
+## in it take the same seed, read from what `run()` returns; anything else
+## leaves an absent stream absent.
+expect_rng_left_alone <- function(run, resolves_seed = FALSE) {
 
   ## The session's stream and kinds as they were, after the test: restoring a
   ## stream that was absent leaves the kinds as set, so they are put back too
@@ -37,9 +40,18 @@ expect_rng_left_alone <- function(run) {
 
   rm(".Random.seed", envir = globalenv())
 
-  run()
+  first <- run()
 
-  expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+  if (!resolves_seed) {
+
+    expect_false(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+    return(invisible())
+
+  }
+
+  expect_true(exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+  expect_type(recorded_seed(first), "integer")
+  expect_identical(recorded_seed(run()), recorded_seed(first))
 
 }
 
@@ -96,12 +108,14 @@ describe("the verbs leave the caller's random state as they found it", {
 
   })
 
+  ## Unseeded, so evaluate() and select_training() draw their seed from the
+  ## session; fit() and ensemble() take the one their object records
   it("evaluate()", {
 
     obj <- make_eval_object(n = 40, n_configs = 1)
 
-    expect_rng_left_alone(function() {
-      suppressWarnings(evaluate(obj, prune = FALSE, seed = 307L, control = quietly))
+    expect_rng_left_alone(resolves_seed = TRUE, function() {
+      suppressWarnings(evaluate(obj, prune = FALSE, control = quietly))
     })
 
   })
@@ -111,9 +125,9 @@ describe("the verbs leave the caller's random state as they found it", {
     obj <- make_fit_object(n = 60, n_configs = 1)
     obj$config$tuning$final_bayesian_iter <- 0L
 
-    expect_rng_left_alone(function() {
+    expect_rng_left_alone(resolves_seed = TRUE, function() {
       suppressWarnings(fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE,
-                           seed = 42L, control = quietly))
+                           control = quietly))
     })
 
   })
@@ -122,7 +136,7 @@ describe("the verbs leave the caller's random state as they found it", {
 
     fitted <- rng_fitted()
 
-    expect_rng_left_alone(function() {
+    expect_rng_left_alone(resolves_seed = TRUE, function() {
       suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE,
                                 compute_uq = TRUE, control = quietly))
     })
@@ -133,7 +147,7 @@ describe("the verbs leave the caller's random state as they found it", {
 
     fx <- select_fixture(n_pool = 100)
 
-    expect_rng_left_alone(function() {
+    expect_rng_left_alone(resolves_seed = TRUE, function() {
       suppressWarnings(select_training(fx$targets, fx$pool, k = 10, scope = "cluster",
                                        cluster_min = 2, control = quietly))
     })

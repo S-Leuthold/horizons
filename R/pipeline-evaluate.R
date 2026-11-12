@@ -276,7 +276,10 @@ evaluate <- function(x,
 
   ## The caller's random state is left as found: every draw that shapes a
   ## result is a unit of its own (with_unit_seed()), and what only moves the
-  ## stream (a recipe step's id, an engine's discarded seed) is undone on exit
+  ## stream (a recipe step's id, an engine's discarded seed) is undone on exit.
+  ## A session that has never drawn is given its stream first, so the stream
+  ## the root is drawn from is the one left, and an unseeded call repeats.
+  ensure_rng_stream()
   local_rng_state()
 
   ## How the run goes: the fields evaluate() reads, defaults filled in, and

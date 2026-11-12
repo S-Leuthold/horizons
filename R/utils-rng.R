@@ -49,6 +49,30 @@ local_rng_state <- function(frame = parent.frame()) {
 }
 
 
+#' Give a session that has never drawn its random stream
+#'
+#' @description
+#' R creates `.Random.seed` on the first random draw, seeded from the clock,
+#' and this does the same when it is absent, as [stats::simulate()] does
+#' before it saves the caller's state. A verb that resolves a root
+#' ([resolve_seed()]) calls it before its own [local_rng_state()], so the
+#' stream it draws the root from is the one it leaves: the next unseeded call
+#' with nothing drawn between them takes the same root, in a fresh session
+#' too. A stream that exists is left as it is.
+#'
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+
+ensure_rng_stream <- function() {
+
+  if (!exists(".Random.seed", envir = globalenv(), inherits = FALSE)) stats::runif(1L)
+
+  invisible(NULL)
+
+}
+
+
 #' A unit's seed, from the run's seed and the unit's name
 #'
 #' @description
@@ -118,8 +142,10 @@ with_unit_seed <- function(seed, name, code) {
 #' 1L)`, under the caller's kinds, after which the stream is restored. So the
 #' same `set.seed()` gives the same run however many verbs follow, and the
 #' user's own draws are not moved; calls with nothing drawn between them get
-#' the same root, and only a session that has never drawn gets a fresh one
-#' each time. There is no fixed fallback.
+#' the same root. A session that has never drawn has no stream to restore, so
+#' each verb that resolves a root gives it one first ([ensure_rng_stream()]),
+#' before it saves the caller's state; called alone, this restores an absent
+#' stream as absent. There is no fixed fallback.
 #'
 #' @param seed The verb's `seed`: `NULL` or a whole number, checked at the
 #'   door.

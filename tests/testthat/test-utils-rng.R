@@ -76,6 +76,37 @@ describe("local_rng_state()", {
 
 })
 
+describe("ensure_rng_stream()", {
+
+  it("gives a session that has never drawn a stream, under the session's kinds", {
+
+    withr::with_preserve_seed({
+
+      kinds <- RNGkind()
+      if (has_stream()) rm(".Random.seed", envir = globalenv())
+
+      ensure_rng_stream()
+
+      expect_true(has_stream())
+      expect_identical(RNGkind(), kinds)
+
+    })
+
+  })
+
+  it("leaves a stream that exists as it is", {
+
+    withr::local_seed(8)
+    before <- .Random.seed
+
+    ensure_rng_stream()
+
+    expect_identical(.Random.seed, before)
+
+  })
+
+})
+
 describe("unit_seed()", {
 
   it("is a pure function of the root and the name", {
@@ -231,14 +262,22 @@ describe("resolve_seed()", {
 
   })
 
-  it("leaves a session that has never drawn without a stream", {
+  it("takes one root twice in a session that had never drawn, once it is given a stream, as a verb's door gives it", {
 
     withr::with_preserve_seed({
 
       if (has_stream()) rm(".Random.seed", envir = globalenv())
 
+      ## Alone, an absent stream is restored as absent, so each call would
+      ## draw from a stream of its own
       expect_true(resolve_seed(NULL, list())$drawn)
       expect_false(has_stream())
+
+      ensure_rng_stream()
+      root <- resolve_seed(NULL, list())
+
+      expect_true(root$drawn)
+      expect_identical(resolve_seed(NULL, list()), root)
 
     })
 
