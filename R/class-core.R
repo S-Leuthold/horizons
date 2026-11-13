@@ -175,7 +175,7 @@ new_horizons_data <- function(analysis = NULL,
                       n_train          = NULL,  ## integer: training rows after any trim
                       n_test           = NULL,  ## integer
                       response_trim    = NULL,  ## list: the training-partition response trim and its fences, or NULL when none was requested (#77)
-                      workers          = NULL,  ## integer or NA: worker count of the plan
+                      workers          = NULL,  ## integer: the daemons connected when the run began, 1 when sequential
                       parallelize_over = NULL,  ## character: axis actually parallelized
                       recipe           = NULL,  ## list: sg_window, sg_window_cm, pca_threshold the configs ran with
                       seed             = NULL,  ## integer: the run's root seed, which every draw is seeded from with its name; fit() takes it unless given one
@@ -1977,8 +1977,8 @@ validate_horizons_ensemble <- function(x, call = rlang::caller_env()) {
 #'    run-provenance keys `parallelize_over` and `workers` are tolerated when
 #'    absent ([fit()]'s cold start writes neither, since no [evaluate()] ran)
 #'    and validated when present: `parallelize_over` one of `"sequential"`,
-#'    `"configs"`, `"resamples"`; `workers` a single positive whole number or
-#'    NA. `recipe` (the recipe settings the configs ran with, #62) must be a
+#'    `"configs"`, `"resamples"`; `workers` a single positive whole number.
+#'    `recipe` (the recipe settings the configs ran with, #62) must be a
 #'    list whose `sg_window` is a single whole number and whose
 #'    `pca_threshold` is a single number. `screened` (#45) must be `TRUE` or
 #'    `FALSE`. `response_trim` (the training-partition response trim, #77)
@@ -2099,19 +2099,17 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
   }
 
-  ## `workers` is the count the registered plan offered (observed): a single
-  ## positive whole number, or NA when the backend reported an unbounded
-  ## count.
+  ## `workers` is the daemons connected when the run began (observed), 1
+  ## when it ran sequentially: a single positive whole number.
 
   if ("workers" %in% names(ev)) {
 
     w <- ev$workers
 
-    if (!is.numeric(w) || length(w) != 1 ||
-        (!is.na(w) && (w < 1 || w != as.integer(w)))) {
+    if (!is.numeric(w) || length(w) != 1 || is.na(w) || w < 1 || w != as.integer(w)) {
 
       errors <- c(errors, cli::format_inline(
-        "{.field workers} must be a single positive whole number (or NA for an unbounded backend)"
+        "{.field workers} must be a single positive whole number"
       ))
 
     }

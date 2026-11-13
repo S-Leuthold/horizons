@@ -5,8 +5,10 @@
 \title{Errors and warnings horizons raises}
 \description{
 Every error horizons raises carries the base class \code{horizons_error},
-exactly one kind, and sometimes one more specific class in front of the
-kind. Every warning carries the base class \code{horizons_warning} and one
+exactly one kind, and sometimes a more specific class in front of the
+kind, or a chain of them where one refines another
+(\code{horizons_error_no_daemons} is also \code{horizons_error_systemic}). Every
+warning carries the base class \code{horizons_warning} and one
 topic. A handler can catch all of horizons' errors, one kind of them, or
 one specific refusal, and filter warnings by what happened.
 }
@@ -27,8 +29,8 @@ holds every one, a character vector with one plain-text message per
 check.}
 \item{\code{horizons_error_dependency}}{A needed package is missing, or the
 environment cannot run the call (a parallel run under
-\code{devtools::load_all()}, whose workers load the installed build, or one
-whose workers load another version of horizons).}
+\code{devtools::load_all()}, whose mirai daemons load the installed build,
+or one whose daemons load another version of horizons).}
 \item{\code{horizons_error_run}}{The work was attempted and failed: every
 configuration or member failed, a download failed, or the run stopped
 on a failure that would hit every unit the same way.}
@@ -72,20 +74,22 @@ cannot predict the test rows), \code{error_message} and \code{trace}.}
 early, because the first configurations or members to run failed the
 same way across at least two models (the circuit breaker,
 \code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
-\code{\link[=ensemble]{ensemble()}} stopped because a parallel worker died or lacks a
-package the run needs, or no mirai daemon was left to run its work
+\code{\link[=ensemble]{ensemble()}} stopped because a mirai daemon died or lacks a package
+the run needs, or no mirai daemon was left to run its work
 (\code{horizons_error_no_daemons}, below), or \code{\link[=evaluate]{evaluate()}} could not write to its
-\code{output_dir} (on the configs axis a checkpoint a worker could not
+\code{output_dir} (on the configs axis a checkpoint a daemon could not
 write is a \code{skipped} warning instead, since every configuration has
 run by then). The rows finished so far travel
 as \code{results}; \code{NULL} from \code{ensemble()}, which has none before its
 meta-learner is built.}
 \item{\code{horizons_error_no_daemons}}{(run, and \code{horizons_error_systemic})
 A parallel \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or \code{\link[=ensemble]{ensemble()}} had work left and no
-mirai daemon connected to run it: the daemons exited under
-\code{maxtasks}, \code{idletime} or \code{walltime}, which mirai does not restart
-them from, or were stopped. The rows finished so far travel as
-\code{results} (\code{NULL} from \code{ensemble()}).}
+mirai daemon connected to run it, or fewer than two as a unit tune
+runs on the daemons started (tune would run it sequentially): the
+daemons exited under \code{maxtasks}, \code{idletime} or \code{walltime}, which mirai
+does not restart them from, or were stopped. The rows finished so far
+travel as \code{results}, a table with no rows when none had finished
+(\code{NULL} from \code{ensemble()}).}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
 warnings under \code{options(warn = 2)}. Instead of turning the first warning
 into an error that loses the result, the verb aborts with the finished

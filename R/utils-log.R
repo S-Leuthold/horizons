@@ -527,7 +527,7 @@ abort_missing_mid_run <- function(cnd, unit, id) {
   abort_horizons(c(
     "A package needed by {where} {.val {id}} is not installed where it ran.",
     "x" = "{cause}",
-    "i" = "Install it in every library the session and its parallel workers load."
+    "i" = "Install it in every library the session and its mirai daemons load."
   ), kind = "dependency", class = "horizons_error_missing_package", parent = cnd,
   call = NULL)
 

@@ -105,8 +105,10 @@
 #' way across at least two models, `fit()` stops with
 #' `horizons_error_systemic` and the members so far as `results`
 #' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
-#' member), and it stops the same way when a daemon dies or is found lacking
-#' a package the members need. With
+#' member), and it stops the same way when a daemon dies (see
+#' "Parallelism"). A daemon lacking a package the members need is refused
+#' before the run (`horizons_error_missing_package`); one found lacking it
+#' later fails the members it runs with tune's error. With
 #' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
 #' first failure, inside tuning included, stops the call with its backtrace.
 #' Before a parallel run `fit()` refuses a session loaded with

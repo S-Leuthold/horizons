@@ -132,8 +132,12 @@
 #'
 #' Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 #' one in the calling process (via `RhpcBLASctl` when installed) and restored
-#' on exit; daemons keep the thread settings the session had when
-#' `mirai::daemons()` was called. On either axis the daemons load the
+#' on exit. Daemons are processes of their own: they start with the
+#' environment variables the session had when `mirai::daemons()` was called
+#' (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`), not its in-process settings,
+#' so a thread count set in the session with `options()` or `RhpcBLASctl`
+#' does not reach them; on the configs axis each configuration's task sets
+#' data.table's and ranger's threads to one itself. On either axis the daemons load the
 #' *installed* package, so a parallel run refuses, before anything is drawn,
 #' under `devtools::load_all()`. Every daemon connected is then asked, one
 #' task each, which horizons it loads and whether it can load the packages
@@ -218,8 +222,9 @@
 #' run every configuration; the configs axis has no breaker), and their
 #' failures are not checkpointed. A daemon that lacks a package the
 #' configurations need, which this session has, is refused before the run
-#' (see "Parallelism"); one found lacking it mid-run stops the run the same
-#' way.
+#' (`horizons_error_missing_package`, see "Parallelism"); one found lacking
+#' it mid-run stops the run as systemic on the configs axis, and on the
+#' resamples axis fails the configurations it runs with tune's error.
 #' So does a daemon that dies, during a Bayesian iteration too (see
 #' "Parallelism"). When some configurations failed and
 #' the rest are returned, one `horizons_warning_partial_failure` names them
@@ -751,7 +756,7 @@ evaluate <- function(x,
 
       ## A parallel axis has two daemons or more
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
-                 " (", plan_workers, " workers)\n"))
+                 " (", plan_workers, " daemons)\n"))
 
     } else if (allow_par && debug) {
 
@@ -3292,7 +3297,7 @@ check_parallel_workers <- function(verb, needed, collector, results = NULL, call
 
     abort_horizons(c(
       "Parallel {.fn {verb}} cannot run under {.fn devtools::load_all}.",
-      "i" = "Workers load the installed {.pkg horizons}, not this source tree, so they would run stale code.",
+      "i" = "Daemons load the installed {.pkg horizons}, not this source tree, so they would run stale code.",
       "i" = "Install the package first ({.code R CMD INSTALL}), or call {.fn {verb}} without parallelism."
     ), kind = "dependency", call = call)
 
@@ -3436,8 +3441,8 @@ abort_daemon_packages <- function(lacking, n_checked, needed, verb, call = rlang
 abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 
   abort_horizons(c(
-    "A parallel worker loads horizons {worker}, but this session runs {parent}.",
-    "i" = "Reinstall the package so workers run matching code."
+    "A mirai daemon loads horizons {worker}, but this session runs {parent}.",
+    "i" = "Reinstall the package so the daemons run matching code."
   ), kind = "dependency", call = call)
 
 }
@@ -3543,8 +3548,9 @@ evaluate_config_worker <- function(config_i, shared) {
     ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
     ## so setting OPENBLAS_NUM_THREADS here, after the library is loaded in
     ## this worker, changed nothing when measured (2026-09-15). What can be
-    ## set at runtime in the worker is set here. A daemon keeps the thread
-    ## settings the session had when daemons() was called.
+    ## set at runtime in the worker is set here. A daemon starts with the
+    ## session's environment variables from when daemons() was called, not
+    ## its in-process settings.
     if (requireNamespace("data.table", quietly = TRUE)) {
       data.table::setDTthreads(1L)
     }

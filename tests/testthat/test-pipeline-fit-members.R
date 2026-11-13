@@ -772,7 +772,7 @@ describe("fit() - each member is one unit", {
 
     expect_error(run(running_under_load_all = function() FALSE,
                      daemon_reports          = function(...) daemons_on("0.0.1")),
-                 "A parallel worker loads horizons 0.0.1", fixed = TRUE,
+                 "A mirai daemon loads horizons 0.0.1", fixed = TRUE,
                  class = "horizons_error_dependency")
 
   })

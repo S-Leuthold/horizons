@@ -328,8 +328,9 @@ SCORING_SCHEMA <- 6L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records
-# the axis and its backend (`plan`: "sequential" or "mirai", with the workers'
-# count), the training-data fingerprint and its fields,
+# the axis and its backend (`plan`: "sequential" or "mirai", and `workers`,
+# the daemons connected as the run began), the training-data fingerprint and
+# its fields,
 # and the tuning settings. Bump it when a field the monitor reads changes; the
 # monitor refuses a manifest of any other schema.
 EVAL_MANIFEST_SCHEMA <- 4L

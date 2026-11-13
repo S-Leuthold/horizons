@@ -254,7 +254,7 @@ describe("evaluate() parallel worker footprint", {
     err <- expect_error(horizons:::evaluate_config_worker(1L, shared),
                         "but this session runs 0.0.0.", fixed = TRUE,
                         class = "horizons_error_dependency")
-    expect_match(conditionMessage(err), "Reinstall the package so workers run matching code.",
+    expect_match(conditionMessage(err), "Reinstall the package so the daemons run matching code.",
                  fixed = TRUE)
 
   })
@@ -325,7 +325,7 @@ describe("evaluate() parallel worker footprint", {
     expect_error(
       evaluate(make_eval_object(n_configs = 1),
                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples")),
-      paste0("A parallel worker loads horizons 0.0.1, but this session runs ",
+      paste0("A mirai daemon loads horizons 0.0.1, but this session runs ",
              utils::packageVersion("horizons"), "."),
       fixed = TRUE, class = "horizons_error_dependency"
     )
@@ -591,7 +591,7 @@ describe("evaluate() - the parallel axis's setup", {
     two        <- run(TRUE, 2L)
     sequential <- run(FALSE, 2L)
 
-    expect_identical(two$line, "│  Parallel: over resamples on mirai (2 workers)")
+    expect_identical(two$line, "│  Parallel: over resamples on mirai (2 daemons)")
     expect_identical(sequential$line, character())
 
     ## allow_par = FALSE never reads the daemons
@@ -744,7 +744,7 @@ describe("evaluate() - output_dir and the configs axis (#233)", {
     ))
 
     expect_identical(grep("Parallel:", out, value = TRUE, fixed = TRUE),
-                     "│  Parallel: over resamples on mirai (2 workers)")
+                     "│  Parallel: over resamples on mirai (2 daemons)")
 
   })
 
@@ -1331,8 +1331,11 @@ describe("monitor_evaluate()", {
     run    <- seq_checkpoints()
     tmpdir <- run$dir
 
-    ## The sequential run's manifest, made to describe a configs-axis run on
-    ## ten workers with one config still to finish.
+    ## The sequential run's manifest says it ran on no daemons
+    expect_true(any(grepl("Parallel:  none (sequential)", capture.output(monitor_evaluate(tmpdir)), fixed = TRUE)))
+
+    ## Then made to describe a configs-axis run on ten daemons with one
+    ## config still to finish.
     path     <- file.path(tmpdir, "eval_manifest.rds")
     manifest <- readRDS(path)
     manifest$axis    <- "configs"
@@ -1348,7 +1351,7 @@ describe("monitor_evaluate()", {
     expect_equal(result$n_complete, 3)
     expect_equal(result$n_total, 4)
     expect_false(is.na(result$best_config))
-    expect_true(any(grepl("over configs on mirai (10 workers)", output, fixed = TRUE)))
+    expect_true(any(grepl("over configs on mirai (10 daemons)", output, fixed = TRUE)))
 
     ## Two runs sharing one output_dir are otherwise indistinguishable here.
     expect_true(any(grepl(paste0(manifest$data_n_rows, " training rows of SOC"),

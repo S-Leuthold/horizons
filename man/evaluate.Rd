@@ -181,8 +181,12 @@ with(mirai::daemons(4), evaluate(hd, control = control_horizons(allow_par = TRUE
 
 Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 one in the calling process (via \code{RhpcBLASctl} when installed) and restored
-on exit; daemons keep the thread settings the session had when
-\code{mirai::daemons()} was called. On either axis the daemons load the
+on exit. Daemons are processes of their own: they start with the
+environment variables the session had when \code{mirai::daemons()} was called
+(\code{OMP_NUM_THREADS}, \code{OPENBLAS_NUM_THREADS}), not its in-process settings,
+so a thread count set in the session with \code{options()} or \code{RhpcBLASctl}
+does not reach them; on the configs axis each configuration's task sets
+data.table's and ranger's threads to one itself. On either axis the daemons load the
 \emph{installed} package, so a parallel run refuses, before anything is drawn,
 under \code{devtools::load_all()}. Every daemon connected is then asked, one
 task each, which horizons it loads and whether it can load the packages
@@ -271,8 +275,9 @@ as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{
 run every configuration; the configs axis has no breaker), and their
 failures are not checkpointed. A daemon that lacks a package the
 configurations need, which this session has, is refused before the run
-(see "Parallelism"); one found lacking it mid-run stops the run the same
-way.
+(\code{horizons_error_missing_package}, see "Parallelism"); one found lacking
+it mid-run stops the run as systemic on the configs axis, and on the
+resamples axis fails the configurations it runs with tune's error.
 So does a daemon that dies, during a Bayesian iteration too (see
 "Parallelism"). When some configurations failed and
 the rest are returned, one \code{horizons_warning_partial_failure} names them
