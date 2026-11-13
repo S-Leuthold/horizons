@@ -166,6 +166,25 @@ connected_daemons <- function() {
 
 }
 
+#' Whether the daemons have mirai's dispatcher
+#'
+#' @description
+#' With `mirai::daemons(dispatcher = FALSE)` tasks go to the daemons in turn
+#' as they are sent, and `mirai::info()` reports only the connections, its
+#' other counts `NA`: the configs axis then cannot start the longest
+#' configurations first or cancel those still running.
+#'
+#' @return Logical(1): `FALSE` when no daemons are set.
+#' @keywords internal
+#' @noRd
+daemons_dispatch <- function() {
+
+  counts <- mirai::info(.compute = NULL)
+
+  !is.null(counts) && !is.na(counts[["cumulative"]])
+
+}
+
 #' Check that a parallel run has daemons to run on
 #'
 #' @description
@@ -369,6 +388,16 @@ task_value <- function(value, transport) {
 #' raised, so a stop carries every row that came in with it. A pool left
 #' with no daemon stops the run here too ([abort_no_daemons()]).
 #'
+#' When the window exits by an error, an interrupt or a stop of its own, it
+#' cancels every task still in flight (`mirai::stop_mirai()`), so no
+#' configuration goes on to write a checkpoint after `evaluate()` has
+#' returned. It is an `on.exit()`, not a calling handler, so it runs on all
+#' three. A configuration inside a compiled fit stops only when that fit
+#' returns, and writes nothing, since the cancellation interrupts its next R
+#' step. Cancelling needs mirai's dispatcher: without it `stop_mirai()` does
+#' nothing and the task runs to its end, which `evaluate()` warns of
+#' ([daemons_dispatch()]).
+#'
 #' Each task sends the worker function and its arguments, not a closure: the
 #' function's environment is horizons' namespace, which a daemon resolves to
 #' its installed horizons, so nothing in this frame or the caller's travels.
@@ -401,6 +430,10 @@ dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
   no_daemons <- function() {
     abort_no_daemons(rows_so_far(), n_configs - n_done, output_dir, call = call)
   }
+
+  ## On an error, an interrupt or a stop from the window itself; on its
+  ## return nothing is in flight
+  on.exit(for (task in tasks) mirai::stop_mirai(task), add = TRUE)
 
   repeat {
 

@@ -833,8 +833,9 @@ describe("evaluate() - configs axis", {
 ## =========================================================================
 ## The configs axis's dispatch on mirai
 ## =========================================================================
-## What each task carries, the stop when no daemon is left, a daemon's death
-## and what crosses back from a task. The real-daemon tests run plsr, whose
+## What each task carries, the stop when no daemon is left, a daemon's death,
+## the cancellation on an interrupt, daemons without the dispatcher and what
+## crosses back from a task. The real-daemon tests run plsr, whose
 ## cells of the cost table tie, so they start in grid order, all but the
 ## test of the start order, which puts rf among them.
 
@@ -1021,6 +1022,98 @@ describe("evaluate() - the configs axis on mirai", {
     expect_match(msg, "in this error's results field", fixed = TRUE)
     expect_null(err$parent)
     expect_identical(err$results$config_id, c("cfg_001", "cfg_002"))
+
+  })
+
+  it("cancels the configurations in flight when it is interrupted, so none writes a checkpoint after it returns (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    store <- file.path(dir, "checkpoints")
+
+    ## On the daemons every configuration but the first waits three seconds
+    ## before it runs, in R code a cancellation interrupts
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("evaluate_single_config", envir = ns)
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        if (config_row$config_id != "cfg_001") Sys.sleep(3)
+        real(config_row, ...)
+      }, ns = "horizons")
+    })[], 30)
+
+    ## The interrupt arrives as the window's first wait ends, with the first
+    ## configuration done and the second running. The check at the door is
+    ## mocked, so its own wait is not the first.
+    fired      <- FALSE
+    real_round <- await_round
+    local_mocked_bindings(
+      daemon_reports = matching_daemons,
+      await_round    = function(tasks, no_daemons) {
+        real_round(tasks, no_daemons)
+        if (!fired) {
+          fired <<- TRUE
+          rlang::interrupt()
+        }
+      }
+    )
+
+    got <- tryCatch(
+      with_deadline(suppressWarnings(evaluate(plsr_object(4), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 60),
+      interrupt = function(i) "interrupted"
+    )
+
+    expect_identical(got, "interrupted")
+
+    just_after <- list.files(store)
+    expect_identical(just_after, "cfg_001.rds")
+
+    ## Longer than the second configuration's wait and fit
+    Sys.sleep(6)
+    expect_identical(list.files(store), just_after)
+
+    ## Its daemon is free again
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_identical(mirai::info()[["executing"]], 0L)
+
+  })
+
+  it("says once, on the log, that daemons without the dispatcher lose the order and the cancellation, and runs as asked (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    row_cols <- c("config_id", "rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
+                  "cv_rmse", "cv_rrmse", "cv_rsq", "cv_ccc", "cv_rpd", "cv_mae")
+
+    obj <- plsr_object(3)
+    seq_result <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(verbose = FALSE)))
+
+    local_test_daemons(2, dispatcher = FALSE)
+
+    got <- collect_warnings(with_deadline(
+      evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                           output_dir = withr::local_tempdir(), verbose = FALSE)),
+      120
+    ), class = "horizons_warning_input")
+
+    expect_length(got$warnings, 1L)
+    expect_match(gsub("\\s+", " ", conditionMessage(got$warnings[[1]])),
+                 "set with `dispatcher = FALSE`, so `evaluate()` cannot start the longest configurations first",
+                 fixed = TRUE)
+
+    rows <- got$value$log[got$value$log$topic %in% "input", ]
+    expect_identical(nrow(rows), 1L)
+
+    expect_identical(got$value$evaluation$parallelize_over, "configs")
+    expect_identical(got$value$evaluation$results[row_cols], seq_result$evaluation$results[row_cols])
 
   })
 
