@@ -1380,6 +1380,34 @@ describe("evaluate_single_config() - a run on parallel_over = 'everything' whose
 })
 
 
+describe("evaluate_single_config() - warnings its caller caught outside the unit", {
+
+  it("renders them with the row's own, deduplicated and capped as one list (#96)", {
+
+    ## The configuration fails at once, so the row's warnings are the
+    ## caller's alone: seven distinct, one of them twice
+    setup <- make_eval_setup()
+    local_mocked_bindings(build_recipe = function(...) stop("no recipe"))
+
+    outside <- c(rep("A package warned while it loaded.", 2),
+                 paste("Another package warned:", c("alpha", "beta", "gamma", "delta", "epsilon", "zeta")))
+
+    row <- evaluate_single_config(config_row = make_eval_config(), split = setup$split,
+                                  cv_folds = setup$folds, role_map = setup$role_map,
+                                  seed = 42L, outside_warnings = outside)
+
+    expect_identical(row$status, "failed")
+    expect_identical(row$warnings[[1]], c(
+      "A package warned while it loaded.",
+      paste("Another package warned:", c("alpha", "beta", "gamma", "delta")),
+      "2 more distinct warnings not shown."
+    ))
+
+  })
+
+})
+
+
 describe("evaluate_single_config() - parallel_over", {
 
   it("refuses anything but 'resamples' or 'everything', naming the argument", {

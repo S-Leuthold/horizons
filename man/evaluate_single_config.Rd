@@ -20,7 +20,8 @@ evaluate_single_config(
   pca_threshold = DEFAULT_PCA_THRESHOLD,
   outcome_range = DEFAULT_OUTCOME_RANGE,
   debug = FALSE,
-  keep_traces = FALSE
+  keep_traces = FALSE,
+  outside_warnings = character(0)
 )
 }
 \arguments{
@@ -87,6 +88,12 @@ failure is not fallen back from. Warnings are still recorded.}
 
 \item{keep_traces}{Logical. Keep a failure's backtrace, as text, in the
 row's \code{trace}.}
+
+\item{outside_warnings}{Character. Warnings the caller caught outside the
+unit before it ran, as \code{condition_summary()} lines: the configs-axis
+worker's, from loading the configuration's packages and rebuilding its
+folds. They are rendered with the row's own, deduplicated and capped as
+one list (#96).}
 }
 \value{
 Single-row tibble with columns: \code{config_id}, \code{status} (\code{"pruned"}

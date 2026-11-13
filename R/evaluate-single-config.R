@@ -64,6 +64,11 @@
 #'   failure is not fallen back from. Warnings are still recorded.
 #' @param keep_traces Logical. Keep a failure's backtrace, as text, in the
 #'   row's `trace`.
+#' @param outside_warnings Character. Warnings the caller caught outside the
+#'   unit before it ran, as `condition_summary()` lines: the configs-axis
+#'   worker's, from loading the configuration's packages and rebuilding its
+#'   folds. They are rendered with the row's own, deduplicated and capped as
+#'   one list (#96).
 #'
 #' @return Single-row tibble with columns: `config_id`, `status` (`"pruned"`
 #'   means Bayesian refinement was skipped), `below_prune_threshold` (logical;
@@ -95,7 +100,8 @@ evaluate_single_config <- function(config_row,
                                    pca_threshold   = DEFAULT_PCA_THRESHOLD,
                                    outcome_range   = DEFAULT_OUTCOME_RANGE,
                                    debug           = FALSE,
-                                   keep_traces     = FALSE) {
+                                   keep_traces     = FALSE,
+                                   outside_warnings = character(0)) {
 
   start_time <- Sys.time()
 
@@ -464,9 +470,11 @@ evaluate_single_config <- function(config_row,
   ## Step 10: The row, succeeded or failed
   ## -------------------------------------------------------------------------
   ## The warnings the unit caught join the notes, so a warning caught as it
-  ## was raised and the same warning in tune's notes are one line.
+  ## was raised and the same warning in tune's notes are one line, and so do
+  ## the caller's from outside the unit.
 
-  warning_log <- dplyr::bind_rows(unit_warning_records(unit$records), warning_log)
+  warning_log <- dplyr::bind_rows(unit_warning_records(unit$records), warning_log,
+                                  text_records(outside_warnings))
 
   row <- if (unit$failed) {
 

@@ -216,8 +216,9 @@ systemic).
 
 mirai relays no warning, message or output from a task. On the configs
 axis what a configuration's unit records reaches the \code{log} as on the
-sequential path, and a warning raised in its task outside the unit is
-kept on the configuration's \code{warnings}. Messages and printed output are
+sequential path, and a warning raised in its task before the unit runs
+(while the configuration's packages load, say) is kept on the
+configuration's \code{warnings}, with the unit's. Messages and printed output are
 not relayed, and a warning raised while a daemon loads horizons itself is
 dropped.
 }

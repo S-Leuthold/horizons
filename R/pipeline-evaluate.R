@@ -167,8 +167,9 @@
 #'
 #' mirai relays no warning, message or output from a task. On the configs
 #' axis what a configuration's unit records reaches the `log` as on the
-#' sequential path, and a warning raised in its task outside the unit is
-#' kept on the configuration's `warnings`. Messages and printed output are
+#' sequential path, and a warning raised in its task before the unit runs
+#' (while the configuration's packages load, say) is kept on the
+#' configuration's `warnings`, with the unit's. Messages and printed output are
 #' not relayed, and a warning raised while a daemon loads horizons itself is
 #' dropped.
 #'
@@ -3482,9 +3483,10 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   is no `debug` either, since a debug run never dispatches.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
-#'   records still on it for the parent to lift, any warning raised outside
-#'   the unit added to its `warnings`, and, when its checkpoint could not be
-#'   written, why, as the attribute `"checkpoint_failed"`.
+#'   records still on it for the parent to lift, any warning raised in the
+#'   worker's own steps before the unit rendered in its `warnings` with the
+#'   unit's, and, when its checkpoint could not be written, why, as the
+#'   attribute `"checkpoint_failed"`.
 #' @keywords internal
 #' @noRd
 
@@ -3527,13 +3529,15 @@ evaluate_config_worker <- function(config_i, shared) {
 
   }
 
-  ## mirai relays no condition from a task, so a warning raised here outside
-  ## the configuration's unit (a package's while it loads, say) is kept on
-  ## the row, as another package's warning inside the unit is, rather than
-  ## lost. The unit records and muffles its own.
+  ## mirai relays no condition from a task, so a warning raised in the
+  ## worker's own steps before the configuration's unit runs (a package's
+  ## while it loads, say) is caught here and rendered with the row's own
+  ## warnings, as another package's warning inside the unit is, rather than
+  ## lost. The unit records and muffles its own; the code around it in
+  ## evaluate_single_config() and the stamps below raise none.
   outside <- character(0)
 
-  result_row <- withCallingHandlers({
+  resamples <- withCallingHandlers({
 
     ## Thread pinning that works happens in the PARENT before dispatch
     ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
@@ -3559,40 +3563,37 @@ evaluate_config_worker <- function(config_i, shared) {
 
     ## Reconstruct the split and folds from indices. Fold membership is
     ## reproduced by construction, not by replaying the RNG.
-    resamples <- rebuild_resamples(shared$data, shared$resample_idx)
-
-    result_row <- evaluate_single_config(
-      config_row      = cfg,
-      split           = resamples$split,
-      cv_folds        = resamples$cv_folds,
-      role_map        = shared$role_map,
-      grid_size       = shared$grid_size,
-      bayesian_iter   = shared$bayesian_iter,
-      prune           = shared$prune,
-      prune_threshold = shared$prune_threshold,
-      allow_par       = FALSE,     # configs axis: tune runs sequentially inside
-      seed            = shared$seed,
-      sg_window       = shared$sg_window,
-      pca_threshold   = shared$pca_threshold,
-      outcome_range   = shared$outcome_range,
-      keep_traces     = shared$keep_traces
-    )
-
-    ## Both provenance records are sent rather than rebuilt. The data
-    ## fingerprint hashes the whole predictor matrix, which is a once-per-run
-    ## cost, not a per-config one; and a setting added to the list in
-    ## evaluate() reaches the worker's rows with no change here.
-    result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
-    result_row <- stamp_eval_settings(result_row, shared$settings)
-
-    result_row
+    rebuild_resamples(shared$data, shared$resample_idx)
 
   }, warning = function(w) {
     outside <<- c(outside, condition_summary(w))
     rlang::cnd_muffle(w)
   })
 
-  if (length(outside) > 0) result_row$warnings <- list(c(result_row$warnings[[1]], outside))
+  result_row <- evaluate_single_config(
+    config_row       = cfg,
+    split            = resamples$split,
+    cv_folds         = resamples$cv_folds,
+    role_map         = shared$role_map,
+    grid_size        = shared$grid_size,
+    bayesian_iter    = shared$bayesian_iter,
+    prune            = shared$prune,
+    prune_threshold  = shared$prune_threshold,
+    allow_par        = FALSE,     # configs axis: tune runs sequentially inside
+    seed             = shared$seed,
+    sg_window        = shared$sg_window,
+    pca_threshold    = shared$pca_threshold,
+    outcome_range    = shared$outcome_range,
+    keep_traces      = shared$keep_traces,
+    outside_warnings = outside
+  )
+
+  ## Both provenance records are sent rather than rebuilt. The data
+  ## fingerprint hashes the whole predictor matrix, which is a once-per-run
+  ## cost, not a per-config one; and a setting added to the list in
+  ## evaluate() reaches the worker's rows with no change here.
+  result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
+  result_row <- stamp_eval_settings(result_row, shared$settings)
 
   ## A checkpoint that cannot be written is said on the row, for the parent
   ## to report once every configuration has run, as the configs axis has

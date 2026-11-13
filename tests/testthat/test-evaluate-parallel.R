@@ -963,31 +963,38 @@ describe("evaluate() - the configs axis on mirai", {
 
   })
 
+  it("hands a warning raised before a configuration's unit to the configuration, to render with its own", {
+
+    ## The worker body muffles the warning and passes it on, so it is
+    ## deduplicated and capped with the unit's warnings rather than appended
+    ## after them
+    real_rebuild <- rebuild_resamples
+    handed       <- NULL
+    local_mocked_bindings(rebuild_resamples = function(...) {
+      warning("A package warned while the folds were rebuilt.")
+      real_rebuild(...)
+    })
+    local_mocked_bindings(
+      evaluate_single_config = function(config_row, ..., outside_warnings) {
+        handed <<- outside_warnings
+        tibble::tibble(config_id = config_row$config_id, status = "success",
+                       warnings = list("The rendered warnings."))
+      }
+    )
+
+    expect_no_warning(row <- evaluate_config_worker(1L, worker_payload()))
+    expect_length(handed, 1L)
+    expect_match(handed, "A package warned while the folds were rebuilt.", fixed = TRUE)
+    expect_identical(row$warnings[[1]], "The rendered warnings.")
+
+  })
+
   it("keeps a warning raised outside a configuration's unit on its row, where mirai would drop it (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
-    ## In this session first: the worker body muffles the warning and keeps
-    ## it on the row
-    real_rebuild <- rebuild_resamples
-    local_mocked_bindings(rebuild_resamples = function(...) {
-      warning("A package warned while the folds were rebuilt.")
-      real_rebuild(...)
-    })
-    local_mocked_bindings(
-      evaluate_single_config = function(config_row, ...) {
-        tibble::tibble(config_id = config_row$config_id, status = "success",
-                       warnings = list("The unit's own warning."))
-      }
-    )
-
-    expect_no_warning(row <- evaluate_config_worker(1L, worker_payload()))
-    expect_identical(row$warnings[[1]][1], "The unit's own warning.")
-    expect_match(row$warnings[[1]][2], "A package warned while the folds were rebuilt.", fixed = TRUE)
-
-    ## Then across a daemon, on a real configuration
     local_test_daemons(2)
 
     with_deadline(mirai::everywhere({
