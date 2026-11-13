@@ -52,13 +52,41 @@ matching_daemons <- function(...) daemons_on()
 
 ## Evaluate `expr` with a deadline, so a wait that never ends fails the test
 ## instead of stalling the run. setTimeLimit() ends both a polling wait and
-## mirai's blocking collect.
+## mirai's blocking collect, with a plain error that fires once. Inside a
+## unit that error is contained as the unit's failure, and the call goes on,
+## so the deadline is also read from the clock: whatever `expr` returned or
+## raised, once the time is up the test fails with a class no expectation
+## matches, and no parent an expectation could match through. A wait after
+## the limit fired has none; the CI job's timeout is the backstop for it.
 with_deadline <- function(expr, seconds = 60) {
 
+  start <- Sys.time()
   setTimeLimit(elapsed = seconds, transient = TRUE)
   on.exit(setTimeLimit(elapsed = Inf), add = TRUE)
 
-  expr
+  passed <- function() {
+    if (difftime(Sys.time(), start, units = "secs") >= seconds) {
+      rlang::abort(sprintf("The test's deadline of %s seconds passed.", seconds),
+                   class = "horizons_test_deadline")
+    }
+  }
+
+  value <- withCallingHandlers(expr, error = function(e) passed())
+  passed()
+
+  value
+
+}
+
+## The default profile's daemons as a run found or left them: how many were
+## set, whether any are, their dispatcher (a new one after any reset, even to
+## the same size) and how many are connected
+daemons_record <- function() {
+
+  list(n          = mirai::nextget("n"),
+       set        = mirai::daemons_set(),
+       dispatcher = mirai::nextget("dispatcher"),
+       connected  = connected_daemons())
 
 }
 

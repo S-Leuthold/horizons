@@ -1014,8 +1014,9 @@ describe("fit() - on two daemons", {
 
     expect_identical(list(n = mirai::nextget("n"), dispatcher = mirai::nextget("dispatcher"),
                           connected = connected_daemons()), before)
-    ## The work ran on the daemons
-    expect_gt(mirai::info()[["completed"]], 1L)
+    ## The work ran on the daemons: more tasks completed on these fresh
+    ## daemons than the one each that the check at the door spends
+    expect_gt(mirai::info()[["completed"]], 2L)
 
     cols <- c("config_id", "status", "rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
               "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")

@@ -387,8 +387,10 @@ describe("the parallel backend", {
       expect_identical(eval_rows(ev), eval_rows(base$ev), info = label)
       expect_identical(.Random.seed, before, info = label)
 
-      ## The work ran on the daemons, not in this process
-      expect_gt(mirai::info()[["completed"]], 0L, label = paste("the tasks completed with", label))
+      ## The work ran on the daemons, not in this process: more tasks
+      ## completed on these fresh daemons than the one each that the check
+      ## at the door spends
+      expect_gt(mirai::info()[["completed"]], setting$n, label = paste("the tasks completed with", label))
 
     }
 

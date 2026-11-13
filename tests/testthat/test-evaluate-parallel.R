@@ -466,18 +466,8 @@ describe("evaluate() - workers is gone", {
 
 })
 
-## The default profile's daemons as a run found or left them: how many were
-## set, whether any are, their dispatcher (a new one after any reset) and how
-## many are connected. The shared runs below keep it, so a run that set,
-## resized or reset the daemons shows.
-daemons_record <- function() {
-
-  list(n          = mirai::nextget("n"),
-       set        = mirai::daemons_set(),
-       dispatcher = mirai::nextget("dispatcher"),
-       connected  = connected_daemons())
-
-}
+## The shared runs below keep daemons_record() (helper-parallel.R) from
+## before and after, so a run that set, resized or reset the daemons shows.
 
 ## One allow_par = TRUE run with no daemons set, read by the two tests below
 ## (helper-memo.R), recording the daemons as the run found and left them.
@@ -667,8 +657,10 @@ describe("evaluate() - a checkpoint a configs-axis worker could not write", {
         row$config_id <- config_row$config_id
         row
       },
+      ## The rows come in last configuration first, as the window's
+      ## would whenever later configurations finish first
       dispatch_configs        = function(shared, finished, ...) {
-        for (i in seq_len(nrow(shared$configs))) {
+        for (i in rev(seq_len(nrow(shared$configs)))) {
           finished$rows <- c(finished$rows, list(evaluate_config_worker(i, shared)))
         }
       }
@@ -685,9 +677,10 @@ describe("evaluate() - a checkpoint a configs-axis worker could not write", {
                                           output_dir = tmpdir))
     )
 
-    ## Every configuration's row is returned, and none carries the reason
+    ## Every configuration's row is returned, in configuration order, and
+    ## none carries the reason
     res <- got$value$evaluation$results
-    expect_setequal(res$config_id, c("cfg_001", "cfg_002", "cfg_003"))
+    expect_identical(res$config_id, c("cfg_001", "cfg_002", "cfg_003"))
     expect_identical(res$status, rep("success", 3L))
     expect_null(attr(res, "checkpoint_failed"))
 
@@ -883,6 +876,34 @@ describe("evaluate() - the configs axis on mirai", {
     expect_true(isNamespace(environment(sent$args$worker)))
     expect_setequal(names(sent$args$shared), SHARED_ARG_NAMES)
     expect_null(sent$compute)
+
+  })
+
+  it("keeps at most one configuration in flight per connected daemon (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## Each wait is handed the tasks in flight: four configurations on two
+    ## daemons never put more than two there, so this session holds at most
+    ## two payloads
+    local_test_daemons(2)
+    real_await <- await_round
+    in_flight  <- integer(0)
+    local_mocked_bindings(await_round = function(tasks, no_daemons) {
+      in_flight <<- c(in_flight, length(tasks))
+      real_await(tasks, no_daemons)
+    })
+
+    ev <- with_deadline(suppressWarnings(evaluate(plsr_object(4), seed = 42L,
+                                                  control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                             output_dir = withr::local_tempdir(),
+                                                                             verbose = FALSE))), 120)
+
+    expect_identical(nrow(ev$evaluation$results), 4L)
+    expect_gt(length(in_flight), 0L)
+    expect_lte(max(in_flight), 2L)
 
   })
 

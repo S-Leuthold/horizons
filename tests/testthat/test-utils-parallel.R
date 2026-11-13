@@ -143,12 +143,13 @@ describe("check_parallel_backend()", {
 
     skip_on_cran()
     local_test_daemons(2)
-    before <- list(n = mirai::nextget("n"), set = mirai::daemons_set(), connected = connected_daemons())
+
+    ## The dispatcher is a new one after any reset, even to the same size
+    before <- daemons_record()
 
     check_parallel_backend("evaluate", log_open("evaluate"))
 
-    expect_identical(list(n = mirai::nextget("n"), set = mirai::daemons_set(), connected = connected_daemons()),
-                     before)
+    expect_identical(daemons_record(), before)
 
   })
 
@@ -163,6 +164,23 @@ describe("check_parallel_backend()", {
 
 ## A daemon's death as mirai returns it
 died_value <- function() structure(19L, class = "errorValue")
+
+describe("await_round()", {
+
+  it("stops when no daemon is connected while a task waits, rather than waiting for ever", {
+
+    skip_on_cran()
+
+    task <- local_unresolved_task()
+
+    expect_error(
+      with_deadline(await_round(list(task), function() rlang::abort("No daemon is left.", class = "test_no_daemons")), 10),
+      class = "test_no_daemons"
+    )
+
+  })
+
+})
 
 describe("dispatch_configs()", {
 

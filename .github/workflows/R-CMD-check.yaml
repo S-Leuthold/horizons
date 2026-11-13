@@ -51,6 +51,9 @@ permissions: read-all
 jobs:
   R-CMD-check:
     runs-on: ubuntu-latest
+    # A hang the tests' deadlines miss stops here, not at GitHub's six hours;
+    # the job takes about a quarter of this.
+    timeout-minutes: 60
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
