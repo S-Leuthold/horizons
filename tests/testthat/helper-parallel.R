@@ -28,6 +28,19 @@ local_test_daemons <- function(n = 2L, ..., .env = parent.frame()) {
 
 }
 
+## A task no daemon will ever take, for the stops a wait makes when no daemon
+## is left, without starting one: daemons set on a URL that no daemon dials,
+## so the dispatcher holds the task and none is connected. The daemons are
+## reset when the calling frame exits.
+local_unresolved_task <- function(.env = parent.frame()) {
+
+  mirai::daemons(url = mirai::local_url())
+  withr::defer(mirai::daemons(0), envir = .env)
+
+  mirai::mirai(NULL)
+
+}
+
 ## What daemon_reports() returns from daemons that load horizons `version`
 ## and lack nothing, one report per process id: the mock of the door's check
 ## for tests that do not start daemons.

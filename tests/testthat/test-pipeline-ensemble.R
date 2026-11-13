@@ -648,7 +648,7 @@ describe("ensemble() - the meta-learner as one unit", {
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "A parallel worker stopped while `ensemble()` was running", fixed = TRUE)
+    expect_match(msg, "A mirai daemon stopped while `ensemble()` was running", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected", fixed = TRUE)
     ## The meta-learner's unit contained the error as its failure, so the
     ## death has no error to chain to

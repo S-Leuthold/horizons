@@ -97,7 +97,8 @@
 #'   warning with class `horizons_warning_substitution`, if fewer than two
 #'   are connected. A daemon that dies during the meta-learner, or exits
 #'   under `maxtasks`, `idletime` or `walltime`, stops the call with
-#'   `horizons_error_systemic`, and with none connected as it starts, with
+#'   `horizons_error_systemic`, and with fewer than two connected as it
+#'   starts (tune would run it sequentially), with
 #'   `horizons_error_no_daemons`. A pool whose daemons all exit during one of
 #'   tune's calls waits inside tune, and `ensemble()` checks no daemon's
 #'   packages, so a daemon that cannot load one the meta-learner needs fails

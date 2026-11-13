@@ -196,8 +196,9 @@
 #' fewer daemons connected after it than before, stops the call with
 #' `horizons_error_systemic` and the members so far; so does one exiting
 #' under `maxtasks`, `idletime` or `walltime`, which the count cannot tell
-#' apart, and with none connected as a member starts the call stops with
-#' `horizons_error_no_daemons`. A pool whose daemons all exit during one of
+#' apart, and with fewer than two connected as a member starts (tune would
+#' fit it sequentially) the call stops with `horizons_error_no_daemons`. A
+#' pool whose daemons all exit during one of
 #' tune's calls waits inside tune, and a daemon whose library loses a package
 #' after the check before the run fails the member with tune's "Argument 1
 #' must be a data frame or a named atomic vector". `fit()` parallelises folds
@@ -480,7 +481,8 @@ fit <- function(x,
   ## session's horizons and load the members' packages: checked before
   ## anything is drawn
   if (allow_par) {
-    check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection), collector)
+    check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection), collector,
+                           results = member_results(list()))
   }
 
   ## configure() stores the screening and the final re-tune budgets

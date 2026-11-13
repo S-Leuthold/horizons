@@ -250,8 +250,9 @@ row of the object's \code{log}. A daemon that dies during a member, read as
 fewer daemons connected after it than before, stops the call with
 \code{horizons_error_systemic} and the members so far; so does one exiting
 under \code{maxtasks}, \code{idletime} or \code{walltime}, which the count cannot tell
-apart, and with none connected as a member starts the call stops with
-\code{horizons_error_no_daemons}. A pool whose daemons all exit during one of
+apart, and with fewer than two connected as a member starts (tune would
+fit it sequentially) the call stops with \code{horizons_error_no_daemons}. A
+pool whose daemons all exit during one of
 tune's calls waits inside tune, and a daemon whose library loses a package
 after the check before the run fails the member with tune's "Argument 1
 must be a data frame or a named atomic vector". \code{fit()} parallelises folds

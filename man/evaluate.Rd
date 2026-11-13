@@ -201,11 +201,12 @@ configuration than before it, since tune reads a death as a failure of
 its own. That count cannot tell a death from a daemon exiting under
 \code{maxtasks}, \code{idletime} or \code{walltime}, so on the resamples axis such an exit
 stops the run too; on the configs axis it narrows the dispatch. When work
-remains and no daemon is connected, the run stops with
-\code{horizons_error_no_daemons} (also \code{horizons_error_systemic}), the rows so
-far as its \code{results}: mirai does not start again a daemon that exits
-under those settings, so set daemons without them for a long run, or
-launch more with \code{mirai::launch_local()}. Two waits are tune's, not
+remains and no daemon is connected, or on the resamples axis fewer than
+two as a configuration starts (tune would run it sequentially), the run
+stops with \code{horizons_error_no_daemons} (also \code{horizons_error_systemic}),
+the rows so far as its \code{results}: mirai does not start again a daemon
+that exits under those settings, so set daemons without them for a long
+run, or launch more with \code{mirai::launch_local()}. Two waits are tune's, not
 \code{evaluate()}'s: a pool whose daemons all exit during one of tune's calls
 on the resamples axis waits inside tune, and a daemon whose library loses
 a package after the check fails the configurations it runs there with

@@ -3177,20 +3177,22 @@ describe("evaluate() - a worker's death", {
     err <- expect_error(run(), class = "horizons_error_systemic")
 
     msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "A parallel worker stopped while `evaluate()` was running", fixed = TRUE)
+    expect_match(msg, "A mirai daemon stopped while `evaluate()` was running", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
     expect_match(msg, "in this error's results field", fixed = TRUE)
     expect_identical(err$results$config_id, "cfg_001")
     ## No unit error to chain to: the configuration's row came back
     expect_null(err$parent)
-    expect_length(gregexpr("A parallel worker stopped while", msg, fixed = TRUE)[[1]], 1L)
+    expect_length(gregexpr("A mirai daemon stopped while", msg, fixed = TRUE)[[1]], 1L)
 
     ## With an output_dir, the finished configurations are on disk to resume
     ## from, and the configuration the fall spoiled is not
     dir <- withr::local_tempdir()
     err <- expect_error(run(dir), class = "horizons_error_systemic")
-    expect_match(gsub("\\s+", " ", conditionMessage(err)), "calling `evaluate()` again with it resumes from them",
-                 fixed = TRUE)
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "calling `evaluate()` again with it resumes from them", fixed = TRUE)
+    ## and the results field too, which holds a row whose checkpoint failed
+    expect_match(msg, "in this error's results field", fixed = TRUE)
     expect_identical(list.files(file.path(dir, "checkpoints")), "cfg_001.rds")
 
   })
@@ -3226,38 +3228,53 @@ describe("evaluate() - a worker's death", {
 
   })
 
-  it("stops with the rows so far when no daemon is connected as a configuration starts", {
+  it("stops with the rows so far when fewer than two daemons are connected as a configuration starts", {
 
     template <- ev60()$evaluation$results[1, ]
-    emptied  <- FALSE
     real_feed <- breaker_feed
 
-    local_mocked_bindings(
-      check_parallel_backend = function(...) TRUE,
-      check_parallel_workers = function(...) invisible(NULL),
-      connected_daemons      = function() if (emptied) 0L else 2L,
-      evaluate_single_config = function(config_row, ...) mock_eval_row(template, config_row$config_id, "success"),
-      ## The first configuration's row is in, and its daemons read, by the time
-      ## the breaker sees it: every daemon is gone before the second starts
-      breaker_feed           = function(...) {
-        emptied <<- TRUE
-        real_feed(...)
-      }
-    )
+    ## Every daemon but `left` is gone before the second configuration starts
+    run <- function(left) {
 
-    err <- expect_error(
-      suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
-                                control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
-      class = "horizons_error_no_daemons"
-    )
+      emptied <- FALSE
 
-    expect_s3_class(err, "horizons_error_systemic")
-    expect_identical(err$results$config_id, "cfg_001")
-    msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "No mirai daemon is connected, so `evaluate()` stopped", fixed = TRUE)
-    expect_match(msg, "`maxtasks` tasks, or past `idletime` or `walltime`", fixed = TRUE)
-    ## Not wrapped as a death
-    expect_null(err$parent)
+      testthat::with_mocked_bindings(
+        suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                  control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))),
+        check_parallel_backend = function(...) TRUE,
+        check_parallel_workers = function(...) invisible(NULL),
+        connected_daemons      = function() if (emptied) left else 2L,
+        evaluate_single_config = function(config_row, ...) mock_eval_row(template, config_row$config_id, "success"),
+        ## The first configuration's row is in, and its daemons read, by the
+        ## time the breaker sees it
+        breaker_feed           = function(...) {
+          emptied <<- TRUE
+          real_feed(...)
+        },
+        .package = "horizons"
+      )
+
+    }
+
+    for (left in 0:1) {
+
+      err <- expect_error(run(left), class = "horizons_error_no_daemons")
+
+      expect_s3_class(err, "horizons_error_systemic")
+      expect_identical(err$results$config_id, "cfg_001")
+      msg <- gsub("\\s+", " ", conditionMessage(err))
+      expect_match(msg, "`maxtasks` tasks, or past `idletime` or `walltime`", fixed = TRUE)
+      expect_match(msg, "`evaluate()` spends one task on each daemon checking it before the run", fixed = TRUE)
+      ## Not wrapped as a death
+      expect_null(err$parent)
+
+    }
+
+    expect_match(gsub("\\s+", " ", conditionMessage(expect_error(run(0L)))),
+                 "No mirai daemon is connected, so `evaluate()` stopped", fixed = TRUE)
+    ## With one, tune would run the configuration sequentially, silently (#37)
+    expect_match(gsub("\\s+", " ", conditionMessage(expect_error(run(1L)))),
+                 "Only one mirai daemon is connected, and `evaluate()` needs two to run its work in parallel", fixed = TRUE)
 
   })
 
@@ -3296,7 +3313,7 @@ describe("evaluate() - a worker's death", {
     expect_true(file.exists(killed))
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
-    expect_length(gregexpr("A parallel worker stopped while", msg, fixed = TRUE)[[1]], 1L)
+    expect_length(gregexpr("A mirai daemon stopped while", msg, fixed = TRUE)[[1]], 1L)
     expect_identical(nrow(err$results), 0L)
 
   })
@@ -3350,7 +3367,7 @@ describe("evaluate() - a worker's death", {
 
     expect_true(file.exists(killed))
     msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "A parallel worker stopped", fixed = TRUE)
+    expect_match(msg, "A mirai daemon stopped", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
     ## The configuration's row, the search cut short, was never kept
     expect_identical(nrow(err$results), 0L)
@@ -3365,6 +3382,29 @@ describe("evaluate() - a worker's death", {
 
     expect_identical(class(err), class(boom))
     expect_null(err$parent)
+
+  })
+
+  it("lets a systemic stop through untouched, since whoever raises one gives it the rows so far", {
+
+    ## The window's death and no-daemons stops on the configs axis, and any
+    ## other: none is read as a death, or wrapped a second time
+    for (class in list("horizons_error_systemic", c("horizons_error_no_daemons", "horizons_error_systemic"))) {
+
+      raised <- NULL
+      err    <- expect_error(stop_on_worker_death(
+        withCallingHandlers(
+          abort_horizons("Stopped with its rows.", kind = "run", class = class, results = "its rows"),
+          error = function(e) raised <<- e
+        ),
+        "the wrapper's rows", NULL
+      ), class = class[1])
+
+      expect_identical(err, raised)
+      expect_identical(err$results, "its rows")
+      expect_null(err$parent)
+
+    }
 
   })
 
@@ -3406,7 +3446,7 @@ describe("evaluate() - a package missing where a configuration ran", {
     expect_match(msg, "A package `evaluate()` needs is not installed where its work ran", fixed = TRUE)
     expect_match(msg, "horizonsFakePkgXYZ123", fixed = TRUE)
     ## A sequential run: the hint covers it as well as a parallel one
-    expect_match(msg, "If the run was parallel, a worker's library lacks this one: install it there.", fixed = TRUE)
+    expect_match(msg, "If the run was parallel, a daemon's library lacks this one: install it there.", fixed = TRUE)
     expect_match(msg, "If not, `evaluate()` does not check for it, which is a bug in horizons", fixed = TRUE)
     expect_length(gregexpr("is not installed where its work ran", msg, fixed = TRUE)[[1]], 1L)
 

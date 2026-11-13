@@ -58,7 +58,8 @@ never sets, resizes or resets the daemons, and runs sequentially,
 warning with class \code{horizons_warning_substitution}, if fewer than two
 are connected. A daemon that dies during the meta-learner, or exits
 under \code{maxtasks}, \code{idletime} or \code{walltime}, stops the call with
-\code{horizons_error_systemic}, and with none connected as it starts, with
+\code{horizons_error_systemic}, and with fewer than two connected as it
+starts (tune would run it sequentially), with
 \code{horizons_error_no_daemons}. A pool whose daemons all exit during one of
 tune's calls waits inside tune, and \code{ensemble()} checks no daemon's
 packages, so a daemon that cannot load one the meta-learner needs fails

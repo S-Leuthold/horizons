@@ -155,6 +155,89 @@ describe("check_parallel_backend()", {
 })
 
 ## =========================================================================
+## The configs axis's window and the stops on the daemons
+## =========================================================================
+## mirai() is mocked to hand each configuration's value back at once, as a
+## resolved task: a list whose `data` is the value, which mirai::unresolved()
+## reads as resolved.
+
+## A daemon's death as mirai returns it
+died_value <- function() structure(19L, class = "errorValue")
+
+describe("dispatch_configs()", {
+
+  it("collects every task that finished in a pass before it stops, so the stop carries their rows", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"))
+    row     <- function(id) tibble::tibble(config_id = id, status = "success")
+
+    ## The first configuration's daemon died, and the second's row came in
+    ## in the same pass
+    values <- list(died_value(), row("cfg_002"), row("cfg_003"))
+
+    local_mocked_bindings(connected_daemons = function() 2L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = values[[.args$config_i]])
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+
+    err <- expect_error(
+      dispatch_configs(list(configs = configs), finished, function() dplyr::bind_rows(finished$rows)),
+      class = "horizons_error_systemic"
+    )
+
+    expect_identical(err$results$config_id, "cfg_002")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The mirai daemon running configuration \"cfg_001\" stopped while it ran (`errorValue` 19, Connection reset)",
+                 fixed = TRUE)
+    expect_null(err$parent)
+
+  })
+
+})
+
+describe("daemon_reports()", {
+
+  it("stops as systemic when a daemon dies during the check, with the verb's empty table, as the window does", {
+
+    local_mocked_bindings(everywhere = function(...) structure(list(list(data = died_value())), class = "mirai_map"),
+                          .package = "mirai")
+
+    empty <- tibble::tibble(config_id = character(0))
+    err   <- expect_error(daemon_reports("rules", "fit", empty), class = "horizons_error_systemic")
+
+    expect_false(inherits(err, "horizons_error_dependency"))
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "A mirai daemon stopped while `fit()` checked the daemons before the run (`errorValue` 19, Connection reset)",
+                 fixed = TRUE)
+    expect_identical(err$results, empty)
+
+  })
+
+})
+
+describe("resume_hint()", {
+
+  it("names the checkpoints when there is an output_dir, and the results field whenever it holds rows", {
+
+    some <- tibble::tibble(config_id = "cfg_001")
+    none <- some[0, ]
+
+    expect_named(resume_hint(some, "out"), c("i", "i"))
+    expect_match(resume_hint(some, "out")[1], "checkpointed in", fixed = TRUE)
+    expect_match(resume_hint(some, "out")[2], "results", fixed = TRUE)
+    expect_named(resume_hint(none, "out"), "i")
+    expect_match(resume_hint(some, NULL), "results", fixed = TRUE)
+    expect_null(resume_hint(none, NULL))
+    expect_null(resume_hint(NULL, NULL))
+
+  })
+
+})
+
+## =========================================================================
 ## Thread pinning
 ## =========================================================================
 

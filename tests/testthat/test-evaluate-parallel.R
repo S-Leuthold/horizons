@@ -419,6 +419,34 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("stops with a results table of every column and no rows when no daemon is left during the check at the door", {
+
+    skip_on_cran()
+
+    ## The check's task is one no daemon takes, and none is connected
+    task <- local_unresolved_task()
+    local_mocked_bindings(everywhere = function(...) structure(list(task), class = "mirai_map"),
+                          .package = "mirai")
+    local_mocked_bindings(
+      running_under_load_all = function() FALSE,
+      check_parallel_backend = function(...) TRUE,
+      draw_eval_split        = function(...) stop("the split was drawn")
+    )
+
+    err <- expect_error(
+      with_deadline(evaluate(make_eval_object(n_configs = 1), seed = 42L,
+                             control = control_horizons(allow_par = TRUE, parallelize_over = "resamples")), 30),
+      class = "horizons_error_no_daemons"
+    )
+
+    one <- create_failed_result("cfg_001", "failed")
+
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(names(err$results), names(one))
+    expect_identical(vapply(err$results, typeof, character(1)), vapply(one, typeof, character(1)))
+
+  })
+
 })
 
 
@@ -639,8 +667,8 @@ describe("evaluate() - a checkpoint a configs-axis worker could not write", {
         row$config_id <- config_row$config_id
         row
       },
-      dispatch_configs        = function(configs, shared, finished, no_daemons) {
-        for (i in seq_len(nrow(configs))) {
+      dispatch_configs        = function(shared, finished, ...) {
+        for (i in seq_len(nrow(shared$configs))) {
           finished$rows <- c(finished$rows, list(evaluate_config_worker(i, shared)))
         }
       }
@@ -923,14 +951,15 @@ describe("evaluate() - the configs axis on mirai", {
       class = "horizons_error_systemic"
     )
 
-    ## Wrapped once: the window's reading of the daemon's death is the parent
-    expect_match(conditionMessage(err), "A parallel worker stopped while `evaluate()` was running", fixed = TRUE)
-    expect_s3_class(err$parent, "horizons_error_systemic")
-    expect_match(gsub("\\s+", " ", conditionMessage(err$parent)),
-                 "The daemon running configuration \"cfg_003\" stopped while it ran (`errorValue` 19, Connection reset).",
+    ## Raised once, by the window, naming the transport's error value
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, paste("The mirai daemon running configuration \"cfg_003\" stopped while it ran",
+                            "(`errorValue` 19, Connection reset), so `evaluate()` cannot go on."),
                  fixed = TRUE)
-    expect_null(err$parent$parent)
-    expect_setequal(err$results$config_id, c("cfg_001", "cfg_002"))
+    expect_match(msg, "resumes from them", fixed = TRUE)
+    expect_match(msg, "in this error's results field", fixed = TRUE)
+    expect_null(err$parent)
+    expect_identical(err$results$config_id, c("cfg_001", "cfg_002"))
 
   })
 

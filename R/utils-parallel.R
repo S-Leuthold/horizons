@@ -189,9 +189,11 @@ await_round <- function(tasks, no_daemons) {
 #'
 #' @description
 #' Raised by a wait with work remaining and no daemon connected
-#' ([await_round()]), and before a unit of work on the daemons
-#' (`stop_on_worker_death()`). The likely cause is a daemon's own limit, which
-#' mirai does not restart it from; horizons starts no daemons of its own.
+#' ([await_round()]), and before a unit of work tune runs on the daemons
+#' with fewer than two connected (`stop_on_worker_death()`), the gate
+#' [check_parallel_backend()] applies before the run. The likely cause is a
+#' daemon's own limit, which mirai does not restart it from; horizons starts
+#' no daemons of its own.
 #'
 #' @param results The rows finished so far, carried as `results`, or `NULL`
 #'   when the verb has none to carry.
@@ -199,22 +201,28 @@ await_round <- function(tasks, no_daemons) {
 #'   the caller knows them.
 #' @param output_dir The run's `output_dir`, or `NULL`.
 #' @param verb Character(1). The verb that stops.
+#' @param connected Integer(1). The daemons connected: 0, or 1 before a unit
+#'   that needs two.
 #' @param call The frame the error reports.
 #' @return Does not return; aborts with class `horizons_error_no_daemons`
 #'   (then `horizons_error_systemic`, kind `run`).
 #' @keywords internal
 #' @noRd
 abort_no_daemons <- function(results, n_left = NULL, output_dir = NULL, verb = "evaluate",
-                             call = rlang::caller_env()) {
+                             connected = 0L, call = rlang::caller_env()) {
 
   abort_horizons(c(
-    if (is.null(n_left)) {
+    if (connected > 0L) {
+      "Only one mirai daemon is connected, and {.fn {verb}} needs two to run its work in parallel, so it stopped before its work was done."
+    } else if (is.null(n_left)) {
       "No mirai daemon is connected, so {.fn {verb}} stopped before its work was done."
     } else {
       "No mirai daemon is connected, so {.fn {verb}} stopped with {n_left} configuration{?s} still to run."
     },
     "i" = "A daemon exits after {.arg maxtasks} tasks, or past {.arg idletime} or {.arg walltime}, and mirai does not start it again. Set daemons without those limits, or launch more with {.code mirai::launch_local()}.",
-    "i" = resume_hint(results, output_dir)
+    ### The verbs that check every daemon at the door spend a task on each
+    "i" = if (verb %in% c("evaluate", "fit")) "{.fn {verb}} spends one task on each daemon checking it before the run.",
+    resume_hint(results, output_dir)
   ), kind = "run", class = c("horizons_error_no_daemons", "horizons_error_systemic"),
   results = results, call = call)
 
@@ -224,17 +232,23 @@ abort_no_daemons <- function(results, n_left = NULL, output_dir = NULL, verb = "
 #'
 #' @param results The rows finished so far, or `NULL` when the verb has none.
 #' @param output_dir The run's `output_dir`, or `NULL`.
-#' @return Character(1) or `NULL`: a cli line, interpolated where the
-#'   caller's `output_dir` and `verb` are.
+#' @return A named character vector of cli lines (`"i"`), empty when there is
+#'   nothing to point to, interpolated where the caller's `output_dir` and
+#'   `verb` are: the checkpoints when the run has an `output_dir`, and the
+#'   `results` field whenever it holds rows, since a row whose checkpoint
+#'   could not be written is there and not on disk.
 #' @keywords internal
 #' @noRd
 resume_hint <- function(results, output_dir) {
 
-  if (!is.null(output_dir)) {
-    "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them."
-  } else if (!is.null(results)) {
-    "The rows finished so far are in this error's {.field results} field."
-  }
+  c(
+    if (!is.null(output_dir)) {
+      c("i" = "The configurations finished are checkpointed in {.path {output_dir}}; calling {.fn {verb}} again with it resumes from them.")
+    },
+    if (!is.null(results) && nrow(results) > 0) {
+      c("i" = "The rows finished so far are in this error's {.field results} field.")
+    }
+  )
 
 }
 
@@ -261,6 +275,31 @@ mirai_condition <- function(err) {
 
 }
 
+#' A task's value, or the condition it ended in, raised
+#'
+#' @description
+#' mirai returns what ends a task as its value: a `miraiError` for the
+#' task's own error, raised again as the condition it was
+#' ([mirai_condition()]), and any other error value for a failure of the
+#' task's transport, its daemon's death (`errorValue` 19) among them, which
+#' `transport` raises. A `miraiError` is an error value too, so it is read
+#' first.
+#'
+#' @param value A task's value (`task$data`, once resolved).
+#' @param transport A function of the error value that stops the call.
+#' @return `value`, when it is neither.
+#' @keywords internal
+#' @noRd
+task_value <- function(value, transport) {
+
+  if (mirai::is_mirai_error(value)) stop(mirai_condition(value))
+
+  if (mirai::is_error_value(value)) transport(value)
+
+  value
+
+}
+
 ## ---------------------------------------------------------------------------
 ## The configs axis's dispatch
 ## ---------------------------------------------------------------------------
@@ -276,29 +315,35 @@ mirai_condition <- function(err) {
 #' wait goes through [await_round()], so a window left with no daemon stops
 #' the run rather than waiting for ever.
 #'
-#' What a task returns is read here. A row is appended to `finished$rows`.
-#' A `miraiError` is the task's own error, raised again as the condition it
-#' was ([mirai_condition()]). Any other error value is the transport, and is
-#' raised as `horizons_error_systemic`: `errorValue` 19 is the daemon's
-#' death. A stop's rows so far are `finished$rows`, which the caller
-#' carries.
+#' What a task returns is read here ([task_value()]). A row is appended to
+#' `finished$rows`. A `miraiError` is the task's own error, raised again as
+#' the condition it was. Any other error value is the transport, and the
+#' window stops the run itself, as `horizons_error_systemic` with the rows
+#' so far: `errorValue` 19 is the daemon's death. Every task that finished
+#' in a pass is collected before the first that ended in an error is
+#' raised, so a stop carries every row that came in with it. A pool left
+#' with no daemon stops the run here too ([abort_no_daemons()]).
 #'
 #' Each task sends the worker function and its arguments, not a closure: the
 #' function's environment is horizons' namespace, which a daemon resolves to
 #' its installed horizons, so nothing in this frame or the caller's travels.
 #'
-#' @param configs The configurations still to run (`shared$configs`).
-#' @param shared The payload every task carries ([evaluate_config_worker()]).
+#' @param shared The payload every task carries ([evaluate_config_worker()]);
+#'   `shared$configs` are the configurations still to run.
 #' @param finished An environment whose `rows` the window appends each row
 #'   to, in the order they finish.
-#' @param no_daemons A function of `n_left`, the configurations not
-#'   finished, that stops the run.
+#' @param rows_so_far A function of no arguments returning the results table
+#'   a stop carries: the rows resumed and those in `finished$rows`.
+#' @param output_dir The run's `output_dir`, for a stop's message.
+#' @param call The frame a stop reports: the verb's.
 #' @return `NULL`, invisibly, once every configuration's row is in
 #'   `finished$rows`.
 #' @keywords internal
 #' @noRd
-dispatch_configs <- function(configs, shared, finished, no_daemons) {
+dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
+                             call = rlang::caller_env()) {
 
+  configs   <- shared$configs
   n_configs <- nrow(configs)
   start     <- seq_len(n_configs)
 
@@ -308,9 +353,15 @@ dispatch_configs <- function(configs, shared, finished, no_daemons) {
   next_i    <- 1L
   n_done    <- 0L
 
+  no_daemons <- function() {
+    abort_no_daemons(rows_so_far(), n_configs - n_done, output_dir, call = call)
+  }
+
   repeat {
 
-    ## Collect what has finished
+    ## Collect what has finished, the whole pass before any stop
+    ended <- NULL
+
     for (key in names(tasks)) {
 
       if (mirai::unresolved(tasks[[key]])) next
@@ -318,15 +369,21 @@ dispatch_configs <- function(configs, shared, finished, no_daemons) {
       value        <- tasks[[key]]$data
       tasks[[key]] <- NULL
 
-      if (mirai::is_mirai_error(value)) stop(mirai_condition(value))
-
+      ### A miraiError is an error value too
       if (mirai::is_error_value(value)) {
-        abort_task_ended(value, configs$config_id[as.integer(key)])
+        if (is.null(ended)) ended <- list(value = value, config_id = configs$config_id[as.integer(key)])
+        next
       }
 
       finished$rows <- c(finished$rows, list(value))
       n_done        <- n_done + 1L
 
+    }
+
+    if (!is.null(ended)) {
+      task_value(ended$value, function(value) {
+        abort_task_ended(value, ended$config_id, rows_so_far(), output_dir, call = call)
+      })
     }
 
     if (n_done == n_configs) return(invisible(NULL))
@@ -347,36 +404,52 @@ dispatch_configs <- function(configs, shared, finished, no_daemons) {
 
     }
 
-    if (length(tasks) == 0L) no_daemons(n_configs - n_done)
+    if (length(tasks) == 0L) no_daemons()
 
-    await_round(tasks, function() no_daemons(n_configs - n_done))
+    await_round(tasks, no_daemons)
 
   }
 
 }
 
-#' Stop the call because a configuration's task ended without a result
+#' Stop the call because a task on the daemons ended without a result
 #'
-#' @param value The task's error value: `errorValue` 19 when its daemon
-#'   died, another for another transport failure.
-#' @param config_id Character(1). The configuration it was running.
+#' @description
+#' A task's transport failed: its daemon died (`errorValue` 19), or another
+#' error value came back in place of its result. Raised where the task is
+#' read, by the window ([dispatch_configs()]) and by the check of the
+#' daemons at the door ([daemon_reports()]), with the rows so far, as every
+#' other stop on the daemons is. Its message names the error value.
+#'
+#' @param value The task's error value.
+#' @param config_id Character(1), the configuration the task ran, or `NULL`
+#'   for the check at the door.
+#' @param results The rows finished so far, carried as `results`.
+#' @param output_dir The run's `output_dir`, or `NULL`.
+#' @param verb Character(1). The verb that stops.
 #' @param call The frame the error reports.
 #' @return Does not return; aborts with class `horizons_error_systemic`
-#'   (kind `run`), which `stop_on_worker_death()` wraps with the rows so far.
+#'   (kind `run`).
 #' @keywords internal
 #' @noRd
-abort_task_ended <- function(value, config_id, call = rlang::caller_env()) {
+abort_task_ended <- function(value, config_id, results, output_dir = NULL, verb = "evaluate",
+                             call = rlang::caller_env()) {
 
   code <- as.integer(value)
+  died <- identical(code, 19L)
 
-  abort_horizons(
-    if (identical(code, 19L)) {
-      "The daemon running configuration {.val {config_id}} stopped while it ran ({.code errorValue} 19, Connection reset)."
+  abort_horizons(c(
+    if (is.null(config_id) && died) {
+      "A mirai daemon stopped while {.fn {verb}} checked the daemons before the run ({.code errorValue} 19, Connection reset), so the run cannot go on."
+    } else if (is.null(config_id)) {
+      "A task checking the daemons before the run ended in mirai's {.code errorValue} {code} rather than a result, so {.fn {verb}} cannot go on."
+    } else if (died) {
+      "The mirai daemon running configuration {.val {config_id}} stopped while it ran ({.code errorValue} 19, Connection reset), so {.fn {verb}} cannot go on."
     } else {
-      "Configuration {.val {config_id}}'s task ended in mirai's {.code errorValue} {code} rather than a result."
+      "Configuration {.val {config_id}}'s task ended in mirai's {.code errorValue} {code} rather than a result, so {.fn {verb}} cannot go on."
     },
-    kind = "run", class = "horizons_error_systemic", call = call
-  )
+    resume_hint(results, output_dir)
+  ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 
 }
 

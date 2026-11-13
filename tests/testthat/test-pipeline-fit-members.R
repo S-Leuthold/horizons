@@ -573,7 +573,7 @@ describe("fit() - each member is one unit", {
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "A parallel worker stopped while `fit()` was running", fixed = TRUE)
+    expect_match(msg, "A mirai daemon stopped while `fit()` was running", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
     expect_identical(err$results$config_id, "cfg_001")
     expect_null(err$parent)
@@ -650,7 +650,7 @@ describe("fit() - each member is one unit", {
     )
 
     msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "A parallel worker stopped while `fit()` was running", fixed = TRUE)
+    expect_match(msg, "A mirai daemon stopped while `fit()` was running", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected", fixed = TRUE)
     expect_identical(err$results$config_id, "cfg_001")
 
@@ -711,6 +711,36 @@ describe("fit() - each member is one unit", {
 
     ## Chained to the member's error
     expect_match(conditionMessage(err$parent), "Argument 1 must be a data frame", fixed = TRUE)
+
+    one <- member_results(list(fitted_member(list(config_id = "cfg_001"))))
+
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(names(err$results), names(one))
+    expect_identical(vapply(err$results, typeof, character(1)), vapply(one, typeof, character(1)))
+
+  })
+
+  it("carries a members table with every column and no rows when no daemon is left during the check at the door", {
+
+    skip_on_cran()
+
+    ## The check's task is one no daemon takes, and none is connected
+    obj  <- fit_obj(1L)
+    task <- local_unresolved_task()
+    local_mocked_bindings(everywhere = function(...) structure(list(task), class = "mirai_map"),
+                          .package = "mirai")
+
+    err <- expect_error(
+      testthat::with_mocked_bindings(
+        with_deadline(suppressWarnings(fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                                           control = control_horizons(allow_par = TRUE))), 30),
+        running_under_load_all = function() FALSE,
+        check_parallel_backend = function(...) TRUE,
+        draw_stratified        = function(...) stop("a draw was made"),
+        .package = "horizons"
+      ),
+      class = "horizons_error_no_daemons"
+    )
 
     one <- member_results(list(fitted_member(list(config_id = "cfg_001"))))
 
