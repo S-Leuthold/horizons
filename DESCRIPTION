@@ -51,7 +51,7 @@ Imports:
     tibble,
     tidyr,
     tools,
-    tune,
+    tune (>= 2.0.0),
     utils,
     workflows,
     xgboost,

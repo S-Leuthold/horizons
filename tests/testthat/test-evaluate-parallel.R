@@ -1212,6 +1212,36 @@ describe("evaluate() - cross-mode checkpoint resume", {
 
   })
 
+  it("records the daemons it began with when the check at the door spends a maxtasks pool", {
+
+    ## Two daemons set with maxtasks = 1, each of which exits once the check
+    ## has spent its task; every configuration resumed, so nothing is sent
+    ## after it. The daemons are mocked, so this runs under load_all() too.
+    run   <- seq_checkpoints()
+    spent <- FALSE
+
+    local_mocked_bindings(
+      running_under_load_all = function() FALSE,
+      check_parallel_backend = function(...) TRUE,
+      connected_daemons      = function() if (spent) 0L else 2L,
+      daemon_reports         = function(...) {
+        spent <<- TRUE
+        daemons_on()
+      }
+    )
+
+    ev <- suppressWarnings(
+      evaluate(run$value$obj, seed = 42L,
+               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                          output_dir = run$dir, verbose = FALSE))
+    )
+
+    expect_s3_class(ev, "horizons_eval")
+    expect_identical(ev$evaluation$workers, 2L)
+    expect_identical(readRDS(file.path(run$dir, "eval_manifest.rds"))$workers, 2L)
+
+  })
+
 })
 
 

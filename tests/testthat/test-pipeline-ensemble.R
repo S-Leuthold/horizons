@@ -627,7 +627,7 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
-  it("stops as systemic when the daemons fall across the meta-learner", {
+  it("stops as systemic when the daemons fall across a tuned meta-learner, and reads no count around the weighted one", {
 
     fitted <- ens_fitted()
     fallen <- FALSE
@@ -641,8 +641,18 @@ describe("ensemble() - the meta-learner as one unit", {
       }
     )
 
-    err <- expect_error(
+    ## The weighted meta-learner makes no tune call, so a daemon leaving
+    ## while it runs is not its work's: its own failure is what stops it
+    weighted <- expect_error(
       ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE,
+               control = control_horizons(allow_par = TRUE)),
+      class = "horizons_error_ensemble_failed"
+    )
+    expect_false(inherits(weighted, "horizons_error_systemic"))
+
+    fallen <- FALSE
+    err <- expect_error(
+      ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE,
                control = control_horizons(allow_par = TRUE)),
       class = "horizons_error_systemic"
     )

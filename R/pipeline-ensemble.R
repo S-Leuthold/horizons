@@ -95,11 +95,13 @@
 #'   (`mirai::daemons(4)`); a `future::plan()` is not used, and `ensemble()`
 #'   never sets, resizes or resets the daemons, and runs sequentially,
 #'   warning with class `horizons_warning_substitution`, if fewer than two
-#'   are connected. A daemon that dies during the meta-learner, or exits
-#'   under `maxtasks`, `idletime` or `walltime`, stops the call with
-#'   `horizons_error_systemic`, and with fewer than two connected as it
-#'   starts (tune would run it sequentially), with
-#'   `horizons_error_no_daemons`. A pool whose daemons all exit during one of
+#'   are connected. A daemon that dies while a tuned meta-learner
+#'   (`"penalized"`, `"xgb"`) runs, or exits under `maxtasks`, `idletime` or
+#'   `walltime`, stops the call with `horizons_error_systemic`, and with
+#'   fewer than two connected as it starts (tune would run it sequentially),
+#'   with `horizons_error_no_daemons`; the `"weighted"` meta-learner makes no
+#'   tune call, and reads neither. A
+#'   pool whose daemons all exit during one of
 #'   tune's calls waits inside tune, and `ensemble()` checks no daemon's
 #'   packages, so a daemon that cannot load one the meta-learner needs fails
 #'   it with tune's "Argument 1 must be a data frame or a named atomic
@@ -271,7 +273,9 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
   ## The meta-learner is the unit: a failure in any of its steps leaves
   ## nothing usable, so the call aborts with the record. Its warnings are
-  ## recorded, not raised as they come, and a worker's death is systemic.
+  ## recorded, not raised as they come, and a daemon's death under tune is
+  ## systemic. The weighted meta-learner makes no tune call, so the daemons
+  ## are not counted around it: one leaving then is not its work's.
   ##
   ## The meta-learner draws in one unit of its own, ensemble/meta-folds
   ## (with_unit_seed()): its CV folds, its tuning, its refit and its
@@ -292,7 +296,7 @@ ensemble <- function(x,
     ))
 
   }, unit = "meta_learner", id = method, debug = debug, keep_traces = control$keep_traces),
-  results = NULL, verb = "ensemble", daemons = allow_par)
+  results = NULL, verb = "ensemble", daemons = allow_par && method != "weighted")
 
   if (meta$failed) abort_ensemble_failed(meta$records, method)
 

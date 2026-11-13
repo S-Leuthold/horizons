@@ -479,16 +479,18 @@ evaluate <- function(x,
 
   }
 
-  ## On either axis the workers run horizons code (on the resamples axis,
-  ## tune's workers run the recipe steps and the PLS engine), so they must
+  ## The daemons the run began with, read before the check below, which
+  ## spends a task on each and so can end a pool set with `maxtasks`
+  plan_label    <- if (axis$axis == "sequential") "sequential" else "mirai"
+  plan_workers  <- if (axis$axis == "sequential") 1L else connected_daemons()
+
+  ## On either axis the daemons run horizons code (on the resamples axis,
+  ## tune's tasks run the recipe steps and the PLS engine), so they must
   ## run this session's horizons: checked here, before anything is drawn.
   if (axis$axis != "sequential") {
     check_parallel_workers("evaluate", needed_packages(configs$model, configs$feature_selection), collector,
                            results = results_so_far(list()))
   }
-
-  plan_label    <- if (axis$axis == "sequential") "sequential" else "mirai"
-  plan_workers  <- if (axis$axis == "sequential") 1L else connected_daemons()
 
   if (axis$axis != "sequential") {
 
@@ -884,7 +886,7 @@ evaluate <- function(x,
         outcome_range   = outcome_range,
         debug           = debug,
         keep_traces     = control$keep_traces
-      ), results_so_far(results_list), output_dir, daemons = axis$axis == "resamples")
+      ), results_so_far(results_list), output_dir, daemons = axis$tune_allow_par)
 
       ## Stamp before anything else sees the row, so the in-memory results and
       ## the checkpointed copy carry the same provenance.
