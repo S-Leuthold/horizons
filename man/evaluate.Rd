@@ -144,10 +144,13 @@ The user owns the daemons; \code{evaluate()} owns only which axis they are
 applied to, through \code{control_horizons(parallelize_over = )}.
 \itemize{
 \item \code{"configs"}: one task per config on the daemons, with tune running
-sequentially inside each. At most one config per connected daemon is in
-flight, so this session holds one config's payload per daemon, and the
-rows come back in configuration order. The mode for a large config grid
-on a many-core machine.
+sequentially inside each. The configs start longest first, by a table
+of the seconds each model and feature selection took on a measured
+grid, so the short ones fill the daemons at the end; the rows come back
+in configuration order whatever order they finish in. At most one
+config per connected daemon is in flight, so this session holds one
+config's payload per daemon. The mode for a large config grid on a
+many-core machine.
 \item \code{"resamples"}: configs run sequentially; inside each, tune runs the CV
 folds on the daemons. Useful width is capped at \code{cv_folds}. The mode
 for a few cores and a short grid.

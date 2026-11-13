@@ -835,7 +835,8 @@ describe("evaluate() - configs axis", {
 ## =========================================================================
 ## What each task carries, the stop when no daemon is left, a daemon's death
 ## and what crosses back from a task. The real-daemon tests run plsr, whose
-## cells of the cost table tie, so they start in grid order.
+## cells of the cost table tie, so they start in grid order, all but the
+## test of the start order, which puts rf among them.
 
 ## A plsr grid of `n` configurations, small enough to run in seconds
 plsr_object <- function(n) {
@@ -904,6 +905,45 @@ describe("evaluate() - the configs axis on mirai", {
     expect_identical(nrow(ev$evaluation$results), 4L)
     expect_gt(length(in_flight), 0L)
     expect_lte(max(in_flight), 2L)
+
+  })
+
+  it("starts the longest configurations first, by the cost table (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+
+    ## rf costs more than plsr in the table, so on two daemons cfg_002 and
+    ## cfg_004 start first, in either order, and cfg_001 and cfg_003 once one
+    ## of them has finished
+    expect_gt(CONFIG_COST_SECONDS[["rf/none"]], CONFIG_COST_SECONDS[["plsr/none"]])
+    obj <- make_eval_object(n = 60, n_configs = 4)
+    obj$config$configs$model <- c("plsr", "rf", "plsr", "rf")
+
+    ## Each daemon notes the configuration it starts, each line in one write
+    ## so two daemons' lines never interleave
+    started <- withr::local_tempfile(pattern = "started")
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("evaluate_single_config", envir = ns)
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        cat(paste0(config_row$config_id, "\n"), file = started, append = TRUE)
+        real(config_row, ...)
+      }, ns = "horizons")
+    }, started = started)[], 30)
+
+    with_deadline(suppressWarnings(evaluate(obj, seed = 42L,
+                                            control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                       output_dir = withr::local_tempdir(),
+                                                                       verbose = FALSE))), 120)
+
+    order <- readLines(started)
+    expect_length(order, 4L)
+    expect_setequal(order[1:2], c("cfg_002", "cfg_004"))
+    expect_setequal(order[3:4], c("cfg_001", "cfg_003"))
 
   })
 

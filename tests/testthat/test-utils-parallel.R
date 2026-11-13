@@ -227,7 +227,9 @@ describe("dispatch_configs()", {
 
   it("collects every task that finished in a pass before it stops, so the stop carries their rows", {
 
-    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"))
+    ## One cell of the cost table, so they start in grid order
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"),
+                              model = "plsr", feature_selection = "none")
     row     <- function(id) tibble::tibble(config_id = id, status = "success")
 
     ## The first configuration's daemon died, and the second's row came in

@@ -350,13 +350,15 @@ task_value <- function(value, transport) {
 #' Run configurations on the daemons, a window at a time
 #'
 #' @description
-#' At most as many configurations are in flight as there are daemons
-#' connected, read again each round, so the window narrows when a daemon
-#' leaves and widens when one joins, and this session holds one serialized
-#' payload per daemon: submitting every configuration at once would hold all
-#' of them. Each is collected as it finishes and the next submitted. Every
-#' wait goes through [await_round()], so a window left with no daemon stops
-#' the run rather than waiting for ever.
+#' The configurations start longest first ([dispatch_order()]): with mirai's
+#' dispatcher a task starts in the order it was submitted, so the short ones
+#' fill the daemons at the end. At most as many are in flight as there are
+#' daemons connected, read again each round, so the window narrows when a
+#' daemon leaves and widens when one joins, and this session holds one
+#' serialized payload per daemon: submitting every configuration at once
+#' would hold all of them. Each is collected as it finishes and the next
+#' submitted. Every wait goes through [await_round()], so a window left with
+#' no daemon stops the run rather than waiting for ever.
 #'
 #' What a task returns is read here ([task_value()]). A row is appended to
 #' `finished$rows`. A `miraiError` is the task's own error, raised again as
@@ -388,7 +390,7 @@ dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
 
   configs   <- shared$configs
   n_configs <- nrow(configs)
-  start     <- seq_len(n_configs)
+  start     <- dispatch_order(configs)
 
   ### The task's call, quoted here: its names are the task's arguments
   task_call <- quote(worker(config_i, shared))
