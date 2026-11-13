@@ -2756,8 +2756,9 @@ test_that("validate_horizons_eval validates workers under the new meaning when p
   obj$evaluation$workers <- 2.5
   expect_error(validate_horizons_eval(obj), "workers")
 
-  obj$evaluation$workers <- NA_integer_     # unbounded backend
-  expect_identical(validate_horizons_eval(obj), obj)
+  ## No backend reports an unbounded count any more
+  obj$evaluation$workers <- NA_integer_
+  expect_error(validate_horizons_eval(obj), "workers")
 
 })
 

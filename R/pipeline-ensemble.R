@@ -91,11 +91,22 @@
 #'   first failure, inside tuning included, stops the call with its
 #'   backtrace; with `keep_traces = TRUE` a failure's backtrace is kept as
 #'   text in the abort's `results`. With `allow_par = TRUE`, the meta-learner's CV tuning and its
-#'   out-of-fold pass parallelise over folds on whatever `future::plan()` the
-#'   caller has registered; `ensemble()` never registers a plan, and runs
-#'   sequentially, warning with class `horizons_warning_substitution`, if the
-#'   plan offers fewer than two workers. The control it ran with, defaults
-#'   filled in, is recorded as `ensemble$control`.
+#'   out-of-fold pass run their folds on the mirai daemons the caller has set
+#'   (`mirai::daemons(4)`); a `future::plan()` is not used, and `ensemble()`
+#'   never sets, resizes or resets the daemons, and runs sequentially,
+#'   warning with class `horizons_warning_substitution`, if fewer than two
+#'   are connected. A daemon that dies while a tuned meta-learner
+#'   (`"penalized"`, `"xgb"`) runs, or exits under `maxtasks`, `idletime` or
+#'   `walltime`, stops the call with `horizons_error_systemic`, and with
+#'   fewer than two connected as it starts (tune would run it sequentially),
+#'   with `horizons_error_no_daemons`; the `"weighted"` meta-learner makes no
+#'   tune call, and reads neither. A
+#'   pool whose daemons all exit during one of
+#'   tune's calls waits inside tune, and `ensemble()` checks no daemon's
+#'   packages, so a daemon that cannot load one the meta-learner needs fails
+#'   it with tune's "Argument 1 must be a data frame or a named atomic
+#'   vector". The control it ran with, defaults filled in, is recorded as
+#'   `ensemble$control`.
 #'
 #' @return A `horizons_ensemble` object (inherits from `horizons_fit`) with the
 #'   fitted ensemble in the `ensemble` slot. Before anything is built,
@@ -210,8 +221,8 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
   ## Step 0b: Parallel backend
   ## -------------------------------------------------------------------------
-  ## The user owns the backend; confirm there is one and pin threads here
-  ## before tune spawns anything. Never touch the plan.
+  ## The user owns the daemons; confirm there are some and pin threads here.
+  ## Never set, resize or reset the daemons.
   ##
   ## Debug runs in this session: a backtrace from a worker shows the worker's
   ## plumbing, and no debugger attaches there. The user asked for debug, so
@@ -262,7 +273,9 @@ ensemble <- function(x,
   ## -------------------------------------------------------------------------
   ## The meta-learner is the unit: a failure in any of its steps leaves
   ## nothing usable, so the call aborts with the record. Its warnings are
-  ## recorded, not raised as they come, and a worker's death is systemic.
+  ## recorded, not raised as they come, and a daemon's death under tune is
+  ## systemic. The weighted meta-learner makes no tune call, so the daemons
+  ## are not counted around it: one leaving then is not its work's.
   ##
   ## The meta-learner draws in one unit of its own, ensemble/meta-folds
   ## (with_unit_seed()): its CV folds, its tuning, its refit and its
@@ -283,7 +296,7 @@ ensemble <- function(x,
     ))
 
   }, unit = "meta_learner", id = method, debug = debug, keep_traces = control$keep_traces),
-  results = NULL, verb = "ensemble")
+  results = NULL, verb = "ensemble", daemons = allow_par && method != "weighted")
 
   if (meta$failed) abort_ensemble_failed(meta$records, method)
 

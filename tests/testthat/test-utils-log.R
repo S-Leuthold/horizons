@@ -282,6 +282,29 @@ describe("run_unit()", {
 
   })
 
+  it("records a warning signalled without a muffle restart once, lets it go on to the caller, and returns the unit's value", {
+
+    ## warn = -1: the warning goes on past the unit, as it should, and
+    ## testthat would otherwise report it as the test's
+    withr::local_options(warn = -1)
+    seen <- 0L
+
+    out <- withCallingHandlers(
+      run_unit({
+        signalCondition(simpleWarning("A warning with no muffle restart."))
+        "the value"
+      }, "configuration", "cfg_1"),
+      warning = function(w) seen <<- seen + 1L
+    )
+
+    expect_identical(out$value, "the value")
+    expect_false(out$failed)
+    expect_identical(out$records$type, "warning")
+    expect_identical(out$records$message, "A warning with no muffle restart.")
+    expect_identical(seen, 1L)
+
+  })
+
   it("records a warning with its step and class, muffles it, and goes on", {
 
     out <- expect_no_warning(run_unit({
@@ -417,13 +440,12 @@ describe("run_unit()", {
 
   })
 
-  it("never contains a worker's death, which future raises as a FutureError", {
+  it("never contains a systemic stop raised inside it", {
 
-    died <- structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
-                      list(message = "A future worker died.", call = NULL))
-
-    expect_error(run_unit(stop(died), "configuration", "cfg_1"),
-                 class = "FutureInterruptError")
+    expect_error(run_unit(abort_horizons("The run cannot go on.", kind = "run",
+                                         class = "horizons_error_systemic"),
+                          "configuration", "cfg_1"),
+                 class = "horizons_error_systemic")
 
   })
 

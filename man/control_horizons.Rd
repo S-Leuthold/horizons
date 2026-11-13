@@ -17,19 +17,19 @@ control_horizons(
   min_calib_rows = NULL,
   min_ad_rows = NULL,
   min_degradation_rows = NULL,
-  min_resemblance_rows = NULL,
-  max_worker_payload = NULL
+  min_resemblance_rows = NULL
 )
 }
 \arguments{
 \item{...}{Not used: every field is set by name.}
 
-\item{allow_par}{\code{logical(1)}. Run on the registered \code{future} plan. The
-user owns the plan; the verb never sets one. Default \code{FALSE}.
+\item{allow_par}{\code{logical(1)}. Run on the mirai daemons the user set, as
+with \code{mirai::daemons(4)} before the call; the verb never sets, resizes or
+resets them, and a \code{future::plan()} is not used. Default \code{FALSE}.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=ensemble]{ensemble()}}.}
 
 \item{parallelize_over}{\code{character(1)}. The axis of \code{\link[=evaluate]{evaluate()}}'s work the
-plan is applied to: \code{"auto"} (the default), \code{"configs"} or \code{"resamples"}.
+daemons are applied to: \code{"auto"} (the default), \code{"configs"} or \code{"resamples"}.
 \code{"auto"} never chooses \code{"configs"} without \code{output_dir}, and
 \code{"configs"} asked for explicitly needs one.}
 
@@ -79,12 +79,6 @@ often.}
 \item{min_resemblance_rows}{A whole number of at least 2. The fewest library
 rows \code{\link[=select_training]{select_training()}}'s resemblance check takes its reference
 distribution from. Default 30.}
-
-\item{max_worker_payload}{A number of bytes. The largest payload
-\code{\link[=evaluate]{evaluate()}} sends a worker on the configs axis. Default 1 GiB, or the
-\code{future.globals.maxSize} option when it is larger. To lower the limit,
-set this field: the option is raised to 1e9 whenever tune loads, so a
-smaller value of it cannot be told from tune's.}
 }
 \value{
 A \code{horizons_control} object.
@@ -103,7 +97,7 @@ writes (\code{evaluation$control}, \code{models$control}, \code{ensemble$control
 \code{selection$settings$control}).
 }
 \examples{
-## Quiet, on the registered plan
+## Quiet, on the daemons set with mirai::daemons()
 ctrl <- control_horizons(allow_par = TRUE, verbose = FALSE)
 
 \dontrun{

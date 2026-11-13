@@ -434,16 +434,13 @@ flatten_message <- function(message) {
 #' @description
 #' A bug, a door error and a missing package are not local to a unit: each
 #' would hit every unit the same way, so it propagates with its class, chain
-#' and backtrace intact. Nor is a parallel worker's death, which future
-#' raises as a `FutureError`, or a unit raises as `horizons_error_systemic`
-#' when tune caught future's error: the run cannot go on, and the verb stops
-#' it as systemic. A package found missing mid-run, which reaches a unit in
+#' and backtrace intact. Nor is a systemic stop raised inside one: the run
+#' cannot go on. A package found missing mid-run, which reaches a unit in
 #' another package's classes, is recognised by [missing_package_signal()].
 #'
 #' @keywords internal
 #' @noRd
-NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependency", "systemic")),
-                     "FutureError")
+NEVER_CONTAINED <- paste0("horizons_error_", c("internal", "input", "dependency", "systemic"))
 
 #' Whether a failure is a package missing where the unit ran
 #'
@@ -454,16 +451,17 @@ NEVER_CONTAINED <- c(paste0("horizons_error_", c("internal", "input", "dependenc
 #' would fail every unit that needs it, so it is not the unit's failure. It
 #' reaches the unit in another package's class, anywhere in the chain:
 #' base R's `packageNotFoundError`, which `library()` and `loadNamespace()`
-#' raise (tune's workers attach every package the workflow needs with
-#' `library()`, so a run on the resamples axis meets it there), and rlang's
-#' `rlib_error_package_not_found`, which `rlang::check_installed()` raises (a
-#' selection step's own check, when its recipe is prepped in the unit).
+#' raise, and rlang's `rlib_error_package_not_found`, which
+#' `rlang::check_installed()` raises (a selection step's own check, when its
+#' recipe is prepped in the unit). On the resamples axis a package missing on
+#' a daemon does not reach the unit as either: tune binds the daemon's error
+#' with the folds' results and fails on that, which is why the verbs check
+#' every daemon's packages before the run (`check_parallel_workers()`).
 #'
 #' On the configs axis tune runs inside the worker as it would in a session,
 #' and refuses at its own door before anything is fitted, unclassed. Those
 #' refusals are matched by their text, `TUNE_MISSING_PACKAGE`, anywhere in
-#' the chain, as future.apply's report of a worker's death is
-#' ([worker_death_signal()]).
+#' the chain.
 #'
 #' @param cnd A condition.
 #' @return Logical(1).
@@ -529,7 +527,7 @@ abort_missing_mid_run <- function(cnd, unit, id) {
   abort_horizons(c(
     "A package needed by {where} {.val {id}} is not installed where it ran.",
     "x" = "{cause}",
-    "i" = "Install it in every library the session and its parallel workers load."
+    "i" = "Install it in every library the session and its mirai daemons load."
   ), kind = "dependency", class = "horizons_error_missing_package", parent = cnd,
   call = NULL)
 

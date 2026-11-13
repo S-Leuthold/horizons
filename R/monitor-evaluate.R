@@ -239,9 +239,15 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
   cat(paste0(paste(rep("\u2500", 50), collapse = ""), "\n"))
   cat(paste0("  evaluate() monitor \u2014 ", format(Sys.time(), "%H:%M:%S"), "\n"))
 
-  cat(paste0("  Parallel:  over ", manifest$axis, " on ", manifest$plan,
-             " (", manifest$workers, " worker",
-             if (!identical(manifest$workers, 1L)) "s" else "", ")\n"))
+  ## A parallel run is on the user's daemons; `workers` is how many
+  cat(paste0("  Parallel:  ",
+             if (identical(manifest$axis, "sequential")) {
+               "none (sequential)"
+             } else {
+               paste0("over ", manifest$axis, " on ", manifest$plan, " (", manifest$workers, " daemon",
+                      if (!identical(manifest$workers, 1L)) "s", ")")
+             },
+             "\n"))
 
   ## Which rows this directory is scoring. Without it, two runs pointed at
   ## one output_dir are indistinguishable in the monitor.

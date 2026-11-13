@@ -1,11 +1,9 @@
 ## ---------------------------------------------------------------------------
 ## Tests: parallelism helpers (R/utils-parallel.R)
 ## ---------------------------------------------------------------------------
-## These run with no backend registered and no installed build: the axis
-## resolver is a pure function, and the plan helpers only read the plan.
-## Tests that register a plan restore the previous one with withr::defer().
-
-## local_plan() comes from helper-parallel.R.
+## These run with no installed build: the axis resolver is a pure function,
+## and the backend helpers only read the daemons. Tests that set daemons reset
+## them on exit (local_test_daemons(), helper-parallel.R).
 
 ## =========================================================================
 ## resolve_parallel_axis()
@@ -82,44 +80,29 @@ describe("resolve_parallel_axis()", {
 })
 
 ## =========================================================================
-## Plan inspection
+## The daemons
 ## =========================================================================
 
-describe("registered_plan_label() / registered_workers()", {
+describe("connected_daemons()", {
 
-  it("describes a sequential plan", {
+  it("is 0 with no daemons set", {
 
-    local_plan(future::sequential)
+    mirai::daemons(0)
 
-    expect_equal(registered_plan_label(), "sequential")
-    expect_identical(registered_workers(), 1L)
+    expect_identical(connected_daemons(), 0L)
 
   })
 
-  it("describes a flat multisession plan with its worker count, which check_parallel_backend() passes silently", {
+  it("counts the daemons connected, which check_parallel_backend() passes silently at two", {
 
     skip_on_cran()
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
 
-    expect_equal(registered_plan_label(), "multisession")
-    expect_identical(registered_workers(), 2L)
+    expect_identical(connected_daemons(), 2L)
 
-    ## Two workers are enough: no warning, and TRUE
-    expect_silent(ok <- check_parallel_backend("evaluate()"))
+    ## Two daemons are enough: no warning, and TRUE
+    expect_silent(ok <- check_parallel_backend("evaluate", log_open("evaluate")))
     expect_true(ok)
-
-  })
-
-  it("describes a nested plan level by level and reports the outer count", {
-
-    skip_on_cran()
-    local_plan(list(
-      future::tweak(future::multisession, workers = 2),
-      future::tweak(future::sequential)
-    ))
-
-    expect_equal(registered_plan_label(), "multisession > sequential")
-    expect_identical(registered_workers(), 2L)
 
   })
 
@@ -127,60 +110,146 @@ describe("registered_plan_label() / registered_workers()", {
 
 describe("check_parallel_backend()", {
 
-  it("records a substitution and returns FALSE when nothing useful is registered", {
+  it("records a substitution and returns FALSE with no daemons, naming the call to set them", {
 
-    local_plan(future::sequential)
+    mirai::daemons(0)
     collector <- log_open("evaluate")
 
     expect_no_warning(ok <- check_parallel_backend("evaluate", collector))
     expect_false(ok)
 
     rows <- log_close(collector)
+    msg  <- gsub("\\s+", " ", rows$message)
     expect_identical(rows$topic, "substitution")
-    expect_match(rows$message, "offers 1 worker", fixed = TRUE)
-    expect_match(rows$message, "so it ran sequentially", fixed = TRUE)
-    expect_match(rows$message, "Register a backend before calling", fixed = TRUE)
+    expect_match(msg, "but 0 mirai daemons are connected, so it ran sequentially", fixed = TRUE)
+    expect_match(msg, "Set daemons before calling, for example `mirai::daemons(4)`", fixed = TRUE)
+    expect_match(msg, "A `future::plan()` is no longer used.", fixed = TRUE)
 
   })
 
-  it("records it for a multisession plan with a single worker (the #37 shape)", {
+  it("records it for a single daemon (the #37 shape)", {
 
     skip_on_cran()
-    local_plan(future::multisession, workers = 1)
+    local_test_daemons(1)
     collector <- log_open("fit")
 
     expect_false(check_parallel_backend("fit", collector))
     rows <- log_close(collector)
-    expect_match(rows$message, "fit().*1 worker")
+    expect_match(rows$message, "fit().*1 mirai daemon is connected")
 
   })
 
-  it("refuses a usable plan when future.apply, which tune's future backend calls, is not installed", {
+  it("never sets, resizes or resets the daemons", {
 
-    real <- base::requireNamespace
-    local_mocked_bindings(
-      requireNamespace = function(package, ...) {
-        !identical(package, "future.apply") && real(package, ...)
-      },
-      .package = "base"
-    )
-    local_mocked_bindings(registered_workers = function() 2L)
+    skip_on_cran()
+    local_test_daemons(2)
 
-    err <- expect_error(check_parallel_backend("evaluate", log_open("evaluate")),
-                        "future.apply is not installed, but tune's future backend calls it.",
-                        fixed = TRUE, class = "horizons_error_dependency")
-    expect_match(conditionMessage(err), "install.packages(\"future.apply\")", fixed = TRUE)
-
-  })
-
-  it("never registers or alters the plan", {
-
-    local_plan(future::sequential)
-    before <- future::plan("list")
+    ## The dispatcher is a new one after any reset, even to the same size
+    before <- daemons_record()
 
     check_parallel_backend("evaluate", log_open("evaluate"))
 
-    expect_identical(future::plan("list"), before)
+    expect_identical(daemons_record(), before)
+
+  })
+
+})
+
+## =========================================================================
+## The configs axis's window and the stops on the daemons
+## =========================================================================
+## mirai() is mocked to hand each configuration's value back at once, as a
+## resolved task: a list whose `data` is the value, which mirai::unresolved()
+## reads as resolved.
+
+## A daemon's death as mirai returns it
+died_value <- function() structure(19L, class = "errorValue")
+
+describe("await_round()", {
+
+  it("stops when no daemon is connected while a task waits, rather than waiting for ever", {
+
+    skip_on_cran()
+
+    task <- local_unresolved_task()
+
+    expect_error(
+      with_deadline(await_round(list(task), function() rlang::abort("No daemon is left.", class = "test_no_daemons")), 10),
+      class = "test_no_daemons"
+    )
+
+  })
+
+})
+
+describe("dispatch_configs()", {
+
+  it("collects every task that finished in a pass before it stops, so the stop carries their rows", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"))
+    row     <- function(id) tibble::tibble(config_id = id, status = "success")
+
+    ## The first configuration's daemon died, and the second's row came in
+    ## in the same pass
+    values <- list(died_value(), row("cfg_002"), row("cfg_003"))
+
+    local_mocked_bindings(connected_daemons = function() 2L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = values[[.args$config_i]])
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+
+    err <- expect_error(
+      dispatch_configs(list(configs = configs), finished, function() dplyr::bind_rows(finished$rows)),
+      class = "horizons_error_systemic"
+    )
+
+    expect_identical(err$results$config_id, "cfg_002")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The mirai daemon running configuration \"cfg_001\" stopped while it ran (`errorValue` 19, Connection reset)",
+                 fixed = TRUE)
+    expect_null(err$parent)
+
+  })
+
+})
+
+describe("daemon_reports()", {
+
+  it("stops as systemic when a daemon dies during the check, with the verb's empty table, as the window does", {
+
+    local_mocked_bindings(everywhere = function(...) structure(list(list(data = died_value())), class = "mirai_map"),
+                          .package = "mirai")
+
+    empty <- tibble::tibble(config_id = character(0))
+    err   <- expect_error(daemon_reports("rules", "fit", empty), class = "horizons_error_systemic")
+
+    expect_false(inherits(err, "horizons_error_dependency"))
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "A mirai daemon stopped while `fit()` checked the daemons before the run (`errorValue` 19, Connection reset)",
+                 fixed = TRUE)
+    expect_identical(err$results, empty)
+
+  })
+
+})
+
+describe("resume_hint()", {
+
+  it("names the checkpoints when there is an output_dir, and the results field whenever it holds rows", {
+
+    some <- tibble::tibble(config_id = "cfg_001")
+    none <- some[0, ]
+
+    expect_named(resume_hint(some, "out"), c("i", "i"))
+    expect_match(resume_hint(some, "out")[1], "checkpointed in", fixed = TRUE)
+    expect_match(resume_hint(some, "out")[2], "results", fixed = TRUE)
+    expect_named(resume_hint(none, "out"), "i")
+    expect_match(resume_hint(some, NULL), "results", fixed = TRUE)
+    expect_null(resume_hint(none, NULL))
+    expect_null(resume_hint(NULL, NULL))
 
   })
 

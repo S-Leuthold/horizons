@@ -105,14 +105,18 @@
 #' way across at least two models, `fit()` stops with
 #' `horizons_error_systemic` and the members so far as `results`
 #' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
-#' member), and it stops the same way when a parallel worker dies or lacks a
-#' package the members need. With
+#' member), and it stops the same way when a daemon dies (see
+#' "Parallelism"). A daemon lacking a package the members need is refused
+#' before the run (`horizons_error_missing_package`); one found lacking it
+#' later fails the members it runs with tune's error. With
 #' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
 #' first failure, inside tuning included, stops the call with its backtrace.
 #' Before a parallel run `fit()` refuses a session loaded with
-#' `devtools::load_all()`, and one whose workers load another version of
-#' horizons (`horizons_error_dependency`), since tune's workers run horizons'
-#' recipe steps.
+#' `devtools::load_all()`, and, asking every daemon connected one task each,
+#' daemons that load another version of horizons
+#' (`horizons_error_dependency`) or cannot load a package the members need
+#' (`horizons_error_missing_package`), since tune's tasks run horizons'
+#' recipe steps and the members' engines.
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -184,14 +188,25 @@
 #'   `models$control`.
 #'
 #' @section Parallelism:
-#' With `control_horizons(allow_par = TRUE)`, tune parallelises the CV folds
-#' inside each member's re-tune and OOF pass on whatever `future::plan()` the
-#' caller has registered; `fit()` never registers a plan. If the plan offers
-#' fewer than two workers, `fit()` runs sequentially and warns, with class
-#' `horizons_warning_substitution`; the warning is also a row of the object's
-#' `log`. `fit()` parallelises folds only in this version; a configs axis
-#' across the `n_best` members is gated on the fitted-object memory contract
-#' (a fitted object is hundreds of MB and would cross to workers).
+#' With `control_horizons(allow_par = TRUE)`, tune runs the CV folds inside
+#' each member's re-tune and OOF pass on the [mirai](https://mirai.r-lib.org)
+#' daemons the caller has set (`mirai::daemons(4)` before the call); a
+#' `future::plan()` is not used, and `fit()` never sets, resizes or resets
+#' the daemons. With fewer than two connected, `fit()` runs sequentially and
+#' warns, with class `horizons_warning_substitution`; the warning is also a
+#' row of the object's `log`. A daemon that dies during a member, read as
+#' fewer daemons connected after it than before, stops the call with
+#' `horizons_error_systemic` and the members so far; so does one exiting
+#' under `maxtasks`, `idletime` or `walltime`, which the count cannot tell
+#' apart, and with fewer than two connected as a member starts (tune would
+#' fit it sequentially) the call stops with `horizons_error_no_daemons`. A
+#' pool whose daemons all exit during one of
+#' tune's calls waits inside tune, and a daemon whose library loses a package
+#' after the check before the run fails the member with tune's "Argument 1
+#' must be a data frame or a named atomic vector". `fit()` parallelises folds
+#' only in this version; a configs axis across the `n_best` members is gated
+#' on the fitted-object memory contract (a fitted object is hundreds of MB
+#' and would cross to workers).
 #'
 #' @section Outcome range:
 #' Every prediction `fit()` scores (out-of-fold, test and calibration) is
@@ -366,8 +381,8 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 0b: Parallel backend
   ## -----------------------------------------------------------------------
-  ## The user owns the backend. Confirm there is one to run on, pin threads
-  ## in this process before tune spawns anything, and never touch the plan.
+  ## The user owns the daemons. Confirm there are some to run on, pin
+  ## threads in this process, and never set, resize or reset the daemons.
   ##
   ## Debug runs in this session: a backtrace from a worker shows the worker's
   ## plumbing, and no debugger attaches there. The user asked for debug, so
@@ -382,10 +397,6 @@ fit <- function(x,
     allow_par <- check_parallel_backend("fit", collector)
 
     if (allow_par) {
-
-      ## tune's workers run horizons' recipe steps and the PLS engine, so
-      ## they must run this session's horizons
-      check_parallel_workers("fit")
 
       unpin_threads <- pin_parent_threads()
       on.exit(unpin_threads(), add = TRUE)
@@ -463,7 +474,18 @@ fit <- function(x,
   ## Every engine and selection step the members need, before any is
   ## fitted. Only the members: an evaluation that also holds a mars
   ## configuration does not need earth to fit the others.
-  check_config_packages(all_configs[all_configs$config_id %in% top_configs$config_id, ], "fit")
+  member_configs <- all_configs[all_configs$config_id %in% top_configs$config_id, ]
+
+  check_config_packages(member_configs, "fit")
+
+  ## tune's tasks on the daemons run horizons' recipe steps and the PLS
+  ## engine, and fit the members' engines, so every daemon must run this
+  ## session's horizons and load the members' packages: checked before
+  ## anything is drawn
+  if (allow_par) {
+    check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection), collector,
+                           results = member_results(list()))
+  }
 
   ## configure() stores the screening and the final re-tune budgets
   ## separately; fit() used to pass the screening one to the re-tune, so the
@@ -834,7 +856,7 @@ fit <- function(x,
       min_degradation_rows = control$min_degradation_rows,
       debug                = debug,
       keep_traces          = control$keep_traces
-    ), member_results(results_list), verb = "fit")
+    ), member_results(results_list), verb = "fit", daemons = allow_par)
 
     results_list[[i]] <- config_result
 

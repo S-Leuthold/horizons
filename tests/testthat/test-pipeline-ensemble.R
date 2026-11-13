@@ -627,23 +627,42 @@ describe("ensemble() - the meta-learner as one unit", {
 
   })
 
-  it("stops as systemic when a parallel worker dies", {
+  it("stops as systemic when the daemons fall across a tuned meta-learner, and reads no count around the weighted one", {
 
     fitted <- ens_fitted()
+    fallen <- FALSE
 
-    local_mocked_bindings(build_oof_matrix = function(...) {
-      stop(structure(class = c("FutureError", "error", "condition"),
-                     list(message = "the worker died", call = NULL)))
-    })
+    local_mocked_bindings(
+      check_parallel_backend = function(...) TRUE,
+      connected_daemons      = function() if (fallen) 1L else 2L,
+      build_oof_matrix       = function(...) {
+        fallen <<- TRUE
+        stop("Argument 1 must be a data frame or a named atomic vector.")
+      }
+    )
 
+    ## The weighted meta-learner makes no tune call, so a daemon leaving
+    ## while it runs is not its work's: its own failure is what stops it
+    weighted <- expect_error(
+      ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE,
+               control = control_horizons(allow_par = TRUE)),
+      class = "horizons_error_ensemble_failed"
+    )
+    expect_false(inherits(weighted, "horizons_error_systemic"))
+
+    fallen <- FALSE
     err <- expect_error(
-      ensemble(fitted, method = "weighted", optimize = FALSE, compute_uq = FALSE),
+      ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE,
+               control = control_horizons(allow_par = TRUE)),
       class = "horizons_error_systemic"
     )
 
-    expect_match(conditionMessage(err), "A parallel worker stopped while `ensemble()` was running",
-                 fixed = TRUE)
-    expect_s3_class(err$parent, "FutureError")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A mirai daemon stopped while `ensemble()` was running", fixed = TRUE)
+    expect_match(msg, "Fewer mirai daemons were connected", fixed = TRUE)
+    ## The meta-learner's unit contained the error as its failure, so the
+    ## death has no error to chain to
+    expect_null(err$parent)
 
     ## ensemble() has no rows before its meta-learner is built, so it
     ## carries none and promises none
@@ -1739,7 +1758,7 @@ describe("predict.horizons_ensemble() - response bound guardrail", {
 ## =========================================================================
 ## tune's control constructors default to allow_par = TRUE, so before this
 ## the meta-learner tuning and OOF pass dispatched onto any registered
-## future::plan() with no argument to say otherwise.
+## backend with no argument to say otherwise.
 
 describe("ensemble() - allow_par", {
 
@@ -1755,36 +1774,36 @@ describe("ensemble() - allow_par", {
 
   })
 
-  it("does not dispatch onto a registered plan unless asked", {
+  it("does not dispatch onto the daemons unless asked, and takes mirai when asked", {
 
     skip_on_cran()
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
 
     ## tune's own framework choice for the control ensemble() builds: with
-    ## allow_par = FALSE it is sequential even though a plan is registered.
+    ## allow_par = FALSE it is sequential even though daemons are set.
     expect_equal(tune:::choose_framework(control = horizons:::meta_tune_control("grid")),
                  "sequential")
     expect_equal(tune:::choose_framework(control = horizons:::meta_tune_control("grid", TRUE)),
-                 "future")
+                 "mirai")
 
   })
 
   it("runs sequentially when allow_par = TRUE has no backend, and says so once, on the log too", {
 
     fitted <- ens_fitted()
-    local_plan(future::sequential)
+    mirai::daemons(0)
 
     got <- collect_warnings(
       ensemble(fitted, method = "penalized", optimize = FALSE, compute_uq = FALSE,
                control = control_horizons(allow_par = TRUE)),
-      "offers 1 worker"
+      "mirai daemons are connected"
     )
     ens <- got$value
     w   <- got$warnings[[1]]
 
     expect_length(got$warnings, 1L)
     expect_s3_class(w, "horizons_warning_substitution")
-    expect_match(conditionMessage(w), "ensemble\\(\\).*offers 1 worker")
+    expect_match(conditionMessage(w), "ensemble\\(\\).*0 mirai daemons are connected")
     expect_true(inherits(ens, "horizons_ensemble"))
     ## The warning rows: the log also holds the meta-learner's folds' note
     added <- log_rows_added(fitted, ens)
@@ -1798,13 +1817,14 @@ describe("ensemble() - allow_par", {
   it("pins the parent's threads while a backend it can use runs, and restores them on exit", {
 
     fitted <- ens_fitted()
-    local_plan(future::sequential)
+    mirai::daemons(0)
 
     calls     <- character()
     tune_par  <- logical()
     real_ctrl <- meta_tune_control
     local_mocked_bindings(
       check_parallel_backend = function(...) TRUE,
+      connected_daemons      = function() 2L,
       pin_parent_threads     = function() {
         calls <<- c(calls, "pin")
         function() calls <<- c(calls, "restore")
@@ -1821,9 +1841,32 @@ describe("ensemble() - allow_par", {
     expect_true(inherits(ens, "horizons_ensemble"))
     expect_identical(calls, c("pin", "restore"))
 
-    ## The engines' tune control is told to use the plan
+    ## The engines' tune control is told to use the daemons
     expect_gt(length(tune_par), 0)
     expect_true(all(tune_par))
+
+  })
+
+  it("runs the meta-learner's tuning on the daemons and leaves them as it found them (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    fitted <- ens_fitted()
+    local_test_daemons(2)
+    before <- list(n = mirai::nextget("n"), dispatcher = mirai::nextget("dispatcher"),
+                   connected = connected_daemons())
+
+    ens <- with_deadline(suppressWarnings(
+      ensemble(fitted, method = "penalized", optimize = TRUE, compute_uq = FALSE,
+               control = control_horizons(allow_par = TRUE))
+    ), 300)
+
+    expect_true(inherits(ens, "horizons_ensemble"))
+    expect_identical(list(n = mirai::nextget("n"), dispatcher = mirai::nextget("dispatcher"),
+                          connected = connected_daemons()), before)
+    expect_gt(mirai::info()[["completed"]], 0L)
 
   })
 

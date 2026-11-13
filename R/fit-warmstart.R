@@ -434,14 +434,11 @@ tune_warmstart_bayes <- function(workflow,
 #' on candidates left out ([incomplete_note()]), and under `debug` the first
 #' stops the call.
 #'
-#' A worker that dies during an iteration on the resamples axis never
-#' reaches here as future's error: tune's `try()` around the candidate's
-#' resampling catches it. future.apply reports it first, "Caught
-#' FutureInterruptError. Canceling all iterations ...", unclassed, as a
-#' warning before 1.21.0 and as a message since, so the death is read from
-#' that text in either ([worker_death_signal()]) and stops the run as
-#' systemic once `tune_bayes()` has returned, as a death in the grid stage
-#' does.
+#' A daemon that dies during an iteration on the resamples axis does not
+#' reach here at all: tune prints "Optimization stopped prematurely" and
+#' returns the iterations so far. The verb reads the death from the
+#' connected daemons around the unit (`stop_on_worker_death()`), so the
+#' search it cut short is never kept.
 #'
 #' The same on.exit() return swallows a Ctrl-C during the search, so the
 #' interrupt is recorded as it arrives and raised again once tune has
@@ -478,17 +475,11 @@ bayes_search <- function(workflow,
 
   stopped     <- NULL
   all_failed  <- NULL
-  worker_died <- NULL
   interrupted <- FALSE
   n_dropped   <- 0L
   search_cap  <- paste0(toupper(substr(search, 1, 1)), substring(search, 2))
 
-  read_death <- function(cnd) {
-    if (is.null(worker_died) && worker_death_signal(cnd)) worker_died <<- cnd
-  }
-
   read_log <- function(m) {
-    read_death(m)
     text <- cli::ansi_strip(conditionMessage(m))
     if (grepl("All models failed for:", text, fixed = TRUE)) {
       n_dropped <<- n_dropped + 1L
@@ -523,7 +514,6 @@ bayes_search <- function(workflow,
         ),
         message = read_log
       )),
-      warning   = read_death,
       error     = function(e) if (is.null(stopped)) stopped <<- rlang::cnd_entrace(e),
       interrupt = function(i) interrupted <<- TRUE
     ),
@@ -533,15 +523,6 @@ bayes_search <- function(workflow,
   )
 
   if (interrupted) rlang::interrupt()
-
-  if (!is.null(worker_died)) {
-
-    abort_horizons(
-      "A parallel worker stopped during {search}.",
-      kind = "run", class = "horizons_error_systemic", parent = worker_died
-    )
-
-  }
 
   ## A kind no unit contains, or a package missing on a worker, is raised
   ## again for the unit, not fallen back from

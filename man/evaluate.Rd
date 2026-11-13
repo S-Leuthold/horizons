@@ -53,8 +53,8 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{evaluate()} reads \code{allow_par}, \code{parallelize_over},
-\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces} and
-\code{max_worker_payload}, and refuses any other field that is set. The
+\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker} and \code{keep_traces}, and
+refuses any other field that is set. The
 control it ran with, defaults filled in, is recorded as
 \code{evaluation$control}.}
 }
@@ -62,8 +62,8 @@ control it ran with, defaults filled in, is recorded as
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with
 \code{evaluation$results}, \code{evaluation$best_config}, \code{evaluation$split}, and
 associated metadata populated, including \code{evaluation$parallelize_over}
-(the axis actually used), \code{evaluation$workers} (the worker count the
-registered plan offered; 1 when sequential) and \code{evaluation$recipe} (the
+(the axis actually used), \code{evaluation$workers} (the daemons connected
+when the run began; 1 when sequential) and \code{evaluation$recipe} (the
 \code{sg_window}, its width in cm-1 on the evaluated axis as \code{sg_window_cm},
 and the \code{pca_threshold} every config's recipe ran with) and
 \code{evaluation$response_trim} (the training-partition response trim, or
@@ -130,24 +130,27 @@ grid are dropped; a file that cannot be used is a note in the object's
 
 \section{Parallelism}{
 
-With \code{control_horizons(allow_par = TRUE)}, \code{evaluate()} dispatches onto
-whatever \code{future::plan()} the caller has registered. If no usable backend
-is registered (fewer than two workers), it runs sequentially and warns,
-with class \code{horizons_warning_substitution}, naming the plan it found; the
-warning is also a row of the object's \code{log}. Without it, \code{evaluate()} runs
-in the calling process and never inspects the plan. It never registers or
-alters a plan.
+With \code{control_horizons(allow_par = TRUE)}, \code{evaluate()} runs on the
+\href{https://mirai.r-lib.org}{mirai} daemons the caller has set: set them
+before the call with \code{mirai::daemons(4)}, or for one call with
+\code{with(mirai::daemons(4), evaluate(...))}. A \code{future::plan()} is not used.
+With fewer than two daemons connected it runs sequentially and warns, with
+class \code{horizons_warning_substitution}, naming the call that would set
+them; the warning is also a row of the object's \code{log}. Without
+\code{allow_par}, \code{evaluate()} runs in the calling process and never reads the
+daemons. It never sets, resizes or resets them.
 
-The user owns the backend and the topology; \code{evaluate()} owns only which
-axis the plan is applied to, through \code{control_horizons(parallelize_over = )}.
+The user owns the daemons; \code{evaluate()} owns only which axis they are
+applied to, through \code{control_horizons(parallelize_over = )}.
 \itemize{
-\item \code{"configs"}: one future per config on the registered plan, with tune
-running sequentially inside each. The per-worker payload is one config's
-worth and tune ships nothing to inner workers. The mode for a large
-config grid on a many-core machine.
-\item \code{"resamples"}: configs run sequentially; inside each, tune parallelises
-the CV folds on the registered plan. Useful width is capped at
-\code{cv_folds}. The mode for a few cores and a short grid.
+\item \code{"configs"}: one task per config on the daemons, with tune running
+sequentially inside each. At most one config per connected daemon is in
+flight, so this session holds one config's payload per daemon, and the
+rows come back in configuration order. The mode for a large config grid
+on a many-core machine.
+\item \code{"resamples"}: configs run sequentially; inside each, tune runs the CV
+folds on the daemons. Useful width is capped at \code{cv_folds}. The mode
+for a few cores and a short grid.
 \item \code{"auto"} (default): \code{"configs"} when the number of configs is at least
 \code{cv_folds} and there is an \code{output_dir} to checkpoint into, otherwise
 \code{"resamples"}. Derived from the measured cost model: configs wins
@@ -157,35 +160,71 @@ the worker count cancels. \code{"configs"} asked for explicitly without an
 \code{output_dir} is refused before anything runs (#233).
 }
 
-A nested plan (configs across an outer level, folds across an inner one)
-is not built or endorsed by the package in this version. A caller who
-wants one registers it with \code{future::plan(list(...))} and uses
-\code{"configs"}.
-
-Results do not depend on the backend, the number of workers, which worker
+Results do not depend on the backend, the number of daemons, which daemon
 runs a configuration or the order the work finishes in: every draw is
 seeded from the run's \code{seed} and its own name, where it is made (except
 \code{cubist}, whose neighbour step no seed reaches; see the reproducibility
-note in \code{\link[=configure]{configure()}}). A backend's own seed (\code{mirai::daemons(seed = )},
-say) has no effect on them.
+note in \code{\link[=configure]{configure()}}). The daemons' own seed (\code{mirai::daemons(seed = )})
+has no effect on them.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{# Laptop: four cores, parallelise the folds inside each config.
-future::plan(future::multisession, workers = 4)
+mirai::daemons(4)
 hd |> evaluate(control = control_horizons(allow_par = TRUE, parallelize_over = "resamples"))
 
-# Thirty cores, one config per worker, checkpointed.
-future::plan(future::multisession, workers = 30)
+# Thirty cores, one config per daemon, checkpointed.
+mirai::daemons(30)
 hd |> evaluate(control = control_horizons(allow_par = TRUE, output_dir = "output/run"))
+
+# Daemons for this call only.
+with(mirai::daemons(4), evaluate(hd, control = control_horizons(allow_par = TRUE)))
 }\if{html}{\out{</div>}}
 
 Before dispatch, BLAS, OpenMP, data.table and ranger threads are pinned to
 one in the calling process (via \code{RhpcBLASctl} when installed) and restored
-on exit. On either axis the workers load the \emph{installed} package, so a
-parallel run refuses, before anything is drawn, under
-\code{devtools::load_all()} or when a worker loads another version of horizons
-than the session (class \code{horizons_error_dependency}). With
+on exit. Daemons are processes of their own: they start with the
+environment variables the session had when \code{mirai::daemons()} was called
+(\code{OMP_NUM_THREADS}, \code{OPENBLAS_NUM_THREADS}), not its in-process settings,
+so a thread count set in the session with \code{options()} or \code{RhpcBLASctl}
+does not reach them; on the configs axis each configuration's task sets
+data.table's and ranger's threads to one itself. On either axis the daemons load the
+\emph{installed} package, so a parallel run refuses, before anything is drawn,
+under \code{devtools::load_all()}. Every daemon connected is then asked, one
+task each, which horizons it loads and whether it can load the packages
+the configurations need; a daemon on another version of horizons is
+refused (\code{horizons_error_dependency}), and so is one that lacks a package
+(\code{horizons_error_missing_package}, naming each and how many daemons lack
+it). A daemon set with \code{maxtasks} spends one task on the check. With
 \code{control_horizons(debug = TRUE)}, \code{evaluate()} runs in this session
 whatever \code{allow_par} says.
+
+A daemon that dies stops the run with \code{horizons_error_systemic}, the rows
+finished so far as its \code{results} (and in \code{output_dir}): on the configs
+axis when its configuration's task comes back as mirai's \code{errorValue} 19,
+on the resamples axis when fewer daemons are connected after a
+configuration than before it, since tune reads a death as a failure of
+its own. That count cannot tell a death from a daemon exiting under
+\code{maxtasks}, \code{idletime} or \code{walltime}, so on the resamples axis such an exit
+stops the run too; on the configs axis it narrows the dispatch. When work
+remains and no daemon is connected, or on the resamples axis fewer than
+two as a configuration starts (tune would run it sequentially), the run
+stops with \code{horizons_error_no_daemons} (also \code{horizons_error_systemic}),
+the rows so far as its \code{results}: mirai does not start again a daemon
+that exits under those settings, so set daemons without them for a long
+run, or launch more with \code{mirai::launch_local()}. Two waits are tune's, not
+\code{evaluate()}'s: a pool whose daemons all exit during one of tune's calls
+on the resamples axis waits inside tune, and a daemon whose library loses
+a package after the check fails the configurations it runs there with
+tune's "Argument 1 must be a data frame or a named atomic vector", which
+does not name the package (on the configs axis it stops the run as
+systemic).
+
+mirai relays no warning, message or output from a task. On the configs
+axis what a configuration's unit records reaches the \code{log} as on the
+sequential path, and a warning raised in its task before the unit runs
+(while the configuration's packages load, say) is kept on the
+configuration's \code{warnings}, with the unit's. Messages and printed output are
+not relayed, and a warning raised while a daemon loads horizons itself is
+dropped.
 }
 
 \section{Response outliers}{
@@ -234,14 +273,13 @@ the first configurations to run fail the same way across at least two
 models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so far
 as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
 run every configuration; the configs axis has no breaker), and their
-failures are not checkpointed. A parallel worker that lacks a package the
-configurations need, which this session has, stops the run the same way.
-So does a parallel worker that dies, during a Bayesian iteration too: tune
-catches future's error there, so the death is read from what future.apply
-reports first
-("Caught FutureInterruptError. Canceling all iterations ...", a warning
-before future.apply 1.21.0 and a message since), which has no class and
-is matched by its text. When some configurations failed and
+failures are not checkpointed. A daemon that lacks a package the
+configurations need, which this session has, is refused before the run
+(\code{horizons_error_missing_package}, see "Parallelism"); one found lacking
+it mid-run stops the run as systemic on the configs axis, and on the
+resamples axis fails the configurations it runs with tune's error.
+So does a daemon that dies, during a Bayesian iteration too (see
+"Parallelism"). When some configurations failed and
 the rest are returned, one \code{horizons_warning_partial_failure} names them
 with each distinct cause. A configuration whose Bayesian search stopped
 early keeps the iterations it finished; one whose search failed before any

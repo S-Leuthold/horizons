@@ -33,8 +33,8 @@
 #' @param optimize Logical. Tune penalty/mixture (`TRUE`) or use fixed
 #'   defaults (`FALSE`). Default `TRUE`.
 #' @param allow_par Logical. Passed through from `ensemble()`'s control to
-#'   the meta-learner's tune controls; folds parallelise on the registered
-#'   plan when `TRUE`. Default `FALSE`.
+#'   the meta-learner's tune controls; folds run on the mirai daemons when
+#'   `TRUE`. Default `FALSE`.
 #' @param seed Integer. The run's seed, recorded on the contract (passed
 #'   through to [fit_tuned_meta_learner()]).
 #' @param debug Logical. From `ensemble()`'s control; see

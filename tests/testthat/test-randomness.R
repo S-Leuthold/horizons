@@ -355,83 +355,68 @@ describe("the configurations present", {
 ## ---------------------------------------------------------------------------
 ## 3. Backend
 ## ---------------------------------------------------------------------------
-## What horizons dispatches today: the configs axis on a future plan, and
-## tune's folds on the resamples axis, which tune runs on mirai when daemons
-## are set. Workers load the installed package (R_LIBS on the build).
+## What horizons dispatches: the configs axis on its own window of mirai
+## tasks, and tune's folds on the resamples axis, both on the user's daemons.
+## Daemons load the installed package (R_LIBS on the build).
 
 describe("the parallel backend", {
 
-  it("changes no result on the configs axis, at 2 or 3 workers, and leaves the caller's stream alone", {
+  settings <- list(list(n = 2L, seed = NULL), list(n = 3L, seed = NULL),
+                   list(n = 2L, seed = 1L),   list(n = 3L, seed = 1L))
 
-    skip_unless_slow_tier()
-    skip_on_cran()
-    skip_if_dev_package()
-
-    base <- rng_base()
-
-    for (workers in 2:3) {
-
-      local_plan(future::multisession, workers = workers)
-      withr::local_seed(5)
-      before <- .Random.seed
-
-      ev <- rng_evaluate(rng_object(), control = control_horizons(
-        verbose = FALSE, allow_par = TRUE, parallelize_over = "configs", output_dir = withr::local_tempdir()
-      ))
-
-      expect_identical(ev$evaluation$parallelize_over, "configs", info = workers)
-      expect_identical(eval_rows(ev), eval_rows(base$ev), info = workers)
-      expect_identical(.Random.seed, before, info = workers)
-
-    }
-
-  })
-
-  it("changes no result with tune's folds on mirai, at 2 or 3 daemons, with or without daemons(seed =)", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    skip_if_dev_package()
-    skip_if_not_installed("mirai")
+  ## Each setting's daemons, reset before the next; the caller's seed is set
+  ## after they start, since setting daemons draws once from the stream.
+  ## `control` takes a fresh directory, so no setting resumes another's.
+  for_each_setting <- function(axis, control) {
 
     base <- rng_base()
 
-    ## horizons reads the future plan for its own backend check, which a
-    ## mirai-only session would fail; tune then finds mirai's daemons
-    local_mocked_bindings(
-      check_parallel_backend = function(...) TRUE,
-      registered_workers     = function() 2L,
-      registered_plan_label  = function() "mirai"
-    )
+    for (setting in settings) {
 
-    withr::defer(mirai::daemons(0))
+      label <- paste(axis, "axis,", setting$n, "daemons, seed", format(setting$seed))
 
-    for (setting in list(list(n = 2L, seed = NULL), list(n = 3L, seed = NULL),
-                         list(n = 2L, seed = 1L),   list(n = 3L, seed = 1L))) {
-
-      ## autoexit = NA: a daemon finishes exiting when the reset drops its
-      ## connection, where the default kills it after 200 ms, cutting off the
-      ## trace file a daemon writes on exit under covr
-      mirai::daemons(setting$n, seed = setting$seed, autoexit = NA)
+      mirai::daemons(0)
+      local_test_daemons(setting$n, seed = setting$seed)
 
       withr::local_seed(5)
       before <- .Random.seed
 
-      ev <- rng_evaluate(rng_object(), control = control_horizons(
-        verbose = FALSE, allow_par = TRUE, parallelize_over = "resamples"
-      ))
+      ev <- with_deadline(rng_evaluate(rng_object(), control = control(withr::local_tempdir())), 600)
 
-      label <- paste(setting$n, "daemons, seed", format(setting$seed))
-      expect_identical(ev$evaluation$parallelize_over, "resamples", info = label)
+      expect_identical(ev$evaluation$parallelize_over, axis, info = label)
       expect_identical(eval_rows(ev), eval_rows(base$ev), info = label)
       expect_identical(.Random.seed, before, info = label)
 
-      ## The folds ran on the daemons, not in this process
-      expect_gt(mirai::info()[["completed"]], 0L, label = paste("the tasks completed with", label))
-
-      mirai::daemons(0)
+      ## The work ran on the daemons, not in this process: more tasks
+      ## completed on these fresh daemons than the one each that the check
+      ## at the door spends
+      expect_gt(mirai::info()[["completed"]], setting$n, label = paste("the tasks completed with", label))
 
     }
+
+  }
+
+  it("changes no result on the configs axis, at 2 or 3 daemons, with or without daemons(seed =), and leaves the caller's stream alone", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    for_each_setting("configs", function(dir) control_horizons(
+      verbose = FALSE, allow_par = TRUE, parallelize_over = "configs", output_dir = dir
+    ))
+
+  })
+
+  it("changes no result with tune's folds on the daemons, at 2 or 3, with or without daemons(seed =)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    for_each_setting("resamples", function(dir) control_horizons(
+      verbose = FALSE, allow_par = TRUE, parallelize_over = "resamples"
+    ))
 
   })
 

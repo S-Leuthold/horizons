@@ -35,8 +35,8 @@
 #' @param optimize Logical. Tune the xgboost hyperparameters (`TRUE`) or use
 #'   conservative fixed defaults (`FALSE`). Default `TRUE`.
 #' @param allow_par Logical. Passed through from `ensemble()`'s control to
-#'   the meta-learner's tune controls; folds parallelise on the registered
-#'   plan when `TRUE`. Default `FALSE`.
+#'   the meta-learner's tune controls; folds run on the mirai daemons when
+#'   `TRUE`. Default `FALSE`.
 #' @param seed Integer. The run's seed, recorded on the contract;
 #'   [fit_tuned_meta_learner()] gives xgboost the meta-learner unit's seed
 #'   (`unit_seed()`).

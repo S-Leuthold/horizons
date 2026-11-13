@@ -17,9 +17,10 @@ CONDITION_KINDS <- c("input", "validation", "dependency", "run", "internal")
 #' @description
 #' The one constructor every horizons error goes through. The condition
 #' carries the base class `horizons_error`, exactly one kind
-#' (`horizons_error_<kind>`), and at most one specific subclass in front of
-#' the kind, so a handler can catch all of horizons' errors, one kind of
-#' them, or one refusal (see [horizons_conditions]).
+#' (`horizons_error_<kind>`), and in front of the kind at most one specific
+#' subclass, or a chain of them where one refines another, so a handler can
+#' catch all of horizons' errors, one kind of them, or one refusal (see
+#' [horizons_conditions]).
 #'
 #' An `"internal"` error is a broken invariant, a bug in horizons. It is
 #' raised with `.internal = TRUE`, which adds rlang's footer naming the
@@ -31,8 +32,10 @@ CONDITION_KINDS <- c("input", "validation", "dependency", "run", "internal")
 #' @param kind Character(1). One of `"input"`, `"validation"`,
 #'   `"dependency"`, `"run"` or `"internal"`. Required: a horizons error
 #'   always says which kind it is.
-#' @param class Character(1) or `NULL`. A specific subclass, written in full
-#'   (`"horizons_error_all_configs_failed"`), when the refusal earns one.
+#' @param class Character or `NULL`. A specific subclass, written in full
+#'   (`"horizons_error_all_configs_failed"`), when the refusal earns one; or
+#'   a chain of them, most specific first, when it refines another
+#'   (`c("horizons_error_no_daemons", "horizons_error_systemic")`).
 #' @param ... Passed to [cli::cli_abort()]: fields, `parent`, `body`.
 #' @param call The frame the error reports, the caller's by default.
 #' @param .envir The environment the message is interpolated in.
@@ -62,11 +65,12 @@ abort_horizons <- function(message,
   }
 
   if (!is.null(class) &&
-      (!rlang::is_string(class) || !startsWith(class, "horizons_error_") ||
-       class %in% paste0("horizons_error_", CONDITION_KINDS))) {
+      (!is.character(class) || length(class) == 0 || anyNA(class) ||
+       !all(startsWith(class, "horizons_error_")) ||
+       any(class %in% paste0("horizons_error_", CONDITION_KINDS)))) {
 
     cli::cli_abort(
-      "{.arg class} must be one specific subclass named {.val horizons_error_<type>}, not a kind.",
+      "{.arg class} must be specific subclasses named {.val horizons_error_<type>}, not a kind.",
       class = c("horizons_error_internal", "horizons_error"),
       .internal = TRUE
     )
@@ -172,8 +176,10 @@ check_reserved_columns <- function(columns,
 #'
 #' @description
 #' Every error horizons raises carries the base class `horizons_error`,
-#' exactly one kind, and sometimes one more specific class in front of the
-#' kind. Every warning carries the base class `horizons_warning` and one
+#' exactly one kind, and sometimes a more specific class in front of the
+#' kind, or a chain of them where one refines another
+#' (`horizons_error_no_daemons` is also `horizons_error_systemic`). Every
+#' warning carries the base class `horizons_warning` and one
 #' topic. A handler can catch all of horizons' errors, one kind of them, or
 #' one specific refusal, and filter warnings by what happened.
 #'
@@ -193,8 +199,8 @@ check_reserved_columns <- function(columns,
 #'     check.}
 #'   \item{`horizons_error_dependency`}{A needed package is missing, or the
 #'     environment cannot run the call (a parallel run under
-#'     `devtools::load_all()`, whose workers load the installed build, or one
-#'     whose workers load another version of horizons).}
+#'     `devtools::load_all()`, whose mirai daemons load the installed build,
+#'     or one whose daemons load another version of horizons).}
 #'   \item{`horizons_error_run`}{The work was attempted and failed: every
 #'     configuration or member failed, a download failed, or the run stopped
 #'     on a failure that would hit every unit the same way.}
@@ -236,13 +242,22 @@ check_reserved_columns <- function(columns,
 #'     early, because the first configurations or members to run failed the
 #'     same way across at least two models (the circuit breaker,
 #'     `control_horizons(breaker = )`), or [evaluate()], [fit()] or
-#'     [ensemble()] stopped because a parallel worker died or lacks a
-#'     package the run needs, or [evaluate()] could not write to its
-#'     `output_dir` (on the configs axis a checkpoint a worker could not
+#'     [ensemble()] stopped because a mirai daemon died or lacks a package
+#'     the run needs, or no mirai daemon was left to run its work
+#'     (`horizons_error_no_daemons`, below), or [evaluate()] could not write to its
+#'     `output_dir` (on the configs axis a checkpoint a daemon could not
 #'     write is a `skipped` warning instead, since every configuration has
 #'     run by then). The rows finished so far travel
 #'     as `results`; `NULL` from `ensemble()`, which has none before its
 #'     meta-learner is built.}
+#'   \item{`horizons_error_no_daemons`}{(run, and `horizons_error_systemic`)
+#'     A parallel [evaluate()], [fit()] or [ensemble()] had work left and no
+#'     mirai daemon connected to run it, or fewer than two as a unit tune
+#'     runs on the daemons started (tune would run it sequentially): the
+#'     daemons exited under `maxtasks`, `idletime` or `walltime`, which mirai
+#'     does not restart them from, or were stopped. The rows finished so far
+#'     travel as `results`, a table with no rows when none had finished
+#'     (`NULL` from `ensemble()`).}
 #'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
 #'     warnings under `options(warn = 2)`. Instead of turning the first warning
 #'     into an error that loses the result, the verb aborts with the finished
@@ -260,10 +275,11 @@ check_reserved_columns <- function(columns,
 #'     needs is not installed: a model's engine, or the package a feature
 #'     selection step trains with (Boruta). [evaluate()], [fit()],
 #'     [ensemble()] and `predict()` check before any work starts, and refuse
-#'     once, naming every missing package and what needs it. A package found
-#'     missing later, where a unit ran (a parallel worker's library, or a
-#'     package the check does not know of), raises it too, and the verbs that
-#'     dispatch units then stop with `horizons_error_systemic`.}
+#'     once, naming every missing package and what needs it; a parallel
+#'     [evaluate()] or [fit()] checks every mirai daemon too. A package found
+#'     missing later, where a unit ran (a daemon's library, or a package the
+#'     check does not know of), raises it too, and the verbs that dispatch
+#'     units then stop with `horizons_error_systemic`.}
 #' }
 #'
 #' @section Warning topics:

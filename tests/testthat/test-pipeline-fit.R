@@ -953,25 +953,25 @@ describe("fit() - a PCA member stores only the components it uses", {
 
 describe("fit() - allow_par without a usable backend", {
 
-  it("warns once naming fit() and the plan, on the log too, then runs sequentially", {
+  it("warns once naming fit() and the daemons connected, on the log too, then runs sequentially", {
 
     skip_unless_slow_tier()
 
-    local_plan(future::sequential)
+    mirai::daemons(0)
     obj <- make_fit_object(n = 60, n_configs = 1)
     obj$config$tuning$final_bayesian_iter <- 0L
 
     got <- collect_warnings(
       fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 123L,
           control = control_horizons(allow_par = TRUE)),
-      "offers 1 worker"
+      "mirai daemons are connected"
     )
     r <- got$value
     w <- got$warnings[[1]]
 
     expect_length(got$warnings, 1L)
     expect_s3_class(w, "horizons_warning_substitution")
-    expect_match(conditionMessage(w), "fit\\(\\).*offers 1 worker")
+    expect_match(conditionMessage(w), "fit\\(\\).*0 mirai daemons are connected")
     expect_s3_class(r, "horizons_fit")
     expect_true("substitution" %in% r$log$topic[r$log$verb == "fit"])
 
@@ -979,8 +979,8 @@ describe("fit() - allow_par without a usable backend", {
 
 })
 
-## On a real two-worker plan tune runs the re-tune and the OOF fits on
-## workers, which advances the parent's RNG stream differently from the
+## On two daemons tune runs the re-tune and the OOF fits on them, which
+## advances the parent's RNG stream differently from the
 ## sequential loop. Each stage of fit_single_config() is a unit of its own,
 ## so the result does not depend on that.
 ##
@@ -989,9 +989,9 @@ describe("fit() - allow_par without a usable backend", {
 ## reaches, so a cubist with neighbours depends on the fits made before it in
 ## its process (configure()'s reproducibility note).
 
-describe("fit() - on a two-worker plan", {
+describe("fit() - on two daemons", {
 
-  it("matches the sequential fit exactly (installed build)", {
+  it("matches the sequential fit exactly, and leaves the daemons as it found them (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -1004,11 +1004,19 @@ describe("fit() - on a two-worker plan", {
       fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
     )
 
-    local_plan(future::multisession, workers = 2)
+    local_test_daemons(2)
+    before <- list(n = mirai::nextget("n"), dispatcher = mirai::nextget("dispatcher"),
+                   connected = connected_daemons())
 
-    par_fit <- suppressWarnings(
+    par_fit <- with_deadline(suppressWarnings(
       fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(allow_par = TRUE))
-    )
+    ), 300)
+
+    expect_identical(list(n = mirai::nextget("n"), dispatcher = mirai::nextget("dispatcher"),
+                          connected = connected_daemons()), before)
+    ## The work ran on the daemons: more tasks completed on these fresh
+    ## daemons than the one each that the check at the door spends
+    expect_gt(mirai::info()[["completed"]], 2L)
 
     cols <- c("config_id", "status", "rmse", "rrmse", "rsq", "ccc", "rpd", "mae",
               "cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")

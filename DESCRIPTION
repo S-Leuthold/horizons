@@ -14,7 +14,7 @@ Description: Builds and compares predictive models from mid-infrared (MIR)
     the best configurations with conformal prediction intervals and an
     applicability-domain check, and stacks them into ensembles. Training sets
     can also be drawn from a reference spectral library. Built on the
-    'tidymodels' framework, with parallel execution through 'future'.
+    'tidymodels' framework, with parallel execution through 'mirai'.
 License: MIT + file LICENSE
 URL: https://github.com/S-Leuthold/horizons
 BugReports: https://github.com/S-Leuthold/horizons/issues
@@ -32,11 +32,9 @@ Imports:
     digest,
     dplyr,
     glmnet,
-    furrr,
-    future,
-    future.apply,
     glue,
     hardhat,
+    mirai (>= 2.7.0),
     opusreader2,
     parsnip,
     pls,
@@ -53,7 +51,7 @@ Imports:
     tibble,
     tidyr,
     tools,
-    tune,
+    tune (>= 2.0.0),
     utils,
     workflows,
     xgboost,
@@ -72,8 +70,7 @@ Suggests:
     kernlab,
     lightgbm,
     nnet,
-    RhpcBLASctl,
-    mirai
+    RhpcBLASctl
 Config/testthat/edition: 3
 Config/testthat/parallel: true
 Config/testthat/start-first: pipeline-fit, pipeline-evaluate,

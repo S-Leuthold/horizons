@@ -294,8 +294,14 @@ SHARED_ARG_NAMES <- c(
   "pkg_version"
 )
 
-# Vocabulary of control_horizons(parallelize_over = ). "both" (a nested plan) is
-# deliberately absent for v1; control_horizons() refuses it with a hint.
+# Seconds between the configs axis's polls of the tasks in flight and the
+# daemons connected (await_round(), R/utils-parallel.R). mirai's info() costs
+# microseconds, so the poll is cheap against configurations of seconds to
+# hours.
+DISPATCH_POLL_SECONDS <- 0.1
+
+# Vocabulary of control_horizons(parallelize_over = ). "both" is deliberately
+# absent for v1; control_horizons() refuses it with a hint.
 PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 
 # Scoring schema stamped into every evaluate() result row and checked when
@@ -322,19 +328,12 @@ SCORING_SCHEMA <- 6L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records
-# the axis and the user's plan, the training-data fingerprint and its fields,
+# the axis and its backend (`plan`: "sequential" or "mirai", and `workers`,
+# the daemons connected as the run began), the training-data fingerprint and
+# its fields,
 # and the tuning settings. Bump it when a field the monitor reads changes; the
 # monitor refuses a manifest of any other schema.
 EVAL_MANIFEST_SCHEMA <- 4L
-
-# future.globals.maxSize for the configs-axis dispatch, set by evaluate() for
-# the duration of the call. Declared rather than inherited so a payload
-# regression fails loudly with future's "size of the globals ... exceeds"
-# error instead of R's opaque "long vectors not supported yet". Measured
-# 2026-09-14 on 17,788 x 1,701 (KSSL clay at 2 cm-1): 417.6 MB per worker
-# after the three serialization fixes. 1 GiB is ~2.4x headroom. The footprint
-# tests in test-evaluate-parallel.R are the upstream guard.
-EVAL_WORKER_PAYLOAD_LIMIT <- 1 * 1024^3
 
 # evaluate()'s smallest cross-validation assessment fold, in rows, below which
 # it warns (quality) that the cross-validated metrics rest on few rows. A

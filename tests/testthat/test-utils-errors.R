@@ -225,6 +225,19 @@ describe("abort_horizons()", {
 
   })
 
+  it("raises a chain of subclasses, most specific first, when one refines another", {
+
+    err <- expect_error(
+      abort_horizons("No daemon left.", kind = "run",
+                     class = c("horizons_error_no_daemons", "horizons_error_systemic")),
+      class = "horizons_error_systemic"
+    )
+
+    expect_equal(class(err)[1:4], c("horizons_error_no_daemons", "horizons_error_systemic",
+                                     "horizons_error_run", "horizons_error"))
+
+  })
+
   it("interpolates the message in the caller's environment", {
 
     n_rows <- 7L
@@ -264,6 +277,10 @@ describe("abort_horizons()", {
     expect_error(abort_horizons("x", kind = "run", class = "my_error"), "class",
                  class = "horizons_error_internal")
     expect_error(abort_horizons("x", kind = "run", class = "horizons_error_input"),
+                 "class", class = "horizons_error_internal")
+    expect_error(abort_horizons("x", kind = "run", class = c("horizons_error_systemic", "my_error")),
+                 "class", class = "horizons_error_internal")
+    expect_error(abort_horizons("x", kind = "run", class = c("horizons_error_no_daemons", "horizons_error_run")),
                  "class", class = "horizons_error_internal")
 
   })

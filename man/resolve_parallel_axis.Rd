@@ -26,7 +26,8 @@ resolve_parallel_axis(
 }
 \value{
 A list: \code{axis} (\code{"sequential"}, \code{"configs"} or \code{"resamples"}),
-\code{dispatch_configs} (logical; use the furrr branch), \code{tune_allow_par}
+\code{dispatch_configs} (logical; dispatch the configurations to the
+daemons), \code{tune_allow_par}
 (logical; what the single-config functions pass to tune's control), and
 \code{tune_parallel_over} (\code{"resamples"} or \code{NULL}; the value \emph{requested} of
 tune, which may rewrite it, see the note on \code{tune:::.update_parallel_over}
@@ -34,7 +35,7 @@ in the spec).
 }
 \description{
 Pure function from the caller's request and the object's shape to the
-concrete dispatch decision. It never inspects the registered plan, so it is
+concrete dispatch decision. It never reads the daemons, so it is
 unit-testable with no backend and no installed build.
 
 \code{"auto"} picks by the measured cost model (2026-09-15): one config run
@@ -46,8 +47,7 @@ n_configs * T / k with k the effective inner speedup, which is capped at
 rule is \code{n_configs >= cv_folds}. Dispatching configs needs a checkpoint
 directory, so \code{"auto"} chooses it only when there is one (#233).
 
-A nested plan registered by the caller does not change the axis: on the
-configs axis the worker runs tune sequentially, so a second plan level is
-never used. \code{control_horizons()} refuses \code{"both"} with that hint.
+On the configs axis the worker runs tune sequentially: a daemon has no
+daemons of its own. \code{control_horizons()} refuses \code{"both"}.
 }
 \keyword{internal}

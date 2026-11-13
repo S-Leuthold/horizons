@@ -548,21 +548,23 @@ describe("fit() - each member is one unit", {
 
   })
 
-  it("stops with the members so far when a parallel worker dies", {
+  it("stops with the members so far when the daemons fall across a member", {
 
-    obj   <- fit_obj(2L)
-    calls <- 0L
+    obj    <- fit_obj(2L)
+    calls  <- 0L
+    fallen <- FALSE
 
     err <- expect_error(
       testthat::with_mocked_bindings(
         suppressWarnings(fit(obj, n_best = 2L,
-                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
-        fit_single_config = function(config_row, ...) {
+                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(allow_par = TRUE))),
+        check_parallel_backend = function(...) TRUE,
+        check_parallel_workers = function(...) invisible(NULL),
+        connected_daemons      = function() if (fallen) 1L else 2L,
+        fit_single_config      = function(config_row, ...) {
           calls <<- calls + 1L
-          if (calls == 2L) {
-            stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
-                           list(message = "worker died", call = NULL)))
-          }
+          if (calls == 2L) fallen <<- TRUE
           fitted_member(config_row)
         },
         .package = "horizons"
@@ -570,10 +572,11 @@ describe("fit() - each member is one unit", {
       class = "horizons_error_systemic"
     )
 
-    expect_match(conditionMessage(err), "A parallel worker stopped while `fit()` was running",
-                 fixed = TRUE)
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A mirai daemon stopped while `fit()` was running", fixed = TRUE)
+    expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
     expect_identical(err$results$config_id, "cfg_001")
-    expect_s3_class(err$parent, "FutureError")
+    expect_null(err$parent)
 
   })
 
@@ -615,40 +618,41 @@ describe("fit() - each member is one unit", {
 
   })
 
-  it("stops with the members so far when a worker dies during a warm-start Bayesian search, reported as a message or a warning", {
+  it("stops with the members so far when a daemon dies during a warm-start Bayesian search, which tune cuts short quietly", {
 
     ## Real fits of the members, several seconds even without the search
     skip_unless_slow_tier()
 
-    ## tune catches future's error inside its search; future.apply reports it
-    ## first, as a warning before 1.21.0 and as a message since. The first
-    ## member's search returns without an iteration, the second one's worker
-    ## dies.
-    obj <- fit_obj(2L)
+    ## A daemon that dies inside an iteration makes tune stop the search and
+    ## return what it had ("Optimization stopped prematurely"), no error: so
+    ## the second member's search returns its initial grid as the daemons
+    ## fall, and the member is never kept.
+    obj    <- fit_obj(2L)
+    calls  <- 0L
+    fallen <- FALSE
 
-    for (report in list(message, warning)) {
+    local_mocked_bindings(tune_bayes = function(...) {
+      calls <<- calls + 1L
+      if (calls == 2L) fallen <<- TRUE
+      list(...)$initial
+    }, .package = "tune")
+    local_mocked_bindings(
+      check_parallel_backend = function(...) TRUE,
+      check_parallel_workers = function(...) invisible(NULL),
+      connected_daemons      = function() if (fallen) 1L else 2L
+    )
 
-      calls <- 0L
-      local_mocked_bindings(tune_bayes = function(...) {
-        calls <<- calls + 1L
-        if (calls == 2L) report("Caught FutureInterruptError. Canceling all iterations ...")
-        list(...)$initial
-      }, .package = "tune")
+    err <- expect_error(
+      suppressWarnings(fit(obj, n_best = 2L,
+                           compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                           control = control_horizons(allow_par = TRUE))),
+      class = "horizons_error_systemic"
+    )
 
-      err <- expect_error(
-        suppressWarnings(fit(obj, n_best = 2L,
-                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
-        class = "horizons_error_systemic"
-      )
-
-      expect_match(conditionMessage(err), "A parallel worker stopped while `fit()` was running",
-                   fixed = TRUE)
-      expect_identical(err$results$config_id, "cfg_001")
-      expect_s3_class(err$parent, "horizons_error_systemic")
-      expect_match(conditionMessage(err$parent),
-                   "A parallel worker stopped during the warm-start Bayesian search.", fixed = TRUE)
-
-    }
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "A mirai daemon stopped while `fit()` was running", fixed = TRUE)
+    expect_match(msg, "Fewer mirai daemons were connected", fixed = TRUE)
+    expect_identical(err$results$config_id, "cfg_001")
 
   })
 
@@ -683,21 +687,59 @@ describe("fit() - each member is one unit", {
 
   })
 
-  it("carries a members table with every column and no rows when the first member's worker dies", {
+  it("carries a members table with every column and no rows when the daemons fall across the first member", {
 
-    obj <- fit_obj(2L)
+    obj    <- fit_obj(2L)
+    fallen <- FALSE
 
     err <- expect_error(
       testthat::with_mocked_bindings(
         suppressWarnings(fit(obj, n_best = 2L,
-                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
-        fit_single_config = function(config_row, ...) {
-          stop(structure(class = c("FutureInterruptError", "FutureError", "error", "condition"),
-                         list(message = "worker died", call = NULL)))
+                             compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(allow_par = TRUE))),
+        check_parallel_backend = function(...) TRUE,
+        check_parallel_workers = function(...) invisible(NULL),
+        connected_daemons      = function() if (fallen) 1L else 2L,
+        fit_single_config      = function(config_row, ...) {
+          fallen <<- TRUE
+          stop("Argument 1 must be a data frame or a named atomic vector.")
         },
         .package = "horizons"
       ),
       class = "horizons_error_systemic"
+    )
+
+    ## Chained to the member's error
+    expect_match(conditionMessage(err$parent), "Argument 1 must be a data frame", fixed = TRUE)
+
+    one <- member_results(list(fitted_member(list(config_id = "cfg_001"))))
+
+    expect_identical(nrow(err$results), 0L)
+    expect_identical(names(err$results), names(one))
+    expect_identical(vapply(err$results, typeof, character(1)), vapply(one, typeof, character(1)))
+
+  })
+
+  it("carries a members table with every column and no rows when no daemon is left during the check at the door", {
+
+    skip_on_cran()
+
+    ## The check's task is one no daemon takes, and none is connected
+    obj  <- fit_obj(1L)
+    task <- local_unresolved_task()
+    local_mocked_bindings(everywhere = function(...) structure(list(task), class = "mirai_map"),
+                          .package = "mirai")
+
+    err <- expect_error(
+      testthat::with_mocked_bindings(
+        with_deadline(suppressWarnings(fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                                           control = control_horizons(allow_par = TRUE))), 30),
+        running_under_load_all = function() FALSE,
+        check_parallel_backend = function(...) TRUE,
+        draw_stratified        = function(...) stop("a draw was made"),
+        .package = "horizons"
+      ),
+      class = "horizons_error_no_daemons"
     )
 
     one <- member_results(list(fitted_member(list(config_id = "cfg_001"))))
@@ -729,8 +771,8 @@ describe("fit() - each member is one unit", {
                  class = "horizons_error_dependency")
 
     expect_error(run(running_under_load_all = function() FALSE,
-                     worker_horizons_version = function() "0.0.1"),
-                 "A parallel worker loads horizons 0.0.1", fixed = TRUE,
+                     daemon_reports          = function(...) daemons_on("0.0.1")),
+                 "A mirai daemon loads horizons 0.0.1", fixed = TRUE,
                  class = "horizons_error_dependency")
 
   })

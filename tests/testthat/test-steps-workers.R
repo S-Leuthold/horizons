@@ -67,7 +67,7 @@ describe("the custom steps on parallel workers", {
 
   })
 
-  it("resamples a workflow with each step on fresh workers that have not loaded horizons (#238)", {
+  it("resamples a workflow with each step on fresh daemons that have not loaded horizons (#238)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -76,27 +76,25 @@ describe("the custom steps on parallel workers", {
     withr::local_seed(1)
     d <- workers_data()
 
-    local_plan(future::sequential)
-
     for (step in names(step_calls)) {
 
-      ## Fresh workers for each step, so one step's run cannot leave horizons
+      ## Fresh daemons for each step, so one step's run cannot leave horizons
       ## loaded for the next
-      future::plan(future::sequential)
-      future::plan(future::multisession, workers = 2)
+      mirai::daemons(0)
+      local_test_daemons(2)
 
-      loaded <- future::value(future::future(isNamespaceLoaded("horizons"), globals = FALSE))
-      expect_false(loaded, label = paste(step, ": horizons loaded on a fresh worker"))
+      loaded <- with_deadline(mirai::mirai(isNamespaceLoaded("horizons"))[], 30)
+      expect_false(loaded, label = paste(step, ": horizons loaded on a fresh daemon"))
 
       ## The steps' own messages and the small data's warnings are not the
       ## subject here; the notes say whether any fold failed.
-      res <- suppressWarnings(suppressMessages(in_global(paste0(
+      res <- with_deadline(suppressWarnings(suppressMessages(in_global(paste0(
         "tune::fit_resamples(",
         "  workflows::workflow(recipes::recipe(SOC ~ ., data = d) |> ", step_calls[[step]], ",",
         "                      parsnip::linear_reg()),",
         "  rsample::vfold_cv(d, v = 2),",
         "  control = tune::control_resamples(allow_par = TRUE))"
-      ), d)))
+      ), d))), 120)
 
       notes <- tune::collect_notes(res)
 
