@@ -2166,9 +2166,17 @@ describe("evaluate() - checkpoint data provenance", {
                       res$evaluation$n_train))
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_identical(manifest$schema_version, 4L)
+    expect_identical(manifest$schema_version, 5L)
     expect_identical(manifest$data_hash, res$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, res$evaluation$n_train)
+
+    ## Each configuration's cell of the cost table, for the monitor's ETA, in
+    ## the grid's order: cfg_002's cubist costs more than cfg_001's rf, so a
+    ## record in the order they start would differ
+    expect_identical(manifest$config_ids, c("cfg_001", "cfg_002"))
+    expect_identical(manifest$config_cost,
+                     unname(CONFIG_COST_SECONDS[c("rf/none", "cubist/none")]))
+
     expect_identical(manifest$settings,
                      eval_settings(cv_folds = 3L, grid_size = 2L,
                                    bayesian_iter = 0L, prune = FALSE,

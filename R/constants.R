@@ -302,13 +302,15 @@ DISPATCH_POLL_SECONDS <- 0.1
 
 # Seconds one configuration took, by model and feature selection, from which
 # the configs axis starts the longest configurations first (dispatch_order(),
-# R/utils-parallel.R). Measured whole, preps and Bayesian candidates included,
-# on 0.12.0's coverage grid: 835 training rows, 1,701 predictors, snv_deriv1,
-# 10 folds, a grid of 10 and 15 Bayesian iterations, one configuration per
-# worker. lightgbm failed every configuration of that run, so its cells are
-# xgboost's, which its fits are within 20% of. Every configuration in a run
-# shares its rows and predictors, so only the order the table gives is used
-# and it is not scaled by them. A new model or selection adds its cells
+# R/utils-parallel.R) and monitor_evaluate() weights its ETA (config_costs(),
+# recorded in the manifest). Measured whole, preps and Bayesian candidates
+# included, on 0.12.0's coverage grid: 835 training rows, 1,701 predictors,
+# snv_deriv1, 10 folds, a grid of 10 and 15 Bayesian iterations, one
+# configuration per worker. lightgbm failed every configuration of that run,
+# so its cells are xgboost's, which its fits are within 20% of. Every
+# configuration in a run shares its rows and predictors, so only the cells
+# relative to one another are used (the order, and the ETA's weights), and
+# the table is not scaled by them. A new model or selection adds its cells
 # (test-utils-parallel.R holds the table to VALID_MODELS x
 # VALID_FEATURE_SELECTION).
 CONFIG_COST_SECONDS <- c(
@@ -363,9 +365,11 @@ SCORING_SCHEMA <- 6L
 # the axis and its backend (`plan`: "sequential" or "mirai", and `workers`,
 # the daemons connected as the run began), the training-data fingerprint and
 # its fields,
-# and the tuning settings. Bump it when a field the monitor reads changes; the
+# and the tuning settings. Schema 5 adds `config_cost`, each configuration's
+# cell of CONFIG_COST_SECONDS in `config_ids`' order, which weights the
+# monitor's ETA. Bump it when a field the monitor reads changes; the
 # monitor refuses a manifest of any other schema.
-EVAL_MANIFEST_SCHEMA <- 4L
+EVAL_MANIFEST_SCHEMA <- 5L
 
 # evaluate()'s smallest cross-validation assessment fold, in rows, below which
 # it warns (quality) that the cross-validated metrics rest on few rows. A

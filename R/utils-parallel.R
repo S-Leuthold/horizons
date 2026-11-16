@@ -100,14 +100,48 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 }
 
 ## ---------------------------------------------------------------------------
-## dispatch_order
+## The cost table: config_costs, dispatch_order
 ## ---------------------------------------------------------------------------
+
+#' The seconds each configuration is expected to take
+#'
+#' @description
+#' Each configuration's cell of `CONFIG_COST_SECONDS`, the seconds a
+#' configuration of its model and feature selection took on a measured grid.
+#' The configs axis starts the longest first by it ([dispatch_order()]), and
+#' `monitor_evaluate()` weights its ETA by it, from the run's manifest.
+#'
+#' @param configs The configurations, with `model` and `feature_selection`
+#'   columns.
+#' @return Numeric, one unnamed cost per row of `configs`.
+#' @keywords internal
+#' @noRd
+config_costs <- function(configs) {
+
+  keys <- paste(configs$model, configs$feature_selection, sep = "/")
+  cost <- unname(CONFIG_COST_SECONDS[keys])
+
+  ### configure() admits only the models and selections the table holds, so a
+  ### key it lacks is a cell missing from the table
+  if (anyNA(cost)) {
+
+    missing <- unique(keys[is.na(cost)])
+
+    abort_horizons(
+      "{.code CONFIG_COST_SECONDS} has no cost for {.val {missing}}.",
+      kind = "internal"
+    )
+
+  }
+
+  cost
+
+}
 
 #' The order the configs axis starts its configurations in
 #'
 #' @description
-#' Longest first: by `CONFIG_COST_SECONDS`, the seconds a configuration of
-#' each model and feature selection took, so the longest start first and the
+#' Longest first: by [config_costs()], so the longest start first and the
 #' short ones fill the daemons at the end. Ties keep grid order, so the order
 #' is deterministic. The results do not depend on it, apart from `cubist`'s,
 #' whose neighbour step no seed reaches, so which process fits which Cubist
@@ -123,24 +157,8 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 #' @noRd
 dispatch_order <- function(configs) {
 
-  keys <- paste(configs$model, configs$feature_selection, sep = "/")
-  cost <- CONFIG_COST_SECONDS[keys]
-
-  ### configure() admits only the models and selections the table holds, so a
-  ### key it lacks is a cell missing from the table
-  if (anyNA(cost)) {
-
-    missing <- unique(keys[is.na(cost)])
-
-    abort_horizons(
-      "{.code CONFIG_COST_SECONDS} has no cost for {.val {missing}}.",
-      kind = "internal"
-    )
-
-  }
-
   ### order() leaves ties in their original order, which is grid order
-  order(-cost)
+  order(-config_costs(configs))
 
 }
 
