@@ -109,9 +109,11 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 #' Longest first: by `CONFIG_COST_SECONDS`, the seconds a configuration of
 #' each model and feature selection took, so the longest start first and the
 #' short ones fill the daemons at the end. Ties keep grid order, so the order
-#' is deterministic. The results do not depend on it: each configuration's
-#' draws are seeded from the run's seed and its own name, and the rows are put
-#' back in configuration order before they are bound.
+#' is deterministic. The results do not depend on it, apart from `cubist`'s,
+#' whose neighbour step no seed reaches, so which process fits which Cubist
+#' configuration can move them (the reproducibility note in [configure()]):
+#' every other draw is seeded from the run's seed and its own name, and the
+#' rows are put back in configuration order before they are bound.
 #'
 #' @param configs The configurations to run, with `model` and
 #'   `feature_selection` columns.

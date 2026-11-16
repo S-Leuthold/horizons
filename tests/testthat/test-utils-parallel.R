@@ -89,7 +89,9 @@ describe("dispatch_order()", {
 
     keys <- as.vector(outer(VALID_MODELS, VALID_FEATURE_SELECTION, paste, sep = "/"))
 
-    expect_setequal(names(CONFIG_COST_SECONDS), keys)
+    ## Each cell once: a second copy of a cell would never be read, since a
+    ## lookup takes the first
+    expect_identical(sort(names(CONFIG_COST_SECONDS)), sort(keys))
     expect_true(all(is.finite(CONFIG_COST_SECONDS) & CONFIG_COST_SECONDS > 0))
 
   })
