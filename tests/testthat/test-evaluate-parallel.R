@@ -341,6 +341,7 @@ describe("evaluate() parallel worker footprint", {
       daemon_reports          = matching_daemons,
       check_parallel_backend  = function(...) TRUE,
       connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE,
       dispatch_configs        = function(...) rlang::abort("stop", class = "dispatched")
     )
 
@@ -652,6 +653,7 @@ describe("evaluate() - a checkpoint a configs-axis worker could not write", {
       daemon_reports          = matching_daemons,
       check_parallel_backend  = function(...) TRUE,
       connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE,
       evaluate_single_config  = function(config_row, ...) {
         row <- template
         row$config_id <- config_row$config_id
@@ -834,10 +836,10 @@ describe("evaluate() - configs axis", {
 ## The configs axis's dispatch on mirai
 ## =========================================================================
 ## What each task carries, the stop when no daemon is left, a daemon's death,
-## the cancellation on an interrupt, daemons without the dispatcher and what
-## crosses back from a task. The real-daemon tests run plsr, whose
-## cells of the cost table tie, so they start in grid order, all but the
-## test of the start order, which puts rf among them.
+## the cancellation on an interrupt or an error, daemons without the
+## dispatcher and what crosses back from a task. The real-daemon tests run
+## plsr, whose cells of the cost table tie, so they start in grid order, all
+## but the test of the start order, which puts rf among them.
 
 ## A plsr grid of `n` configurations, small enough to run in seconds
 plsr_object <- function(n) {
@@ -858,7 +860,8 @@ describe("evaluate() - the configs axis on mirai", {
       running_under_load_all  = function() FALSE,
       daemon_reports          = matching_daemons,
       check_parallel_backend  = function(...) TRUE,
-      connected_daemons       = function() 2L
+      connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE
     )
     local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
       sent <<- list(expr = .expr, args = .args, compute = .compute)
@@ -1071,16 +1074,57 @@ describe("evaluate() - the configs axis on mirai", {
 
     expect_identical(got, "interrupted")
 
-    just_after <- list.files(store)
-    expect_identical(just_after, "cfg_001.rds")
-
-    ## Longer than the second configuration's wait and fit
-    Sys.sleep(6)
-    expect_identical(list.files(store), just_after)
-
-    ## Its daemon is free again
+    ## Once the daemons are idle again, read the store: a configuration the
+    ## cancel missed has written its checkpoint before its task ends, so no
+    ## fixed sleep is needed
     with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
-    expect_identical(mirai::info()[["executing"]], 0L)
+    expect_identical(list.files(store), "cfg_001.rds")
+
+  })
+
+  it("cancels the configurations in flight when it stops on an error, so none writes a checkpoint after it returns (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    store <- file.path(dir, "checkpoints")
+
+    ## As the interrupt's test above, with the window's first wait raising an
+    ## error instead: the cancel is an on.exit(), so an error reaches it too
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("evaluate_single_config", envir = ns)
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        if (config_row$config_id != "cfg_001") Sys.sleep(3)
+        real(config_row, ...)
+      }, ns = "horizons")
+    })[], 30)
+
+    fired      <- FALSE
+    real_round <- await_round
+    local_mocked_bindings(
+      daemon_reports = matching_daemons,
+      await_round    = function(tasks, no_daemons) {
+        real_round(tasks, no_daemons)
+        if (!fired) {
+          fired <<- TRUE
+          rlang::abort("The window stopped.", class = "test_window_stop")
+        }
+      }
+    )
+
+    expect_error(
+      with_deadline(suppressWarnings(evaluate(plsr_object(4), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 60),
+      class = "test_window_stop"
+    )
+
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_identical(list.files(store), "cfg_001.rds")
 
   })
 
@@ -1114,6 +1158,29 @@ describe("evaluate() - the configs axis on mirai", {
 
     expect_identical(got$value$evaluation$parallelize_over, "configs")
     expect_identical(got$value$evaluation$results[row_cols], seq_result$evaluation$results[row_cols])
+
+  })
+
+  it("says nothing of the dispatcher on the resamples axis, where the folds' tasks are tune's (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2, dispatcher = FALSE)
+
+    got <- collect_warnings(with_deadline(
+      evaluate(plsr_object(2), seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "resamples",
+                                                                      verbose = FALSE)),
+      120
+    ), class = "horizons_warning_input")
+
+    ## On the daemons without the dispatcher, so the absence below is the
+    ## axis's
+    expect_false(daemons_dispatch())
+    expect_identical(got$value$evaluation$parallelize_over, "resamples")
+    expect_length(got$warnings, 0L)
+    expect_false(any(got$value$log$topic %in% "input"))
 
   })
 
@@ -1385,6 +1452,7 @@ describe("evaluate() - cross-mode checkpoint resume", {
       running_under_load_all = function() FALSE,
       check_parallel_backend = function(...) TRUE,
       connected_daemons      = function() if (spent) 0L else 2L,
+      daemons_dispatch       = function() TRUE,
       daemon_reports         = function(...) {
         spent <<- TRUE
         daemons_on()
