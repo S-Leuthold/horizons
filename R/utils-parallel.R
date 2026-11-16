@@ -409,14 +409,14 @@ task_value <- function(value, transport) {
 #' with no daemon stops the run here too ([abort_no_daemons()]).
 #'
 #' When the window exits by an error, an interrupt or a stop of its own, it
-#' cancels every task still in flight (`mirai::stop_mirai()`), so no
-#' configuration goes on to write a checkpoint after `evaluate()` has
-#' returned. It is an `on.exit()`, not a calling handler, so it runs on all
-#' three. A configuration inside a compiled fit stops only when that fit
-#' returns, and writes nothing, since the cancellation interrupts its next R
-#' step. Cancelling needs mirai's dispatcher: without it `stop_mirai()` does
-#' nothing and the task runs to its end, which `evaluate()` warns of
-#' ([daemons_dispatch()]).
+#' cancels every task still in flight (`mirai::stop_mirai()`), so a
+#' configuration still running stops before it writes its checkpoint. It is
+#' an `on.exit()`, not a calling handler, so it runs on all three. A
+#' configuration inside a compiled fit stops only when that fit returns, and
+#' writes nothing, since the interrupt is raised once R checks for it, long
+#' before the checkpoint. Cancelling needs mirai's dispatcher: without it
+#' `stop_mirai()` does nothing and the task runs to its end, which
+#' `evaluate()` warns of ([daemons_dispatch()]).
 #'
 #' Each task sends the worker function and its arguments, not a closure: the
 #' function's environment is horizons' namespace, which a daemon resolves to
@@ -453,7 +453,7 @@ dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
 
   ## On an error, an interrupt or a stop from the window itself; on its
   ## return nothing is in flight
-  on.exit(for (task in tasks) mirai::stop_mirai(task), add = TRUE)
+  on.exit(mirai::stop_mirai(tasks), add = TRUE)
 
   repeat {
 

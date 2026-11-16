@@ -605,6 +605,39 @@ describe("evaluate() - the parallel axis's setup", {
 
   })
 
+  it("says on the configs axis's parallel line that the daemons have no dispatcher, before any configuration runs", {
+
+    ## The dispatch is stopped at the window, as an interrupt would stop it:
+    ## the line is already on the console. Mocked, so this runs under
+    ## load_all() too.
+    line <- function(dispatcher) {
+
+      testthat::local_mocked_bindings(
+        running_under_load_all  = function() FALSE,
+        daemon_reports          = matching_daemons,
+        check_parallel_backend  = function(...) TRUE,
+        connected_daemons       = function() 2L,
+        daemons_dispatch        = function() dispatcher,
+        dispatch_configs        = function(...) rlang::abort("stop", class = "dispatched")
+      )
+
+      dir <- withr::local_tempdir()
+      out <- utils::capture.output(tryCatch(
+        suppressWarnings(evaluate(make_eval_object(n_configs = 4), seed = 42L,
+                                  control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                             output_dir = dir, verbose = TRUE))),
+        dispatched = function(e) NULL
+      ))
+
+      grep("Parallel:", out, value = TRUE, fixed = TRUE)
+
+    }
+
+    expect_identical(line(FALSE), "│  Parallel: over configs on mirai (2 daemons, no dispatcher)")
+    expect_identical(line(TRUE), "│  Parallel: over configs on mirai (2 daemons)")
+
+  })
+
   it("runs a debug run in this session, whatever allow_par says, without reading the daemons", {
 
     dir <- withr::local_tempdir()
@@ -1149,9 +1182,15 @@ describe("evaluate() - the configs axis on mirai", {
     ), class = "horizons_warning_input")
 
     expect_length(got$warnings, 1L)
-    expect_match(gsub("\\s+", " ", conditionMessage(got$warnings[[1]])),
-                 "set with `dispatcher = FALSE`, so `evaluate()` cannot start the longest configurations first",
+    msg <- gsub("\\s+", " ", conditionMessage(got$warnings[[1]]))
+    expect_match(msg, "set with `dispatcher = FALSE`, so `evaluate()` cannot start the longest configurations first",
                  fixed = TRUE)
+
+    ## The hint holds for a remote pool too: it names the setting, not a
+    ## call that would start local daemons
+    expect_match(msg, "mirai keeps its dispatcher unless `dispatcher = FALSE` is set; set the daemons again without it.",
+                 fixed = TRUE)
+    expect_no_match(msg, "mirai::daemons(n)", fixed = TRUE)
 
     rows <- got$value$log[got$value$log$topic %in% "input", ]
     expect_identical(nrow(rows), 1L)
