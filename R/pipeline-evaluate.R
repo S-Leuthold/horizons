@@ -1713,7 +1713,8 @@ checkpoint_path <- function(checkpoint_dir, config_id) {
 #'
 #' @description
 #' The one writer for what `evaluate()` puts in its `output_dir`: the
-#' manifest and each configuration's checkpoint. The file is written under a
+#' manifest, each configuration's checkpoint, and the files a run keeps in
+#' `tmp/` for its own use ([run_files_dir()]). The file is written under a
 #' name the store does not list and renamed into place, so a reader (the
 #' monitor polls while workers write) never sees half a file. A write that
 #' fails, or a rename that is refused, leaves no temporary file behind, and
