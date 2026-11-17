@@ -1073,6 +1073,11 @@ evaluate <- function(x,
     ## The daemons resolve the horizons namespace by NAME, which finds the
     ## INSTALLED library; check_parallel_workers() refused a session they
     ## could not match before anything ran.
+    ##
+    ## A daemon resolves a relative path against the directory it was started
+    ## in, not this session's, so the checkpoint directory it is sent is
+    ## absolute, as the payload's path is below. This session's own paths,
+    ## and its messages, keep the directory as given.
 
     shared_args <- list(
       data            = split$data,
@@ -1089,7 +1094,7 @@ evaluate <- function(x,
       outcome_range   = outcome_range,
       data_fp         = data_fp,
       settings        = settings,
-      checkpoint_dir  = checkpoint_dir,
+      checkpoint_dir  = normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE),
       keep_traces     = control$keep_traces,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )

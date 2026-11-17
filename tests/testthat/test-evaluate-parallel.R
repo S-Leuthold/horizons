@@ -1148,6 +1148,32 @@ describe("evaluate() - the configs axis on mirai", {
 
   })
 
+  it("gives the daemons absolute paths, so a relative output_dir reaches them after a setwd() (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## The daemons start in one directory and the run goes on from another,
+    ## its output_dir relative to it: each daemon reads the payload and
+    ## writes its checkpoint where this session's store is
+    launch <- withr::local_tempdir()
+    work   <- withr::local_tempdir()
+
+    withr::local_dir(launch)
+    local_test_daemons(2)
+    withr::local_dir(work)
+
+    ev <- with_deadline(suppressWarnings(evaluate(plsr_object(3), seed = 42L,
+                                                  control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                             output_dir = "out", verbose = FALSE))), 120)
+
+    expect_identical(ev$evaluation$results$status, rep("success", 3L))
+    expect_setequal(list.files(file.path(work, "out", "checkpoints")), sprintf("cfg_%03d.rds", 1:3))
+    expect_false(dir.exists(file.path(launch, "out")))
+
+  })
+
   it("starts the longest configurations first, by the cost table (installed build)", {
 
     skip_unless_slow_tier()
