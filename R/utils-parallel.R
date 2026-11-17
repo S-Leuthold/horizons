@@ -571,7 +571,8 @@ abort_task_ended <- function(value, config_id, results, output_dir = NULL, verb 
 #' Every configuration after it would fail the same way, so the window stops
 #' the run here, as systemic, with the rows so far, as it stops on a daemon's
 #' death ([abort_task_ended()]). The message says what the axis needs: each
-#' daemon reads the file at the path this session gives it.
+#' daemon reads the file at the path this session gives it, and no other run
+#' is started into the same `output_dir`, which would remove the file.
 #'
 #' @param path Character(1). The file the daemon was given.
 #' @param reason Character(1). What base R said when the daemon read it.
@@ -590,7 +591,7 @@ abort_payload_unread <- function(path, reason, config_id, results, output_dir = 
   abort_horizons(c(
     "The mirai daemon running configuration {.val {config_id}} could not read the configurations' data from {.path {path}}, so {.fn {verb}} cannot go on.",
     "x" = "{reason}",
-    "i" = "On the configs axis each daemon reads the configurations' data from {.arg output_dir}, at the path this session gives it, so daemons on another machine need {.arg output_dir} on a file system they share with it, at that path. {.code parallelize_over = \"resamples\"} runs without it.",
+    "i" = "On the configs axis each daemon reads the configurations' data from {.arg output_dir}, at the path this session gives it, so daemons on another machine need {.arg output_dir} on a file system they share with it, at that path. {.code parallelize_over = \"resamples\"} runs without it. One {.arg output_dir} serves one run at a time, and a run started into it removes an earlier run's file.",
     resume_hint(results, output_dir)
   ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 

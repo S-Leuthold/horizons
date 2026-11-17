@@ -289,6 +289,12 @@ describe("dispatch_configs()", {
                  fixed = TRUE)
     expect_match(msg, "/runs/out/tmp/payload-1a2b.rds", fixed = TRUE)
     expect_match(msg, "the file system is gone", fixed = TRUE)
+
+    ## Both ways the file goes: daemons that cannot reach output_dir, and
+    ## another run started into it
+    expect_match(msg, "daemons on another machine need `output_dir` on a file system they share with it", fixed = TRUE)
+    expect_match(msg, "One `output_dir` serves one run at a time, and a run started into it removes an earlier run's file.",
+                 fixed = TRUE)
     expect_identical(err$results$config_id, "cfg_001")
     expect_null(err$parent)
 
