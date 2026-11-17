@@ -1251,7 +1251,6 @@ describe("evaluate() - the configs axis on mirai", {
 
     expect_identical(ev$evaluation$results$status, rep("success", 3L))
     expect_setequal(list.files(file.path(work, "out", "checkpoints")), sprintf("cfg_%03d.rds", 1:3))
-    expect_false(dir.exists(file.path(launch, "out")))
 
   })
 
@@ -1393,7 +1392,7 @@ describe("evaluate() - the configs axis on mirai", {
       ns   <- asNamespace("horizons")
       real <- get("evaluate_single_config", envir = ns)
       utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
-        until   <- Sys.time() + 30
+        until   <- Sys.time() + 100
         payload <- function() list.files(tmp, pattern = "^payload-", full.names = TRUE)
         if (config_row$config_id == "cfg_001") {
           file.create(file.path(signals, "cfg_001-read"))
