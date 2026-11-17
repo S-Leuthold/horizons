@@ -1107,11 +1107,36 @@ evaluate <- function(x,
 
     rows_so_far <- function() results_so_far(in_config_order(finished$rows, configs$config_id))
 
-    ## A daemon that dies, or a pool left with none, stops the run in the
-    ## window, with the rows so far, which are checkpointed; a package missing
-    ## on a daemon comes back as the worker's error, and is systemic here.
+    ## The payload is written once, to a file of its own under output_dir,
+    ## which each configuration's daemon reads: a task carries only its
+    ## configuration's index and the file's path, so this session holds no
+    ## copy of the data while a configuration runs (mirai keeps each task's
+    ## message until the task is collected). The path is absolute, since a
+    ## daemon resolves a relative one against the directory it was started
+    ## in, and named by tempfile(), which no other call draws and which
+    ## leaves the random stream alone. The removal is registered before the
+    ## write, so the file goes however evaluate() exits; the window's own
+    ## exit handler, which cancels the tasks in flight, runs before it.
+    run_dir     <- run_files_dir(output_dir)
+    not_created <- create_output_dir(run_dir)
+
+    if (!is.null(not_created)) abort_output_write(run_dir, not_created, rows_so_far())
+
+    payload_path <- tempfile("payload-", tmpdir = normalizePath(run_dir, winslash = "/", mustWork = TRUE),
+                             fileext = ".rds")
+    on.exit(remove_run_file(payload_path), add = TRUE)
+
+    not_written <- write_output_file(shared_args, payload_path)
+
+    if (!is.null(not_written)) abort_output_write(payload_path, not_written, rows_so_far())
+
+    ## A daemon that dies, a pool left with none, or a daemon that cannot
+    ## read the payload stops the run in the window, with the rows so far,
+    ## which are checkpointed; a package missing on a daemon comes back as
+    ## the worker's error, and is systemic here.
     stop_on_worker_death(
-      dispatch_configs(shared_args, finished, rows_so_far, output_dir, call = rlang::current_env()),
+      dispatch_configs(pending_configs, payload_path, finished, rows_so_far, output_dir,
+                       call = rlang::current_env()),
       rows_so_far(), output_dir
     )
 
@@ -1730,6 +1755,60 @@ create_output_dir <- function(path) {
   if (length(reasons) == 0) reasons <- "the directory could not be created"
 
   paste(unique(reasons), collapse = "; ")
+
+}
+
+#' The directory of the files a run keeps in `output_dir` for its own use
+#'
+#' @description
+#' `<output_dir>/tmp/`, apart from the results (`checkpoints/` and
+#' `eval_manifest.rds`), so nothing that reads results lists what is in it:
+#' the configs axis's payload, for now.
+#'
+#' @param output_dir The run's `output_dir`.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+run_files_dir <- function(output_dir) {
+
+  file.path(output_dir, "tmp")
+
+}
+
+#' Remove a run file, and its directory when that is left empty
+#'
+#' @description
+#' Called as `evaluate()` exits, however it exits, so it raises nothing: a
+#' file already gone is left so, and on Windows a file a daemon still has
+#' open is not removed.
+#'
+#' @param path The file.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+remove_run_file <- function(path) {
+
+  unlink(path)
+  remove_empty_dir(dirname(path))
+
+}
+
+#' Remove a directory that holds nothing
+#'
+#' @param dir The directory. Anything that is not a directory, or a directory
+#'   holding a file, is left alone.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+remove_empty_dir <- function(dir) {
+
+  ### unlink() removes a directory only with recursive = TRUE, so it is
+  ### called only once the directory is found empty
+  if (dir.exists(dir) && length(list.files(dir, all.files = TRUE, no.. = TRUE)) == 0L) {
+    unlink(dir, recursive = TRUE)
+  }
+
+  invisible(NULL)
 
 }
 
@@ -3534,7 +3613,38 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #' @keywords internal
 #' @noRd
 
-evaluate_config_worker <- function(config_i, shared) {
+evaluate_config_worker <- function(config_i, payload_path) {
+
+  ## -------------------------------------------------------------------------
+  ## The payload, read from the file evaluate() wrote
+  ## -------------------------------------------------------------------------
+  ## With base R alone, before anything of horizons': this body travels from
+  ## the session, but every helper it calls is the daemon's, and a daemon on
+  ## another version, which the check below exists to catch, may lack one. A
+  ## file that cannot be read is said on what is returned, not raised, so the
+  ## window stops the run in the session, where the rows so far are. What
+  ## base R said is kept as write_output_file() keeps it: any warning before
+  ## the error, then the error.
+  said   <- character(0)
+  unread <- NULL
+
+  shared <- tryCatch(
+    withCallingHandlers(
+      readRDS(payload_path),
+      warning = function(w) {
+        said <<- c(said, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }
+    ),
+    error = function(e) {
+      unread <<- paste(unique(c(said, conditionMessage(e))), collapse = "; ")
+      NULL
+    }
+  )
+
+  if (!is.null(unread)) {
+    return(structure(list(path = payload_path, reason = unread), class = "horizons_payload_unread"))
+  }
 
   ## -------------------------------------------------------------------------
   ## The worker's horizons, then the cross-process contract

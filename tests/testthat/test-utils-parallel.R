@@ -247,7 +247,7 @@ describe("dispatch_configs()", {
     finished$rows <- list()
 
     err <- expect_error(
-      dispatch_configs(list(configs = configs), finished, function() dplyr::bind_rows(finished$rows)),
+      dispatch_configs(configs, "payload.rds", finished, function() dplyr::bind_rows(finished$rows)),
       class = "horizons_error_systemic"
     )
 

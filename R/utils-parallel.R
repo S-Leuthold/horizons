@@ -434,15 +434,14 @@ task_value <- function(value, transport) {
 #'   `finished$rows`.
 #' @keywords internal
 #' @noRd
-dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
+dispatch_configs <- function(configs, payload_path, finished, rows_so_far, output_dir = NULL,
                              call = rlang::caller_env()) {
 
-  configs   <- shared$configs
   n_configs <- nrow(configs)
   start     <- dispatch_order(configs)
 
   ### The task's call, quoted here: its names are the task's arguments
-  task_call <- quote(worker(config_i, shared))
+  task_call <- quote(worker(config_i, payload_path))
   tasks     <- list()
   next_i    <- 1L
   n_done    <- 0L
@@ -467,8 +466,9 @@ dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
       value        <- tasks[[key]]$data
       tasks[[key]] <- NULL
 
-      ### A miraiError is an error value too
-      if (mirai::is_error_value(value)) {
+      ### A miraiError is an error value too; a payload the daemon could not
+      ### read is neither, and stops the run as they do
+      if (mirai::is_error_value(value) || inherits(value, "horizons_payload_unread")) {
         if (is.null(ended)) ended <- list(value = value, config_id = configs$config_id[as.integer(key)])
         next
       }
@@ -479,6 +479,10 @@ dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
     }
 
     if (!is.null(ended)) {
+      if (inherits(ended$value, "horizons_payload_unread")) {
+        abort_payload_unread(ended$value$path, ended$value$reason, ended$config_id, rows_so_far(),
+                             output_dir, call = call)
+      }
       task_value(ended$value, function(value) {
         abort_task_ended(value, ended$config_id, rows_so_far(), output_dir, call = call)
       })
@@ -496,7 +500,7 @@ dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
 
       tasks[[as.character(i)]] <- mirai::mirai(
         task_call,
-        .args    = list(worker = evaluate_config_worker, config_i = i, shared = shared),
+        .args    = list(worker = evaluate_config_worker, config_i = i, payload_path = payload_path),
         .compute = NULL
       )
 
@@ -546,6 +550,40 @@ abort_task_ended <- function(value, config_id, results, output_dir = NULL, verb 
     } else {
       "Configuration {.val {config_id}}'s task ended in mirai's {.code errorValue} {code} rather than a result, so {.fn {verb}} cannot go on."
     },
+    resume_hint(results, output_dir)
+  ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
+
+}
+
+#' Stop the call because a daemon could not read the configurations' data
+#'
+#' @description
+#' On the configs axis each task reads the configurations' data from the file
+#' `evaluate()` wrote under `output_dir`, and a daemon that cannot read it
+#' returns what went wrong instead of a row ([evaluate_config_worker()]).
+#' Every configuration after it would fail the same way, so the window stops
+#' the run here, as systemic, with the rows so far, as it stops on a daemon's
+#' death ([abort_task_ended()]). The message says what the axis needs: each
+#' daemon reads the file at the path this session gives it.
+#'
+#' @param path Character(1). The file the daemon was given.
+#' @param reason Character(1). What base R said when the daemon read it.
+#' @param config_id Character(1). The configuration the task ran.
+#' @param results The rows finished so far, carried as `results`.
+#' @param output_dir The run's `output_dir`.
+#' @param verb Character(1). The verb that stops.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_payload_unread <- function(path, reason, config_id, results, output_dir = NULL, verb = "evaluate",
+                                 call = rlang::caller_env()) {
+
+  abort_horizons(c(
+    "The mirai daemon running configuration {.val {config_id}} could not read the configurations' data from {.path {path}}, so {.fn {verb}} cannot go on.",
+    "x" = "{reason}",
+    "i" = "On the configs axis each daemon reads the configurations' data from {.arg output_dir}, at the path this session gives it, so daemons on another machine need {.arg output_dir} on a file system they share with it, at that path. {.code parallelize_over = \"resamples\"} runs without it.",
     resume_hint(results, output_dir)
   ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 
