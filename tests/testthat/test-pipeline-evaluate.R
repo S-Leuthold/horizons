@@ -3193,6 +3193,61 @@ describe("evaluate() - the circuit breaker", {
 ## configuration. These mock the axis and the count; the two after them kill
 ## a real daemon.
 
+## An isolated fit's process that dies is its configuration's failure: the
+## row reads failed with the reason, and the run goes on, since no daemon
+## of the user's pool died (local_dying_fits(), helper-parallel.R).
+
+describe("evaluate() - an isolated fit's process that dies", {
+
+  it("fails its configuration with the reason, whatever fold it was, and the run goes on", {
+
+    skip_on_os("windows")
+
+    ## One grid fit of the cubist configuration dies: its other candidates
+    ## were scored on every fold, so the fold rule alone would keep it
+    local_dying_fits(function(i) i == 2L)
+
+    before <- connected_daemons()
+    ev     <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L))
+    res    <- ev$evaluation$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2],
+                 paste("^Grid search failed:", PROCESS_DIED, "a Cubist fit ended without returning its result"))
+    expect_identical(connected_daemons(), before)
+
+  })
+
+  it("fails its configuration when the process dies during the Bayesian search", {
+
+    skip_unless_slow_tier()
+    skip_on_os("windows")
+
+    ## Every fit once the search starts dies, so tune drops each candidate it
+    ## proposes
+    in_search <- FALSE
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      in_search <<- TRUE
+      on.exit(in_search <<- FALSE)
+      real_bayes(...)
+    }, .package = "tune")
+    local_dying_fits(function(i) in_search)
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$tuning$bayesian_iter <- 2L
+
+    res <- suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE))$evaluation$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2], paste("^Bayesian search failed:", PROCESS_DIED))
+
+  })
+
+})
+
 describe("evaluate() - a worker's death", {
 
   it("stops the run as systemic when the daemons fall across a configuration, with the rows finished so far", {

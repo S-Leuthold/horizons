@@ -105,6 +105,25 @@ processes_end <- function(pids, seconds = 5) {
   !any(vapply(pids, process_alive, logical(1)))
 }
 
+## Replace the isolated engines' fit with one whose process kills itself on
+## the calls `dies()` picks (it is given the call's number), so a test sees a
+## real death of an isolated fit's process, until the calling frame exits.
+## The other calls fit as the engine would.
+local_dying_fits <- function(dies, .env = parent.frame()) {
+
+  calls     <- 0L
+  real_fit  <- isolated_fit
+
+  testthat::local_mocked_bindings(isolated_fit = function(..., .isolated_fit, .isolated_engine) {
+    calls <<- calls + 1L
+    if (dies(calls)) {
+      run_isolated(quote(tools::pskill(Sys.getpid(), 9L)), what = paste0("a ", .isolated_engine, " fit"))
+    }
+    real_fit(..., .isolated_fit = .isolated_fit, .isolated_engine = .isolated_engine)
+  }, .package = "horizons", .env = .env)
+
+}
+
 ## Evaluate `expr` letting only warnings that match `keep` (a condition class
 ## or a message regex) propagate. The small fixtures trip rsample's
 ## stratification warnings, which are not the subject of any test here; this

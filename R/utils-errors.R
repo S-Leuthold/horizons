@@ -259,6 +259,14 @@ check_reserved_columns <- function(columns,
 #'     does not restart them from, or were stopped. The rows finished so far
 #'     travel as `results`, a table with no rows when none had finished
 #'     (`NULL` from `ensemble()`).}
+#'   \item{`horizons_error_process_died`}{(run) A process horizons started
+#'     for one piece of isolated work (`control_horizons(isolate = )`) ended
+#'     without returning its result: killed, most often by the system when
+#'     memory ran out. In [evaluate()] and [fit()] an isolated fit's process
+#'     that dies fails its configuration or member, whatever fold or stage it
+#'     was, with this class in the row's `class`, and the run goes on, since
+#'     no daemon of the user's died; in [select_training()] the draw's
+#'     process that dies stops the call.}
 #'   \item{`horizons_error_promoted_warnings`}{(run) A verb ended with
 #'     warnings under `options(warn = 2)`. Instead of turning the first warning
 #'     into an error that loses the result, the verb aborts with the finished

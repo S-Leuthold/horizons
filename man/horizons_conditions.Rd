@@ -91,6 +91,14 @@ daemons exited under \code{maxtasks}, \code{idletime} or \code{walltime}, which 
 does not restart them from, or were stopped. The rows finished so far
 travel as \code{results}, a table with no rows when none had finished
 (\code{NULL} from \code{ensemble()}).}
+\item{\code{horizons_error_process_died}}{(run) A process horizons started
+for one piece of isolated work (\code{control_horizons(isolate = )}) ended
+without returning its result: killed, most often by the system when
+memory ran out. In \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} an isolated fit's process
+that dies fails its configuration or member, whatever fold or stage it
+was, with this class in the row's \code{class}, and the run goes on, since
+no daemon of the user's died; in \code{\link[=select_training]{select_training()}} the draw's
+process that dies stops the call.}
 \item{\code{horizons_error_promoted_warnings}}{(run) A verb ended with
 warnings under \code{options(warn = 2)}. Instead of turning the first warning
 into an error that loses the result, the verb aborts with the finished

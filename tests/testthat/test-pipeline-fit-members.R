@@ -621,6 +621,44 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("fails the member whose isolated final fit's process dies, outside tune, and returns the other", {
+
+    ## Real fits of the members
+    skip_unless_slow_tier()
+    skip_on_os("windows")
+
+    obj <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 0L
+
+    ## The cubist member's process dies on its final fit, the one fit made
+    ## outside tune's calls
+    in_tune     <- 0L
+    real_grid   <- tune::tune_grid
+    real_resamp <- tune::fit_resamples
+    inside <- function(f) function(...) {
+      in_tune <<- in_tune + 1L
+      on.exit(in_tune <<- in_tune - 1L)
+      f(...)
+    }
+    local_mocked_bindings(tune_grid = inside(real_grid), fit_resamples = inside(real_resamp),
+                          .package = "tune")
+    local_dying_fits(function(i) in_tune == 0L)
+
+    before <- connected_daemons()
+    got    <- collect_warnings(
+      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE),
+      "."
+    )
+    res <- got$value$models$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2], paste("^Final model fit failed:", PROCESS_DIED, "a Cubist fit"))
+    expect_identical(names(got$value$models$workflows), res$config_id[1])
+    expect_identical(connected_daemons(), before)
+
+  })
+
   it("stops with the members so far when a daemon dies during a warm-start Bayesian search, which tune cuts short quietly", {
 
     ## Real fits of the members, several seconds even without the search

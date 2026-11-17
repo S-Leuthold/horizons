@@ -434,6 +434,11 @@ tune_warmstart_bayes <- function(workflow,
 #' on candidates left out ([incomplete_note()]), and under `debug` the first
 #' stops the call.
 #'
+#' An isolated fit whose process dies ([run_isolated()]) fails the unit
+#' with `horizons_error_process_died`, whether tune kept it as a note or
+#' dropped the candidate and only printed it, so the search is not fallen
+#' back from.
+#'
 #' A daemon that dies during an iteration on the resamples axis does not
 #' reach here at all: tune prints "Optimization stopped prematurely" and
 #' returns the iterations so far. The verb reads the death from the
@@ -475,12 +480,18 @@ bayes_search <- function(workflow,
 
   stopped     <- NULL
   all_failed  <- NULL
+  died        <- NULL
   interrupted <- FALSE
   n_dropped   <- 0L
   search_cap  <- paste0(toupper(substr(search, 1, 1)), substring(search, 2))
 
   read_log <- function(m) {
     text <- cli::ansi_strip(conditionMessage(m))
+    ### An isolated fit's process that died, which tune prints once however
+    ### many candidates it drops for it
+    if (is.null(died) && grepl(PROCESS_DIED, text, fixed = TRUE)) {
+      died <<- sub(paste0("^.*?(", PROCESS_DIED, ")"), "\\1", text, perl = TRUE)
+    }
     if (grepl("All models failed for:", text, fixed = TRUE)) {
       n_dropped <<- n_dropped + 1L
       if (is.null(all_failed)) {
@@ -524,10 +535,12 @@ bayes_search <- function(workflow,
 
   if (interrupted) rlang::interrupt()
 
-  ## A kind no unit contains, or a package missing on a worker, is raised
-  ## again for the unit, not fallen back from
+  ## A kind no unit contains, a package missing on a worker, or an isolated
+  ## fit's process that died, is raised again for the unit, not fallen back
+  ## from
   if (!is.null(stopped) &&
-      (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED) || missing_package_signal(stopped))) {
+      (debug || rlang::cnd_inherits(stopped, c(NEVER_CONTAINED, "horizons_error_process_died")) ||
+         missing_package_signal(stopped))) {
 
     stop(stopped)
 
@@ -544,6 +557,11 @@ bayes_search <- function(workflow,
     )
 
   }
+
+  ## An isolated fit's process that died fails the unit, as it does in the
+  ## grid (check_tune_result()), even where tune dropped every candidate it
+  ## killed and kept no note of it
+  if (!is.null(died)) abort_process_died_in_tune(died)
 
   if (!is.null(bayes_results)) check_tune_result(bayes_results, failure = NULL, debug = debug)
 
