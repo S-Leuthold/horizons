@@ -50,7 +50,8 @@
 #' With `control_horizons(output_dir = )`, each config's result is
 #'   written to `<output_dir>/checkpoints/<config_id>.rds` as it finishes, and
 #'   a rerun into the same directory resumes from those files. Required when
-#'   configs are dispatched to workers. A resumed row must have been scored on
+#'   configs are dispatched to workers, whose daemons also read the configs'
+#'   data from it (see "Parallelism"). A resumed row must have been scored on
 #'   this run's training data (the outcome, the sample ids, which columns hold
 #'   the `id`, `outcome` and `predictor` roles, and the outcome and predictor
 #'   values) and tuned with this run's settings
@@ -65,8 +66,13 @@
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
-#'   `output_dir` per outcome. A write to `output_dir` that fails (the
-#'   directory, the manifest or a checkpoint) stops the run with
+#'   `output_dir` per outcome, and one run in it at a time: on the configs
+#'   axis a run keeps the configs' data in `<output_dir>/tmp/` while it runs
+#'   and removes them as it exits, and a run removes any an earlier one left
+#'   there (one killed outright leaves its own, and on Windows so can one
+#'   stopped while a daemon was still reading them). A write to
+#'   `output_dir` that fails (the directory, the manifest, a checkpoint or
+#'   the configs' data) stops the run with
 #'   `horizons_error_systemic`, naming the directory, the rows finished so
 #'   far as its `results`. On the configs axis a checkpoint a worker could
 #'   not write is known only once every configuration has run, so the
@@ -99,8 +105,14 @@
 #'   of the seconds each model and feature selection took on a measured
 #'   grid, so the short ones fill the daemons at the end; the rows come back
 #'   in configuration order whatever order they finish in. At most one
-#'   config per connected daemon is in flight, so this session holds one
-#'   config's payload per daemon. The mode for a large config grid on a
+#'   config per connected daemon is in flight. The configs' data are written
+#'   once, to a file in `<output_dir>/tmp/`, which each config's daemon
+#'   reads, so this session holds no copy of a running config's data; the
+#'   file is removed when `evaluate()` returns or stops. The daemons must
+#'   reach `output_dir` at the path this session gives them (on another
+#'   machine, a file system shared at that path), and a daemon that cannot
+#'   read the file stops the run with `horizons_error_systemic`, the rows
+#'   finished so far as its `results`. The mode for a large config grid on a
 #'   many-core machine.
 #' * `"resamples"`: configs run sequentially; inside each, tune runs the CV
 #'   folds on the daemons. Useful width is capped at `cv_folds`. The mode
@@ -185,7 +197,8 @@
 #' unless `dispatcher = FALSE` is set. On daemons set that way the configs
 #' axis runs as asked, but each configuration goes to the next daemon in
 #' turn as it is sent, free or not, and those running when the run stops go
-#' on to their end. `evaluate()` warns of it once, with class
+#' on to their end, while those queued behind them end as they start, since
+#' the configs' data are gone. `evaluate()` warns of it once, with class
 #' `horizons_warning_input`; the warning is also a row of the object's
 #' `log`, and under `verbose` the progress tree's parallel line says "no
 #' dispatcher" before any configuration runs, so a run that is stopped
@@ -1047,8 +1060,8 @@ evaluate <- function(x,
     ## -------------------------------------------------------------------
 
     ## The daemons are the user's: evaluate() neither sets nor resets them.
-    ## mirai has no payload limit; the payload tests in
-    ## test-evaluate-parallel.R are the guard on its size.
+    ## A task carries the payload's path, and the file is the payload; the
+    ## tests of what a task carries in test-evaluate-parallel.R guard both.
 
     if (verbose) {
 
@@ -1066,14 +1079,15 @@ evaluate <- function(x,
     ## Filter to pending configs only
     pending_configs <- configs[configs$config_id %in% pending_ids, ]
 
-    ## Assemble everything a worker needs into one value. Two serialization
+    ## Assemble everything a worker needs into one value, the payload, which
+    ## is written to a file below and read by each task. Two serialization
     ## traps are avoided here; R/utils-resamples.R's header has the mechanism
     ## and the measurements.
     ##
     ## Do not inline the worker back into an anonymous function. A closure
     ## defined in this frame is serialized together with it, so every local —
-    ## `split` and `cv_fold_obj` included — would ship to every worker no matter
-    ## what is passed explicitly.
+    ## `split` and `cv_fold_obj` included — would ship with every task no
+    ## matter what is passed explicitly.
 
     ## The daemons resolve the horizons namespace by NAME, which finds the
     ## INSTALLED library; check_parallel_workers() refused a session they
@@ -3620,16 +3634,27 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'
 #' Because this function lives in the package namespace, its environment is
 #' serialized as a reference to the namespace, which the daemon resolves by
-#' name, so the payload is `shared` and the function's own code.
+#' name, so a task carries the function's own code, the configuration's index
+#' and the payload's path, and none of the data.
 #'
 #' Resolving by name has one cost, and it is the reason `evaluate()` refuses to
 #' dispatch under `pkgload`: the worker loads the **installed** horizons, not the
 #' source tree. A compatible-but-stale install would run old helper code behind a
 #' new worker body, silently, and the worker computes every metric.
 #'
+#' The payload, `shared`, is the file at `payload_path`, which `evaluate()`
+#' writes once for every task. The worker reads it first, with base R alone:
+#' the helpers this body calls are the daemon's, and a daemon on another
+#' version, which the version check exists to catch, may lack one. A file it
+#' cannot read is said on what it returns, not raised, so the window stops
+#' the run in the session, where the rows finished so far are
+#' ([abort_payload_unread()]). Then the version is checked, then the
+#' payload's keys.
+#'
 #' @param config_i Integer row index into `shared$configs`. Named to avoid
 #'   colliding with `shared$resample_idx`.
-#' @param shared List of worker inputs assembled by `evaluate()`, whose keys are
+#' @param payload_path Character(1). The absolute path of the file holding
+#'   `shared`, the list of worker inputs assembled by `evaluate()`, whose keys are
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
@@ -3645,7 +3670,10 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   records still on it for the parent to lift, any warning raised in the
 #'   worker's own steps before the unit rendered in its `warnings` with the
 #'   unit's, and, when its checkpoint could not be written, why, as the
-#'   attribute `"checkpoint_failed"`.
+#'   attribute `"checkpoint_failed"`. When the file at `payload_path` cannot
+#'   be read, instead, a list of class `horizons_payload_unread` holding the
+#'   `path` and the `reason` (what base R said, any warning before the
+#'   error).
 #' @keywords internal
 #' @noRd
 

@@ -247,7 +247,8 @@ check_reserved_columns <- function(columns,
 #'     (`horizons_error_no_daemons`, below), or [evaluate()] could not write to its
 #'     `output_dir` (on the configs axis a checkpoint a daemon could not
 #'     write is a `skipped` warning instead, since every configuration has
-#'     run by then). The rows finished so far travel
+#'     run by then), or on the configs axis a daemon could not read the
+#'     configurations' data from its `output_dir`. The rows finished so far travel
 #'     as `results`; `NULL` from `ensemble()`, which has none before its
 #'     meta-learner is built.}
 #'   \item{`horizons_error_no_daemons`}{(run, and `horizons_error_systemic`)
