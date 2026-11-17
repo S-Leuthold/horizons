@@ -21,6 +21,7 @@ evaluate_single_config(
   outcome_range = DEFAULT_OUTCOME_RANGE,
   debug = FALSE,
   keep_traces = FALSE,
+  isolate = TRUE,
   outside_warnings = character(0)
 )
 }
@@ -88,6 +89,10 @@ failure is not fallen back from. Warnings are still recorded.}
 
 \item{keep_traces}{Logical. Keep a failure's backtrace, as text, in the
 row's \code{trace}.}
+
+\item{isolate}{Logical. Fit a model whose engine \code{MODEL_SPECS} marks
+\code{isolate} through its isolated twin, each fit in a process of its own
+(\code{\link[=model_engine]{model_engine()}}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
 
 \item{outside_warnings}{Character. Warnings the caller caught outside the
 unit before it ran, as \code{condition_summary()} lines: the configs-axis

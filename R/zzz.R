@@ -51,6 +51,10 @@ utils::globalVariables(c(".metric", ".estimate"))
   ## The plsr model's engine, which horizons provides (R/pls-engine.R)
   register_pls_engine()
 
+  ## The isolated twins of the engines MODEL_SPECS marks, copied from the
+  ## registrations the packages above made (R/isolated-engines.R)
+  register_isolated_engines()
+
   ## ---------------------------------------------------------------------------
   ## Trust the user - no automatic thread control
   ## ---------------------------------------------------------------------------

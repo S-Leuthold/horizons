@@ -604,8 +604,11 @@ describe("fit() - each member is one unit", {
       real_resamples(...)
     }, .package = "tune")
 
+    ## Fitted in this session, where the mock is: an isolated fit's process
+    ## would fit with the real engine
     got <- collect_warnings(
-      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE),
+      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+          control = control_horizons(isolate = FALSE)),
       "."
     )
     res <- got$value$models$results
@@ -827,9 +830,9 @@ describe("fit() - the members' packages", {
     ## cubist's engine cannot be loaded where its member is fitted, though
     ## the door found it in this session
     real_spec <- define_model_spec
-    local_mocked_bindings(define_model_spec = function(model) {
+    local_mocked_bindings(define_model_spec = function(model, ...) {
       if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
-      real_spec(model)
+      real_spec(model, ...)
     })
 
     err <- expect_error(

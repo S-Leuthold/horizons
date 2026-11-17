@@ -17,11 +17,17 @@ VALID_MODELS <- c(
   "mars"
 )
 
-# Model specifications lookup — maps short names to tidymodels constructors
-# Used by evaluate() to instantiate parsnip model specs
+# Model specifications lookup: each short name's parsnip model (`fn`) and
+# engine. `isolate = TRUE` marks an engine that carries state from one fit to
+# the next in its process, which none of its arguments resets: each of its
+# fits then runs in a process of its own, through the engine's isolated twin
+# (model_engine(), register_isolated_engines(), R/isolated-engines.R), unless
+# control_horizons(isolate = FALSE). Cubist's C code keeps its generator's
+# stream behind the neighbour step's distance and leaks two (p + 2)^2
+# matrices a fit (R/isolated-engines.R).
 MODEL_SPECS <- list(
   rf          = list(fn = "rand_forest",  engine = "ranger"),
-  cubist      = list(fn = "cubist_rules", engine = "Cubist"),
+  cubist      = list(fn = "cubist_rules", engine = "Cubist", isolate = TRUE),
   xgboost     = list(fn = "boost_tree",   engine = "xgboost"),
   plsr        = list(fn = "pls",          engine = "pls"),
   elastic_net = list(fn = "linear_reg",   engine = "glmnet"),
@@ -291,6 +297,7 @@ SHARED_ARG_NAMES <- c(
   "settings",
   "checkpoint_dir",
   "keep_traces",
+  "isolate",
   "pkg_version"
 )
 

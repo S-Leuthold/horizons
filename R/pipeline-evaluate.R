@@ -547,6 +547,10 @@ evaluate <- function(x,
 
   }
 
+  ## Fits a model's engine would otherwise carry state across run in this
+  ## session when isolation is turned off, which the log notes
+  log_isolation_off(collector, configs$model, control$isolate)
+
   if (axis$axis != "sequential") {
 
     unpin_threads <- pin_parent_threads()
@@ -814,6 +818,10 @@ evaluate <- function(x,
 
     }
 
+    iso_line <- isolation_tree_line(configs$model, control$isolate)
+
+    if (!is.null(iso_line)) cat(paste0("\u2502  ", iso_line, "\n"))
+
     cat("\u2502\n")
 
   }
@@ -948,7 +956,8 @@ evaluate <- function(x,
         pca_threshold   = recipe_cfg$pca_threshold,
         outcome_range   = outcome_range,
         debug           = debug,
-        keep_traces     = control$keep_traces
+        keep_traces     = control$keep_traces,
+        isolate         = control$isolate
       ), results_so_far(results_list), output_dir, daemons = axis$tune_allow_par)
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -1115,6 +1124,7 @@ evaluate <- function(x,
       settings        = settings,
       checkpoint_dir  = normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE),
       keep_traces     = control$keep_traces,
+      isolate         = control$isolate,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
 
@@ -3668,7 +3678,7 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
-#'   `keep_traces` and `pkg_version`. There is no `allow_par`: on
+#'   `keep_traces`, `isolate` and `pkg_version`. There is no `allow_par`: on
 #'   the configs axis tune always runs sequentially inside the worker. There
 #'   is no `debug` either, since a debug run never dispatches.
 #'
@@ -3810,6 +3820,7 @@ evaluate_config_worker <- function(config_i, payload_path) {
     pca_threshold    = shared$pca_threshold,
     outcome_range    = shared$outcome_range,
     keep_traces      = shared$keep_traces,
+    isolate          = shared$isolate,
     outside_warnings = outside
   )
 

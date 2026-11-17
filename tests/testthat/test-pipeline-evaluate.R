@@ -431,6 +431,41 @@ describe("evaluate() - its control", {
 
   })
 
+  it("says in the tree which models fit in a process of their own, and with isolation off says so and notes it", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+    seen     <- list()
+
+    local_mocked_bindings(evaluate_single_config = function(config_row, ..., isolate) {
+      seen[[config_row$config_id]] <<- isolate
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    run <- function(...) {
+      out <- utils::capture.output(ev <- suppressWarnings(evaluate(
+        make_eval_object(n = 60, n_configs = 2), seed = 42L,
+        control = control_horizons(verbose = TRUE, ...)
+      )))
+      list(line = grep("Isolated fits:", out, value = TRUE, fixed = TRUE), ev = ev)
+    }
+
+    on <- run()
+    expect_identical(on$line, "│  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)")
+    expect_false(any(on$ev$log$type == "note" & grepl("isolate = FALSE", on$ev$log$message, fixed = TRUE)))
+    expect_true(on$ev$evaluation$control$isolate)
+    expect_identical(unlist(seen), c(cfg_001 = TRUE, cfg_002 = TRUE))
+
+    off <- run(isolate = FALSE)
+    note <- off$ev$log[off$ev$log$type == "note" & grepl("isolate = FALSE", off$ev$log$message, fixed = TRUE), ]
+    expect_identical(off$line, "│  Isolated fits: off, as asked; cubist fitted in this session")
+    expect_identical(nrow(note), 1L)
+    expect_identical(note$ids, list("cubist"))
+    expect_false(off$ev$evaluation$control$isolate)
+    expect_identical(unlist(seen), c(cfg_001 = FALSE, cfg_002 = FALSE))
+
+  })
+
   it("refuses a control field it does not use, before anything runs", {
 
     local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
@@ -3436,9 +3471,9 @@ describe("evaluate() - a package missing where a configuration ran", {
 
     ## cubist's engine cannot be loaded where its configuration runs, though
     ## the door found it in this session
-    local_mocked_bindings(define_model_spec = function(model) {
+    local_mocked_bindings(define_model_spec = function(model, ...) {
       if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
-      real_spec(model)
+      real_spec(model, ...)
     })
 
     err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L)),

@@ -63,6 +63,7 @@ worker_payload <- function() {
                                                outcome_range = c(-Inf, Inf)),
     checkpoint_dir  = NULL,
     keep_traces     = FALSE,
+    isolate         = TRUE,
     pkg_version     = as.character(utils::packageVersion("horizons"))
   )
 
@@ -160,14 +161,14 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("carries the recipe settings, the outcome range and keep_traces in the payload and hands them to the config (#62, #76)", {
+  it("carries the recipe settings, the outcome range, keep_traces and isolate in the payload and hands them to the config (#62, #76)", {
 
     ## Run in-process: the worker body is an ordinary function, and what is
     ## under test is that it forwards shared$sg_window,
     ## shared$pca_threshold, shared$outcome_range and shared$keep_traces,
     ## not the dispatch. evaluate_single_config() is replaced with a
     ## recorder, so nothing is tuned.
-    expect_true(all(c("sg_window", "pca_threshold", "outcome_range", "keep_traces") %in%
+    expect_true(all(c("sg_window", "pca_threshold", "outcome_range", "keep_traces", "isolate") %in%
                       horizons:::SHARED_ARG_NAMES))
 
     ## A debug run never dispatches, so debug is never sent
@@ -175,12 +176,13 @@ describe("evaluate() parallel worker footprint", {
 
     shared <- worker_payload()
     shared$keep_traces <- TRUE
+    shared$isolate     <- FALSE
 
     seen <- NULL
 
     testthat::local_mocked_bindings(
       evaluate_single_config = function(...) {
-        seen <<- list(...)[c("sg_window", "pca_threshold", "outcome_range", "keep_traces")]
+        seen <<- list(...)[c("sg_window", "pca_threshold", "outcome_range", "keep_traces", "isolate")]
         tibble::tibble(config_id = "cfg_001", status = "failed")
       },
       .package = "horizons"
@@ -190,7 +192,7 @@ describe("evaluate() parallel worker footprint", {
 
     ## The outcome range rides the same payload (#76)
     expect_identical(seen, list(sg_window = 13L, pca_threshold = 0.9,
-                                outcome_range = c(-Inf, Inf), keep_traces = TRUE))
+                                outcome_range = c(-Inf, Inf), keep_traces = TRUE, isolate = FALSE))
 
   })
 

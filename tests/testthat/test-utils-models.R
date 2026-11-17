@@ -14,9 +14,10 @@ describe("define_model_spec()", {
 
   it("returns a regression model_spec with the correct engine and tune() placeholders for each valid model", {
 
+    ## cubist's fits are isolated (MODEL_SPECS), through its engine's twin
     expected_engines <- list(
       rf          = "ranger",
-      cubist      = "Cubist",
+      cubist      = "Cubist_isolated",
       xgboost     = "xgboost",
       plsr        = "pls",
       elastic_net = "glmnet",
@@ -35,6 +36,22 @@ describe("define_model_spec()", {
 
       has_tune <- any(vapply(spec$args, is_tune_arg, logical(1)))
       expect_true(has_tune, info = paste("Model", model, "should have tune() params"))
+
+    }
+
+  })
+
+  it("takes each model's own engine under isolate = FALSE, and changes nothing else", {
+
+    for (model in VALID_MODELS) {
+
+      off <- define_model_spec(model, isolate = FALSE)
+      on  <- define_model_spec(model)
+
+      expect_identical(off$engine, MODEL_SPECS[[model]]$engine, label = model)
+      expect_identical(names(off$args), names(on$args), label = model)
+      expect_identical(lapply(off$eng_args, rlang::quo_get_expr), lapply(on$eng_args, rlang::quo_get_expr),
+                       label = model)
 
     }
 

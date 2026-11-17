@@ -67,6 +67,9 @@
 #'   are still recorded.
 #' @param keep_traces Logical. Keep a failure's backtrace, as text, in the
 #'   member's `trace`.
+#' @param isolate Logical. Fit a model whose engine `MODEL_SPECS` marks
+#'   `isolate` through its isolated twin, each fit in a process of its own
+#'   ([model_engine()]); `control_horizons(isolate = )`. Default `TRUE`.
 #'
 #' @return List with fields: config_id, status, degraded (`NA` when the
 #'   check could not run), degraded_reason, fitted_workflow, best_params,
@@ -107,7 +110,8 @@ fit_single_config <- function(config_row,
                               min_ad_rows          = N_AD_TRAIN_MIN,
                               min_degradation_rows = DEGRADATION_MIN_N,
                               debug                = FALSE,
-                              keep_traces          = FALSE) {
+                              keep_traces          = FALSE,
+                              isolate              = TRUE) {
 
   start_time <- Sys.time()
 
@@ -172,7 +176,7 @@ fit_single_config <- function(config_row,
                                                sg_window     = sg_window,
                                                pca_threshold = pca_threshold))
 
-    model_spec <- unit_step("model_spec", define_model_spec(config_row$model))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate))
 
     wflow <- unit_step("workflow", workflows::workflow() |>
                          workflows::add_recipe(recipe) |>

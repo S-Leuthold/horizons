@@ -92,6 +92,7 @@ Collate:
     'utils-clustering.R'
     'utils-models.R'
     'pls-engine.R'
+    'isolated-engines.R'
     'utils-recipes.R'
     'utils-rng.R'
     'utils-resamples.R'

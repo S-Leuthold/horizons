@@ -17,6 +17,7 @@ control_horizons(
   min_calib_rows = NULL,
   min_ad_rows = NULL,
   min_degradation_rows = NULL,
+  isolate = NULL,
   min_resemblance_rows = NULL
 )
 }
@@ -76,6 +77,15 @@ flagged out of domain: 3\% at the default, 10\% at 9.}
 rows \code{\link[=fit]{fit()}}'s degradation check bootstraps from. Default 10. Below the
 default the bootstrap interval widens and a healthy fit is flagged more
 often.}
+
+\item{isolate}{\code{logical(1)}. Run work that would otherwise depend on what
+ran before it in the session in a process started for it alone, which
+ends when the work returns: each fit of a model whose engine carries
+state from one fit to the next (\code{cubist}), in \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}},
+wherever the fit runs, and \code{\link[=select_training]{select_training()}}'s draw, so the session
+never holds the library. \code{FALSE} runs both in the process that calls
+them, and the run says so. Default \code{getOption("horizons.isolate", TRUE)}.
+\code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=select_training]{select_training()}}.}
 
 \item{min_resemblance_rows}{A whole number of at least 2. The fewest library
 rows \code{\link[=select_training]{select_training()}}'s resemblance check takes its reference

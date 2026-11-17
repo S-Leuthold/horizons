@@ -478,6 +478,10 @@ fit <- function(x,
 
   check_config_packages(member_configs, "fit")
 
+  ## Fits a model's engine would otherwise carry state across run in this
+  ## session when isolation is turned off, which the log notes
+  log_isolation_off(collector, member_configs$model, control$isolate)
+
   ## tune's tasks on the daemons run horizons' recipe steps and the PLS
   ## engine, and fit the members' engines, so every daemon must run this
   ## session's horizons and load the members' packages: checked before
@@ -787,6 +791,10 @@ fit <- function(x,
 
     }
 
+    iso_line <- isolation_tree_line(member_configs$model, control$isolate)
+
+    if (!is.null(iso_line)) cat(paste0("\u2502  ", iso_line, "\n"))
+
     cat("\u2502\n")
 
   }
@@ -855,7 +863,8 @@ fit <- function(x,
       min_ad_rows          = control$min_ad_rows,
       min_degradation_rows = control$min_degradation_rows,
       debug                = debug,
-      keep_traces          = control$keep_traces
+      keep_traces          = control$keep_traces,
+      isolate              = control$isolate
     ), member_results(results_list), verb = "fit", daemons = allow_par)
 
     results_list[[i]] <- config_result
