@@ -1009,6 +1009,65 @@ describe("evaluate() - the configs axis on mirai", {
 
   })
 
+  it("removes the payloads an earlier run left in output_dir once its checkpoint gates pass, and nothing of the user's", {
+
+    ## Mocked as the tests above; what tmp/ holds is read as the task is
+    ## sent, by when the manifest is written and the payload with it
+    template <- allow_par_run()$result$evaluation$results[1, ]
+    seen     <- NULL
+
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      daemon_reports          = matching_daemons,
+      check_parallel_backend  = function(...) TRUE,
+      connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE
+    )
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      seen <<- list(files = list.files(dirname(.args$payload_path)), own = basename(.args$payload_path))
+      rlang::abort("stop", class = "dispatched")
+    }, .package = "mirai")
+
+    run <- function(dir) {
+      suppressWarnings(evaluate(make_eval_object(n_configs = 4), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                           output_dir = dir, verbose = FALSE)))
+    }
+
+    ## An earlier run's payload and a cut-off write of one, and a file of
+    ## the user's
+    left <- c("payload-old.rds", "file1.rds.tmp", "notes.txt")
+    leave <- function(dir) {
+      dir.create(file.path(dir, "tmp"))
+      for (f in left) writeLines("left", file.path(dir, "tmp", f))
+      file.path(dir, "tmp")
+    }
+
+    dir <- withr::local_tempdir()
+    tmp <- leave(dir)
+
+    tryCatch(run(dir), dispatched = function(e) NULL)
+
+    expect_setequal(seen$files, c(seen$own, "notes.txt"))
+    expect_identical(list.files(tmp), "notes.txt")
+
+    ## A run refused at the gates, a row scored on other data in the store,
+    ## owns nothing and removes nothing
+    dir <- withr::local_tempdir()
+    tmp <- leave(dir)
+
+    row <- template
+    row$config_id              <- "cfg_001"
+    row$data_fields[[1]]$ids   <- "0000deadbeef"
+    dir.create(file.path(dir, "checkpoints"))
+    saveRDS(row, file.path(dir, "checkpoints", "cfg_001.rds"))
+
+    err <- expect_error(run(dir), class = "horizons_error_input")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "different training data", fixed = TRUE)
+    expect_setequal(list.files(tmp), left)
+
+  })
+
   it("stops as systemic before any task is sent when the payload cannot be written, with the rows resumed", {
 
     ## Two configurations checkpointed by a sequential run stopped at the

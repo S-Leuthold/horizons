@@ -851,6 +851,11 @@ evaluate <- function(x,
                          results_so_far(unname(checkpoint_results)))
     }
 
+    ## The call that writes the manifest owns output_dir, so, its checkpoint
+    ## gates passed, it removes the run files an earlier call left and this
+    ## one cannot use. Its own payload is written later, in Step 8.
+    clear_run_files(output_dir)
+
   }
 
   ## -----------------------------------------------------------------------
@@ -1785,7 +1790,8 @@ run_files_dir <- function(output_dir) {
 #' @description
 #' Called as `evaluate()` exits, however it exits, so it raises nothing: a
 #' file already gone is left so, and on Windows a file a daemon still has
-#' open is not removed.
+#' open is not removed, and stays until the next call into `output_dir`
+#' removes it ([clear_run_files()]).
 #'
 #' @param path The file.
 #' @return `NULL`, invisibly.
@@ -1795,6 +1801,31 @@ remove_run_file <- function(path) {
 
   unlink(path)
   remove_empty_dir(dirname(path))
+
+}
+
+#' Remove the run files an earlier call left in `output_dir`
+#'
+#' @description
+#' The call that writes the manifest owns `output_dir`, so one directory
+#' serves one run at a time. Once that call's checkpoint gates have passed,
+#' it removes what an earlier call left in `tmp/` and it cannot use: a
+#' payload, which belongs to the call that wrote it, and the writer's
+#' temporary file from a write that was cut off. A call removes its own
+#' payload as it exits, so one is left only by a call that was killed, or
+#' on Windows by one whose daemon still had the file open. Any other file in
+#' `tmp/` is left alone; the directory goes when it is left empty.
+#'
+#' @param output_dir The run's `output_dir`.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+clear_run_files <- function(output_dir) {
+
+  dir <- run_files_dir(output_dir)
+
+  unlink(list.files(dir, pattern = "^payload-.*\\.rds$|\\.rds\\.tmp$", full.names = TRUE))
+  remove_empty_dir(dir)
 
 }
 
