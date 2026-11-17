@@ -95,10 +95,13 @@
 #' applied to, through `control_horizons(parallelize_over = )`.
 #'
 #' * `"configs"`: one task per config on the daemons, with tune running
-#'   sequentially inside each. At most one config per connected daemon is in
-#'   flight, so this session holds one config's payload per daemon, and the
-#'   rows come back in configuration order. The mode for a large config grid
-#'   on a many-core machine.
+#'   sequentially inside each. The configs start longest first, by a table
+#'   of the seconds each model and feature selection took on a measured
+#'   grid, so the short ones fill the daemons at the end; the rows come back
+#'   in configuration order whatever order they finish in. At most one
+#'   config per connected daemon is in flight, so this session holds one
+#'   config's payload per daemon. The mode for a large config grid on a
+#'   many-core machine.
 #' * `"resamples"`: configs run sequentially; inside each, tune runs the CV
 #'   folds on the daemons. Useful width is capped at `cv_folds`. The mode
 #'   for a few cores and a short grid.
@@ -778,7 +781,8 @@ evaluate <- function(x,
   ## fingerprint, so the monitor can say which rows the run in this directory
   ## is scoring, with the data fields and the tuning settings. The monitor
   ## gates checkpoint rows against them, as evaluate() does, and re-reads the
-  ## manifest on every poll, so it is written atomically.
+  ## manifest on every poll, so it is written atomically. Each
+  ## configuration's expected cost weights the monitor's ETA.
 
   if (!is.null(output_dir)) {
 
@@ -787,6 +791,7 @@ evaluate <- function(x,
       n_total                      = n_total,
       n_pending                    = n_pending,
       config_ids                   = configs$config_id,
+      config_cost                  = config_costs(configs),
       start_time                   = start_time,
       metric                       = metric,
       cv_folds                     = cv_folds,

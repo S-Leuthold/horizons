@@ -18,7 +18,8 @@ Default 10.}
 }
 \value{
 Invisibly returns a list with completion stats (n_complete,
-n_total, rate, eta, best_config, best_metric), \code{ignored} (the number of
+n_total, rate in configs per hour, eta weighted by each config's
+expected time, best_config, best_metric), \code{ignored} (the number of
 rows refused, by reason: \code{other_data}, \code{other_settings},
 \code{earlier_schema} (another scoring schema, or recording less than the
 manifest), \code{not_in_grid}) and \code{unreadable} (checkpoint files that could
@@ -39,4 +40,9 @@ in the manifest's grid. Refused rows and unreadable files are shown, not
 hidden.
 A manifest written by another version of horizons is refused;
 \code{evaluate()} rewrites it when a run starts in the directory.
+
+The ETA counts each config by the time its model and feature selection
+are expected to take, from a table of the seconds each took on a measured
+grid (the one the configs axis starts the longest first by), not as one,
+since configs differ in length by orders of magnitude.
 }

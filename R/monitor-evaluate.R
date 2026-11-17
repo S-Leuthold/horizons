@@ -16,6 +16,11 @@
 #' A manifest written by another version of horizons is refused;
 #' `evaluate()` rewrites it when a run starts in the directory.
 #'
+#' The ETA counts each config by the time its model and feature selection
+#' are expected to take, from a table of the seconds each took on a measured
+#' grid (the one the configs axis starts the longest first by), not as one,
+#' since configs differ in length by orders of magnitude.
+#'
 #' @param output_dir Character. Path to the output directory given to
 #'   `evaluate()` as `control_horizons(output_dir = )`.
 #' @param watch Logical. If TRUE, continuously poll for updates. Default FALSE
@@ -24,7 +29,8 @@
 #'   Default 10.
 #'
 #' @return Invisibly returns a list with completion stats (n_complete,
-#'   n_total, rate, eta, best_config, best_metric), `ignored` (the number of
+#'   n_total, rate in configs per hour, eta weighted by each config's
+#'   expected time, best_config, best_metric), `ignored` (the number of
 #'   rows refused, by reason: `other_data`, `other_settings`,
 #'   `earlier_schema` (another scoring schema, or recording less than the
 #'   manifest), `not_in_grid`) and `unreadable` (checkpoint files that could
@@ -160,9 +166,15 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
                                      units = "hours"))
   rate       <- if (elapsed > 0) n_complete / elapsed else NA_real_
 
-  n_remaining <- manifest$n_total - n_complete
+  ## The ETA weights each configuration by its expected cost, since their
+  ## lengths differ by orders of magnitude: counted alone, the few long
+  ## configurations the configs axis starts first would put every one left
+  ## at their length
+  cost_done <- sum(manifest$config_cost[match(names(gated$kept), manifest$config_ids)])
+  cost_left <- sum(manifest$config_cost) - cost_done
+
   eta <- if (!is.na(rate) && rate > 0) {
-    hrs <- n_remaining / rate
+    hrs <- cost_left * elapsed / cost_done
     if (hrs < 1) paste0(round(hrs * 60), " min") else paste0(round(hrs, 1), " hr")
   } else {
     NA_character_

@@ -100,6 +100,69 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 }
 
 ## ---------------------------------------------------------------------------
+## The cost table: config_costs, dispatch_order
+## ---------------------------------------------------------------------------
+
+#' The seconds each configuration is expected to take
+#'
+#' @description
+#' Each configuration's cell of `CONFIG_COST_SECONDS`, the seconds a
+#' configuration of its model and feature selection took on a measured grid.
+#' The configs axis starts the longest first by it ([dispatch_order()]), and
+#' `monitor_evaluate()` weights its ETA by it, from the run's manifest.
+#'
+#' @param configs The configurations, with `model` and `feature_selection`
+#'   columns.
+#' @return Numeric, one unnamed cost per row of `configs`.
+#' @keywords internal
+#' @noRd
+config_costs <- function(configs) {
+
+  keys <- paste(configs$model, configs$feature_selection, sep = "/")
+  cost <- unname(CONFIG_COST_SECONDS[keys])
+
+  ### configure() admits only the models and selections the table holds, so a
+  ### key it lacks is a cell missing from the table
+  if (anyNA(cost)) {
+
+    missing <- unique(keys[is.na(cost)])
+
+    abort_horizons(
+      "{.code CONFIG_COST_SECONDS} has no cost for {.val {missing}}.",
+      kind = "internal"
+    )
+
+  }
+
+  cost
+
+}
+
+#' The order the configs axis starts its configurations in
+#'
+#' @description
+#' Longest first: by [config_costs()], so the longest start first and the
+#' short ones fill the daemons at the end. Ties keep grid order, so the order
+#' is deterministic. The results do not depend on it, apart from `cubist`'s,
+#' whose neighbour step no seed reaches, so which process fits which Cubist
+#' configuration can move them (the reproducibility note in [configure()]):
+#' every other draw is seeded from the run's seed and its own name, and the
+#' rows are put back in configuration order before they are bound.
+#'
+#' @param configs The configurations to run, with `model` and
+#'   `feature_selection` columns.
+#' @return Integer: the row positions of `configs`, in the order to start
+#'   them.
+#' @keywords internal
+#' @noRd
+dispatch_order <- function(configs) {
+
+  ### order() leaves ties in their original order, which is grid order
+  order(-config_costs(configs))
+
+}
+
+## ---------------------------------------------------------------------------
 ## The daemons
 ## ---------------------------------------------------------------------------
 
@@ -307,13 +370,15 @@ task_value <- function(value, transport) {
 #' Run configurations on the daemons, a window at a time
 #'
 #' @description
-#' At most as many configurations are in flight as there are daemons
-#' connected, read again each round, so the window narrows when a daemon
-#' leaves and widens when one joins, and this session holds one serialized
-#' payload per daemon: submitting every configuration at once would hold all
-#' of them. Each is collected as it finishes and the next submitted. Every
-#' wait goes through [await_round()], so a window left with no daemon stops
-#' the run rather than waiting for ever.
+#' The configurations start longest first ([dispatch_order()]): with mirai's
+#' dispatcher a task starts in the order it was submitted, so the short ones
+#' fill the daemons at the end. At most as many are in flight as there are
+#' daemons connected, read again each round, so the window narrows when a
+#' daemon leaves and widens when one joins, and this session holds one
+#' serialized payload per daemon: submitting every configuration at once
+#' would hold all of them. Each is collected as it finishes and the next
+#' submitted. Every wait goes through [await_round()], so a window left with
+#' no daemon stops the run rather than waiting for ever.
 #'
 #' What a task returns is read here ([task_value()]). A row is appended to
 #' `finished$rows`. A `miraiError` is the task's own error, raised again as
@@ -345,7 +410,7 @@ dispatch_configs <- function(shared, finished, rows_so_far, output_dir = NULL,
 
   configs   <- shared$configs
   n_configs <- nrow(configs)
-  start     <- seq_len(n_configs)
+  start     <- dispatch_order(configs)
 
   ### The task's call, quoted here: its names are the task's arguments
   task_call <- quote(worker(config_i, shared))

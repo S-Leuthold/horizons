@@ -784,7 +784,7 @@ build_configs_axis_run <- function(dir) {
 
 describe("evaluate() - configs axis", {
 
-  it("writes a schema-4 manifest describing the daemons, the axis, the data and the settings, one result and one checkpoint per config, and leaves the user's daemons exactly as it found them", {
+  it("writes a schema-5 manifest describing the daemons, the axis, the data and the settings, one result and one checkpoint per config, and leaves the user's daemons exactly as it found them", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -795,7 +795,7 @@ describe("evaluate() - configs axis", {
     result <- run$value$result
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_identical(manifest$schema_version, 4L)
+    expect_identical(manifest$schema_version, 5L)
     expect_identical(manifest$data_hash, result$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, result$evaluation$n_train)
 
@@ -835,7 +835,8 @@ describe("evaluate() - configs axis", {
 ## =========================================================================
 ## What each task carries, the stop when no daemon is left, a daemon's death
 ## and what crosses back from a task. The real-daemon tests run plsr, whose
-## cells of the cost table tie, so they start in grid order.
+## cells of the cost table tie, so they start in grid order, all but the
+## test of the start order, which puts rf among them.
 
 ## A plsr grid of `n` configurations, small enough to run in seconds
 plsr_object <- function(n) {
@@ -904,6 +905,45 @@ describe("evaluate() - the configs axis on mirai", {
     expect_identical(nrow(ev$evaluation$results), 4L)
     expect_gt(length(in_flight), 0L)
     expect_lte(max(in_flight), 2L)
+
+  })
+
+  it("starts the longest configurations first, by the cost table (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+
+    ## rf costs more than plsr in the table, so on two daemons cfg_002 and
+    ## cfg_004 start first, in either order, and cfg_001 and cfg_003 once one
+    ## of them has finished
+    expect_gt(CONFIG_COST_SECONDS[["rf/none"]], CONFIG_COST_SECONDS[["plsr/none"]])
+    obj <- make_eval_object(n = 60, n_configs = 4)
+    obj$config$configs$model <- c("plsr", "rf", "plsr", "rf")
+
+    ## Each daemon notes the configuration it starts, each line in one write
+    ## so two daemons' lines never interleave
+    started <- withr::local_tempfile(pattern = "started")
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("evaluate_single_config", envir = ns)
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        cat(paste0(config_row$config_id, "\n"), file = started, append = TRUE)
+        real(config_row, ...)
+      }, ns = "horizons")
+    }, started = started)[], 30)
+
+    with_deadline(suppressWarnings(evaluate(obj, seed = 42L,
+                                            control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                       output_dir = withr::local_tempdir(),
+                                                                       verbose = FALSE))), 120)
+
+    order <- readLines(started)
+    expect_length(order, 4L)
+    expect_setequal(order[1:2], c("cfg_002", "cfg_004"))
+    expect_setequal(order[3:4], c("cfg_001", "cfg_003"))
 
   })
 
@@ -1360,7 +1400,7 @@ describe("monitor_evaluate()", {
 
   })
 
-  it("reports the share done, the rate, the ETA, the best value and the recent completions, and no rate or ETA it cannot know", {
+  it("reports the share done, the rate, the ETA weighted by each config's cost, the best value and the recent completions, and no rate or ETA it cannot know", {
 
     skip_on_cran()
     run    <- seq_checkpoints()
@@ -1368,6 +1408,13 @@ describe("monitor_evaluate()", {
     res    <- run$value$result$evaluation$results
     ckpt   <- file.path(tmpdir, "checkpoints")
     path   <- file.path(tmpdir, "eval_manifest.rds")
+
+    ## The ETA counts each config by its cost in the manifest, set here so
+    ## the arithmetic is plain: cfg_004 costs twice each of the others
+    manifest <- readRDS(path)
+    expect_identical(manifest$config_ids, c("cfg_001", "cfg_002", "cfg_003", "cfg_004"))
+    manifest$config_cost <- c(1, 1, 1, 2)
+    saveRDS(manifest, path)
 
     snapshot_at <- function(start_time) {
       manifest <- readRDS(path)
@@ -1388,9 +1435,10 @@ describe("monitor_evaluate()", {
     expect_identical(ahead$eta, NA_character_)
 
     ## Started an hour ago, with three of the four configs done and one of
-    ## them failed. Under a second passes between writing the start and
-    ## reading it; the rate stays within 1% of 3 for half a minute, and the
-    ## ETAs below round as expected for a minute.
+    ## them failed: three units of cost an hour, and cfg_004's two left, so
+    ## 40 minutes where a count would say 20. Under a second passes between
+    ## writing the start and reading it; the rate stays within 1% of 3 for
+    ## half a minute, and the ETAs below round as expected for 45 seconds.
     unlink(file.path(ckpt, "cfg_004.rds"))
     failed <- readRDS(file.path(ckpt, "cfg_002.rds"))
     failed$status <- "failed"
@@ -1402,7 +1450,7 @@ describe("monitor_evaluate()", {
 
     expect_identical(three$pct, 75)
     expect_equal(three$rate, 3, tolerance = 0.01)
-    expect_identical(three$eta, "20 min")
+    expect_identical(three$eta, "40 min")
     expect_identical(three$best_config, best$config_id[1])
     expect_identical(three$best_metric, best$cv_rpd[1])
     expect_setequal(three$recent, c(cv_text("cfg_001"), "cfg_002 failed", cv_text("cfg_003")))
@@ -1411,15 +1459,16 @@ describe("monitor_evaluate()", {
     half <- snapshot_at(Sys.time() - 1800)
 
     expect_equal(half$rate, 6, tolerance = 0.01)
-    expect_identical(half$eta, "10 min")
+    expect_identical(half$eta, "20 min")
 
-    ## One done, three to go, so the ETA is in hours; the failed config has
-    ## no value to rank
+    ## One done, three to go, so the ETA is in hours: one unit of cost an
+    ## hour and four left, where a count would say 3 hr; the failed config
+    ## has no value to rank
     unlink(file.path(ckpt, c("cfg_001.rds", "cfg_003.rds")))
 
     one <- snapshot_at(Sys.time() - 3600)
 
-    expect_identical(one$eta, "3 hr")
+    expect_identical(one$eta, "4 hr")
     expect_identical(one$best_config, NA_character_)
     expect_identical(one$best_metric, NA_real_)
     expect_identical(one$recent, "cfg_002 failed")
