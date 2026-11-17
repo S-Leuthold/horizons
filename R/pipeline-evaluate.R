@@ -30,8 +30,9 @@
 #'   train/test split, the CV folds and each configuration's stages) is
 #'   seeded from it and its own name, so a configuration's results depend on
 #'   the seed alone, not on the other configurations, the order they run in,
-#'   the workers or the session's generator (except `cubist`, whose neighbour
-#'   step no seed reaches; see the reproducibility note in [configure()]).
+#'   the workers or the session's generator (for `cubist`, because each of
+#'   its fits runs in a process of its own; see the reproducibility note in
+#'   [configure()]).
 #'   `NULL` (the default) takes the
 #'   seed the object records (a [select_training()] result's), else one
 #'   integer from the session's random stream, which is left where it was:
@@ -127,10 +128,9 @@
 #'
 #' Results do not depend on the backend, the number of daemons, which daemon
 #' runs a configuration or the order the work finishes in: every draw is
-#' seeded from the run's `seed` and its own name, where it is made (except
-#' `cubist`, whose neighbour step no seed reaches; see the reproducibility
-#' note in [configure()]). The daemons' own seed (`mirai::daemons(seed = )`)
-#' has no effect on them.
+#' seeded from the run's `seed` and its own name, where it is made, and each
+#' `cubist` fit runs in a process of its own (see "Isolated fits" below). The
+#' daemons' own seed (`mirai::daemons(seed = )`) has no effect on them.
 #'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.

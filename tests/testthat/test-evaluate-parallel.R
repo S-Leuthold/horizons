@@ -511,15 +511,12 @@ allow_par_run <- function() memo_fixture("allow_par_run", build_allow_par_run)
 
 build_allow_par_run <- function() {
 
+  ## rf and cubist: the results are compared with a run made later in the
+  ## session, and each cubist fit runs in a process of its own, so its
+  ## neighbour cutoff does not depend on the fits made before it
   daemons_before <- daemons_record()
   obj            <- make_eval_object(n_configs = 2)
   warnings       <- list()
-
-  ## xgboost, not the fixture's cubist: the results are compared with a run
-  ## made later in the session, and Cubist's neighbour cutoff comes from a
-  ## process-wide generator no seed reaches, so a cubist with neighbours
-  ## depends on the fits before it (configure()'s reproducibility note)
-  obj$config$configs$model <- c("rf", "xgboost")
 
   result <- withCallingHandlers(
     evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE)),

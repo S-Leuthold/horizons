@@ -137,13 +137,15 @@ This enables the \code{purrr::map()} multi-outcome pattern:
 Every draw \code{evaluate()}, \code{fit()} and \code{ensemble()} make is seeded from the
 run's seed and the draw's own name, so a run repeats from the seed it
 records, whatever the order of the configurations, the workers or the
-session's random number generator. The one exception is every \code{cubist}
-configuration: its tuning searches \code{neighbors} from 0 to 9, and the
-neighbour distance cutoff comes from a generator inside the Cubist C code
-that no seed reaches, which carries on from every Cubist fit made before it
-in the same R process. So its scores can differ slightly between runs, and
-with them, when candidates are close, the one chosen. Its rules are
-stable, which keeps the difference small. See GitHub issue #51.
+session's random number generator. That holds for \code{cubist} too because
+each Cubist fit runs in a process of its own (\code{control_horizons(isolate = )}): its tuning searches \code{neighbors} from 0 to 9, and the neighbour
+distance cutoff comes from a generator inside the Cubist C code that no
+seed reaches and that carries on from every Cubist fit made before it in
+the same process, which also keeps memory from each fit. With
+\code{control_horizons(isolate = FALSE)} the fits run in the session, and a
+\code{cubist} configuration's scores can then differ slightly between runs, and
+with them, when candidates are close, the one chosen. See GitHub issue
+#51.
 
 \strong{Choosing models for large spectral libraries:}
 

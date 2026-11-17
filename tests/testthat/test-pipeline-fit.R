@@ -984,10 +984,9 @@ describe("fit() - allow_par without a usable backend", {
 ## sequential loop. Each stage of fit_single_config() is a unit of its own,
 ## so the result does not depend on that.
 ##
-## rf and xgboost, engines the run's seed governs. Cubist, fit60()'s second
-## member, takes its neighbour cutoff from a process-wide generator no seed
-## reaches, so a cubist with neighbours depends on the fits made before it in
-## its process (configure()'s reproducibility note).
+## rf and cubist, fit60()'s members. Each cubist fit runs in a process of its
+## own, so its neighbour cutoff does not depend on the fits made before it,
+## here or on a daemon.
 
 describe("fit() - on two daemons", {
 
@@ -997,7 +996,7 @@ describe("fit() - on two daemons", {
     skip_on_cran()
     skip_if_dev_package()
 
-    obj <- make_fit_object(n = 60, n_configs = 2, models = c("rf", "xgboost"))
+    obj <- make_fit_object(n = 60, n_configs = 2)
     obj$config$tuning$final_bayesian_iter <- 2L
 
     seq_fit <- suppressWarnings(

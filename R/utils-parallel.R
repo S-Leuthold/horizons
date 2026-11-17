@@ -143,11 +143,10 @@ config_costs <- function(configs) {
 #' @description
 #' Longest first: by [config_costs()], so the longest start first and the
 #' short ones fill the daemons at the end. Ties keep grid order, so the order
-#' is deterministic. The results do not depend on it, apart from `cubist`'s,
-#' whose neighbour step no seed reaches, so which process fits which Cubist
-#' configuration can move them (the reproducibility note in [configure()]):
-#' every other draw is seeded from the run's seed and its own name, and the
-#' rows are put back in configuration order before they are bound.
+#' is deterministic. The results do not depend on it: every draw is seeded
+#' from the run's seed and its own name, each fit of an engine that carries
+#' state from one fit to the next (`cubist`) runs in a process of its own,
+#' and the rows are put back in configuration order before they are bound.
 #'
 #' @param configs The configurations to run, with `model` and
 #'   `feature_selection` columns.
