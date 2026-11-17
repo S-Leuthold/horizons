@@ -172,6 +172,25 @@
 #' does not name the package (on the configs axis it stops the run as
 #' systemic).
 #'
+#' When the configs axis stops, by an error, an interrupt or a stop of its
+#' own, it cancels the configurations still running on the daemons, so a
+#' configuration still running stops before it writes its checkpoint; a
+#' checkpoint is written whole or not at all, so one the cancel reaches
+#' mid-write is either complete or absent. A configuration
+#' inside a compiled fit (a Cubist fit, say) stops only when that fit
+#' returns, its daemon busy until then, and writes nothing. On the resamples
+#' axis the folds' tasks are tune's, which `evaluate()` does not cancel: they
+#' run to their end on the daemons, and write nothing. The cancellation and
+#' the longest-first start both need mirai's dispatcher, which mirai keeps
+#' unless `dispatcher = FALSE` is set. On daemons set that way the configs
+#' axis runs as asked, but each configuration goes to the next daemon in
+#' turn as it is sent, free or not, and those running when the run stops go
+#' on to their end. `evaluate()` warns of it once, with class
+#' `horizons_warning_input`; the warning is also a row of the object's
+#' `log`, and under `verbose` the progress tree's parallel line says "no
+#' dispatcher" before any configuration runs, so a run that is stopped
+#' shows it too.
+#'
 #' mirai relays no warning, message or output from a task. On the configs
 #' axis what a configuration's unit records reaches the `log` as on the
 #' sequential path, and a warning raised in its task before the unit runs
@@ -501,6 +520,20 @@ evaluate <- function(x,
                            results = results_so_far(list()))
   }
 
+  ## Without mirai's dispatcher the configs axis runs as asked, but loses the
+  ## longest-first start and the cancellation, so it says so once, and on the
+  ## tree's parallel line, which an interrupted run's console keeps
+  no_dispatcher <- axis$axis == "configs" && !daemons_dispatch()
+
+  if (no_dispatcher) {
+
+    log_warning(collector, "input", c(
+      "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn evaluate} cannot start the longest configurations first or cancel the ones still running when it stops.",
+      "i" = "mirai keeps its dispatcher unless {.code dispatcher = FALSE} is set; set the daemons again without it."
+    ))
+
+  }
+
   if (axis$axis != "sequential") {
 
     unpin_threads <- pin_parent_threads()
@@ -759,7 +792,8 @@ evaluate <- function(x,
 
       ## A parallel axis has two daemons or more
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
-                 " (", plan_workers, " daemons)\n"))
+                 " (", plan_workers, " daemons",
+                 if (no_dispatcher) ", no dispatcher", ")\n"))
 
     } else if (allow_par && debug) {
 

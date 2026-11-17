@@ -221,6 +221,25 @@ tune's "Argument 1 must be a data frame or a named atomic vector", which
 does not name the package (on the configs axis it stops the run as
 systemic).
 
+When the configs axis stops, by an error, an interrupt or a stop of its
+own, it cancels the configurations still running on the daemons, so a
+configuration still running stops before it writes its checkpoint; a
+checkpoint is written whole or not at all, so one the cancel reaches
+mid-write is either complete or absent. A configuration
+inside a compiled fit (a Cubist fit, say) stops only when that fit
+returns, its daemon busy until then, and writes nothing. On the resamples
+axis the folds' tasks are tune's, which \code{evaluate()} does not cancel: they
+run to their end on the daemons, and write nothing. The cancellation and
+the longest-first start both need mirai's dispatcher, which mirai keeps
+unless \code{dispatcher = FALSE} is set. On daemons set that way the configs
+axis runs as asked, but each configuration goes to the next daemon in
+turn as it is sent, free or not, and those running when the run stops go
+on to their end. \code{evaluate()} warns of it once, with class
+\code{horizons_warning_input}; the warning is also a row of the object's
+\code{log}, and under \code{verbose} the progress tree's parallel line says "no
+dispatcher" before any configuration runs, so a run that is stopped
+shows it too.
+
 mirai relays no warning, message or output from a task. On the configs
 axis what a configuration's unit records reaches the \code{log} as on the
 sequential path, and a warning raised in its task before the unit runs
