@@ -383,6 +383,224 @@ task_value <- function(value, transport) {
 }
 
 ## ---------------------------------------------------------------------------
+## Isolated work: one call in a process of its own
+## ---------------------------------------------------------------------------
+## Some work runs in a process started for it alone and ended once its value
+## is back: a fit whose engine carries state from one fit to the next
+## (MODEL_SPECS' `isolate`, R/isolated-engines.R), and select_training()'s
+## draw, so this session never holds the library. It is one mirai() call to a
+## profile no daemons() call sets, which mirai answers by starting a new R
+## process for that one call (mirai's ephemeral daemon, the path it takes
+## when no daemons are set). horizons never sets that profile, or any other,
+## and the user's daemons are not touched: the process works the same in
+## this session, on a configs-axis daemon and in one of tune's fold tasks.
+
+#' The compute profile isolated work is sent to
+#'
+#' @description
+#' A name no `mirai::daemons()` call sets, so every `mirai()` sent to it
+#' starts a process of its own. The process id makes it this process's, so a
+#' daemon running isolated work uses its own, and no profile a user set by
+#' name can be taken for it.
+#'
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+isolated_profile <- function() {
+
+  paste0("horizons-isolated-", Sys.getpid())
+
+}
+
+#' Run one call in a process of its own
+#'
+#' @description
+#' Sends `expr` to a new R process ([isolated_profile()]) and returns its
+#' value here, as if it had run in this session:
+#'
+#' * The process is given this session's library paths first, so it loads
+#'   what this session would (a process started by mirai sees `R_LIBS` and
+#'   the startup files, not paths set at run time), then any `options`.
+#' * Its random stream is seeded with one integer drawn here, from the
+#'   caller's stream, under the kinds every unit pins ([with_unit_seed()]),
+#'   so what it draws follows the caller's seed, and this session's stream
+#'   moves by that one draw.
+#' * The warnings and messages it raises are kept in order and muffled
+#'   there, and what it prints is captured; here the output is printed, then
+#'   each condition is raised again with its class and fields, then its
+#'   error, if it ended in one, is raised as the condition it was. mirai
+#'   relays none of these on its own.
+#' * A process that ends without returning (killed, out of memory,
+#'   `errorValue` 19) is `horizons_error_process_died` ([abort_process_died()]).
+#' * Leaving before the value is back (an error, an interrupt) drops the
+#'   call, which ends its process.
+#'
+#' The call sent is a base-R body around `expr`, and `args` are plain
+#' values the body finds by name: nothing of horizons travels, so a process
+#' running a fit loads only what `expr` names. A function or a closure among
+#' `args` would carry its environment with it.
+#'
+#' @param expr A call, quoted, evaluated in the process with `args` in scope.
+#' @param args Named list of the values `expr` reads.
+#' @param what Character(1). What runs, for the death's message: `"a Cubist
+#'   fit"`, `"the library draw"`.
+#' @param options Named list of options to set in the process first.
+#' @param call The frame a death reports.
+#' @return The value of `expr`.
+#' @keywords internal
+#' @noRd
+run_isolated <- function(expr, args = list(), what, options = list(),
+                         call = rlang::caller_env()) {
+
+  reserved <- intersect(names(args), ISOLATED_NAMES)
+
+  if (length(args) > 0 && (is.null(names(args)) || any(!nzchar(names(args))) || length(reserved) > 0)) {
+
+    abort_horizons("Every argument sent to an isolated call must have a name of its own.",
+                   kind = "internal")
+
+  }
+
+  ## One draw from the caller's stream, as resolve_seed() draws a root
+  seed <- sample.int(100000L, 1L)
+
+  ### mirai takes a call held in a variable as the call to send; a call
+  ### written in place would be sent as written
+  body <- isolated_body(expr)
+
+  task <- mirai::mirai(
+    .expr    = body,
+    .args    = c(args, list(.horizons_libs    = .libPaths(),
+                            .horizons_options = options,
+                            .horizons_seed    = seed)),
+    .compute = isolated_profile()
+  )
+
+  ## Dropped and collected unless its value came back, so the process ends:
+  ## mirai closes the call's socket when the task is collected, and the
+  ## process ends with it, inside compiled code too
+  collected <- FALSE
+  on.exit(if (!collected) {
+    mirai::stop_mirai(task)
+    rm(task)
+    gc(verbose = FALSE)
+  }, add = TRUE)
+
+  value     <- mirai::collect_mirai(task)
+  collected <- TRUE
+
+  ### A miraiError is the body's own failure (an option it could not set),
+  ### raised as the condition it was; any other error value, the process's
+  ### end without a result
+  value <- task_value(value, function(v) abort_process_died(v, what, call = call))
+
+  if (length(value$output) > 0) cat(value$output, sep = "\n")
+
+  for (cnd in value$conditions) {
+
+    if (inherits(cnd, "warning")) warning(cnd) else if (inherits(cnd, "message")) message(cnd)
+
+  }
+
+  if (!is.null(value$error)) stop(value$error)
+
+  value$value
+
+}
+
+#' The names an isolated call's body keeps for itself
+#'
+#' @keywords internal
+#' @noRd
+ISOLATED_NAMES <- c(".horizons_libs", ".horizons_options", ".horizons_seed", ".horizons_value",
+                    ".horizons_error", ".horizons_conditions", ".horizons_output")
+
+#' The body an isolated call runs, around its expression
+#'
+#' @description
+#' Base R alone, so the process loads nothing the expression does not name.
+#' A condition is kept without its call and trace, which can hold the data
+#' the call was given.
+#'
+#' @param expr A call.
+#' @return A call returning a list: `value`, `error` (the condition the call
+#'   ended in, or `NULL`), `conditions` (the warnings and messages raised, in
+#'   order) and `output` (what it printed, as lines).
+#' @keywords internal
+#' @noRd
+isolated_body <- function(expr) {
+
+  bquote({
+
+    .libPaths(.horizons_libs)
+    if (length(.horizons_options) > 0) options(.horizons_options)
+    set.seed(.horizons_seed, kind = "Mersenne-Twister", normal.kind = "Inversion",
+             sample.kind = "Rejection")
+
+    .horizons_error      <- NULL
+    .horizons_conditions <- list()
+
+    .horizons_output <- utils::capture.output(
+      .horizons_value <- tryCatch(
+        withCallingHandlers(
+          .(expr),
+          warning = function(w) {
+            w$call <- NULL
+            w$trace <- NULL
+            .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- w
+            if (!is.null(findRestart("muffleWarning"))) invokeRestart("muffleWarning")
+          },
+          message = function(m) {
+            m$call <- NULL
+            .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- m
+            if (!is.null(findRestart("muffleMessage"))) invokeRestart("muffleMessage")
+          }
+        ),
+        error = function(e) {
+          .horizons_error <<- e
+          NULL
+        }
+      )
+    )
+
+    list(value = .horizons_value, error = .horizons_error,
+         conditions = .horizons_conditions, output = .horizons_output)
+
+  })
+
+}
+
+#' Stop the call because an isolated process ended without its result
+#'
+#' @description
+#' The process [run_isolated()] started for one call ended without sending
+#' its value back: killed, most often by the system for memory, which mirai
+#' reads as `errorValue` 19 (Connection reset). A daemon of the user's pool
+#' did not die, so no pool shrank. The message starts with `PROCESS_DIED`, by
+#' which [check_tune_result()] finds it in tune's notes, where tune keeps an
+#' error raised inside a fit as text.
+#'
+#' @param value The task's error value.
+#' @param what Character(1). What ran in the process.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_process_died`
+#'   (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_process_died <- function(value, what, call = rlang::caller_env()) {
+
+  code   <- as.integer(value)
+  reason <- if (identical(code, 19L)) "{.code errorValue} 19, Connection reset" else "{.code errorValue} {code}"
+
+  abort_horizons(c(
+    paste0(PROCESS_DIED, " {what} ended without returning its result (mirai's ", reason, ")."),
+    "i" = "A process ends this way when it is killed, most often by the system when memory runs out.",
+    "i" = "{.code control_horizons(isolate = FALSE)} runs the work in this session instead."
+  ), kind = "run", class = "horizons_error_process_died", call = call)
+
+}
+
+## ---------------------------------------------------------------------------
 ## The configs axis's dispatch
 ## ---------------------------------------------------------------------------
 

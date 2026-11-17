@@ -294,6 +294,12 @@ SHARED_ARG_NAMES <- c(
   "pkg_version"
 )
 
+# How the message starts when a process horizons started for one call
+# (run_isolated(), R/utils-parallel.R) ends without its result. tune keeps an
+# error raised inside a fit only as its text, so check_tune_result() finds a
+# process's death in tune's notes by this phrase.
+PROCESS_DIED <- "The process horizons started for"
+
 # Seconds between the configs axis's polls of the tasks in flight and the
 # daemons connected (await_round(), R/utils-parallel.R). mirai's info() costs
 # microseconds, so the poll is cheap against configurations of seconds to

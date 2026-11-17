@@ -90,6 +90,21 @@ daemons_record <- function() {
 
 }
 
+## Whether a process is running: signal 0 checks without sending anything.
+## For the tests of the processes horizons starts for isolated work, which
+## skip on Windows, where tools::pskill() sends no signal 0.
+process_alive <- function(pid) {
+  isTRUE(tools::pskill(as.integer(pid), 0L))
+}
+
+## Wait up to `seconds` for every process in `pids` to end; TRUE when they
+## all have
+processes_end <- function(pids, seconds = 5) {
+  until <- Sys.time() + seconds
+  while (any(vapply(pids, process_alive, logical(1))) && Sys.time() < until) Sys.sleep(0.05)
+  !any(vapply(pids, process_alive, logical(1)))
+}
+
 ## Evaluate `expr` letting only warnings that match `keep` (a condition class
 ## or a message regex) propagate. The small fixtures trip rsample's
 ## stratification warnings, which are not the subject of any test here; this

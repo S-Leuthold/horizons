@@ -322,6 +322,166 @@ describe("daemon_reports()", {
 
 })
 
+## =========================================================================
+## Isolated work: one call in a process of its own
+## =========================================================================
+## run_isolated() relies on mirai starting a new process for each mirai() sent
+## to a profile no daemons() call set (mirai 2.7.2: compute_env() is NULL for
+## it, and do_mirai() takes the ephemeral_daemon() branch). The first test is
+## the guard on that: a later mirai that refused the name, or reused a
+## process for it, fails here, on CI first.
+
+describe("run_isolated()", {
+
+  it("runs each call in a process of its own, which has ended once its value is back", {
+
+    skip_on_os("windows")
+
+    pids <- c(run_isolated(quote(Sys.getpid()), what = "a test"),
+              run_isolated(quote(Sys.getpid()), what = "a test"))
+
+    expect_length(unique(pids), 2L)
+    expect_false(Sys.getpid() %in% pids)
+    expect_true(processes_end(pids))
+
+  })
+
+  it("leaves the daemons as it found them, and runs in none of them", {
+
+    skip_on_cran()
+    skip_on_os("windows")
+
+    ## With none set
+    mirai::daemons(0)
+    before <- daemons_record()
+    run_isolated(quote(Sys.getpid()), what = "a test")
+    expect_identical(daemons_record(), before)
+    expect_false(mirai::daemons_set(.compute = isolated_profile()))
+
+    ## With two set: the call's process is none of theirs
+    local_test_daemons(2)
+    before      <- daemons_record()
+    daemon_pids <- unlist(with_deadline(mirai::everywhere(Sys.getpid(), .compute = NULL)[], 30))
+    pid         <- run_isolated(quote(Sys.getpid()), what = "a test")
+
+    expect_identical(daemons_record(), before)
+    expect_false(pid %in% daemon_pids)
+    expect_false(mirai::daemons_set(.compute = isolated_profile()))
+
+  })
+
+  it("prints what the process printed, and raises its warnings, messages and error here, in order and with their classes", {
+
+    raised <- list()
+
+    err <- expect_error(
+      withCallingHandlers(
+        utils::capture.output(
+          run_isolated(quote({
+            cat("printed in the process\n")
+            message("a message")
+            warning("a warning")
+            rlang::abort("an error", class = c("horizons_error_probe", "horizons_error_run", "horizons_error"),
+                         field = "a field")
+          }), what = "a test"),
+          file = (printed <- withr::local_tempfile())
+        ),
+        warning = function(w) {
+          raised[[length(raised) + 1L]] <<- w
+          invokeRestart("muffleWarning")
+        },
+        message = function(m) {
+          raised[[length(raised) + 1L]] <<- m
+          invokeRestart("muffleMessage")
+        }
+      ),
+      class = "horizons_error_probe"
+    )
+
+    expect_identical(readLines(printed), "printed in the process")
+    expect_length(raised, 2L)
+    expect_s3_class(raised[[1]], "message")
+    expect_match(conditionMessage(raised[[1]]), "a message")
+    expect_s3_class(raised[[2]], "simpleWarning")
+    expect_identical(conditionMessage(raised[[2]]), "a warning")
+
+    expect_identical(class(err)[1:3], c("horizons_error_probe", "horizons_error_run", "horizons_error"))
+    expect_identical(err$field, "a field")
+    expect_identical(conditionMessage(err), "an error")
+
+  })
+
+  it("returns the value of a call that warns, and takes its values by name", {
+
+    expect_warning(
+      value <- run_isolated(quote({ warning("careful"); a + b }), list(a = 1, b = 2), what = "a test"),
+      "careful"
+    )
+    expect_identical(value, 3)
+
+    expect_error(run_isolated(quote(1), list(1), what = "a test"), class = "horizons_error_internal")
+    expect_error(run_isolated(quote(1), list(.horizons_seed = 1), what = "a test"),
+                 class = "horizons_error_internal")
+
+  })
+
+  it("seeds its process from one draw of the caller's stream, so the caller's seed governs what it draws", {
+
+    set.seed(11)
+    first <- run_isolated(quote(stats::runif(2)), what = "a test")
+    after <- stats::runif(1)
+
+    set.seed(11)
+    again <- run_isolated(quote(stats::runif(2)), what = "a test")
+
+    set.seed(11)
+    sample.int(100000L, 1L)
+
+    expect_identical(again, first)
+    expect_identical(stats::runif(1), after)
+
+  })
+
+  it("stops as horizons_error_process_died when its process ends without its result", {
+
+    skip_on_os("windows")
+
+    err <- expect_error(
+      with_deadline(run_isolated(quote(tools::pskill(Sys.getpid(), 9L)), what = "a Cubist fit"), 30),
+      class = "horizons_error_process_died"
+    )
+
+    expect_s3_class(err, "horizons_error_run")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, paste(PROCESS_DIED, "a Cubist fit ended without returning its result"), fixed = TRUE)
+    expect_match(msg, "(mirai's `errorValue` 19, Connection reset)", fixed = TRUE)
+    expect_match(msg, "control_horizons(isolate = FALSE)", fixed = TRUE)
+    expect_identical(connected_daemons(), 0L)
+
+  })
+
+  it("ends its process when it is stopped before the value is back", {
+
+    skip_on_cran()
+    skip_on_os("windows")
+
+    pid_file <- withr::local_tempfile()
+
+    stopped <- tryCatch({
+      setTimeLimit(elapsed = 3, transient = TRUE)
+      run_isolated(quote({ writeLines(as.character(Sys.getpid()), pid_file); Sys.sleep(60) }),
+                   list(pid_file = pid_file), what = "a test")
+    }, error = function(e) e)
+    setTimeLimit(elapsed = Inf)
+
+    expect_s3_class(stopped, "error")
+    expect_true(file.exists(pid_file))
+    expect_true(processes_end(as.integer(readLines(pid_file)), seconds = 2))
+
+  })
+
+})
+
 describe("resume_hint()", {
 
   it("names the checkpoints when there is an output_dir, and the results field whenever it holds rows", {
