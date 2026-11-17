@@ -962,6 +962,8 @@ describe("evaluate() - the configs axis on mirai", {
     ## path, holding what a worker needs
     expect_identical(dirname(sent$args$payload_path), file.path(normalizePath(dir, winslash = "/"), "tmp"))
     expect_match(basename(sent$args$payload_path), "^payload-.*\\.rds$")
+    ## In one separator: on Windows tempfile() joins with a backslash
+    expect_false(grepl("\\", sent$args$payload_path, fixed = TRUE))
     expect_setequal(sent$keys, SHARED_ARG_NAMES)
 
     ## The task carries none of it
@@ -1071,10 +1073,15 @@ describe("evaluate() - the configs axis on mirai", {
   it("stops as systemic before any task is sent when the payload cannot be written, with the rows resumed", {
 
     ## Two configurations checkpointed by a sequential run stopped at the
-    ## third, so the configs run below resumes them and has two to send
+    ## third, so the configs run below resumes them and has two to send.
+    ## output_dir is relative, so the stops can be seen to name it as given,
+    ## not as the absolute path the daemons are sent
     template <- allow_par_run()$result$evaluation$results[1, ]
     obj      <- make_eval_object(n_configs = 4)
-    dir      <- withr::local_tempdir()
+    base     <- withr::local_tempdir()
+    dir      <- "out"
+
+    withr::local_dir(base)
 
     testthat::with_mocked_bindings(
       tryCatch(
@@ -1122,7 +1129,7 @@ describe("evaluate() - the configs axis on mirai", {
 
     msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err)))
     expect_match(msg, "`evaluate()` could not write to", fixed = TRUE)
-    expect_match(msg, file.path(normalizePath(dir, winslash = "/"), "tmp"), fixed = TRUE)
+    expect_match(msg, "could not write to \\W?out/tmp\\W")
     expect_match(msg, ".rds: the disk is full", fixed = TRUE)
     expect_identical(err$results$config_id, c("cfg_001", "cfg_002"))
     expect_identical(sent, 0L)
@@ -1136,7 +1143,7 @@ describe("evaluate() - the configs axis on mirai", {
 
     msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err)))
     expect_match(msg, "`evaluate()` could not write to", fixed = TRUE)
-    expect_match(msg, dir, fixed = TRUE)
+    expect_match(msg, "could not write to \\W?out\\W")
     expect_match(msg, "tmp: ", fixed = TRUE)
     expect_identical(err$results$config_id, c("cfg_001", "cfg_002"))
     expect_identical(sent, 0L)

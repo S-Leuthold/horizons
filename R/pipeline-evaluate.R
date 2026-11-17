@@ -1096,7 +1096,7 @@ evaluate <- function(x,
     ## A daemon resolves a relative path against the directory it was started
     ## in, not this session's, so the checkpoint directory it is sent is
     ## absolute, as the payload's path is below. This session's own paths,
-    ## and its messages, keep the directory as given.
+    ## and the messages about its writes, keep the directory as given.
 
     shared_args <- list(
       data            = split$data,
@@ -1138,21 +1138,26 @@ evaluate <- function(x,
     ## message until the task is collected). The path is absolute, since a
     ## daemon resolves a relative one against the directory it was started
     ## in, and named by tempfile(), which no other call draws and which
-    ## leaves the random stream alone. The removal is registered before the
-    ## write, so the file goes however evaluate() exits; the window's own
-    ## exit handler, which cancels the tasks in flight, runs before it.
+    ## leaves the random stream alone. tempfile() checks the name is unused
+    ## in the directory; only its name is kept, joined to the directory with
+    ## file.path(), since on Windows tempfile() joins them with a backslash.
+    ## The removal is registered before the write, so the file goes however
+    ## evaluate() exits; the window's own exit handler, which cancels the
+    ## tasks in flight, runs before it.
     run_dir     <- run_files_dir(output_dir)
     not_created <- create_output_dir(run_dir)
 
     if (!is.null(not_created)) abort_output_write(run_dir, not_created, rows_so_far())
 
-    payload_path <- tempfile("payload-", tmpdir = normalizePath(run_dir, winslash = "/", mustWork = TRUE),
-                             fileext = ".rds")
+    abs_run_dir  <- normalizePath(run_dir, winslash = "/", mustWork = TRUE)
+    payload_path <- file.path(abs_run_dir, basename(tempfile("payload-", tmpdir = abs_run_dir, fileext = ".rds")))
     on.exit(remove_run_file(payload_path), add = TRUE)
 
     not_written <- write_output_file(shared_args, payload_path)
 
-    if (!is.null(not_written)) abort_output_write(payload_path, not_written, rows_so_far())
+    if (!is.null(not_written)) {
+      abort_output_write(file.path(run_dir, basename(payload_path)), not_written, rows_so_far())
+    }
 
     ## A daemon that dies, a pool left with none, or a daemon that cannot
     ## read the payload stops the run in the window, with the rows so far,
