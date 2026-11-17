@@ -1068,6 +1068,21 @@ describe("evaluate() - the configs axis on mirai", {
     expect_match(gsub("\\s+", " ", conditionMessage(err)), "different training data", fixed = TRUE)
     expect_setequal(list.files(tmp), left)
 
+    ## A sequential run owns output_dir as well, and removes them too; it is
+    ## stopped at its first configuration, after the gates
+    dir <- withr::local_tempdir()
+    tmp <- leave(dir)
+
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(evaluate(make_eval_object(n_configs = 4), seed = 42L,
+                                  control = control_horizons(output_dir = dir, verbose = FALSE))),
+        first = function(e) NULL
+      ),
+      evaluate_single_config = function(config_row, ...) rlang::abort("stop", class = "first")
+    )
+    expect_identical(list.files(tmp), "notes.txt")
+
   })
 
   it("stops as systemic before any task is sent when the payload cannot be written, with the rows resumed", {
