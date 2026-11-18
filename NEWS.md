@@ -3,7 +3,6 @@
 ## Changes
 
 * On the configs axis, `evaluate()` writes the configurations' data once, to a file in `output_dir`'s `tmp/` directory, and each configuration's daemon reads it there, so this session no longer holds a copy of each running configuration's data. The file is removed when `evaluate()` returns or stops, and a run removes any an earlier run left, so one `output_dir` serves one run at a time. The daemons must now reach `output_dir` at the path this session gives them; a daemon that cannot read the file stops the run with `horizons_error_systemic`, the rows finished so far as its `results` (#272).
-* On the configs axis with a relative `output_dir`, a `setwd()` after the daemons started no longer sends each configuration's checkpoint to the daemon's own directory, where this session's store never saw it (#272).
 * When `evaluate()` stops on the configs axis, by an error, an interrupt or a stop of its own, it cancels the configurations still running on the daemons, so a configuration still running stops before it writes its checkpoint; one inside a compiled fit stops once that fit returns. Daemons set with `mirai::daemons(dispatcher = FALSE)` lose both this and the longest-first start: `evaluate()` runs on them as asked, warns once (`horizons_warning_input`), and says "no dispatcher" on the progress tree's parallel line (#271).
 * On the configs axis, `evaluate()` starts the longest configurations first, by a table of the seconds each model and feature selection took on a measured grid, so the short ones fill the daemons at the end. Results come back in configuration order and do not change, apart from `cubist`, whose neighbour step carries on from the Cubist fits made before it in the same process (`?configure`). The sequential and resamples paths keep grid order. `monitor_evaluate()`'s ETA weights each configuration by the same table rather than counting each as one, so it no longer reads far too long while the long configurations run (#270).
 * Breaking: parallel work runs on mirai. Set daemons with `mirai::daemons()` before calling `evaluate()`, `fit()` or `ensemble()` with `control_horizons(allow_par = TRUE)`, or with `with(mirai::daemons(4), evaluate(...))` for one call. A `future::plan()` is no longer used, and future, future.apply and furrr are no longer dependencies; horizons now needs mirai 2.7.0 and tune 2.0.0. horizons never sets, resizes or resets the daemons, and needs two or more connected to run in parallel; with fewer it warns and runs sequentially, as before (#269).
@@ -19,6 +18,7 @@
 
 ## Bug fixes
 
+* On the configs axis with a relative `output_dir`, a `setwd()` after the daemons started no longer sends each configuration's checkpoint to the daemon's own directory, where this session's store never saw it (#272).
 * `evaluate()` no longer fails every lightgbm configuration when it runs in parallel over configurations; each worker now loads the packages its configuration needs (#262).
 
 # horizons 0.12.0
