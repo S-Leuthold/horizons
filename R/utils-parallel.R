@@ -765,9 +765,11 @@ abort_process_died <- function(value, what, call = rlang::caller_env()) {
 #' cancels every task still in flight (`mirai::stop_mirai()`), so a
 #' configuration still running stops before it writes its checkpoint. It is
 #' an `on.exit()`, not a calling handler, so it runs on all three. A
-#' configuration inside a compiled fit stops only when that fit returns, and
-#' writes nothing, since the interrupt is raised once R checks for it, long
-#' before the checkpoint. Cancelling needs mirai's dispatcher: without it
+#' configuration in an isolated fit stops at once, since its daemon waits on
+#' the fit's process in R, and the process is ended as the wait is left
+#' ([run_isolated()]). One inside another compiled fit stops only when that
+#' fit returns, and writes nothing, since the interrupt is raised once R
+#' checks for it, long before the checkpoint. Cancelling needs mirai's dispatcher: without it
 #' `stop_mirai()` does nothing and the task runs to its end, which
 #' `evaluate()` warns of ([daemons_dispatch()]).
 #'

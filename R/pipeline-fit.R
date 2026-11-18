@@ -182,7 +182,7 @@
 #'   recorded as `models$seed`, which [ensemble()] takes.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `min_calib_rows`, `min_ad_rows` and
+#'   `keep_traces`, `isolate`, `min_calib_rows`, `min_ad_rows` and
 #'   `min_degradation_rows`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as
 #'   `models$control`.
@@ -206,7 +206,17 @@
 #' must be a data frame or a named atomic vector". `fit()` parallelises folds
 #' only in this version; a configs axis across the `n_best` members is gated
 #' on the fitted-object memory contract (a fitted object is hundreds of MB
-#' and would cross to workers).
+#' and would cross to workers). Before anything is fitted, a parallel `fit()`
+#' checks that the daemons on this machine fit in its memory, as
+#' [evaluate()] does ("Parallelism" there), warning with class
+#' `horizons_warning_input` when they would not.
+#'
+#' Each `cubist` fit runs in a process of its own, wherever it runs, as in
+#' [evaluate()] ("Isolated fits" there), so a member's results depend on the
+#' seed alone; a member whose fit's process dies, in its re-tune, its
+#' out-of-fold pass or its final fit, fails with
+#' `horizons_error_process_died`. `control_horizons(isolate = FALSE)` fits it
+#' here instead, which the tree and the `log` say.
 #'
 #' @section Outcome range:
 #' Every prediction `fit()` scores (out-of-fold, test and calibration) is

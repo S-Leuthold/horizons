@@ -139,10 +139,11 @@ draw on.}
 it computes. \code{select_training()} reads \code{verbose}, \code{debug} (a failure
 building a registered library's first-use similarity space stops the
 call, rather than being left to the first draw), \code{chunk_size} (targets
-per distance chunk) and \code{min_resemblance_rows} (the fewest library rows
-the resemblance check takes its reference distribution from), and
-refuses any other field that is set. The control it ran with, defaults
-filled in, is recorded as \code{selection$settings$control}.}
+per distance chunk), \code{min_resemblance_rows} (the fewest library rows
+the resemblance check takes its reference distribution from) and
+\code{isolate} (see "The draw's process"), and refuses any other field that
+is set. The control it ran with, defaults filled in, is recorded as
+\code{selection$settings$control}.}
 }
 \value{
 \code{horizons_data.} Rows drawn from \code{pool}, on the library's own
@@ -363,6 +364,28 @@ until a version of horizons that builds the library differently: a
 library cached by an earlier build is built again, after asking as on
 first use, and the log notes it. \code{x$selection$library} records which
 library was drawn from, and its \code{build}.
+
+\strong{The draw's process.} From the library's load to the record, the draw
+runs in a process started for it, which ends once the training set is
+back, so the session never holds the library (2.8 to 3.2 GB for KSSL
+while it loads), the neighbour search's distances or a space build's
+transform; it holds the targets, the training set returned and, while
+the draw runs, a copy of what it was sent, the library too when it is
+passed in memory. The process loads the horizons this session loaded,
+from the same library, with this session's \verb{horizons.*} options (so it
+reads and writes the same caches) and library paths. Its tree is printed
+when it returns, and its warnings and log rows are the call's, as they
+would have been here; a refusal names \code{select_training()}. A registered
+library's consent is asked in the session, as above, and the library is
+then built in the draw's process. The draw runs in the session instead,
+with the same results, under \code{control_horizons(isolate = FALSE)}, under
+\code{devtools::load_all()}, where a process would load the installed
+horizons rather than the source, and when the installed horizons is
+another version than the one loaded. A process that ends without its
+result (killed, most often for memory) stops the call with
+\code{horizons_error_process_died}. The process takes its threads from the
+environment variables the session started with, not a count set at run
+time (\code{RhpcBLASctl}).
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 columns returned, the pool's identity, the targets' identity (their source,

@@ -42,8 +42,8 @@
 #'   [ensemble()] take it unless given one.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
-#'   `output_dir`, `verbose`, `debug`, `breaker` and `keep_traces`, and
-#'   refuses any other field that is set. The
+#'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces` and
+#'   `isolate`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as
 #'   `evaluation$control`.
 #'
@@ -188,9 +188,11 @@
 #' own, it cancels the configurations still running on the daemons, so a
 #' configuration still running stops before it writes its checkpoint; a
 #' checkpoint is written whole or not at all, so one the cancel reaches
-#' mid-write is either complete or absent. A configuration
-#' inside a compiled fit (a Cubist fit, say) stops only when that fit
-#' returns, its daemon busy until then, and writes nothing. On the resamples
+#' mid-write is either complete or absent. A configuration in an isolated
+#' fit (each `cubist` fit; see "Isolated fits") stops at once, its fit's
+#' process ended with it. One inside another compiled fit (an xgboost fit,
+#' say) stops only when that fit returns, its daemon busy until then, and
+#' writes nothing. On the resamples
 #' axis the folds' tasks are tune's, which `evaluate()` does not cancel: they
 #' run to their end on the daemons, and write nothing. The cancellation and
 #' the longest-first start both need mirai's dispatcher, which mirai keeps
@@ -211,6 +213,42 @@
 #' configuration's `warnings`, with the unit's. Messages and printed output are
 #' not relayed, and a warning raised while a daemon loads horizons itself is
 #' dropped.
+#'
+#' A parallel run checks, before anything is drawn, that the daemons on this
+#' machine fit in the memory it has. Each daemon holds a copy of the run's
+#' data and, while it fits a model whose fits are isolated, that fit's
+#' process beside it; what one needs is estimated from the run's rows and
+#' predictors, by a rule fitted to measured runs, so it is approximate. When
+#' the daemons on this machine (each names its machine in the check at the
+#' door) would need more than the memory available, `evaluate()` warns once,
+#' with class `horizons_warning_input`, naming the count that fits, records
+#' it on the `log`, and under `verbose` the tree's parallel line says "more
+#' memory than available"; the run goes on. The memory available is
+#' `ps::ps_system_memory()`'s, which under a container's or `systemd-run`'s
+#' memory cap is the machine's, not the cap's. Daemons on another machine
+#' are not checked.
+#'
+#' @section Isolated fits:
+#' A model whose engine keeps state from one fit to the next in the process
+#' that fits it is fitted in a process of its own, started for that one fit
+#' and ended once the fitted model is back: `cubist`, whose Cubist C code
+#' carries the generator behind its neighbour step's distance cutoff, and
+#' memory, across fits. Its results then depend on the seed alone, and a
+#' long run's memory does not grow with its fits. The fitted model comes
+#' back to the process that asked for it and predicts there. This holds
+#' wherever the fit runs: in this session, on a configs-axis daemon, or in
+#' one of tune's fold tasks on the resamples axis, where each daemon fitting
+#' a `cubist` fold has its fit's process beside it. Starting the process
+#' costs about 0.7 s a fit, measured on Linux. A fit's warnings and errors are raised
+#' in the process that asked, with their classes, so a configuration records
+#' them as it would. A fit's process that ends without its result (killed,
+#' most often for memory) fails its configuration, whatever fold or stage it
+#' was, with `error_message` saying so and `class`
+#' `horizons_error_process_died`, and the run goes on, since no daemon died.
+#' `control_horizons(isolate = FALSE)`, or `options(horizons.isolate =
+#' FALSE)`, fits them in the process that runs the configuration instead;
+#' the tree says which models were isolated, or that isolation was off, and
+#' a run with it off records a note on the `log`.
 #'
 #' @section Response outliers:
 #' When `validate()` was asked to remove response outliers
@@ -259,7 +297,9 @@
 #' configurations need, which this session has, is refused before the run
 #' (`horizons_error_missing_package`, see "Parallelism"); one found lacking
 #' it mid-run stops the run as systemic on the configs axis, and on the
-#' resamples axis fails the configurations it runs with tune's error.
+#' resamples axis fails the configurations it runs with tune's error. An
+#' isolated fit whose process dies fails its configuration with
+#' `horizons_error_process_died` (see "Isolated fits").
 #' So does a daemon that dies, during a Bayesian iteration too (see
 #' "Parallelism"). When some configurations failed and
 #' the rest are returned, one `horizons_warning_partial_failure` names them

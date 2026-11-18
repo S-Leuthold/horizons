@@ -55,7 +55,7 @@ recorded as \code{models$seed}, which \code{\link[=ensemble]{ensemble()}} takes.
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug}, \code{breaker},
-\code{keep_traces}, \code{min_calib_rows}, \code{min_ad_rows} and
+\code{keep_traces}, \code{isolate}, \code{min_calib_rows}, \code{min_ad_rows} and
 \code{min_degradation_rows}, and refuses any other field that is set. The
 control it ran with, defaults filled in, is recorded as
 \code{models$control}.}
@@ -260,7 +260,17 @@ after the check before the run fails the member with tune's "Argument 1
 must be a data frame or a named atomic vector". \code{fit()} parallelises folds
 only in this version; a configs axis across the \code{n_best} members is gated
 on the fitted-object memory contract (a fitted object is hundreds of MB
-and would cross to workers).
+and would cross to workers). Before anything is fitted, a parallel \code{fit()}
+checks that the daemons on this machine fit in its memory, as
+\code{\link[=evaluate]{evaluate()}} does ("Parallelism" there), warning with class
+\code{horizons_warning_input} when they would not.
+
+Each \code{cubist} fit runs in a process of its own, wherever it runs, as in
+\code{\link[=evaluate]{evaluate()}} ("Isolated fits" there), so a member's results depend on the
+seed alone; a member whose fit's process dies, in its re-tune, its
+out-of-fold pass or its final fit, fails with
+\code{horizons_error_process_died}. \code{control_horizons(isolate = FALSE)} fits it
+here instead, which the tree and the \code{log} say.
 }
 
 \section{Outcome range}{
