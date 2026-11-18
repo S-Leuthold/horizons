@@ -1704,19 +1704,30 @@ describe("evaluate() - the configs axis on mirai", {
 ## A library holding every package this session sees but `hidden`, and the
 ## library variables pointing at it, for daemons started in the test.
 ## Daemons are new Rscript processes, which take their libraries from these
-## variables, not from this session's .libPaths().
+## variables, not from this session's .libPaths(). horizons itself is not
+## linked: the daemons load it from its own library, listed after the
+## temporary one, because covr records the path each process loaded the
+## package from and reads it once the tests are over, when the temporary
+## library is gone. That library must not hold `hidden` too.
 local_hidden_package_lib <- function(hidden, .env = parent.frame()) {
+
+  horizons_lib <- dirname(find.package("horizons"))
+
+  if (file.exists(file.path(horizons_lib, hidden))) {
+    testthat::skip(paste0(hidden, " is installed beside horizons, so the daemons cannot be kept from it"))
+  }
 
   dir <- withr::local_tempdir(.local_envir = .env)
 
   for (lib in .libPaths()) {
     for (pkg in list.files(lib)) {
       target <- file.path(dir, pkg)
-      if (pkg != hidden && !file.exists(target)) file.symlink(file.path(lib, pkg), target)
+      if (!pkg %in% c(hidden, "horizons") && !file.exists(target)) file.symlink(file.path(lib, pkg), target)
     }
   }
 
-  withr::local_envvar(R_LIBS = dir, R_LIBS_USER = dir, R_LIBS_SITE = dir, .local_envir = .env)
+  libs <- paste(dir, horizons_lib, sep = .Platform$path.sep)
+  withr::local_envvar(R_LIBS = libs, R_LIBS_USER = dir, R_LIBS_SITE = dir, .local_envir = .env)
 
   dir
 
