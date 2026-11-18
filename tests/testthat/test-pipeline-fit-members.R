@@ -645,10 +645,10 @@ describe("fit() - each member is one unit", {
     local_dying_fits(function(i) in_tune == 0L)
 
     before <- connected_daemons()
-    got    <- collect_warnings(
+    got    <- with_deadline(collect_warnings(
       fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE),
       "."
-    )
+    ), 300)
     res <- got$value$models$results
 
     expect_identical(res$status, c("success", "failed"))

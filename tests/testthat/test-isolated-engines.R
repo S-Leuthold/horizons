@@ -100,7 +100,7 @@ describe("isolated_fit()", {
     d <- isolated_data()
 
     set.seed(21)
-    fitted <- parsnip::fit_xy(cubist_spec("Cubist_isolated"), x = d$x, y = d$y)
+    fitted <- with_deadline(parsnip::fit_xy(cubist_spec("Cubist_isolated"), x = d$x, y = d$y), 60)
     after  <- stats::runif(1)
 
     ## The engine's own fit function in a fresh process, seeded with the one
@@ -193,11 +193,11 @@ describe("a cubist fit through define_model_spec()", {
       parsnip::fit_xy(spec, x = data$x, y = data$y)
     }
 
-    first <- fit_once(d)
-    again <- lapply(1:3, function(i) {
+    first <- with_deadline(fit_once(d), 60)
+    again <- with_deadline(lapply(1:3, function(i) {
       fit_once(other)
       fit_once(d)
-    })
+    }), 120)
 
     for (later in again) {
       expect_identical(later$fit$maxd, first$fit$maxd)

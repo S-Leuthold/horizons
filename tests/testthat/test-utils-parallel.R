@@ -394,7 +394,7 @@ describe("check_daemon_memory()", {
   it("records an input warning when this machine's daemons would need more than it has, suggesting a count that fits", {
 
     ## Four daemons here, room for two and a bit
-    got <- check(daemons_on(pids = 1:4), 2.5 * need_two)
+    got <- check(daemons_on(pids = 1:4, host = this_host()), 2.5 * need_two)
     msg <- gsub("\\s+", " ", got$rows$message)
 
     expect_true(got$warned)
@@ -404,22 +404,24 @@ describe("check_daemon_memory()", {
     expect_match(msg, "`mirai::daemons(2)` fits", fixed = TRUE)
 
     ## Room for fewer than two: a sequential run
-    got <- check(daemons_on(pids = 1:4), 1.5 * need_two)
+    got <- check(daemons_on(pids = 1:4, host = this_host()), 1.5 * need_two)
     expect_match(got$rows$message, "a sequential run does (`control_horizons(allow_par = FALSE)`)", fixed = TRUE)
 
   })
 
   it("is quiet when they fit, counts only the daemons on this machine, and notes a reading it cannot make", {
 
-    expect_false(check(daemons_on(pids = 1:2), 2.5 * need_two)$warned)
-    expect_identical(nrow(check(daemons_on(pids = 1:2), 2.5 * need_two)$rows), 0L)
+    here <- function(pids) daemons_on(pids = pids, host = this_host())
+
+    expect_false(check(here(1:2), 2.5 * need_two)$warned)
+    expect_identical(nrow(check(here(1:2), 2.5 * need_two)$rows), 0L)
 
     ## Four daemons, two on another machine
-    elsewhere <- c(daemons_on(pids = 1:2), daemons_on(pids = 3:4, host = "another-machine"))
+    elsewhere <- c(here(1:2), daemons_on(pids = 3:4, host = "another-machine"))
     expect_false(check(elsewhere, 2.5 * need_two)$warned)
     expect_false(check(daemons_on(pids = 1:2, host = "another-machine"), 1)$warned)
 
-    unread <- check(daemons_on(pids = 1:4), NA_real_)
+    unread <- check(here(1:4), NA_real_)
     expect_false(unread$warned)
     expect_identical(unread$rows$type, "note")
     expect_match(unread$rows$message, "could not read the memory available", fixed = TRUE)
@@ -433,21 +435,32 @@ describe("check_daemon_memory()", {
 ## =========================================================================
 ## run_isolated() relies on mirai starting a new process for each mirai() sent
 ## to a profile no daemons() call set (mirai 2.7.2: compute_env() is NULL for
-## it, and do_mirai() takes the ephemeral_daemon() branch). The first test is
-## the guard on that: a later mirai that refused the name, or reused a
-## process for it, fails here, on CI first.
+## it, and do_mirai() takes the ephemeral_daemon() branch). The first two
+## tests are the guard on that: a later mirai that reused a process for the
+## name fails the first, on every platform, and one that held the call fails
+## it at its deadline rather than hanging the run; a process left running
+## fails the second, on CI first. Every call here waits under a deadline.
 
 describe("run_isolated()", {
 
-  it("runs each call in a process of its own, which has ended once its value is back", {
+  it("runs each call in a process of its own", {
 
-    skip_on_os("windows")
-
-    pids <- c(run_isolated(quote(Sys.getpid()), what = "a test"),
-              run_isolated(quote(Sys.getpid()), what = "a test"))
+    pids <- with_deadline(c(run_isolated(quote(Sys.getpid()), what = "a test"),
+                            run_isolated(quote(Sys.getpid()), what = "a test")), 30)
 
     expect_length(unique(pids), 2L)
     expect_false(Sys.getpid() %in% pids)
+
+  })
+
+  it("leaves no process running once each value is back", {
+
+    ### tools::pskill() sends no signal 0 on Windows, so it cannot ask
+    skip_on_os("windows")
+
+    pids <- with_deadline(c(run_isolated(quote(Sys.getpid()), what = "a test"),
+                            run_isolated(quote(Sys.getpid()), what = "a test")), 30)
+
     expect_true(processes_end(pids))
 
   })
@@ -460,7 +473,7 @@ describe("run_isolated()", {
     ## With none set
     mirai::daemons(0)
     before <- daemons_record()
-    run_isolated(quote(Sys.getpid()), what = "a test")
+    with_deadline(run_isolated(quote(Sys.getpid()), what = "a test"), 30)
     expect_identical(daemons_record(), before)
     expect_false(mirai::daemons_set(.compute = isolated_profile()))
 
@@ -468,7 +481,7 @@ describe("run_isolated()", {
     local_test_daemons(2)
     before      <- daemons_record()
     daemon_pids <- unlist(with_deadline(mirai::everywhere(Sys.getpid(), .compute = NULL)[], 30))
-    pid         <- run_isolated(quote(Sys.getpid()), what = "a test")
+    pid         <- with_deadline(run_isolated(quote(Sys.getpid()), what = "a test"), 30)
 
     expect_identical(daemons_record(), before)
     expect_false(pid %in% daemon_pids)
@@ -506,13 +519,13 @@ describe("run_isolated()", {
     err <- expect_error(
       withCallingHandlers(
         utils::capture.output(
-          run_isolated(quote({
+          with_deadline(run_isolated(quote({
             cat("printed in the process\n")
             message("a message")
             warning("a warning")
             rlang::abort("an error", class = c("horizons_error_probe", "horizons_error_run", "horizons_error"),
                          field = "a field")
-          }), what = "a test"),
+          }), what = "a test"), 30),
           file = (printed <- withr::local_tempfile())
         ),
         warning = function(w) {
@@ -543,7 +556,7 @@ describe("run_isolated()", {
   it("returns the value of a call that warns, and takes its values by name", {
 
     expect_warning(
-      value <- run_isolated(quote({ warning("careful"); a + b }), list(a = 1, b = 2), what = "a test"),
+      value <- with_deadline(run_isolated(quote({ warning("careful"); a + b }), list(a = 1, b = 2), what = "a test"), 30),
       "careful"
     )
     expect_identical(value, 3)
@@ -554,19 +567,35 @@ describe("run_isolated()", {
 
   })
 
+  it("is called by name: each argument a symbol of its own name, so the call holds none of the data", {
+
+    expect_identical(call_by_name(quote(f), list(a = 1:3, b = "x")), quote(f(a = a, b = b)))
+    expect_identical(call_by_name(quote(pkg::f), list()), quote(pkg::f()))
+    expect_error(call_by_name(quote(f), list(1)), class = "horizons_error_internal")
+    expect_error(call_by_name(quote(f), list(a = 1, 2)), class = "horizons_error_internal")
+
+  })
+
   it("seeds its process from one draw of the caller's stream, so the caller's seed governs what it draws", {
 
+    draw <- function() with_deadline(run_isolated(quote(stats::runif(2)), what = "a test"), 30)
+
     set.seed(11)
-    first <- run_isolated(quote(stats::runif(2)), what = "a test")
+    first <- draw()
     after <- stats::runif(1)
 
     set.seed(11)
-    again <- run_isolated(quote(stats::runif(2)), what = "a test")
+    again <- draw()
+
+    ## Another seed, another draw in the process
+    set.seed(12)
+    other <- draw()
 
     set.seed(11)
     sample.int(100000L, 1L)
 
     expect_identical(again, first)
+    expect_false(identical(other, first))
     expect_identical(stats::runif(1), after)
 
   })

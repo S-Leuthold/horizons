@@ -13,8 +13,13 @@
 ## after daemons(0), cutting off the trace file a daemon writes on exit under
 ## covr. Named apart from mirai's own local_daemons(), which switches the
 ## active profile instead. Setting daemons moves the caller's random stream by
-## one draw, so a test of the stream sets its seed after this.
+## one draw, so a test of the stream sets its seed after this. The machine is
+## read as having a petabyte available meanwhile, so a run on these daemons
+## does not warn that they need more than a small machine has: the memory
+## check has tests of its own (test-utils-parallel.R).
 local_test_daemons <- function(n = 2L, ..., .env = parent.frame()) {
+
+  testthat::local_mocked_bindings(memory_available = function() 1e15, .package = "horizons", .env = .env)
 
   mirai::daemons(n, ..., autoexit = NA)
   withr::defer(mirai::daemons(0), envir = .env)
@@ -43,13 +48,19 @@ local_unresolved_task <- function(.env = parent.frame()) {
 
 ## What daemon_reports() returns from daemons that load horizons `version`
 ## and lack nothing, one report per process id: the mock of the door's check
-## for tests that do not start daemons.
+## for tests that do not start daemons. By default they are on another
+## machine, so the memory check counts none of them and a test's result does
+## not depend on this machine's free memory; a test of the check puts them
+## here (`host = this_host()`).
 daemons_on <- function(version = as.character(utils::packageVersion("horizons")), pids = 1:2,
-                       host = Sys.info()[["nodename"]]) {
+                       host = "a-test-host") {
   lapply(as.integer(pids), function(pid) list(pid = pid, host = host, version = version, missing = character(0)))
 }
 
 matching_daemons <- function(...) daemons_on()
+
+## The name the memory check knows this machine by
+this_host <- function() Sys.info()[["nodename"]]
 
 ## Evaluate `expr` with a deadline, so a wait that never ends fails the test
 ## instead of stalling the run. setTimeLimit() ends both a polling wait and

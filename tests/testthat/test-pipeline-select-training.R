@@ -3011,8 +3011,8 @@ test_that("select_training() refuses in its own process as it does here, naming 
   ## A property the pool lacks is found once the library is read, in the
   ## draw's process
   err <- expect_error(
-    select_training(fx$targets, fx$pool, k = 10, properties = "nope",
-                    control = control_horizons(isolate = TRUE)),
+    with_deadline(select_training(fx$targets, fx$pool, k = 10, properties = "nope",
+                                  control = control_horizons(isolate = TRUE)), 60),
     class = "horizons_error_input"
   )
 

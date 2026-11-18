@@ -786,7 +786,7 @@ describe("evaluate() - the daemons' memory", {
 
     local_mocked_bindings(
       running_under_load_all  = function() FALSE,
-      daemon_reports          = matching_daemons,
+      daemon_reports          = function(...) daemons_on(host = this_host()),
       check_parallel_backend  = function(...) TRUE,
       connected_daemons       = function() 2L,
       daemons_dispatch        = function() TRUE,
