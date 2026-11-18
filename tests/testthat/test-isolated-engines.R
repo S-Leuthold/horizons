@@ -175,6 +175,39 @@ describe("isolated_fit()", {
 
 })
 
+describe("a cubist fit through define_model_spec()", {
+
+  it("does not depend on the Cubist fits made before it in the session", {
+
+    ## Cubist's neighbour cutoff (`maxd`) comes from a generator in its C code
+    ## that carries on from every fit in a process; at 300 predictors it moves
+    ## by several units from one fit to the next there. Each fit in a process
+    ## of its own starts it at the same point.
+    d     <- isolated_data(n = 200, p = 300)
+    other <- isolated_data(n = 150, p = 40)
+
+    fit_once <- function(data) {
+      spec <- tune::finalize_model(define_model_spec("cubist"),
+                                   tibble::tibble(committees = 2L, neighbors = 5L, max_rules = 50L))
+      set.seed(4)
+      parsnip::fit_xy(spec, x = data$x, y = data$y)
+    }
+
+    first <- fit_once(d)
+    again <- lapply(1:3, function(i) {
+      fit_once(other)
+      fit_once(d)
+    })
+
+    for (later in again) {
+      expect_identical(later$fit$maxd, first$fit$maxd)
+      expect_identical(predict(later, d$x[1:20, ]), predict(first, d$x[1:20, ]))
+    }
+
+  })
+
+})
+
 describe("the progress tree and the log on isolated fits", {
 
   it("says which models fit in a process of their own, and with isolation off says so and notes it", {
