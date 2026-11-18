@@ -13,7 +13,7 @@ define_model_spec(model, isolate = TRUE)
 
 \item{isolate}{Logical. Whether a model \code{MODEL_SPECS} marks \code{isolate}
 takes its engine's isolated twin, which fits each model in a process of
-its own (\code{\link[=model_engine]{model_engine()}}); \code{control_horizons(isolate = )}.}
+its own (\code{model_engine()}); \code{control_horizons(isolate = )}.}
 }
 \value{
 A \code{parsnip} model specification with \code{mode = "regression"}.

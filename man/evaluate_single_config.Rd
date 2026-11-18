@@ -92,7 +92,7 @@ row's \code{trace}.}
 
 \item{isolate}{Logical. Fit a model whose engine \code{MODEL_SPECS} marks
 \code{isolate} through its isolated twin, each fit in a process of its own
-(\code{\link[=model_engine]{model_engine()}}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
+(\code{model_engine()}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
 
 \item{outside_warnings}{Character. Warnings the caller caught outside the
 unit before it ran, as \code{condition_summary()} lines: the configs-axis

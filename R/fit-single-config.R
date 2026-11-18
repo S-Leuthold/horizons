@@ -69,7 +69,7 @@
 #'   member's `trace`.
 #' @param isolate Logical. Fit a model whose engine `MODEL_SPECS` marks
 #'   `isolate` through its isolated twin, each fit in a process of its own
-#'   ([model_engine()]); `control_horizons(isolate = )`. Default `TRUE`.
+#'   (`model_engine()`); `control_horizons(isolate = )`. Default `TRUE`.
 #'
 #' @return List with fields: config_id, status, degraded (`NA` when the
 #'   check could not run), degraded_reason, fitted_workflow, best_params,

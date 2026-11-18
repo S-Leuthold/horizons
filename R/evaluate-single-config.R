@@ -66,7 +66,7 @@
 #'   row's `trace`.
 #' @param isolate Logical. Fit a model whose engine `MODEL_SPECS` marks
 #'   `isolate` through its isolated twin, each fit in a process of its own
-#'   ([model_engine()]); `control_horizons(isolate = )`. Default `TRUE`.
+#'   (`model_engine()`); `control_horizons(isolate = )`. Default `TRUE`.
 #' @param outside_warnings Character. Warnings the caller caught outside the
 #'   unit before it ran, as `condition_summary()` lines: the configs-axis
 #'   worker's, from loading the configuration's packages and rebuilding its

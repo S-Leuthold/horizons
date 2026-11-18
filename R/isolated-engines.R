@@ -176,11 +176,11 @@ register_isolated_engine <- function(model, engine, mode = "regression") {
 #' Fit an isolated engine's model in a process of its own
 #'
 #' @description
-#' The fit function of every isolated twin ([register_isolated_engine()]).
+#' The fit function of every isolated twin (`register_isolated_engine()`).
 #' parsnip calls it with what it would have given the engine's own fit
 #' function, every argument by name, and the twin's defaults: that function,
 #' and the engine's name. It calls the function with those arguments in a
-#' process started for this one fit ([run_isolated()]), whose random stream
+#' process started for this one fit (`run_isolated()`), whose random stream
 #' is seeded from one draw of the caller's, and returns the fitted model,
 #' which predicts here as the engine's would. A warning or error the fit
 #' raises is raised here with its class; a process that ends without its

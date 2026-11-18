@@ -102,7 +102,7 @@ member's \code{trace}.}
 
 \item{isolate}{Logical. Fit a model whose engine \code{MODEL_SPECS} marks
 \code{isolate} through its isolated twin, each fit in a process of its own
-(\code{\link[=model_engine]{model_engine()}}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
+(\code{model_engine()}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
 }
 \value{
 List with fields: config_id, status, degraded (\code{NA} when the

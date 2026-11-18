@@ -11,7 +11,7 @@
 #'   "mars", "lightgbm", "mlp".
 #' @param isolate Logical. Whether a model `MODEL_SPECS` marks `isolate`
 #'   takes its engine's isolated twin, which fits each model in a process of
-#'   its own ([model_engine()]); `control_horizons(isolate = )`.
+#'   its own (`model_engine()`); `control_horizons(isolate = )`.
 #'
 #' @return A `parsnip` model specification with `mode = "regression"`.
 #' @keywords internal
