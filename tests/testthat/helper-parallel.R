@@ -44,8 +44,9 @@ local_unresolved_task <- function(.env = parent.frame()) {
 ## What daemon_reports() returns from daemons that load horizons `version`
 ## and lack nothing, one report per process id: the mock of the door's check
 ## for tests that do not start daemons.
-daemons_on <- function(version = as.character(utils::packageVersion("horizons")), pids = 1:2) {
-  lapply(as.integer(pids), function(pid) list(pid = pid, version = version, missing = character(0)))
+daemons_on <- function(version = as.character(utils::packageVersion("horizons")), pids = 1:2,
+                       host = Sys.info()[["nodename"]]) {
+  lapply(as.integer(pids), function(pid) list(pid = pid, host = host, version = version, missing = character(0)))
 }
 
 matching_daemons <- function(...) daemons_on()

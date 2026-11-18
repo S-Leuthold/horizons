@@ -301,6 +301,22 @@ SHARED_ARG_NAMES <- c(
   "pkg_version"
 )
 
+# What one mirai daemon on this machine needs for a run, in bytes, by the
+# processes it holds: the daemon itself, and, when the run fits a model whose
+# fits are isolated (MODEL_SPECS' `isolate`), that fit's process beside it.
+# Each is `base` plus `per_byte` times the run's data, its rows times its
+# predictors times 8 bytes (daemon_need(), R/utils-parallel.R). PROVISIONAL:
+# the daemon's line is fitted through two measured runs on the configs axis,
+# local-real (1,047 rows by 1,701 predictors, 14 MB of data; each daemon's
+# peak 1.0 to 1.5 GB, P0a1's evidence) and library-real (10,341 rows, 141 MB;
+# about 2.1 GB a daemon, P0a4's evidence, and 3.3 GB for a library unit in
+# one process, math-floor.md), and the isolated fit's is a guess; the
+# measurement of a daemon and its isolated fit's process replaces both.
+DAEMON_MEMORY <- list(
+  daemon   = c(base = 1.4e9, per_byte = 8),
+  isolated = c(base = 0.3e9, per_byte = 4)
+)
+
 # How the message starts when a process horizons started for one call
 # (run_isolated(), R/utils-parallel.R) ends without its result. tune keeps an
 # error raised inside a fit only as its text, so check_tune_result() finds a

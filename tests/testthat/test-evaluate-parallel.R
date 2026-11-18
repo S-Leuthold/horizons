@@ -776,6 +776,54 @@ describe("evaluate() - a checkpoint a configs-axis worker could not write", {
 
 })
 
+describe("evaluate() - the daemons' memory", {
+
+  it("warns once at its end when this machine's daemons would need more memory than it has, and says so on the tree's parallel line", {
+
+    ## A real result row to return, read before anything is mocked
+    ## (helper-memo.R)
+    template <- allow_par_run()$result$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      daemon_reports          = matching_daemons,
+      check_parallel_backend  = function(...) TRUE,
+      connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE,
+      memory_available        = function() 1e9,
+      evaluate_single_config  = function(config_row, ...) {
+        row <- template
+        row$config_id <- config_row$config_id
+        row
+      },
+      dispatch_configs        = function(configs, payload_path, finished, ...) {
+        for (i in seq_len(nrow(configs))) {
+          finished$rows <- c(finished$rows, list(evaluate_config_worker(i, payload_path)))
+        }
+      }
+    )
+
+    out <- utils::capture.output(got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                          output_dir = withr::local_tempdir(), verbose = TRUE))
+    ))
+
+    input <- Filter(function(w) inherits(w, "horizons_warning_input"), got$warnings)
+    row   <- got$value$log[got$value$log$topic %in% "input", ]
+
+    expect_length(input, 1L)
+    expect_match(gsub("\\s+", " ", conditionMessage(input[[1]])),
+                 "The 2 mirai daemons on this machine would need about", fixed = TRUE)
+    expect_identical(nrow(row), 1L)
+    expect_identical(input[[1]]$log, row)
+    expect_identical(grep("Parallel:", out, value = TRUE, fixed = TRUE),
+                     "│  Parallel: over configs on mirai (2 daemons, more memory than available)")
+
+  })
+
+})
+
 describe("evaluate() - output_dir and the configs axis (#233)", {
 
   it("refuses an explicit configs axis without an output_dir before anything runs", {

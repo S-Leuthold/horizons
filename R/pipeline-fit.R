@@ -486,9 +486,21 @@ fit <- function(x,
   ## engine, and fit the members' engines, so every daemon must run this
   ## session's horizons and load the members' packages: checked before
   ## anything is drawn
+  ## The daemons on this machine against the memory it has, for this run's
+  ## data, said once and on the tree's parallel line
+  short_memory <- FALSE
+  n_daemons    <- NA_integer_
+
   if (allow_par) {
-    check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection), collector,
-                           results = member_results(list()))
+    ### Read before the check, which spends a task on each daemon and so can
+    ### end a pool set with `maxtasks`
+    n_daemons <- connected_daemons()
+    reports   <- check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection),
+                                        collector, results = member_results(list()))
+    short_memory <- check_daemon_memory(reports, member_configs$model, control$isolate,
+                                        n_rows       = nrow(x$data$analysis),
+                                        n_predictors = sum(role_map$role == "predictor"),
+                                        collector    = collector, verb = "fit")
   }
 
   ## configure() stores the screening and the final re-tune budgets
@@ -785,7 +797,13 @@ fit <- function(x,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
     ))
 
-    if (par_by_user && debug) {
+    if (allow_par) {
+
+      ## A parallel fit runs the members' folds on the daemons
+      cat(paste0("\u2502  Parallel: over resamples on mirai (", n_daemons, " daemons",
+                 if (short_memory) ", more memory than available", ")\n"))
+
+    } else if (par_by_user && debug) {
 
       cat("\u2502  Parallel: off, since debug runs in this session\n")
 

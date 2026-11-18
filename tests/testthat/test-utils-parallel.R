@@ -323,6 +323,112 @@ describe("daemon_reports()", {
 })
 
 ## =========================================================================
+## The memory the daemons on this machine need
+## =========================================================================
+
+describe("daemon_need() and daemon_processes()", {
+
+  it("counts the daemon, and an isolated fit's process beside it only when the run fits such a model with isolation on", {
+
+    expect_identical(daemon_processes(c("rf", "cubist"), TRUE), c(daemon = 1L, isolated = 1L))
+    expect_identical(daemon_processes(c("rf", "cubist"), FALSE), c(daemon = 1L, isolated = 0L))
+    expect_identical(daemon_processes("rf", TRUE), c(daemon = 1L, isolated = 0L))
+
+  })
+
+  it("adds each process's line at the run's data, its rows times its predictors times 8 bytes", {
+
+    bytes <- 8 * 1000 * 200
+    line  <- function(p) DAEMON_MEMORY[[p]][["base"]] + DAEMON_MEMORY[[p]][["per_byte"]] * bytes
+
+    expect_equal(daemon_need(c(daemon = 1L, isolated = 0L), 1000, 200), line("daemon"))
+    expect_equal(daemon_need(c(daemon = 1L, isolated = 1L), 1000, 200), line("daemon") + line("isolated"))
+
+    ## More data needs more
+    expect_gt(daemon_need(c(daemon = 1L, isolated = 0L), 10000, 1701),
+              daemon_need(c(daemon = 1L, isolated = 0L), 1000, 1701))
+
+  })
+
+})
+
+describe("memory_available()", {
+
+  it("reads what ps says the system can give processes", {
+
+    available <- memory_available()
+
+    expect_true(is.finite(available) && available > 0)
+    expect_lte(abs(available - ps::ps_system_memory()[["avail"]]), 0.2 * available)
+
+  })
+
+})
+
+describe("daemon_reports()'s host", {
+
+  it("names the machine each daemon runs on, which the memory check counts by", {
+
+    skip_on_cran()
+    local_test_daemons(2)
+
+    reports <- with_deadline(daemon_reports(character(0), "evaluate"), 30)
+
+    expect_identical(unique(vapply(reports, `[[`, character(1), "host")), Sys.info()[["nodename"]])
+
+  })
+
+})
+
+describe("check_daemon_memory()", {
+
+  need_two <- daemon_need(c(daemon = 1L, isolated = 1L), 1000, 200)
+
+  check <- function(reports, available, models = c("rf", "cubist")) {
+    collector <- log_open("evaluate")
+    local_mocked_bindings(memory_available = function() available)
+    warned <- check_daemon_memory(reports, models, TRUE, 1000, 200, collector, "evaluate")
+    list(warned = warned, rows = log_close(collector))
+  }
+
+  it("records an input warning when this machine's daemons would need more than it has, suggesting a count that fits", {
+
+    ## Four daemons here, room for two and a bit
+    got <- check(daemons_on(pids = 1:4), 2.5 * need_two)
+    msg <- gsub("\\s+", " ", got$rows$message)
+
+    expect_true(got$warned)
+    expect_identical(got$rows$topic, "input")
+    expect_match(msg, "The 4 mirai daemons on this machine would need about", fixed = TRUE)
+    expect_match(msg, "and each fit of \"cubist\" runs in a process of its own beside it", fixed = TRUE)
+    expect_match(msg, "`mirai::daemons(2)` fits", fixed = TRUE)
+
+    ## Room for fewer than two: a sequential run
+    got <- check(daemons_on(pids = 1:4), 1.5 * need_two)
+    expect_match(got$rows$message, "a sequential run does (`control_horizons(allow_par = FALSE)`)", fixed = TRUE)
+
+  })
+
+  it("is quiet when they fit, counts only the daemons on this machine, and notes a reading it cannot make", {
+
+    expect_false(check(daemons_on(pids = 1:2), 2.5 * need_two)$warned)
+    expect_identical(nrow(check(daemons_on(pids = 1:2), 2.5 * need_two)$rows), 0L)
+
+    ## Four daemons, two on another machine
+    elsewhere <- c(daemons_on(pids = 1:2), daemons_on(pids = 3:4, host = "another-machine"))
+    expect_false(check(elsewhere, 2.5 * need_two)$warned)
+    expect_false(check(daemons_on(pids = 1:2, host = "another-machine"), 1)$warned)
+
+    unread <- check(daemons_on(pids = 1:4), NA_real_)
+    expect_false(unread$warned)
+    expect_identical(unread$rows$type, "note")
+    expect_match(unread$rows$message, "could not read the memory available", fixed = TRUE)
+
+  })
+
+})
+
+## =========================================================================
 ## Isolated work: one call in a process of its own
 ## =========================================================================
 ## run_isolated() relies on mirai starting a new process for each mirai() sent

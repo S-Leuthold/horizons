@@ -382,6 +382,135 @@ task_value <- function(value, transport) {
 }
 
 ## ---------------------------------------------------------------------------
+## The memory the daemons on this machine need
+## ---------------------------------------------------------------------------
+## The user's daemons(n) is the run's budget of cores, and each daemon holds
+## its own copy of the run's data, and, while it fits a model whose fits are
+## isolated, that fit's process too. A parallel evaluate() or fit() warns at
+## its door when the daemons on this machine would need more memory than the
+## machine has, and suggests a count that fits. The run goes on: the
+## estimate is from measured runs, and the user knows the machine.
+
+#' The memory available on this machine
+#'
+#' @description
+#' `ps::ps_system_memory()`'s `avail`: what the system can give processes
+#' without swapping. Under a container's or `systemd-run`'s memory cap it is
+#' the machine's, not the cap's.
+#'
+#' @return Numeric(1), in bytes, or `NA` when it cannot be read. A seam, so a
+#'   test can give another reading.
+#' @keywords internal
+#' @noRd
+memory_available <- function() {
+
+  tryCatch(as.numeric(ps::ps_system_memory()[["avail"]]), error = function(e) NA_real_)
+
+}
+
+#' The processes one daemon holds for a run
+#'
+#' @description
+#' The daemon, and an isolated fit's process beside it while it fits a model
+#' whose fits are isolated (each daemon fits one at a time). The one place a
+#' daemon's processes are counted, so work that starts more of them adds its
+#' count here.
+#'
+#' @param models Character. The models the run fits.
+#' @param isolate Logical(1). `control_horizons(isolate = )`.
+#' @return Named integer: one count per row of `DAEMON_MEMORY`.
+#' @keywords internal
+#' @noRd
+daemon_processes <- function(models, isolate) {
+
+  c(daemon   = 1L,
+    isolated = as.integer(isTRUE(isolate) && length(isolated_models(models)) > 0))
+
+}
+
+#' The memory one daemon needs for a run
+#'
+#' @param processes Named integer, from [daemon_processes()].
+#' @param n_rows,n_predictors The run's data: its rows and predictors.
+#' @return Numeric(1), in bytes: each process's `DAEMON_MEMORY` line at the
+#'   run's data, times how many of it the daemon holds.
+#' @keywords internal
+#' @noRd
+daemon_need <- function(processes, n_rows, n_predictors) {
+
+  bytes <- 8 * as.numeric(n_rows) * as.numeric(n_predictors)
+
+  sum(vapply(names(processes), function(p) {
+    processes[[p]] * (DAEMON_MEMORY[[p]][["base"]] + DAEMON_MEMORY[[p]][["per_byte"]] * bytes)
+  }, numeric(1)))
+
+}
+
+#' Warn when the daemons on this machine would need more memory than it has
+#'
+#' @description
+#' Run at a parallel `evaluate()`'s or `fit()`'s door, once the daemons have
+#' reported ([daemon_reports()]). The daemons counted are those on this
+#' machine, by the host name each reported; daemons elsewhere are not
+#' checked, since only this machine's memory can be read here. When those
+#' daemons' need ([daemon_need()]) is more than the memory available
+#' ([memory_available()]), an `input` warning is recorded on the verb's
+#' collector, raised once at its end, suggesting the most daemons that fit,
+#' or a sequential run below two. A reading that cannot be made is a note.
+#'
+#' @param reports The daemons' reports, one per task.
+#' @param models Character. The models the run fits.
+#' @param isolate Logical(1).
+#' @param n_rows,n_predictors The run's data.
+#' @param collector The verb's collector.
+#' @param verb Character(1).
+#' @return Logical(1): `TRUE` when it warned, for the tree's parallel line.
+#' @keywords internal
+#' @noRd
+check_daemon_memory <- function(reports, models, isolate, n_rows, n_predictors, collector, verb) {
+
+  here    <- Sys.info()[["nodename"]]
+  local   <- Filter(function(r) identical(r$host, here), reports)
+  n_local <- length(unique(vapply(local, function(r) r$pid, integer(1))))
+
+  if (n_local == 0L) return(FALSE)
+
+  available <- memory_available()
+
+  if (!is.finite(available)) {
+    log_note(collector, "{.fn {verb}} could not read the memory available on this machine, so it did not check that its mirai daemons fit in it.")
+    return(FALSE)
+  }
+
+  processes <- daemon_processes(models, isolate)
+  need      <- daemon_need(processes, n_rows, n_predictors)
+  total     <- n_local * need
+
+  if (total <= available) return(FALSE)
+
+  fits <- floor(available / need)
+  gb   <- function(bytes) format(round(bytes / 1e9, 1), nsmall = 1)
+  iso  <- isolated_models(models)
+
+  log_warning(collector, "input", c(
+    "The {n_local} mirai daemon{?s} on this machine would need about {gb(need)} GB each for this run, {gb(total)} GB in all, and {gb(available)} GB is available.",
+    "i" = if (processes[["isolated"]] > 0) {
+      "Each holds a copy of the run's data, and each fit of {.val {iso}} runs in a process of its own beside it."
+    } else {
+      "Each holds a copy of the run's data."
+    },
+    "i" = if (fits >= 2) {
+      "{.code mirai::daemons({fits})} fits; the estimate is from measured runs, so it is approximate."
+    } else {
+      "Fewer than two daemons fit, so a sequential run does ({.code control_horizons(allow_par = FALSE)}); the estimate is from measured runs, so it is approximate."
+    }
+  ))
+
+  TRUE
+
+}
+
+## ---------------------------------------------------------------------------
 ## Isolated work: one call in a process of its own
 ## ---------------------------------------------------------------------------
 ## Some work runs in a process started for it alone and ended once its value

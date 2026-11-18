@@ -528,9 +528,17 @@ evaluate <- function(x,
   ## On either axis the daemons run horizons code (on the resamples axis,
   ## tune's tasks run the recipe steps and the PLS engine), so they must
   ## run this session's horizons: checked here, before anything is drawn.
+  ## The daemons on this machine against the memory it has, for this run's
+  ## data, said once and on the tree's parallel line
+  short_memory <- FALSE
+
   if (axis$axis != "sequential") {
-    check_parallel_workers("evaluate", needed_packages(configs$model, configs$feature_selection), collector,
-                           results = results_so_far(list()))
+    reports <- check_parallel_workers("evaluate", needed_packages(configs$model, configs$feature_selection), collector,
+                                      results = results_so_far(list()))
+    short_memory <- check_daemon_memory(reports, configs$model, control$isolate,
+                                        n_rows       = nrow(analysis),
+                                        n_predictors = sum(role_map$role == "predictor"),
+                                        collector    = collector, verb = "evaluate")
   }
 
   ## Without mirai's dispatcher the configs axis runs as asked, but loses the
@@ -810,7 +818,8 @@ evaluate <- function(x,
       ## A parallel axis has two daemons or more
       cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
                  " (", plan_workers, " daemons",
-                 if (no_dispatcher) ", no dispatcher", ")\n"))
+                 if (no_dispatcher) ", no dispatcher",
+                 if (short_memory) ", more memory than available", ")\n"))
 
     } else if (allow_par && debug) {
 
@@ -3472,7 +3481,8 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' @param results The verb's results table with no rows, which a stop
 #'   before the first unit carries, so it has the shape of one after it.
 #' @param call The frame a refusal reports: the verb's.
-#' @return `NULL`, invisibly.
+#' @return The daemons' reports ([daemon_reports()]), invisibly, for the
+#'   memory check.
 #' @keywords internal
 #' @noRd
 check_parallel_workers <- function(verb, needed, collector, results = NULL, call = rlang::caller_env()) {
@@ -3512,7 +3522,7 @@ check_parallel_workers <- function(verb, needed, collector, results = NULL, call
 
   }
 
-  invisible(NULL)
+  invisible(reports)
 
 }
 
@@ -3549,9 +3559,10 @@ running_under_load_all <- function() {
 #' @param verb Character(1). The verb asking.
 #' @param results The verb's results table with no rows, for a stop.
 #' @param call The frame a refusal reports.
-#' @return List, one report per task: `pid` (integer), `version`
-#'   (character, `NA` when horizons cannot be loaded) and `missing`
-#'   (character). A seam, so a test can report other daemons.
+#' @return List, one report per task: `pid` (integer), `host` (the machine's
+#'   name, which the memory check reads), `version` (character, `NA` when
+#'   horizons cannot be loaded) and `missing` (character). A seam, so a test
+#'   can report other daemons.
 #' @keywords internal
 #' @noRd
 daemon_reports <- function(packages, verb = "evaluate", results = NULL, call = rlang::caller_env()) {
@@ -3562,6 +3573,7 @@ daemon_reports <- function(packages, verb = "evaluate", results = NULL, call = r
   tasks <- unclass(mirai::everywhere({
     loads <- vapply(packages, requireNamespace, logical(1), quietly = TRUE)
     list(pid     = Sys.getpid(),
+         host    = Sys.info()[["nodename"]],
          version = if (loads[["horizons"]]) as.character(utils::packageVersion("horizons")) else NA_character_,
          missing = packages[!loads])
   }, .args = list(packages = packages), .compute = NULL))

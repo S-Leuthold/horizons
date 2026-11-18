@@ -39,6 +39,7 @@ Imports:
     parsnip,
     pls,
     prospectr (>= 0.2.10),
+    ps,
     purrr,
     qs2,
     ranger,
