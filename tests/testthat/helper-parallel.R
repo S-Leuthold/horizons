@@ -106,6 +106,35 @@ processes_end <- function(pids, seconds = 5) {
   !any(vapply(pids, process_alive, logical(1)))
 }
 
+## A library holding another horizons, until the calling frame exits: a
+## package of that name at version 0.0.0.1, holding nothing else, installed
+## with R CMD INSTALL (a few seconds). What a process started with only the
+## environment's library paths would load first when R_LIBS names it.
+local_decoy_horizons <- function(.env = parent.frame()) {
+
+  src <- withr::local_tempdir(.local_envir = .env)
+  lib <- withr::local_tempdir(.local_envir = .env)
+
+  dir.create(file.path(src, "R"))
+  writeLines(c("Package: horizons", "Version: 0.0.0.1", "Title: Another horizons",
+               "Description: A package of the same name, for a test.", "License: MIT",
+               "Encoding: UTF-8"),
+             file.path(src, "DESCRIPTION"))
+  writeLines("export(decoy)", file.path(src, "NAMESPACE"))
+  writeLines("decoy <- function() TRUE", file.path(src, "R", "decoy.R"))
+
+  status <- system2(file.path(R.home("bin"), "R"),
+                    c("CMD", "INSTALL", "--no-test-load", "--no-docs", paste0("--library=", shQuote(lib)), shQuote(src)),
+                    stdout = FALSE, stderr = FALSE)
+
+  if (!identical(as.integer(status), 0L) || !dir.exists(file.path(lib, "horizons"))) {
+    testthat::skip("another horizons could not be installed for the test")
+  }
+
+  lib
+
+}
+
 ## Replace the isolated engines' fit with one whose process kills itself on
 ## the calls `dies()` picks (it is given the call's number), so a test sees a
 ## real death of an isolated fit's process, until the calling frame exits.

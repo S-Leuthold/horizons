@@ -476,6 +476,29 @@ describe("run_isolated()", {
 
   })
 
+  it("starts its process on this session's libraries, so a value it is sent that loads horizons loads this one", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## A process started on the environment's paths alone would find another
+    ## horizons first
+    decoy <- local_decoy_horizons()
+    withr::local_envvar(R_LIBS = decoy)
+
+    ## A function of horizons' namespace loads horizons as the process reads
+    ## the message, before the body sets its paths
+    loaded <- getNamespaceInfo("horizons", "path")
+    path   <- with_deadline(run_isolated(quote(getNamespaceInfo("horizons", "path")),
+                                         list(f = draw_training_set), what = "a test",
+                                         libraries = unique(c(dirname(loaded), .libPaths()))), 30)
+
+    expect_identical(normalizePath(path), normalizePath(loaded))
+    expect_identical(Sys.getenv("R_LIBS"), decoy)
+
+  })
+
   it("prints what the process printed, and raises its warnings, messages and error here, in order and with their classes", {
 
     raised <- list()

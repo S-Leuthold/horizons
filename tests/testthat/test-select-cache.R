@@ -488,13 +488,14 @@ test_that("the first-use space leaves out the library's flagged rows, as a draw'
 
   ## Arrange: a release whose recipe flags one row, as a step that could not
   ## use it would
-  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
-  entry$recipe <- function(raw, entry, verbose = TRUE) {
-    pool <- build_ossl_library(raw, entry, verbose = verbose)
+  entry      <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  real_build <- build_ossl_library
+  local_mocked_bindings(build_ossl_library = function(raw, entry, verbose = TRUE) {
+    pool <- real_build(raw, entry, verbose = verbose)
     pool$data$analysis$.flag <- c("standardize", rep(NA_character_, nrow(pool$data$analysis) - 1L))
     pool$data$role_map <- rbind(pool$data$role_map, tibble::tibble(variable = ".flag", role = "meta"))
     pool
-  }
+  })
   cache <- local_mini_registry(entry)
   withr::local_options(horizons.library_download = TRUE)
 
@@ -727,9 +728,17 @@ test_that("a first use drawn in its own process asks in the session and builds t
   empty <- withr::local_tempdir()
   withr::local_options(horizons.cache_dir = empty, horizons.library_download = NULL)
 
-  draw <- function() {
-    select_training(targets, "mini", k = 5, depth = "all", seed = 7L,
-                    control = control_horizons(isolate = TRUE))
+  ## Each draw sent to a process of its own, counted, with what it was sent
+  real_mirai <- mirai::mirai
+  sent       <- list()
+  local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .compute = NULL) {
+    sent[[length(sent) + 1L]] <<- .args
+    real_mirai(.expr = .expr, ..., .args = .args, .compute = .compute)
+  }, .package = "mirai")
+
+  draw <- function(verbose = FALSE) {
+    with_deadline(select_training(targets, "mini", k = 5, depth = "all", seed = 7L,
+                                  control = control_horizons(isolate = TRUE, verbose = verbose)), 60)
   }
 
   ## Not interactive and no option: refused in the session with its message,
@@ -740,19 +749,63 @@ test_that("a first use drawn in its own process asks in the session and builds t
   )
   expect_length(list.files(empty, all.files = TRUE, no.. = TRUE), 0L)
 
+  ## The process was asked once, and deferred to the session
+  expect_length(sent, 1L)
+
   ## With the option, the message is the session's, once, and the library is
   ## built where the session's option points
   withr::local_options(horizons.library_download = TRUE)
 
   said <- character()
-  out  <- suppressWarnings(withCallingHandlers(draw(), message = function(m) {
+  txt  <- utils::capture.output(out <- suppressWarnings(withCallingHandlers(draw(verbose = TRUE), message = function(m) {
     said <<- c(said, conditionMessage(m))
     invokeRestart("muffleMessage")
-  }))
+  })))
 
   expect_s3_class(out, "horizons_data")
   expect_length(grep("is not cached yet", said, fixed = TRUE), 1L)
+
+  ## The session says what the process is doing before it waits on it, and
+  ## the process's own tree follows once it returns
+  said_first <- grep("Downloading and building the mini library in the draw's process", txt, fixed = TRUE)
+  expect_length(said_first, 1L)
+  expect_lt(said_first, grep("Selecting training set", txt, fixed = TRUE)[1])
   expect_true(file.exists(file.path(empty, "mini_v0.qs2")))
   expect_identical(out$selection$library$name, "mini")
+
+  ## Deferred, then given: two more sends. The registry entry each carried
+  ## names its recipe, and holds no function that would load a horizons
+  ## before the process sets its library paths
+  expect_length(sent, 3L)
+  holds <- function(v) is.function(v) || is.environment(v) || (is.list(v) && any(vapply(v, holds, logical(1))))
+  for (args in sent) {
+    expect_identical(args$registry_entry$recipe, "build_ossl_library")
+    expect_false(holds(args$registry_entry))
+  }
+
+})
+
+
+test_that("a registered library's draw in its own process runs this session's horizons, whatever another library holds", {
+
+  skip_unless_slow_tier()
+  skip_on_cran()
+  skip_if_dev_package()
+
+  mini    <- use_mini()
+  targets <- mini_targets(mini$pool)
+
+  ## A process started on the environment's paths alone would find another
+  ## horizons first, one with no draw in it
+  decoy <- local_decoy_horizons()
+  withr::local_envvar(R_LIBS = decoy)
+
+  out <- with_deadline(suppressWarnings(
+    select_training(targets, "mini", k = 5, depth = "all", seed = 7L, control = control_horizons(isolate = TRUE))
+  ), 60)
+
+  expect_s3_class(out, "horizons_data")
+  expect_true(out$selection$settings$control$isolate)
+  expect_identical(Sys.getenv("R_LIBS"), decoy)
 
 })

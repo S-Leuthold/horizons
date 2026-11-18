@@ -30,8 +30,8 @@
 #'   `title`, `build` (see the entry), `sources` (a data.frame of `table`, `file`, `url`, `bytes`,
 #'   `md5`), `filters`, `properties` (short name, source column, unit),
 #'   `license`, `short_cite`, `citation`, `credit`, and
-#'   `recipe`, the
-#'   function that builds the library from the verified source files.
+#'   `recipe`, the name of the horizons function that builds the library
+#'   from the verified source files.
 #' @noRd
 library_registry <- function() {
 
@@ -129,7 +129,10 @@ library_registry <- function() {
         "Soil Survey Laboratory."
       ),
 
-      recipe = build_ossl_library
+      ## By name, found in the namespace that builds the library: an entry
+      ## is sent to the draw's process, where a function would load horizons
+      ## before the process has set its library paths
+      recipe = "build_ossl_library"
 
     )
 
@@ -412,7 +415,8 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
   on.exit(unlink(raw_dir, recursive = TRUE), add = TRUE)
 
   raw  <- download_sources(entry, raw_dir, verbose = verbose, call = call)
-  pool <- entry$recipe(raw, entry, verbose = verbose)
+  recipe <- get(entry$recipe, envir = asNamespace("horizons"), mode = "function")
+  pool   <- recipe(raw, entry, verbose = verbose)
 
   record <- library_record(
     "registered",

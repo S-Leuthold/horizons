@@ -546,10 +546,11 @@ isolated_profile <- function() {
 #' Sends `expr` to a new R process ([isolated_profile()]) and returns its
 #' value here, as if it had run in this session:
 #'
-#' * The process is given this session's library paths (`libraries`) first,
+#' * The process starts with this session's library paths (`libraries`):
+#'   `R_LIBS` names them while it is started, and its body sets them first,
 #'   so it loads what this session would (a process started by mirai sees
-#'   `R_LIBS` and the startup files, not paths set at run time), then any
-#'   `options`.
+#'   `R_LIBS` and the startup files, not paths set at run time), whatever
+#'   its arguments hold. Then any `options` are set.
 #' * Its random stream is seeded with one integer drawn here, from the
 #'   caller's stream, under the kinds every unit pins ([with_unit_seed()]),
 #'   so what it draws follows the caller's seed, and this session's stream
@@ -600,6 +601,15 @@ run_isolated <- function(expr, args = list(), what, options = list(), libraries 
   ### mirai takes a call held in a variable as the call to send; a call
   ### written in place would be sent as written
   body <- isolated_body(expr)
+
+  ## The process starts with these libraries on its startup path, not only
+  ## given them in the body: a value sent that holds a function or a fitted
+  ## object loads its package as the process reads the message, before the
+  ## body runs. mirai starts the process inside mirai(), which it inherits
+  ## this variable from.
+  libs_were <- Sys.getenv("R_LIBS", unset = NA)
+  Sys.setenv(R_LIBS = paste(libraries, collapse = .Platform$path.sep))
+  on.exit(if (is.na(libs_were)) Sys.unsetenv("R_LIBS") else Sys.setenv(R_LIBS = libs_were), add = TRUE)
 
   task <- mirai::mirai(
     .expr    = body,
