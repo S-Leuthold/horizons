@@ -436,8 +436,12 @@ tune_warmstart_bayes <- function(workflow,
 #'
 #' An isolated fit whose process dies ([run_isolated()]) fails the unit
 #' with `horizons_error_process_died`, whether tune kept it as a note or
-#' dropped the candidate and only printed it, so the search is not fallen
-#' back from.
+#' dropped the candidate, so the search is not fallen back from. tune keeps
+#' no note of a dropped candidate, and on the resamples axis prints its
+#' reason on the daemon, so the deaths are read from the processes the fits
+#' ran in ([isolated_deaths()]): this one, and each daemon when the folds ran
+#' on them. The record is emptied before the search too, since what it holds
+#' then is other units' deaths, read already from tune's notes.
 #'
 #' A daemon that dies during an iteration on the resamples axis does not
 #' reach here at all: tune prints "Optimization stopped prematurely" and
@@ -480,18 +484,18 @@ bayes_search <- function(workflow,
 
   stopped     <- NULL
   all_failed  <- NULL
-  died        <- NULL
   interrupted <- FALSE
   n_dropped   <- 0L
   search_cap  <- paste0(toupper(substr(search, 1, 1)), substring(search, 2))
 
+  ## The deaths of isolated fits' processes, read where the fits ran: on the
+  ## daemons when tune sends them the folds. What the record holds now is
+  ## other units', so it is emptied first.
+  on_daemons <- isTRUE(allow_par)
+  isolated_deaths(on_daemons)
+
   read_log <- function(m) {
     text <- cli::ansi_strip(conditionMessage(m))
-    ### An isolated fit's process that died, which tune prints once however
-    ### many candidates it drops for it
-    if (is.null(died) && grepl(PROCESS_DIED, text, fixed = TRUE)) {
-      died <<- sub(paste0("^.*?(", PROCESS_DIED, ")"), "\\1", text, perl = TRUE)
-    }
     if (grepl("All models failed for:", text, fixed = TRUE)) {
       n_dropped <<- n_dropped + 1L
       if (is.null(all_failed)) {
@@ -535,16 +539,22 @@ bayes_search <- function(workflow,
 
   if (interrupted) rlang::interrupt()
 
-  ## A kind no unit contains, a package missing on a worker, or an isolated
-  ## fit's process that died, is raised again for the unit, not fallen back
-  ## from
+  ## A kind no unit contains, or a package missing on a worker, is raised
+  ## again for the unit, not fallen back from
   if (!is.null(stopped) &&
-      (debug || rlang::cnd_inherits(stopped, c(NEVER_CONTAINED, "horizons_error_process_died")) ||
-         missing_package_signal(stopped))) {
+      (debug || rlang::cnd_inherits(stopped, NEVER_CONTAINED) || missing_package_signal(stopped))) {
 
     stop(stopped)
 
   }
+
+  ## An isolated fit's process that died fails the unit, as it does in the
+  ## grid (check_tune_result()), even where tune dropped every candidate it
+  ## killed and kept no note of it; under debug too, before the dropped
+  ## candidate is reported as a failure with no record of why
+  died <- isolated_deaths(on_daemons)
+
+  if (length(died) > 0) abort_process_died_in_tune(died[1])
 
   if (debug && !is.null(all_failed)) {
 
@@ -557,11 +567,6 @@ bayes_search <- function(workflow,
     )
 
   }
-
-  ## An isolated fit's process that died fails the unit, as it does in the
-  ## grid (check_tune_result()), even where tune dropped every candidate it
-  ## killed and kept no note of it
-  if (!is.null(died)) abort_process_died_in_tune(died)
 
   if (!is.null(bayes_results)) check_tune_result(bayes_results, failure = NULL, debug = debug)
 

@@ -560,14 +560,17 @@ isolated_profile <- function() {
 #'   error, if it ended in one, is raised as the condition it was. mirai
 #'   relays none of these on its own.
 #' * A process that ends without returning (killed, out of memory,
-#'   `errorValue` 19) is `horizons_error_process_died` ([abort_process_died()]).
+#'   `errorValue` 19) is `horizons_error_process_died` ([abort_process_died()]),
+#'   and is recorded in this process ([note_process_death()]), where a
+#'   Bayesian search reads it.
 #' * Leaving before the value is back (an error, an interrupt) drops the
 #'   call, which ends its process.
 #'
 #' The call sent is a base-R body around `expr`, and `args` are plain
-#' values the body finds by name: nothing of horizons travels, so a process
-#' running a fit loads only what `expr` names. A function or a closure among
-#' `args` would carry its environment with it.
+#' values the body finds by name: nothing of horizons is in the body, so a
+#' process running a fit loads only what `expr` names. A function or a
+#' fitted object among `args` carries its environment or its package with
+#' it, which the process loads from `libraries` as it reads its message.
 #'
 #' @param expr A call, quoted, evaluated in the process with `args` in scope.
 #' @param args Named list of the values `expr` reads.
@@ -621,8 +624,11 @@ run_isolated <- function(expr, args = list(), what, options = list(), libraries 
 
   ### A miraiError is the body's own failure (an option it could not set),
   ### raised as the condition it was; any other error value, the process's
-  ### end without a result
-  value <- task_value(value, function(v) abort_process_died(v, what, call = call))
+  ### end without a result, recorded here as it is raised
+  value <- task_value(value, function(v) {
+    withCallingHandlers(abort_process_died(v, what, call = call),
+                        horizons_error_process_died = note_process_death)
+  })
 
   if (length(value$output) > 0) cat(value$output, sep = "\n")
 
@@ -727,6 +733,100 @@ abort_process_died <- function(value, what, call = rlang::caller_env()) {
     "i" = "A process ends this way when it is killed, most often by the system when memory runs out.",
     "i" = "{.code control_horizons(isolate = FALSE)} runs the work in this session instead."
   ), kind = "run", class = "horizons_error_process_died", call = call)
+
+}
+
+## ---------------------------------------------------------------------------
+## The deaths of isolated work's processes, where they were met
+## ---------------------------------------------------------------------------
+## tune keeps an error raised inside a fit as a note, where check_tune_result()
+## finds a process's death, except in a Bayesian search, which drops a
+## candidate that failed in every fold, note and all. So each death is also
+## recorded in the process whose call met it (run_isolated()), and the search
+## reads the record there once it returns: here, or on each daemon when its
+## folds ran on them (bayes_search()).
+
+#' The deaths of the processes `run_isolated()` started from this process
+#'
+#' @description
+#' `messages` holds each death's message, as tune would keep it in a note,
+#' oldest first, until [take_process_deaths()] takes them.
+#'
+#' @keywords internal
+#' @noRd
+process_deaths <- new.env(parent = emptyenv())
+process_deaths$messages <- character(0)
+
+#' Record the death of a process `run_isolated()` started
+#'
+#' @param cnd The `horizons_error_process_died` being raised.
+#' @return `NULL`, invisibly; the condition goes on being raised.
+#' @keywords internal
+#' @noRd
+note_process_death <- function(cnd) {
+
+  process_deaths$messages <- c(process_deaths$messages, conditionMessage(cnd))
+
+  invisible(NULL)
+
+}
+
+#' Take the deaths recorded in this process, leaving none
+#'
+#' @return Character: each death's message, oldest first.
+#' @keywords internal
+#' @noRd
+take_process_deaths <- function() {
+
+  taken <- process_deaths$messages
+  process_deaths$messages <- character(0)
+
+  taken
+
+}
+
+#' Take the deaths recorded here and, for work run on them, on each daemon
+#'
+#' @description
+#' This process's record ([take_process_deaths()]) and, when `on_daemons`,
+#' each connected daemon's, read with one task on each, as the door's check
+#' reaches them ([daemon_reports()]), and left empty. A daemon gone before
+#' its task returns is not waited for: its death is the verb's to read from
+#' the count of connected daemons.
+#'
+#' @param on_daemons Logical(1). Whether the work ran on the user's daemons
+#'   (tune's folds on the resamples axis).
+#' @return Character: the deaths' messages.
+#' @keywords internal
+#' @noRd
+isolated_deaths <- function(on_daemons) {
+
+  here <- take_process_deaths()
+
+  ### tune runs the folds here when no daemons are set, whatever allow_par
+  ### says
+  if (!isTRUE(on_daemons) || !mirai::daemons_set(.compute = NULL) || connected_daemons() == 0L) {
+
+    return(here)
+
+  }
+
+  ## A mirai_map, whose elements are plain mirai. Called through the
+  ## namespace, which every daemon that ran tune's folds has loaded
+  tasks <- unclass(mirai::everywhere(
+    get("take_process_deaths", envir = asNamespace("horizons"))(),
+    .compute = NULL
+  ))
+
+  while (any(vapply(tasks, mirai::unresolved, logical(1))) && connected_daemons() > 0L) {
+    Sys.sleep(DISPATCH_POLL_SECONDS)
+  }
+
+  there <- lapply(tasks, function(task) {
+    if (!mirai::unresolved(task) && is.character(task$data)) task$data else character(0)
+  })
+
+  c(here, unlist(there, use.names = FALSE))
 
 }
 

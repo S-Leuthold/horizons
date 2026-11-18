@@ -3208,7 +3208,7 @@ describe("evaluate() - an isolated fit's process that dies", {
     local_dying_fits(function(i) i == 2L)
 
     before <- connected_daemons()
-    ev     <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L))
+    ev     <- with_deadline(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L)), 300)
     res    <- ev$evaluation$results
 
     expect_identical(res$status, c("success", "failed"))
@@ -3238,7 +3238,81 @@ describe("evaluate() - an isolated fit's process that dies", {
     obj <- make_eval_object(n = 60, n_configs = 2)
     obj$config$tuning$bayesian_iter <- 2L
 
-    res <- suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE))$evaluation$results
+    res <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE)), 300)$evaluation$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2], paste("^Bayesian search failed:", PROCESS_DIED))
+
+    ## Under debug, which stops at the first failure, the death is the reason
+    ## given, not a candidate dropped with no record of why
+    err <- expect_error(
+      with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE,
+                                              control = control_horizons(debug = TRUE))), 300),
+      class = "horizons_error_process_died"
+    )
+    expect_match(conditionMessage(err), PROCESS_DIED, fixed = TRUE)
+
+  })
+
+  it("does not fail a later configuration's Bayesian search with a death an earlier one's grid met", {
+
+    skip_unless_slow_tier()
+    skip_on_os("windows")
+
+    ## cubist first, its second grid fit dying; then rf, whose search reads
+    ## the deaths recorded in this session once it returns
+    local_dying_fits(function(i) i == 2L)
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model <- c("cubist", "rf")
+    obj$config$tuning$bayesian_iter <- 2L
+
+    res <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE)), 300)$evaluation$results
+
+    expect_identical(res$status, c("failed", "success"))
+    expect_identical(res$class[1], "horizons_error_process_died")
+
+  })
+
+  it("fails its configuration on the resamples axis too, where tune prints the dropped candidate's reason on a daemon (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_on_os("windows")
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+
+    ## On the daemons, every isolated fit's process dies while the flag
+    ## exists, which the search alone creates: so each candidate the search
+    ## proposes fails in every fold, and tune drops it with its note
+    flag <- withr::local_tempfile()
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("isolated_fit", ns)
+      unlockBinding("isolated_fit", ns)
+      assign("isolated_fit", function(..., .isolated_fit, .isolated_engine) {
+        if (file.exists(flag)) {
+          get("run_isolated", ns)(quote(tools::pskill(Sys.getpid(), 9L)), what = "a Cubist fit")
+        }
+        real(..., .isolated_fit = .isolated_fit, .isolated_engine = .isolated_engine)
+      }, envir = ns)
+    }, .args = list(flag = flag), .compute = NULL)[], 30)
+
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      file.create(flag)
+      on.exit(unlink(flag))
+      real_bayes(...)
+    }, .package = "tune")
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$tuning$bayesian_iter <- 2L
+
+    res <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE,
+      control = control_horizons(allow_par = TRUE, parallelize_over = "resamples")
+    )), 600)$evaluation$results
 
     expect_identical(res$status, c("success", "failed"))
     expect_identical(res$class[2], "horizons_error_process_died")
