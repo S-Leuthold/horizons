@@ -39,7 +39,8 @@ verbs, and \code{\link[=average]{average()}}, at once. All four verbs.}
 
 \item{output_dir}{\code{character(1)}. A directory where \code{\link[=evaluate]{evaluate()}} writes
 each configuration's result as it finishes, and from which it resumes.
-Default none.}
+On the configs axis the daemons read the configurations' data from it
+too, so they must reach it (see \code{\link[=evaluate]{evaluate()}}). Default none.}
 
 \item{debug}{\code{logical(1)}. Stop at the first failure with its full
 backtrace, instead of recording the failed unit and going on. Warnings

@@ -97,7 +97,8 @@ specified metric. The best configuration is stored for downstream use by
 With \code{control_horizons(output_dir = )}, each config's result is
 written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
 a rerun into the same directory resumes from those files. Required when
-configs are dispatched to workers. A resumed row must have been scored on
+configs are dispatched to workers, whose daemons also read the configs'
+data from it (see "Parallelism"). A resumed row must have been scored on
 this run's training data (the outcome, the sample ids, which columns hold
 the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and predictor
 values) and tuned with this run's settings
@@ -112,8 +113,13 @@ refusal then names the seed the checkpoints were tuned with, to pass as
 So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one
-\code{output_dir} per outcome. A write to \code{output_dir} that fails (the
-directory, the manifest or a checkpoint) stops the run with
+\code{output_dir} per outcome, and one run in it at a time: on the configs
+axis a run keeps the configs' data in \verb{<output_dir>/tmp/} while it runs
+and removes them as it exits, and a run removes any an earlier one left
+there (one killed outright leaves its own, and on Windows so can one
+stopped while a daemon was still reading them). A write to
+\code{output_dir} that fails (the directory, the manifest, a checkpoint or
+the configs' data) stops the run with
 \code{horizons_error_systemic}, naming the directory, the rows finished so
 far as its \code{results}. On the configs axis a checkpoint a worker could
 not write is known only once every configuration has run, so the
@@ -148,8 +154,14 @@ sequentially inside each. The configs start longest first, by a table
 of the seconds each model and feature selection took on a measured
 grid, so the short ones fill the daemons at the end; the rows come back
 in configuration order whatever order they finish in. At most one
-config per connected daemon is in flight, so this session holds one
-config's payload per daemon. The mode for a large config grid on a
+config per connected daemon is in flight. The configs' data are written
+once, to a file in \verb{<output_dir>/tmp/}, which each config's daemon
+reads, so this session holds no copy of a running config's data; the
+file is removed when \code{evaluate()} returns or stops. The daemons must
+reach \code{output_dir} at the path this session gives them (on another
+machine, a file system shared at that path), and a daemon that cannot
+read the file stops the run with \code{horizons_error_systemic}, the rows
+finished so far as its \code{results}. The mode for a large config grid on a
 many-core machine.
 \item \code{"resamples"}: configs run sequentially; inside each, tune runs the CV
 folds on the daemons. Useful width is capped at \code{cv_folds}. The mode
@@ -234,7 +246,8 @@ the longest-first start both need mirai's dispatcher, which mirai keeps
 unless \code{dispatcher = FALSE} is set. On daemons set that way the configs
 axis runs as asked, but each configuration goes to the next daemon in
 turn as it is sent, free or not, and those running when the run stops go
-on to their end. \code{evaluate()} warns of it once, with class
+on to their end, while those queued behind them end as they start, since
+the configs' data are gone. \code{evaluate()} warns of it once, with class
 \code{horizons_warning_input}; the warning is also a row of the object's
 \code{log}, and under \code{verbose} the progress tree's parallel line says "no
 dispatcher" before any configuration runs, so a run that is stopped

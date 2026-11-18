@@ -247,7 +247,7 @@ describe("dispatch_configs()", {
     finished$rows <- list()
 
     err <- expect_error(
-      dispatch_configs(list(configs = configs), finished, function() dplyr::bind_rows(finished$rows)),
+      dispatch_configs(configs, "payload.rds", finished, function() dplyr::bind_rows(finished$rows)),
       class = "horizons_error_systemic"
     )
 
@@ -255,6 +255,47 @@ describe("dispatch_configs()", {
     expect_match(gsub("\\s+", " ", conditionMessage(err)),
                  "The mirai daemon running configuration \"cfg_001\" stopped while it ran (`errorValue` 19, Connection reset)",
                  fixed = TRUE)
+    expect_null(err$parent)
+
+  })
+
+  it("stops as systemic, naming the file and why, with the rows so far, when a daemon cannot read the configurations' data", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"),
+                              model = "plsr", feature_selection = "none")
+    row     <- function(id) tibble::tibble(config_id = id, status = "success")
+
+    ## The second configuration's daemon could not read the payload, and the
+    ## first's row came in in the same pass
+    unread <- structure(list(path = "/runs/out/tmp/payload-1a2b.rds", reason = "the file system is gone"),
+                        class = "horizons_payload_unread")
+    values <- list(row("cfg_001"), unread, row("cfg_003"))
+
+    local_mocked_bindings(connected_daemons = function() 2L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = values[[.args$config_i]])
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+
+    err <- expect_error(
+      dispatch_configs(configs, unread$path, finished, function() dplyr::bind_rows(finished$rows)),
+      class = "horizons_error_systemic"
+    )
+
+    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err)))
+    expect_match(msg, "The mirai daemon running configuration \"cfg_002\" could not read the configurations' data from",
+                 fixed = TRUE)
+    expect_match(msg, "/runs/out/tmp/payload-1a2b.rds", fixed = TRUE)
+    expect_match(msg, "the file system is gone", fixed = TRUE)
+
+    ## Both ways the file goes: daemons that cannot reach output_dir, and
+    ## another run started into it
+    expect_match(msg, "daemons on another machine need `output_dir` on a file system they share with it", fixed = TRUE)
+    expect_match(msg, "One `output_dir` serves one run at a time, and a run started into it removes an earlier run's file.",
+                 fixed = TRUE)
+    expect_identical(err$results$config_id, "cfg_001")
     expect_null(err$parent)
 
   })

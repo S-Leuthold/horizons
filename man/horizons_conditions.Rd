@@ -79,7 +79,8 @@ the run needs, or no mirai daemon was left to run its work
 (\code{horizons_error_no_daemons}, below), or \code{\link[=evaluate]{evaluate()}} could not write to its
 \code{output_dir} (on the configs axis a checkpoint a daemon could not
 write is a \code{skipped} warning instead, since every configuration has
-run by then). The rows finished so far travel
+run by then), or on the configs axis a daemon could not read the
+configurations' data from its \code{output_dir}. The rows finished so far travel
 as \code{results}; \code{NULL} from \code{ensemble()}, which has none before its
 meta-learner is built.}
 \item{\code{horizons_error_no_daemons}}{(run, and \code{horizons_error_systemic})

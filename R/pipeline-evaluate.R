@@ -50,7 +50,8 @@
 #' With `control_horizons(output_dir = )`, each config's result is
 #'   written to `<output_dir>/checkpoints/<config_id>.rds` as it finishes, and
 #'   a rerun into the same directory resumes from those files. Required when
-#'   configs are dispatched to workers. A resumed row must have been scored on
+#'   configs are dispatched to workers, whose daemons also read the configs'
+#'   data from it (see "Parallelism"). A resumed row must have been scored on
 #'   this run's training data (the outcome, the sample ids, which columns hold
 #'   the `id`, `outcome` and `predictor` roles, and the outcome and predictor
 #'   values) and tuned with this run's settings
@@ -65,8 +66,13 @@
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
-#'   `output_dir` per outcome. A write to `output_dir` that fails (the
-#'   directory, the manifest or a checkpoint) stops the run with
+#'   `output_dir` per outcome, and one run in it at a time: on the configs
+#'   axis a run keeps the configs' data in `<output_dir>/tmp/` while it runs
+#'   and removes them as it exits, and a run removes any an earlier one left
+#'   there (one killed outright leaves its own, and on Windows so can one
+#'   stopped while a daemon was still reading them). A write to
+#'   `output_dir` that fails (the directory, the manifest, a checkpoint or
+#'   the configs' data) stops the run with
 #'   `horizons_error_systemic`, naming the directory, the rows finished so
 #'   far as its `results`. On the configs axis a checkpoint a worker could
 #'   not write is known only once every configuration has run, so the
@@ -99,8 +105,14 @@
 #'   of the seconds each model and feature selection took on a measured
 #'   grid, so the short ones fill the daemons at the end; the rows come back
 #'   in configuration order whatever order they finish in. At most one
-#'   config per connected daemon is in flight, so this session holds one
-#'   config's payload per daemon. The mode for a large config grid on a
+#'   config per connected daemon is in flight. The configs' data are written
+#'   once, to a file in `<output_dir>/tmp/`, which each config's daemon
+#'   reads, so this session holds no copy of a running config's data; the
+#'   file is removed when `evaluate()` returns or stops. The daemons must
+#'   reach `output_dir` at the path this session gives them (on another
+#'   machine, a file system shared at that path), and a daemon that cannot
+#'   read the file stops the run with `horizons_error_systemic`, the rows
+#'   finished so far as its `results`. The mode for a large config grid on a
 #'   many-core machine.
 #' * `"resamples"`: configs run sequentially; inside each, tune runs the CV
 #'   folds on the daemons. Useful width is capped at `cv_folds`. The mode
@@ -185,7 +197,8 @@
 #' unless `dispatcher = FALSE` is set. On daemons set that way the configs
 #' axis runs as asked, but each configuration goes to the next daemon in
 #' turn as it is sent, free or not, and those running when the run stops go
-#' on to their end. `evaluate()` warns of it once, with class
+#' on to their end, while those queued behind them end as they start, since
+#' the configs' data are gone. `evaluate()` warns of it once, with class
 #' `horizons_warning_input`; the warning is also a row of the object's
 #' `log`, and under `verbose` the progress tree's parallel line says "no
 #' dispatcher" before any configuration runs, so a run that is stopped
@@ -851,6 +864,11 @@ evaluate <- function(x,
                          results_so_far(unname(checkpoint_results)))
     }
 
+    ## The call that writes the manifest owns output_dir, so, its checkpoint
+    ## gates passed, it removes the run files an earlier call left and this
+    ## one cannot use. Its own payload is written later, in Step 8.
+    clear_run_files(output_dir)
+
   }
 
   ## -----------------------------------------------------------------------
@@ -1042,8 +1060,8 @@ evaluate <- function(x,
     ## -------------------------------------------------------------------
 
     ## The daemons are the user's: evaluate() neither sets nor resets them.
-    ## mirai has no payload limit; the payload tests in
-    ## test-evaluate-parallel.R are the guard on its size.
+    ## A task carries the payload's path, and the file is the payload; the
+    ## tests of what a task carries in test-evaluate-parallel.R guard both.
 
     if (verbose) {
 
@@ -1061,18 +1079,24 @@ evaluate <- function(x,
     ## Filter to pending configs only
     pending_configs <- configs[configs$config_id %in% pending_ids, ]
 
-    ## Assemble everything a worker needs into one value. Two serialization
+    ## Assemble everything a worker needs into one value, the payload, which
+    ## is written to a file below and read by each task. Two serialization
     ## traps are avoided here; R/utils-resamples.R's header has the mechanism
     ## and the measurements.
     ##
     ## Do not inline the worker back into an anonymous function. A closure
     ## defined in this frame is serialized together with it, so every local —
-    ## `split` and `cv_fold_obj` included — would ship to every worker no matter
-    ## what is passed explicitly.
+    ## `split` and `cv_fold_obj` included — would ship with every task no
+    ## matter what is passed explicitly.
 
     ## The daemons resolve the horizons namespace by NAME, which finds the
     ## INSTALLED library; check_parallel_workers() refused a session they
     ## could not match before anything ran.
+    ##
+    ## A daemon resolves a relative path against the directory it was started
+    ## in, not this session's, so the checkpoint directory it is sent is
+    ## absolute, as the payload's path is below. This session's own paths,
+    ## and the messages about its writes, keep the directory as given.
 
     shared_args <- list(
       data            = split$data,
@@ -1089,7 +1113,7 @@ evaluate <- function(x,
       outcome_range   = outcome_range,
       data_fp         = data_fp,
       settings        = settings,
-      checkpoint_dir  = checkpoint_dir,
+      checkpoint_dir  = normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE),
       keep_traces     = control$keep_traces,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
@@ -1107,11 +1131,41 @@ evaluate <- function(x,
 
     rows_so_far <- function() results_so_far(in_config_order(finished$rows, configs$config_id))
 
-    ## A daemon that dies, or a pool left with none, stops the run in the
-    ## window, with the rows so far, which are checkpointed; a package missing
-    ## on a daemon comes back as the worker's error, and is systemic here.
+    ## The payload is written once, to a file of its own under output_dir,
+    ## which each configuration's daemon reads: a task carries only its
+    ## configuration's index and the file's path, so this session holds no
+    ## copy of the data while a configuration runs (mirai keeps each task's
+    ## message until the task is collected). The path is absolute, since a
+    ## daemon resolves a relative one against the directory it was started
+    ## in, and named by tempfile(), which no other call draws and which
+    ## leaves the random stream alone. tempfile() checks the name is unused
+    ## in the directory; only its name is kept, joined to the directory with
+    ## file.path(), since on Windows tempfile() joins them with a backslash.
+    ## The removal is registered before the write, so the file goes however
+    ## evaluate() exits; the window's own exit handler, which cancels the
+    ## tasks in flight, runs before it.
+    run_dir     <- run_files_dir(output_dir)
+    not_created <- create_output_dir(run_dir)
+
+    if (!is.null(not_created)) abort_output_write(run_dir, not_created, rows_so_far())
+
+    abs_run_dir  <- normalizePath(run_dir, winslash = "/", mustWork = TRUE)
+    payload_path <- file.path(abs_run_dir, basename(tempfile("payload-", tmpdir = abs_run_dir, fileext = ".rds")))
+    on.exit(remove_run_file(payload_path), add = TRUE)
+
+    not_written <- write_output_file(shared_args, payload_path)
+
+    if (!is.null(not_written)) {
+      abort_output_write(file.path(run_dir, basename(payload_path)), not_written, rows_so_far())
+    }
+
+    ## A daemon that dies, a pool left with none, or a daemon that cannot
+    ## read the payload stops the run in the window, with the rows so far,
+    ## which are checkpointed; a package missing on a daemon comes back as
+    ## the worker's error, and is systemic here.
     stop_on_worker_death(
-      dispatch_configs(shared_args, finished, rows_so_far, output_dir, call = rlang::current_env()),
+      dispatch_configs(pending_configs, payload_path, finished, rows_so_far, output_dir,
+                       call = rlang::current_env()),
       rows_so_far(), output_dir
     )
 
@@ -1659,7 +1713,8 @@ checkpoint_path <- function(checkpoint_dir, config_id) {
 #'
 #' @description
 #' The one writer for what `evaluate()` puts in its `output_dir`: the
-#' manifest and each configuration's checkpoint. The file is written under a
+#' manifest, each configuration's checkpoint, and the files a run keeps in
+#' `tmp/` for its own use ([run_files_dir()]). The file is written under a
 #' name the store does not list and renamed into place, so a reader (the
 #' monitor polls while workers write) never sees half a file. A write that
 #' fails, or a rename that is refused, leaves no temporary file behind, and
@@ -1730,6 +1785,86 @@ create_output_dir <- function(path) {
   if (length(reasons) == 0) reasons <- "the directory could not be created"
 
   paste(unique(reasons), collapse = "; ")
+
+}
+
+#' The directory of the files a run keeps in `output_dir` for its own use
+#'
+#' @description
+#' `<output_dir>/tmp/`, apart from the results (`checkpoints/` and
+#' `eval_manifest.rds`), so nothing that reads results lists what is in it:
+#' the configs axis's payload, for now.
+#'
+#' @param output_dir The run's `output_dir`.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+run_files_dir <- function(output_dir) {
+
+  file.path(output_dir, "tmp")
+
+}
+
+#' Remove a run file, and its directory when that is left empty
+#'
+#' @description
+#' Called as `evaluate()` exits, however it exits, so it raises nothing: a
+#' file already gone is left so, and on Windows a file a daemon still has
+#' open is not removed, and stays until the next call into `output_dir`
+#' removes it ([clear_run_files()]).
+#'
+#' @param path The file.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+remove_run_file <- function(path) {
+
+  unlink(path)
+  remove_empty_dir(dirname(path))
+
+}
+
+#' Remove the run files an earlier call left in `output_dir`
+#'
+#' @description
+#' The call that writes the manifest owns `output_dir`, so one directory
+#' serves one run at a time. Once that call's checkpoint gates have passed,
+#' it removes what an earlier call left in `tmp/` and it cannot use: a
+#' payload, which belongs to the call that wrote it, and the writer's
+#' temporary file from a write that was cut off. A call removes its own
+#' payload as it exits, so one is left only by a call that was killed, or
+#' on Windows by one whose daemon still had the file open. Any other file in
+#' `tmp/` is left alone; the directory goes when it is left empty.
+#'
+#' @param output_dir The run's `output_dir`.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+clear_run_files <- function(output_dir) {
+
+  dir <- run_files_dir(output_dir)
+
+  unlink(list.files(dir, pattern = "^payload-.*\\.rds$|\\.rds\\.tmp$", full.names = TRUE))
+  remove_empty_dir(dir)
+
+}
+
+#' Remove a directory that holds nothing
+#'
+#' @param dir The directory. Anything that is not a directory, or a directory
+#'   holding a file, is left alone.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+remove_empty_dir <- function(dir) {
+
+  ### unlink() removes a directory only with recursive = TRUE, so it is
+  ### called only once the directory is found empty
+  if (dir.exists(dir) && length(list.files(dir, all.files = TRUE, no.. = TRUE)) == 0L) {
+    unlink(dir, recursive = TRUE)
+  }
+
+  invisible(NULL)
 
 }
 
@@ -3505,16 +3640,27 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'
 #' Because this function lives in the package namespace, its environment is
 #' serialized as a reference to the namespace, which the daemon resolves by
-#' name, so the payload is `shared` and the function's own code.
+#' name, so a task carries the function's own code, the configuration's index
+#' and the payload's path, and none of the data.
 #'
 #' Resolving by name has one cost, and it is the reason `evaluate()` refuses to
 #' dispatch under `pkgload`: the worker loads the **installed** horizons, not the
 #' source tree. A compatible-but-stale install would run old helper code behind a
 #' new worker body, silently, and the worker computes every metric.
 #'
+#' The payload, `shared`, is the file at `payload_path`, which `evaluate()`
+#' writes once for every task. The worker reads it first, with base R alone:
+#' the helpers this body calls are the daemon's, and a daemon on another
+#' version, which the version check exists to catch, may lack one. A file it
+#' cannot read is said on what it returns, not raised, so the window stops
+#' the run in the session, where the rows finished so far are
+#' ([abort_payload_unread()]). Then the version is checked, then the
+#' payload's keys.
+#'
 #' @param config_i Integer row index into `shared$configs`. Named to avoid
 #'   colliding with `shared$resample_idx`.
-#' @param shared List of worker inputs assembled by `evaluate()`, whose keys are
+#' @param payload_path Character(1). The absolute path of the file holding
+#'   `shared`, the list of worker inputs assembled by `evaluate()`, whose keys are
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
@@ -3530,11 +3676,45 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   records still on it for the parent to lift, any warning raised in the
 #'   worker's own steps before the unit rendered in its `warnings` with the
 #'   unit's, and, when its checkpoint could not be written, why, as the
-#'   attribute `"checkpoint_failed"`.
+#'   attribute `"checkpoint_failed"`. When the file at `payload_path` cannot
+#'   be read, instead, a list of class `horizons_payload_unread` holding the
+#'   `path` and the `reason` (what base R said, any warning before the
+#'   error).
 #' @keywords internal
 #' @noRd
 
-evaluate_config_worker <- function(config_i, shared) {
+evaluate_config_worker <- function(config_i, payload_path) {
+
+  ## -------------------------------------------------------------------------
+  ## The payload, read from the file evaluate() wrote
+  ## -------------------------------------------------------------------------
+  ## With base R alone, before anything of horizons': this body travels from
+  ## the session, but every helper it calls is the daemon's, and a daemon on
+  ## another version, which the check below exists to catch, may lack one. A
+  ## file that cannot be read is said on what is returned, not raised, so the
+  ## window stops the run in the session, where the rows so far are. What
+  ## base R said is kept as write_output_file() keeps it: any warning before
+  ## the error, then the error.
+  said   <- character(0)
+  unread <- NULL
+
+  shared <- tryCatch(
+    withCallingHandlers(
+      readRDS(payload_path),
+      warning = function(w) {
+        said <<- c(said, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }
+    ),
+    error = function(e) {
+      unread <<- paste(unique(c(said, conditionMessage(e))), collapse = "; ")
+      NULL
+    }
+  )
+
+  if (!is.null(unread)) {
+    return(structure(list(path = payload_path, reason = unread), class = "horizons_payload_unread"))
+  }
 
   ## -------------------------------------------------------------------------
   ## The worker's horizons, then the cross-process contract
