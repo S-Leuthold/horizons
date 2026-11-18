@@ -210,12 +210,14 @@
 #' then built in the draw's process. The draw runs in the session instead,
 #' with the same results, under `control_horizons(isolate = FALSE)`, under
 #' `devtools::load_all()`, where a process would load the installed
-#' horizons rather than the source, and when the installed horizons is
-#' another version than the one loaded. A process that ends without its
-#' result (killed, most often for memory) stops the call with
-#' `horizons_error_process_died`. The process takes its threads from the
-#' environment variables the session started with, not a count set at run
-#' time (`RhpcBLASctl`).
+#' horizons rather than the source, and when horizons has been installed
+#' again since this session loaded it. The tree says where the draw ran; a
+#' draw in the session is noted on the log with its reason, and
+#' `selection$settings$control$isolate` is then `FALSE`. A process that
+#' ends without its result (killed, most often for memory) stops the call
+#' with `horizons_error_process_died`. The process takes its threads from
+#' the environment variables the session started with, not a count set at
+#' run time (`RhpcBLASctl`).
 #'
 #' **What the record holds** (`x$selection`): the settings as resolved, the
 #' columns returned, the pool's identity, the targets' identity (their source,
@@ -716,7 +718,11 @@ select_training <- function(x, library,
   ## draw (run_draw()), so this session never holds the library, the
   ## neighbour search's distances or a space build's transform: it keeps the
   ## training set returned. The draw's tree is printed and its log rows are
-  ## this call's, as when it runs here.
+  ## this call's, as when it runs here. When it runs here instead, as asked
+  ## or because a process of its own would not run this session's horizons,
+  ## the tree and the log say why.
+
+  in_session <- draw_in_session(control)
 
   drawn <- run_draw(list(
     x = x, library = library, registry_entry = if (registered) library_registry()[[library]],
@@ -725,9 +731,11 @@ select_training <- function(x, library,
     sdev_floor = sdev_floor, metric = metric, depth = depth, clusters = clusters,
     cluster_min = cluster_min, twin_ratio = twin_ratio, seed = seed, control = control,
     target_flagged = target_flagged, target_vars = target_vars, restandardize = restandardize
-  ), control = control, call = call)
+  ), in_session = in_session, control = control, call = call)
 
   log_append(collector, drawn$events)
+
+  log_draw_in_session(collector, in_session)
 
   out <- drawn$out
 
@@ -736,7 +744,8 @@ select_training <- function(x, library,
   ## ---------------------------------------------------------------------------
 
   if (verbose) report_selection(out$selection, n_targets = drawn$n_targets,
-                                seed_line = seed_tree_line(root))
+                                seed_line = seed_tree_line(root),
+                                draw_line = draw_tree_line(in_session))
 
   ## Draws short of k: too few measured rows left after the twin
   ## subtraction, or, under cosine, no defined distance at all. One coverage
@@ -850,7 +859,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## draw reads the registry the session read
   resolved <- if (is.null(registry_entry)) {
     resolve_source(library, verbose = isTRUE(verbose), collector = collector,
-                   debug = control$debug, consent = consent, call = call)
+                   debug = control$debug, call = call)
   } else {
     resolve_registered(registry_entry, verbose = isTRUE(verbose), collector = collector,
                        debug = control$debug, consent = consent, call = call)
@@ -1721,7 +1730,8 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 #' results, under `control_horizons(isolate = FALSE)`, under
 #' `devtools::load_all()`, where a process would load the installed horizons
 #' rather than this source, and when the library horizons was loaded from
-#' now holds another version of it ([draw_in_session()]).
+#' now holds another build of it ([draw_in_session()]). Its record's
+#' `control$isolate` is then `FALSE`, since the draw was not isolated.
 #'
 #' A registered library not cached yet, or cached by another build, needs
 #' consent, which a process of its own cannot ask for: it says so instead
@@ -1734,20 +1744,14 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 #'
 #' @param args Named list of [draw_training_set()]'s arguments, but
 #'   `consent` and `call`.
+#' @param in_session Why the draw runs in this session, from
+#'   [draw_in_session()], or `NULL` to run it in a process of its own.
 #' @param control The verb's resolved control.
 #' @param call The verb's frame.
 #' @return What [draw_training_set()] returns.
 #' @keywords internal
 #' @noRd
-run_draw <- function(args, control, call) {
-
-  in_session <- draw_in_session(control)
-
-  ### Called by name with its arguments as symbols, here and in the process,
-  ### so the call a refusal or a trace records holds none of the data
-  draw_call <- function(fn, args) {
-    as.call(c(list(fn), stats::setNames(lapply(names(args), as.name), names(args))))
-  }
+run_draw <- function(args, in_session, control, call) {
 
   as_verbs <- function(e) {
     if (inherits(e, "horizons_error") && identical(rlang::call_name(e$call), "draw_training_set")) {
@@ -1756,12 +1760,17 @@ run_draw <- function(args, control, call) {
     stop(e)
   }
 
+  ## Called by name with its arguments as symbols, here and in the process
+  ## (call_by_name()), so the call a refusal or a trace records holds none
+  ## of the data
   if (!is.null(in_session)) {
 
-    here <- c(args, list(consent = "ask", call = call))
+    ## The record says what ran: not isolated, whether asked or not
+    args$control$isolate <- FALSE
+    here <- c(args, list(call = call))
 
     return(rlang::try_fetch(
-      eval(draw_call(quote(draw_training_set), here), list2env(here, parent = environment())),
+      eval(call_by_name(quote(draw_training_set), here), list2env(here, parent = environment())),
       error = as_verbs
     ))
 
@@ -1772,7 +1781,7 @@ run_draw <- function(args, control, call) {
 
   send <- function(consent) {
     sent <- c(args, list(consent = consent))
-    run_isolated(draw_call(call(":::", as.name("horizons"), as.name("draw_training_set")), sent), sent,
+    run_isolated(call_by_name(call(":::", as.name("horizons"), as.name("draw_training_set")), sent), sent,
                  what = "the library draw", options = options, libraries = libraries, call = call)
   }
 
@@ -1782,6 +1791,12 @@ run_draw <- function(args, control, call) {
       horizons_consent_needed = function(cnd) {
         library_consent(args$registry_entry, cnd$path, ask = interactive(), rebuild = cnd$rebuild,
                         call = call)
+        ### The download and the build take minutes, and the process's own
+        ### tree prints only once it returns
+        if (isTRUE(control$verbose)) {
+          cat(paste0("\u251C\u2500 Downloading and building the ", args$registry_entry$name,
+                     " library in the draw's process; its progress prints when it is done\n"))
+        }
         send("given")
       }
     ),
@@ -1794,42 +1809,108 @@ run_draw <- function(args, control, call) {
 #' Why the draw runs in this session, if it does
 #'
 #' @param control The verb's resolved control.
-#' @return Character(1): `"isolate = FALSE"`, `"load_all"` or `"another
-#'   version installed"`; `NULL` when the draw runs in a process of its own.
+#' @return Character(1): `"isolate"` (`control_horizons(isolate = FALSE)`),
+#'   `"load_all"` (under `devtools::load_all()`) or `"reinstalled"` (the
+#'   library horizons was loaded from holds another build of it now, read
+#'   by its `Built` stamp, or one that cannot be read); `NULL` when the draw
+#'   runs in a process of its own.
 #' @keywords internal
 #' @noRd
 draw_in_session <- function(control) {
 
-  if (!isTRUE(control$isolate)) return("isolate = FALSE")
+  if (!isTRUE(control$isolate)) return("isolate")
 
   if (running_under_load_all()) return("load_all")
 
-  installed <- in_session_library()
-
-  if (!identical(installed$version, as.character(getNamespaceVersion("horizons")))) {
-    return("another version installed")
-  }
+  ### By the install's `Built` stamp, not the version: every development
+  ### build is x.y.z.9000
+  if (!identical(in_session_library()$built, loaded_build$built)) return("reinstalled")
 
   NULL
 
 }
 
 
-#' The library this session's horizons was loaded from, and the version it
+#' Why the draw ran in this session, as words
+#'
+#' @param in_session From [draw_in_session()], not `NULL`.
+#' @param markup Logical(1). cli's inline markup, for the log; plain text,
+#'   for the tree.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+draw_in_session_reason <- function(in_session, markup) {
+
+  code <- function(x) if (markup) paste0("{.code ", x, "}") else x
+
+  switch(in_session,
+    isolate     = paste0("as ", code("control_horizons(isolate = FALSE)"), " asked"),
+    load_all    = paste0("under ", code("devtools::load_all()"), ", whose source a process of its own would not load"),
+    reinstalled = paste0("since the horizons installed where this session loaded it from is not the one it loaded, ",
+                         "which a process of its own would load (restart R to draw in one)")
+  )
+
+}
+
+
+#' The selection tree's line on where the draw ran
+#'
+#' @param in_session From [draw_in_session()].
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+draw_tree_line <- function(in_session) {
+
+  if (is.null(in_session)) {
+
+    return("Draw: in a process of its own (control_horizons(isolate = FALSE) turns it off)")
+
+  }
+
+  paste0("Draw: in this session, ", draw_in_session_reason(in_session, markup = FALSE))
+
+}
+
+
+#' Note on the log that the draw ran in this session
+#'
+#' @description
+#' As `log_isolation_off()` notes fits that ran in the process that ran
+#' them: the draw ran here, as asked or because a process of its own would
+#' not have run this session's horizons, so this session held the library
+#' while it drew. The results are the same either way.
+#'
+#' @param collector The verb's collector.
+#' @param in_session From [draw_in_session()].
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_draw_in_session <- function(collector, in_session) {
+
+  if (is.null(in_session)) return(invisible(collector))
+
+  log_note(collector, paste0(
+    "The draw ran in this session, ", draw_in_session_reason(in_session, markup = TRUE),
+    ", rather than in a process of its own, so this session held the library and the neighbour search while it drew."
+  ))
+
+}
+
+
+#' The library this session's horizons was loaded from, and the build it
 #' holds now
 #'
-#' @return List: `lib` (the library directory) and `version` (the version
-#'   its DESCRIPTION records, `NA` when it cannot be read). A seam, so a test
-#'   can report another version.
+#' @return List: `lib` (the library directory) and `built` (the `Built`
+#'   stamp its DESCRIPTION records now, [read_built()], `NA` when it cannot
+#'   be read), which [draw_in_session()] compares with the one this session
+#'   loaded. A seam, so a test can report another build.
 #' @keywords internal
 #' @noRd
 in_session_library <- function() {
 
-  path    <- getNamespaceInfo("horizons", "path")
-  version <- tryCatch(unname(read.dcf(file.path(path, "DESCRIPTION"), "Version")[1, 1]),
-                      error = function(e) NA_character_)
+  path <- getNamespaceInfo("horizons", "path")
 
-  list(lib = dirname(path), version = version)
+  list(lib = dirname(path), built = read_built(path))
 
 }
 
@@ -1838,20 +1919,23 @@ in_session_library <- function() {
 #'
 #' @description
 #' This session's `horizons.*` options, so the caches the draw reads and
-#' writes are this session's; the download's `timeout`; and what its tree is
-#' printed under (cli's colours and unicode, R's number formatting), so the
-#' tree reads as it would have here.
+#' writes are this session's; the download's (`timeout`, and the method,
+#' extra arguments and user agent `utils::download.file()` reads, which a
+#' session behind a proxy may set); and what its tree is printed under
+#' (cli's colours and unicode, R's number formatting), so the tree reads as
+#' it would have here.
 #'
 #' @return Named list.
 #' @keywords internal
 #' @noRd
 draw_options <- function() {
 
-  all <- options()
+  opts <- options()
 
-  c(all[startsWith(names(all), "horizons.")],
+  c(opts[startsWith(names(opts), "horizons.")],
     list(cli.num_colors = cli::num_ansi_colors(), cli.unicode = cli::is_utf8_output()),
-    all[intersect(c("timeout", "digits", "scipen", "OutDec"), names(all))])
+    opts[intersect(c("timeout", "download.file.method", "download.file.extra", "HTTPUserAgent",
+                     "digits", "scipen", "OutDec"), names(opts))])
 
 }
 
@@ -2630,16 +2714,20 @@ check_resemblance <- function(sp, St, metric, chunk_size, seed, eligible = NULL,
 #' @param n_targets [Integer.] Targets in the batch.
 #' @param seed_line [Character or NULL.] The line for a seed drawn from the
 #'   session ([seed_tree_line()]), or `NULL`.
+#' @param draw_line [Character or NULL.] The line on where the draw ran
+#'   ([draw_tree_line()]), or `NULL`.
 #'
 #' @return NULL, called for its output.
 #' @noRd
-report_selection <- function(sel, n_targets, seed_line = NULL) {
+report_selection <- function(sel, n_targets, seed_line = NULL, draw_line = NULL) {
 
   s     <- sel$settings
   ps    <- sel$pool_sizes
   scope <- s$scope
 
   if (!is.null(seed_line)) cat(paste0("\u2502  \u251C\u2500 ", seed_line, "\n"))
+
+  if (!is.null(draw_line)) cat(paste0("\u2502  \u251C\u2500 ", draw_line, "\n"))
 
   for (i in seq_len(nrow(ps))) {
 

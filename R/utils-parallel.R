@@ -644,6 +644,31 @@ run_isolated <- function(expr, args = list(), what, options = list(), libraries 
 
 }
 
+#' A call to `fn` with each of `args` passed by its own name
+#'
+#' @description
+#' How isolated work is called: each argument is a symbol of its own name,
+#' which the process finds among the values [run_isolated()] sends it (and
+#' the session among the same values, for work it runs itself), so the call
+#' holds none of the data, and nor does a trace that records it.
+#'
+#' @param fn The function, by name: a symbol, or a `pkg::fun` call.
+#' @param args Named list: the values the call takes, every one named.
+#' @return A call.
+#' @keywords internal
+#' @noRd
+call_by_name <- function(fn, args) {
+
+  if (length(args) > 0 && (is.null(names(args)) || any(!nzchar(names(args))))) {
+
+    abort_horizons("Every argument of an isolated call must have a name of its own.", kind = "internal")
+
+  }
+
+  as.call(c(list(fn), stats::setNames(lapply(names(args), as.name), names(args))))
+
+}
+
 #' The names an isolated call's body keeps for itself
 #'
 #' @keywords internal

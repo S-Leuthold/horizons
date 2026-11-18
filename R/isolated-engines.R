@@ -200,18 +200,9 @@ isolated_fit <- function(..., .isolated_fit, .isolated_engine) {
 
   args <- list(...)
   pkg  <- .isolated_fit["pkg"]
+  fn   <- if (is.na(pkg)) as.name(.isolated_fit[["fun"]]) else call("::", as.name(pkg), as.name(.isolated_fit[["fun"]]))
 
-  if (length(args) == 0 || is.null(names(args)) || any(!nzchar(names(args)))) {
-    abort_horizons("An isolated fit takes its arguments by name, as parsnip passes them.", kind = "internal")
-  }
-
-  fn <- if (is.na(pkg)) as.name(.isolated_fit[["fun"]]) else call("::", as.name(pkg), as.name(.isolated_fit[["fun"]]))
-
-  ### The arguments by name, as symbols the process finds among the values
-  ### it is sent, so the call holds none of the data
-  fit_call <- as.call(c(list(fn), stats::setNames(lapply(names(args), as.name), names(args))))
-
-  run_isolated(fit_call, args, what = paste0("a ", .isolated_engine, " fit"))
+  run_isolated(call_by_name(fn, args), args, what = paste0("a ", .isolated_engine, " fit"))
 
 }
 
@@ -234,7 +225,9 @@ isolation_tree_line <- function(models, isolate) {
     paste0("Isolated fits: ", paste(iso, collapse = ", "),
            ", each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)")
   } else {
-    paste0("Isolated fits: off, as asked; ", paste(iso, collapse = ", "), " fitted in this session")
+    ### The log note's words: on a parallel run the fits are the daemons'
+    paste0("Isolated fits: off, as asked; ", paste(iso, collapse = ", "), " fitted in the process that ran ",
+           if (length(iso) == 1) "it" else "them")
   }
 
 }

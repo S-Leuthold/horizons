@@ -353,7 +353,8 @@ test_that("an unreadable or foreign cache file is rebuilt, not trusted, with a n
   expect_s3_class(qs2::qs_read(f), "horizons_space_cache")
   expect_true(any(grepl("The cached similarity space could not be used; rebuilding it", txt, fixed = TRUE)))
 
-  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+  log   <- without_draw_note(out$log)
+  notes <- log[log$verb == "select_training" & log$type == "note", ]
   expect_identical(nrow(notes), 1L)
   expect_match(notes$message, "could not be read or was built for other settings, so it was rebuilt", fixed = TRUE)
 
@@ -510,7 +511,8 @@ test_that("the first-use space leaves out the library's flagged rows, as a draw'
   out <- suppressWarnings(select_training(mini_targets(pool), "mini", k = 5L))
 
   expect_true(out$selection$search$cache$hit)
-  expect_false(any(out$log$type[out$log$verb == "select_training"] == "note"))
+  log <- without_draw_note(out$log)
+  expect_false(any(log$type[log$verb == "select_training"] == "note"))
 
 })
 
@@ -537,7 +539,8 @@ test_that("a first-use space that fails to build is a note, and stops the call u
     out <- suppressWarnings(suppressMessages(select_training(x, "mini", k = 5L,
                                                              control = control_horizons(verbose = TRUE))))
   )
-  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+  log   <- without_draw_note(out$log)
+  notes <- log[log$verb == "select_training" & log$type == "note", ]
 
   ## The tree says the build was tried, then that it failed
   expect_true(any(grepl("Building the library's similarity space at the default settings", txt, fixed = TRUE)))
@@ -672,7 +675,8 @@ test_that("a cached space whose rows are not the library's is rebuilt over, with
   )
   expect_true(any(grepl("did not match this library's rows; rebuilding it", txt, fixed = TRUE)))
 
-  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+  log   <- without_draw_note(out$log)
+  notes <- log[log$verb == "select_training" & log$type == "note", ]
   expect_identical(nrow(notes), 1L)
   expect_match(notes$message, "did not match this library's rows, so it was rebuilt over", fixed = TRUE)
   expect_false(any(grepl("rebuilt", out$log$message[out$log$type == "warning"])))

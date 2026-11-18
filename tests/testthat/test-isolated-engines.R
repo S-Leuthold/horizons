@@ -217,7 +217,7 @@ describe("the progress tree and the log on isolated fits", {
       "Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)"
     )
     expect_identical(isolation_tree_line(c("rf", "cubist"), FALSE),
-                     "Isolated fits: off, as asked; cubist fitted in this session")
+                     "Isolated fits: off, as asked; cubist fitted in the process that ran it")
     expect_null(isolation_tree_line("rf", TRUE))
 
     collector <- log_open("evaluate")

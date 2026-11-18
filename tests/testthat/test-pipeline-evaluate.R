@@ -450,15 +450,17 @@ describe("evaluate() - its control", {
       list(line = grep("Isolated fits:", out, value = TRUE, fixed = TRUE), ev = ev)
     }
 
+    ## The line's wording is isolation_tree_line()'s, pinned in its own test
+    ## (test-isolated-engines.R) and the tree's snapshot
     on <- run()
-    expect_identical(on$line, "│  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)")
+    expect_identical(on$line, paste0("│  ", isolation_tree_line(c("rf", "cubist"), TRUE)))
     expect_false(any(on$ev$log$type == "note" & grepl("isolate = FALSE", on$ev$log$message, fixed = TRUE)))
     expect_true(on$ev$evaluation$control$isolate)
     expect_identical(unlist(seen), c(cfg_001 = TRUE, cfg_002 = TRUE))
 
     off <- run(isolate = FALSE)
     note <- off$ev$log[off$ev$log$type == "note" & grepl("isolate = FALSE", off$ev$log$message, fixed = TRUE), ]
-    expect_identical(off$line, "│  Isolated fits: off, as asked; cubist fitted in this session")
+    expect_identical(off$line, paste0("│  ", isolation_tree_line(c("rf", "cubist"), FALSE)))
     expect_identical(nrow(note), 1L)
     expect_identical(note$ids, list("cubist"))
     expect_false(off$ev$evaluation$control$isolate)

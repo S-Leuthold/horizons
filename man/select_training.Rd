@@ -380,12 +380,14 @@ library's consent is asked in the session, as above, and the library is
 then built in the draw's process. The draw runs in the session instead,
 with the same results, under \code{control_horizons(isolate = FALSE)}, under
 \code{devtools::load_all()}, where a process would load the installed
-horizons rather than the source, and when the installed horizons is
-another version than the one loaded. A process that ends without its
-result (killed, most often for memory) stops the call with
-\code{horizons_error_process_died}. The process takes its threads from the
-environment variables the session started with, not a count set at run
-time (\code{RhpcBLASctl}).
+horizons rather than the source, and when horizons has been installed
+again since this session loaded it. The tree says where the draw ran; a
+draw in the session is noted on the log with its reason, and
+\code{selection$settings$control$isolate} is then \code{FALSE}. A process that
+ends without its result (killed, most often for memory) stops the call
+with \code{horizons_error_process_died}. The process takes its threads from
+the environment variables the session started with, not a count set at
+run time (\code{RhpcBLASctl}).
 
 \strong{What the record holds} (\code{x$selection}): the settings as resolved, the
 columns returned, the pool's identity, the targets' identity (their source,

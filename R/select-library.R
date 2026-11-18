@@ -162,8 +162,6 @@ library_registry <- function() {
 #'   a registered library reports to it.
 #' @param debug `logical.` Passed to the first-use space's unit
 #'   ([prime_library_space()]).
-#' @param consent `character(1).` How a registered library's download is
-#'   consented to ([library_consent()]): `"ask"`, `"defer"` or `"given"`.
 #' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` (a `horizons_data`) and `record`, the library's
@@ -173,7 +171,7 @@ library_registry <- function() {
 #' @noRd
 resolve_source <- function(library, ask = interactive(), verbose = TRUE,
                            collector = log_open("select_training"), debug = FALSE,
-                           consent = "ask", call = rlang::caller_env()) {
+                           call = rlang::caller_env()) {
 
   UseMethod("resolve_source")
 
@@ -184,7 +182,7 @@ resolve_source <- function(library, ask = interactive(), verbose = TRUE,
 #' @noRd
 resolve_source.horizons_library <- function(library, ask = interactive(), verbose = TRUE,
                                             collector = log_open("select_training"), debug = FALSE,
-                                            consent = "ask", call = rlang::caller_env()) {
+                                            call = rlang::caller_env()) {
 
   list(pool = library$pool, record = utils::modifyList(library$record, list(form = "object")))
 
@@ -195,7 +193,7 @@ resolve_source.horizons_library <- function(library, ask = interactive(), verbos
 #' @noRd
 resolve_source.horizons_data <- function(library, ask = interactive(), verbose = TRUE,
                                          collector = log_open("select_training"), debug = FALSE,
-                                         consent = "ask", call = rlang::caller_env()) {
+                                         call = rlang::caller_env()) {
 
   list(pool = library, record = library_record("object"))
 
@@ -206,14 +204,14 @@ resolve_source.horizons_data <- function(library, ask = interactive(), verbose =
 #' @noRd
 resolve_source.character <- function(library, ask = interactive(), verbose = TRUE,
                                      collector = log_open("select_training"), debug = FALSE,
-                                     consent = "ask", call = rlang::caller_env()) {
+                                     call = rlang::caller_env()) {
 
   registry <- library_registry()
 
   if (library %in% names(registry)) {
 
     return(resolve_registered(registry[[library]], ask = ask, verbose = verbose,
-                              collector = collector, debug = debug, consent = consent, call = call))
+                              collector = collector, debug = debug, call = call))
 
   }
 
@@ -336,7 +334,9 @@ library_cache_path <- function(entry) {
 #' space is not built.
 #'
 #' @param entry A registry entry.
-#' @param ask,verbose,collector,debug,consent As for [resolve_source()].
+#' @param ask,verbose,collector,debug As for [resolve_source()].
+#' @param consent `character(1).` How the download is consented to
+#'   ([library_consent()]): `"ask"`, `"defer"` or `"given"`.
 #' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` and `record`.

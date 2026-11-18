@@ -21,6 +21,34 @@ NULL
 utils::globalVariables(c(".metric", ".estimate"))
 
 
+#' The build of horizons this session loaded
+#'
+#' @description
+#' `built` is the `Built` field of the installed DESCRIPTION this session
+#' loaded horizons from, read once as it loads ([read_built()]): the R
+#' version, platform and time of the install, so two installs of one version
+#' differ. `NA` for a source tree loaded with `devtools::load_all()`, which
+#' has none.
+#'
+#' @keywords internal
+#' @noRd
+loaded_build <- new.env(parent = emptyenv())
+loaded_build$built <- NA_character_
+
+#' The `Built` field of an installed package's DESCRIPTION
+#'
+#' @param path The package's directory.
+#' @return Character(1), or `NA` when there is none or it cannot be read.
+#' @keywords internal
+#' @noRd
+read_built <- function(path) {
+
+  tryCatch(unname(read.dcf(file.path(path, "DESCRIPTION"), "Built")[1, 1]),
+           error = function(e) NA_character_)
+
+}
+
+
 #' Package startup configuration
 #'
 #' @description
@@ -54,6 +82,10 @@ utils::globalVariables(c(".metric", ".estimate"))
   ## The isolated twins of the engines MODEL_SPECS marks, copied from the
   ## registrations the packages above made (R/isolated-engines.R)
   register_isolated_engines()
+
+  ## The build this session loads, so a horizons installed over it later can
+  ## be told from it (draw_in_session())
+  loaded_build$built <- read_built(getNamespaceInfo(pkgname, "path"))
 
   ## ---------------------------------------------------------------------------
   ## Trust the user - no automatic thread control
