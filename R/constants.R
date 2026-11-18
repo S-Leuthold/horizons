@@ -305,16 +305,26 @@ SHARED_ARG_NAMES <- c(
 # processes it holds: the daemon itself, and, when the run fits a model whose
 # fits are isolated (MODEL_SPECS' `isolate`), that fit's process beside it.
 # Each is `base` plus `per_byte` times the run's data, its rows times its
-# predictors times 8 bytes (daemon_need(), R/utils-parallel.R). PROVISIONAL:
-# the daemon's line is fitted through two measured runs on the configs axis,
-# local-real (1,047 rows by 1,701 predictors, 14 MB of data; each daemon's
-# peak 1.0 to 1.5 GB, P0a1's evidence) and library-real (10,341 rows, 141 MB;
-# about 2.1 GB a daemon, P0a4's evidence, and 3.3 GB for a library unit in
-# one process, math-floor.md), and the isolated fit's is a guess; the
-# measurement of a daemon and its isolated fit's process replaces both.
+# predictors times 8 bytes (daemon_need(), R/utils-parallel.R). Each line
+# goes through two measured points, at 1,047 rows by 1,701 predictors (14.2 MB
+# of data) and at 10,341 rows by 1,701 (140.7 MB), and is rounded up (`base`
+# to 0.05 GB, `per_byte` to 0.5), so it lies above both:
+#
+# - The daemon: its peak less its size once connected (0.08 GB), the largest
+#   measured at each size: 1.58 GB at 1,047 rows (a grid of every model on
+#   eight daemons, through evaluate() and fit()) and 3.08 GB at 10,341 rows
+#   (elastic net and xgboost configurations, in fit(); Cubist configurations
+#   with their fits isolated peaked at 2.46 GB).
+# - The isolated fit's process: its peak, the largest measured, a Cubist fit
+#   at 100 committees: 0.64 GB on a 750-row fold of 1,691 predictors and
+#   1.25 GB on a 7,444-row fold after correlation selection (about 360
+#   predictors).
+#
+# A run of other models, selections or committees can need more or less, so
+# the warning calls the estimate approximate.
 DAEMON_MEMORY <- list(
-  daemon   = c(base = 1.4e9, per_byte = 8),
-  isolated = c(base = 0.3e9, per_byte = 4)
+  daemon   = c(base = 1.45e9, per_byte = 12),
+  isolated = c(base = 0.6e9, per_byte = 5)
 )
 
 # How the message starts when a process horizons started for one call
