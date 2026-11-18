@@ -58,12 +58,15 @@
 #'   values) and tuned with this run's settings
 #'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
 #'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
-#'   and `outcome_range`) and this run's response trim
-#'   (`response_threshold`, `NA` when none was requested); either mismatch
-#'   aborts, naming what differs. A run left to draw its seed from the
-#'   session draws another in a new session, so its split moves: the
-#'   refusal then names the seed the checkpoints were tuned with, to pass as
-#'   `seed =`.
+#'   and `outcome_range`), this run's response trim
+#'   (`response_threshold`, `NA` when none was requested) and, when the grid
+#'   has a `cubist` configuration, `control_horizons(isolate = )`, which
+#'   decides its scores (see "Isolated fits"); either mismatch aborts,
+#'   naming what differs. A row that does not record a setting this run
+#'   records, written by an earlier version, is evaluated again. A run left
+#'   to draw its seed from the session draws another in a new session, so
+#'   its split moves: the refusal then names the seed the checkpoints were
+#'   tuned with, to pass as `seed =`.
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
@@ -706,7 +709,8 @@ evaluate <- function(x,
   ## place a setting is added. The metric is absent on purpose: every row
   ## carries all six cv_ columns and the ranking is recomputed on each run, so
   ## changing it cannot make a row stale. So is the parallel axis, which the
-  ## results do not depend on.
+  ## results do not depend on. Isolation is recorded below it, for the grids
+  ## it changes.
 
   settings <- eval_settings(
     cv_folds        = cv_folds,
@@ -734,6 +738,14 @@ evaluate <- function(x,
     ## no trim was requested, as prune_threshold is when not pruning.
     response_threshold = if (is.null(trim_request)) NA_real_ else trim_request$threshold
   )
+
+  ## Whether the models MODEL_SPECS marks `isolate` were fitted each in a
+  ## process of its own (control_horizons(isolate = )): for cubist that
+  ## decides its neighbour step's cutoff, and so its scores, so a row fitted
+  ## under the other setting is refused, and one written before the setting
+  ## was recorded is re-evaluated. Recorded only when the grid fits such a
+  ## model, so another grid's checkpoints resume as before.
+  if (length(isolated_models(configs$model)) > 0) settings$isolate <- control$isolate
 
   ## -----------------------------------------------------------------------
   ## Step 6: Load checkpoints (if any)

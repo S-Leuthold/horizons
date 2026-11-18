@@ -2225,7 +2225,10 @@ describe("evaluate() - checkpoint data provenance", {
                                    ## and its outcome range (#76), likewise
                                    outcome_range = c(0, Inf),
                                    ## no response trim requested (#77)
-                                   response_threshold = NA_real_))
+                                   response_threshold = NA_real_,
+                                   ## and isolation, since the grid fits
+                                   ## cubist
+                                   isolate = TRUE))
 
     row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
     expect_identical(row$data_hash, manifest$data_hash)
@@ -2865,6 +2868,75 @@ describe("evaluate() - tuning-settings provenance", {
       "pca_threshold",
       class = "horizons_error_input"
     )
+
+  })
+
+  ## Isolation decides cubist's neighbour cutoff, and so its scores, so a grid
+  ## that fits cubist records it; another grid does not, and resumes across
+  ## a change of it.
+
+  it("refuses to resume a grid with cubist under the other isolate setting, naming it, and evaluates again a row that does not record it", {
+
+    ## CK-A's grid fits rf and cubist, each cubist fit in a process of its own
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
+    first  <- ck$value$first
+
+    expect_true(all(vapply(first$evaluation$results$settings, `[[`, logical(1), "isolate")))
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                control = control_horizons(output_dir = tmpdir, isolate = FALSE))),
+      horizons_error_input = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_error_input")
+    expect_match(flat_message(err), "isolate = TRUE (this run: FALSE)", fixed = TRUE)
+
+    ## Rows written before isolation was recorded are evaluated again, as a
+    ## row missing any setting is
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      row <- readRDS(f)
+      row$settings[[1]]$isolate <- NULL
+      saveRDS(row, f)
+    }
+
+    template <- first$evaluation$results[1, ]
+    ran      <- character(0)
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      ran <<- c(ran, config_row$config_id)
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    again <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
+
+    expect_setequal(ran, obj$config$configs$config_id)
+    expect_true(all(vapply(again$evaluation$results$settings, `[[`, logical(1), "isolate")))
+
+  })
+
+  it("records no isolate setting for a grid that fits no isolated model, which resumes across a change of it", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      ran <<- c(ran, config_row$config_id)
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model <- c("rf", "plsr")
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                       control = control_horizons(output_dir = tmpdir, isolate = FALSE)))
+    expect_false("isolate" %in% names(first$evaluation$results$settings[[1]]))
+    expect_length(ran, 2L)
+
+    resumed <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
+    expect_length(ran, 2L)
+    expect_identical(resumed$evaluation$results$config_id, first$evaluation$results$config_id)
 
   })
 
