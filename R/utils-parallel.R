@@ -730,6 +730,12 @@ ISOLATED_NAMES <- c(".horizons_libs", ".horizons_options", ".horizons_seed", ".h
 #' its trace), which can hold the data the call was given; the error the
 #' call ends in keeps both, since the caller reports a refusal's call.
 #'
+#' The body is parsed from text ([ISOLATED_BODY]) at each call rather than
+#' written as code in this function, so it is the same plain call however
+#' horizons was installed: code here would carry the source references of a
+#' keep-source install, and under covr the counts it adds, both of which
+#' travel with the body and make the process load horizons.
+#'
 #' @param expr A call.
 #' @return A call returning a list: `value`, `error` (the condition the call
 #'   ended in, or `NULL`), `conditions` (the warnings and messages raised, in
@@ -738,45 +744,57 @@ ISOLATED_NAMES <- c(".horizons_libs", ".horizons_options", ".horizons_seed", ".h
 #' @noRd
 isolated_body <- function(expr) {
 
-  bquote({
-
-    .libPaths(.horizons_libs)
-    if (length(.horizons_options) > 0) options(.horizons_options)
-    set.seed(.horizons_seed, kind = "Mersenne-Twister", normal.kind = "Inversion",
-             sample.kind = "Rejection")
-
-    .horizons_error      <- NULL
-    .horizons_conditions <- list()
-
-    .horizons_output <- utils::capture.output(
-      .horizons_value <- tryCatch(
-        withCallingHandlers(
-          .(expr),
-          warning = function(w) {
-            w$call <- NULL
-            w$trace <- NULL
-            .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- w
-            if (!is.null(findRestart("muffleWarning"))) invokeRestart("muffleWarning")
-          },
-          message = function(m) {
-            m$call <- NULL
-            .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- m
-            if (!is.null(findRestart("muffleMessage"))) invokeRestart("muffleMessage")
-          }
-        ),
-        error = function(e) {
-          .horizons_error <<- e
-          NULL
-        }
-      )
-    )
-
-    list(value = .horizons_value, error = .horizons_error,
-         conditions = .horizons_conditions, output = .horizons_output)
-
-  })
+  ### substitute() through do.call(), so it works on the parsed call rather
+  ### than on the symbol holding it
+  do.call(substitute, list(str2lang(ISOLATED_BODY), list(.horizons_expr = expr)))
 
 }
+
+#' The text of the body an isolated call runs
+#'
+#' @description
+#' [isolated_body()] parses it and puts the call to run in place of
+#' `.horizons_expr`. Text, not code, for the reason given there.
+#'
+#' @keywords internal
+#' @noRd
+ISOLATED_BODY <- '{
+
+  .libPaths(.horizons_libs)
+  if (length(.horizons_options) > 0) options(.horizons_options)
+  set.seed(.horizons_seed, kind = "Mersenne-Twister", normal.kind = "Inversion",
+           sample.kind = "Rejection")
+
+  .horizons_error      <- NULL
+  .horizons_conditions <- list()
+
+  .horizons_output <- utils::capture.output(
+    .horizons_value <- tryCatch(
+      withCallingHandlers(
+        .horizons_expr,
+        warning = function(w) {
+          w$call <- NULL
+          w$trace <- NULL
+          .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- w
+          if (!is.null(findRestart("muffleWarning"))) invokeRestart("muffleWarning")
+        },
+        message = function(m) {
+          m$call <- NULL
+          .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- m
+          if (!is.null(findRestart("muffleMessage"))) invokeRestart("muffleMessage")
+        }
+      ),
+      error = function(e) {
+        .horizons_error <<- e
+        NULL
+      }
+    )
+  )
+
+  list(value = .horizons_value, error = .horizons_error,
+       conditions = .horizons_conditions, output = .horizons_output)
+
+}'
 
 #' Stop the call because an isolated process ended without its result
 #'

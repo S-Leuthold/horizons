@@ -567,6 +567,21 @@ describe("run_isolated()", {
 
   })
 
+  it("sends a plain body however horizons was installed: no source references and no coverage counts", {
+
+    ## A keep-source install would put srcrefs on the body's calls, and covr
+    ## its count() calls in them; either makes the body large, and the
+    ## process load horizons to read it
+    body <- isolated_body(quote(f(x = x)))
+
+    expect_identical(body, str2lang(deparse1(body, collapse = "\n")))
+    expect_false(any(c("count", "covr") %in% all.names(body)))
+    expect_lt(length(serialize(body, NULL)), 5000)
+    expect_true("f" %in% all.names(body))
+    expect_false(".horizons_expr" %in% all.names(body))
+
+  })
+
   it("is called by name: each argument a symbol of its own name, so the call holds none of the data", {
 
     expect_identical(call_by_name(quote(f), list(a = 1:3, b = "x")), quote(f(a = a, b = b)))
