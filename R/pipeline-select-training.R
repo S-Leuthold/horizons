@@ -389,9 +389,8 @@ select_training <- function(x, library,
 
   ## How the run goes: the fields select_training() reads, defaults filled
   ## in, and the record of it on the selection
-  control    <- resolve_control(control, "select_training")
-  chunk_size <- control$chunk_size
-  verbose    <- control$verbose
+  control <- resolve_control(control, "select_training")
+  verbose <- control$verbose
 
   ## The call's warnings, written to the returned object's log and raised
   ## once per topic at the end (log_close(), signal_log())
@@ -686,8 +685,153 @@ select_training <- function(x, library,
 
   }
 
-  resolved <- resolve_source(library, verbose = isTRUE(verbose), collector = collector,
-                             debug = control$debug, call = call)
+  ## ---------------------------------------------------------------------------
+  ## Steps 1 to 5: the draw, in a process of its own
+  ## ---------------------------------------------------------------------------
+
+  ## From the library's load to the record, in a process started for the
+  ## draw (run_draw()), so this session never holds the library, the
+  ## neighbour search's distances or a space build's transform: it keeps the
+  ## training set returned. The draw's tree is printed and its log rows are
+  ## this call's, as when it runs here.
+
+  drawn <- run_draw(list(
+    x = x, library = library, registry_entry = if (registered) library_registry()[[library]],
+    k = k, scope = scope, properties = properties, snv = snv, derivative = derivative,
+    window = window, poly = poly, mask = mask, space = space, ncomp = ncomp,
+    sdev_floor = sdev_floor, metric = metric, depth = depth, clusters = clusters,
+    cluster_min = cluster_min, twin_ratio = twin_ratio, seed = seed, control = control,
+    target_flagged = target_flagged, target_vars = target_vars, restandardize = restandardize
+  ), control = control, call = call)
+
+  log_append(collector, drawn$events)
+
+  out <- drawn$out
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6: Report
+  ## ---------------------------------------------------------------------------
+
+  if (verbose) report_selection(out$selection, n_targets = drawn$n_targets,
+                                seed_line = seed_tree_line(root))
+
+  ## Draws short of k: too few measured rows left after the twin
+  ## subtraction, or, under cosine, no defined distance at all. One coverage
+  ## warning, beside any of the axes', naming the targets.
+
+  sd_tbl <- out$selection$short_draws
+
+  if (nrow(sd_tbl)) {
+
+    undefined <- startsWith(sd_tbl$reason, "no defined distance")
+    thin      <- sd_tbl[!undefined, , drop = FALSE]
+    no_angle  <- unique(sd_tbl$target_id[undefined])
+
+    log_warning(collector, "coverage", c(
+      "{nrow(sd_tbl)} target-property draw{?s} could not reach k.",
+      "i" = if (nrow(thin)) "{nrow(thin)} after twin exclusions, with too few measured rows left. Smallest: {min(thin$k_drawn)} of {max(thin$k_requested)} rows, on {.field {unique(thin$property)}}.",
+      "i" = if (length(no_angle)) "{length(no_angle)} target{?s} had no defined distance to any pool row, so nothing was drawn for {?it/them}: {shown_ids(no_angle)}. {.code metric = \"cosine\"} has no angle for a row on the pool's centroid, since the scores are mean-centred; use {.val euclidean} or {.val mahalanobis} for these targets.",
+      "i" = "See {.code x$selection$short_draws}."
+    ), ids = unique(sd_tbl$target_id))
+
+  }
+
+  resemblance <- out$selection$resemblance
+
+  if (!is.null(resemblance$skipped)) {
+
+    log_warning(collector, "skipped", c(
+      "The resemblance check did not run: {resemblance$skipped}.",
+      "i" = "Nothing says whether the targets resemble the rows they were drawn from; {.code depth = \"all\"} gives it more rows to measure against, and {.code control_horizons(min_resemblance_rows = )} sets how many it needs."
+    ))
+
+  }
+
+  beyond <- resemblance$beyond
+
+  if (nrow(beyond)) {
+
+    log_warning(collector, "applicability", c(
+      "{nrow(beyond)} target{?s} sit{?s/} beyond the pool's own nearest-neighbour spread.",
+      "i" = "{shown_ids(beyond$target_id)}.",
+      "i" = "Selection proceeds; treat their predictions with care. The check is made after SNV, so it cannot see a unit mismatch; that is reported separately."
+    ), ids = beyond$target_id)
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: Record, re-validate, then raise
+  ## ---------------------------------------------------------------------------
+
+  ## The pool's log, carried by subset_rows(), gains this call's rows before
+  ## the object is validated, and each warning is raised only once its row
+  ## is on the object.
+  out$log <- log_close(collector, out$log)
+
+  out <- validate_horizons_data(out)
+
+  signal_log(collector, out)
+
+  out
+
+}
+
+
+## =============================================================================
+## The draw: from the library's load to the record
+## =============================================================================
+
+
+#' Draw the training set, from the library's load to the record
+#'
+#' @description
+#' `select_training()`'s Steps 1 to 5, after its door: the library resolved
+#' and certified, its columns and standardization against the targets', the
+#' similarity space built or read, the neighbour search, the grouping, the
+#' training set assembled, the resemblance check and the record. It takes
+#' plain values and returns plain values, so it runs the same in this session
+#' and in a process of its own ([run_draw()]), where it is called by name. Its
+#' warnings and notes are recorded on a collector of its own, returned for
+#' the verb's; a refusal reports `call`.
+#'
+#' @param x The targets, certified at the verb's door.
+#' @param library As the verb was given it.
+#' @param registry_entry The registry entry when `library` names a
+#'   registered library, else `NULL`.
+#' @param k,scope,properties,snv,derivative,window,poly,mask,space,ncomp,sdev_floor,metric,depth,clusters,cluster_min,twin_ratio
+#'   As the verb's door resolved them.
+#' @param seed The run's root.
+#' @param control The verb's resolved control.
+#' @param target_flagged,target_vars,restandardize What the door read of the
+#'   targets.
+#' @param consent `"ask"`, `"defer"` or `"given"`: how a registered library's
+#'   download is consented to ([library_consent()]).
+#' @param call The frame a refusal reports: the verb's in this session; this
+#'   function's own in a process of its own, which [run_draw()] reports as
+#'   the verb's.
+#' @return List: `out` (the training set, its `selection` record set),
+#'   `n_targets` (the targets drawn for) and `events` (the collector's).
+#' @keywords internal
+#' @noRd
+draw_training_set <- function(x, library, registry_entry, k, scope, properties, snv, derivative,
+                              window, poly, mask, space, ncomp, sdev_floor, metric, depth,
+                              clusters, cluster_min, twin_ratio, seed, control,
+                              target_flagged, target_vars, restandardize,
+                              consent = "ask", call = environment()) {
+
+  verbose    <- control$verbose
+  chunk_size <- control$chunk_size
+  collector  <- log_open("select_training")
+
+  ## A registered library's entry is the session's, given here, so the
+  ## draw reads the registry the session read
+  resolved <- if (is.null(registry_entry)) {
+    resolve_source(library, verbose = isTRUE(verbose), collector = collector,
+                   debug = control$debug, consent = consent, call = call)
+  } else {
+    resolve_registered(registry_entry, verbose = isTRUE(verbose), collector = collector,
+                       debug = control$debug, consent = consent, call = call)
+  }
   pool     <- validate_select_input(resolved$pool, arg = "library", what = "the pool")
   errors   <- check_pool_unpromoted(pool)
 
@@ -1537,72 +1681,156 @@ select_training <- function(x, library,
     timestamp        = Sys.time()
   )
 
-  ## ---------------------------------------------------------------------------
-  ## Step 6: Report
-  ## ---------------------------------------------------------------------------
+  list(out = out, n_targets = length(target_ids), events = collector$events)
 
-  if (verbose) report_selection(out$selection, n_targets = length(target_ids),
-                                seed_line = seed_tree_line(root))
+}
 
-  ## Draws short of k: too few measured rows left after the twin
-  ## subtraction, or, under cosine, no defined distance at all. One coverage
-  ## warning, beside any of the axes', naming the targets.
 
-  sd_tbl <- draw$short_draws
+#' Run the draw in a process of its own, or here
+#'
+#' @description
+#' [draw_training_set()] in a process started for it ([run_isolated()]),
+#' which loads this session's horizons from the library it was loaded from,
+#' with this session's `horizons.*` options (the caches it reads and writes
+#' are the session's), the options its tree is printed under, and its
+#' library paths. Its tree, warnings and messages are given back here as
+#' they were raised there. It runs in this session instead, with the same
+#' results, under `control_horizons(isolate = FALSE)`, under
+#' `devtools::load_all()`, where a process would load the installed horizons
+#' rather than this source, and when the library horizons was loaded from
+#' now holds another version of it ([draw_in_session()]).
+#'
+#' A registered library not cached yet, or cached by another build, needs
+#' consent, which a process of its own cannot ask for: it says so instead
+#' (`consent = "defer"`), the consent is asked here ([library_consent()]),
+#' and given, the draw is sent again (`consent = "given"`).
+#'
+#' A refusal raised in the draw reports the verb's `call`. A process that
+#' ends without its result is `horizons_error_process_died`, which stops the
+#' call: nothing of the draw is left.
+#'
+#' @param args Named list of [draw_training_set()]'s arguments, but
+#'   `consent` and `call`.
+#' @param control The verb's resolved control.
+#' @param call The verb's frame.
+#' @return What [draw_training_set()] returns.
+#' @keywords internal
+#' @noRd
+run_draw <- function(args, control, call) {
 
-  if (nrow(sd_tbl)) {
+  in_session <- draw_in_session(control)
 
-    undefined <- startsWith(sd_tbl$reason, "no defined distance")
-    thin      <- sd_tbl[!undefined, , drop = FALSE]
-    no_angle  <- unique(sd_tbl$target_id[undefined])
-
-    log_warning(collector, "coverage", c(
-      "{nrow(sd_tbl)} target-property draw{?s} could not reach k.",
-      "i" = if (nrow(thin)) "{nrow(thin)} after twin exclusions, with too few measured rows left. Smallest: {min(thin$k_drawn)} of {max(thin$k_requested)} rows, on {.field {unique(thin$property)}}.",
-      "i" = if (length(no_angle)) "{length(no_angle)} target{?s} had no defined distance to any pool row, so nothing was drawn for {?it/them}: {shown_ids(no_angle)}. {.code metric = \"cosine\"} has no angle for a row on the pool's centroid, since the scores are mean-centred; use {.val euclidean} or {.val mahalanobis} for these targets.",
-      "i" = "See {.code x$selection$short_draws}."
-    ), ids = unique(sd_tbl$target_id))
-
+  ### Called by name with its arguments as symbols, here and in the process,
+  ### so the call a refusal or a trace records holds none of the data
+  draw_call <- function(fn, args) {
+    as.call(c(list(fn), stats::setNames(lapply(names(args), as.name), names(args))))
   }
 
-  if (!is.null(resemblance$skipped)) {
+  as_verbs <- function(e) {
+    if (inherits(e, "horizons_error") && identical(rlang::call_name(e$call), "draw_training_set")) {
+      e$call <- rlang::frame_call(call)
+    }
+    stop(e)
+  }
 
-    log_warning(collector, "skipped", c(
-      "The resemblance check did not run: {resemblance$skipped}.",
-      "i" = "Nothing says whether the targets resemble the rows they were drawn from; {.code depth = \"all\"} gives it more rows to measure against, and {.code control_horizons(min_resemblance_rows = )} sets how many it needs."
+  if (!is.null(in_session)) {
+
+    here <- c(args, list(consent = "ask", call = call))
+
+    return(rlang::try_fetch(
+      eval(draw_call(quote(draw_training_set), here), list2env(here, parent = environment())),
+      error = as_verbs
     ))
 
   }
 
-  beyond <- resemblance$beyond
+  libraries <- unique(c(in_session_library()$lib, .libPaths()))
+  options   <- draw_options()
 
-  if (nrow(beyond)) {
-
-    log_warning(collector, "applicability", c(
-      "{nrow(beyond)} target{?s} sit{?s/} beyond the pool's own nearest-neighbour spread.",
-      "i" = "{shown_ids(beyond$target_id)}.",
-      "i" = "Selection proceeds; treat their predictions with care. The check is made after SNV, so it cannot see a unit mismatch; that is reported separately."
-    ), ids = beyond$target_id)
-
+  send <- function(consent) {
+    sent <- c(args, list(consent = consent))
+    run_isolated(draw_call(call(":::", as.name("horizons"), as.name("draw_training_set")), sent), sent,
+                 what = "the library draw", options = options, libraries = libraries, call = call)
   }
 
-  ## ---------------------------------------------------------------------------
-  ## Step 7: Record, re-validate, then raise
-  ## ---------------------------------------------------------------------------
-
-  ## The pool's log, carried by subset_rows(), gains this call's rows before
-  ## the object is validated, and each warning is raised only once its row
-  ## is on the object.
-  out$log <- log_close(collector, out$log)
-
-  out <- validate_horizons_data(out)
-
-  signal_log(collector, out)
-
-  out
+  rlang::try_fetch(
+    rlang::try_fetch(
+      send("defer"),
+      horizons_consent_needed = function(cnd) {
+        library_consent(args$registry_entry, cnd$path, ask = interactive(), rebuild = cnd$rebuild,
+                        call = call)
+        send("given")
+      }
+    ),
+    error = as_verbs
+  )
 
 }
 
+
+#' Why the draw runs in this session, if it does
+#'
+#' @param control The verb's resolved control.
+#' @return Character(1): `"isolate = FALSE"`, `"load_all"` or `"another
+#'   version installed"`; `NULL` when the draw runs in a process of its own.
+#' @keywords internal
+#' @noRd
+draw_in_session <- function(control) {
+
+  if (!isTRUE(control$isolate)) return("isolate = FALSE")
+
+  if (running_under_load_all()) return("load_all")
+
+  installed <- in_session_library()
+
+  if (!identical(installed$version, as.character(getNamespaceVersion("horizons")))) {
+    return("another version installed")
+  }
+
+  NULL
+
+}
+
+
+#' The library this session's horizons was loaded from, and the version it
+#' holds now
+#'
+#' @return List: `lib` (the library directory) and `version` (the version
+#'   its DESCRIPTION records, `NA` when it cannot be read). A seam, so a test
+#'   can report another version.
+#' @keywords internal
+#' @noRd
+in_session_library <- function() {
+
+  path    <- getNamespaceInfo("horizons", "path")
+  version <- tryCatch(unname(read.dcf(file.path(path, "DESCRIPTION"), "Version")[1, 1]),
+                      error = function(e) NA_character_)
+
+  list(lib = dirname(path), version = version)
+
+}
+
+
+#' The options the draw's process runs with
+#'
+#' @description
+#' This session's `horizons.*` options, so the caches the draw reads and
+#' writes are this session's; the download's `timeout`; and what its tree is
+#' printed under (cli's colours and unicode, R's number formatting), so the
+#' tree reads as it would have here.
+#'
+#' @return Named list.
+#' @keywords internal
+#' @noRd
+draw_options <- function() {
+
+  all <- options()
+
+  c(all[startsWith(names(all), "horizons.")],
+    list(cli.num_colors = cli::num_ansi_colors(), cli.unicode = cli::is_utf8_output()),
+    all[intersect(c("timeout", "digits", "scipen", "OutDec"), names(all))])
+
+}
 
 ## =============================================================================
 ## Internal helpers

@@ -5,6 +5,12 @@
 #
 # The miniature library comes from helper-mini-library.R.
 
+## The draws here run in this session: the tests replace functions inside the
+## draw (the registry, the space's build, the search), which a process of its
+## own would not see, and a process loads horizons for each draw. The draw's
+## own process is tested with isolate = TRUE, in test-pipeline-select-training.R.
+withr::local_options(horizons.isolate = FALSE)
+
 
 ## ---------------------------------------------------------------------------
 ## Fixture: a registered mini library, built, and targets on its grid
@@ -692,5 +698,57 @@ test_that("rebuilding a registered library sweeps the spaces cached for the old 
   expect_length(files, 1L)
   expect_identical(qs2::qs_read(file.path(m$cache, files))$identity,
                    as.character(space_cache_identity(rebuilt$record)))
+
+})
+
+
+## ---------------------------------------------------------------------------
+## A registered library's first use, drawn in a process of its own
+## ---------------------------------------------------------------------------
+## The draw's process cannot ask for consent, so the session asks, as it
+## always has, and the library is built in the draw's process, into the
+## session's cache directory.
+
+test_that("a first use drawn in its own process asks in the session and builds the library in the session's cache", {
+
+  skip_unless_slow_tier()
+  skip_on_cran()
+  skip_if_dev_package()
+
+  ## Targets made from the library, built once in a cache of their own
+  mini <- use_mini()
+  targets <- mini_targets(mini$pool)
+
+  ## A cache that holds nothing yet
+  empty <- withr::local_tempdir()
+  withr::local_options(horizons.cache_dir = empty, horizons.library_download = NULL)
+
+  draw <- function() {
+    select_training(targets, "mini", k = 5, depth = "all", seed = 7L,
+                    control = control_horizons(isolate = TRUE))
+  }
+
+  ## Not interactive and no option: refused in the session with its message,
+  ## and nothing written
+  m <- expect_message(
+    expect_error(draw(), "horizons.library_download", class = "horizons_error_consent"),
+    "is not cached yet", fixed = TRUE
+  )
+  expect_length(list.files(empty, all.files = TRUE, no.. = TRUE), 0L)
+
+  ## With the option, the message is the session's, once, and the library is
+  ## built where the session's option points
+  withr::local_options(horizons.library_download = TRUE)
+
+  said <- character()
+  out  <- suppressWarnings(withCallingHandlers(draw(), message = function(m) {
+    said <<- c(said, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  }))
+
+  expect_s3_class(out, "horizons_data")
+  expect_length(grep("is not cached yet", said, fixed = TRUE), 1L)
+  expect_true(file.exists(file.path(empty, "mini_v0.qs2")))
+  expect_identical(out$selection$library$name, "mini")
 
 })

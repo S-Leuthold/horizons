@@ -3,6 +3,12 @@
 # end to end against a miniature OSSL written to disk and served over
 # file:// URLs, so nothing touches the network or the user's cache.
 
+## The draws here run in this session: the tests replace functions inside the
+## draw (the registry, the space's build, the search), which a process of its
+## own would not see, and a process loads horizons for each draw. The draw's
+## own process is tested with isolate = TRUE, in test-pipeline-select-training.R.
+withr::local_options(horizons.isolate = FALSE)
+
 
 ## ---------------------------------------------------------------------------
 ## The three forms

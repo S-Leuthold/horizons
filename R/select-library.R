@@ -162,6 +162,8 @@ library_registry <- function() {
 #'   a registered library reports to it.
 #' @param debug `logical.` Passed to the first-use space's unit
 #'   ([prime_library_space()]).
+#' @param consent `character(1).` How a registered library's download is
+#'   consented to ([library_consent()]): `"ask"`, `"defer"` or `"given"`.
 #' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` (a `horizons_data`) and `record`, the library's
@@ -171,7 +173,7 @@ library_registry <- function() {
 #' @noRd
 resolve_source <- function(library, ask = interactive(), verbose = TRUE,
                            collector = log_open("select_training"), debug = FALSE,
-                           call = rlang::caller_env()) {
+                           consent = "ask", call = rlang::caller_env()) {
 
   UseMethod("resolve_source")
 
@@ -182,7 +184,7 @@ resolve_source <- function(library, ask = interactive(), verbose = TRUE,
 #' @noRd
 resolve_source.horizons_library <- function(library, ask = interactive(), verbose = TRUE,
                                             collector = log_open("select_training"), debug = FALSE,
-                                            call = rlang::caller_env()) {
+                                            consent = "ask", call = rlang::caller_env()) {
 
   list(pool = library$pool, record = utils::modifyList(library$record, list(form = "object")))
 
@@ -193,7 +195,7 @@ resolve_source.horizons_library <- function(library, ask = interactive(), verbos
 #' @noRd
 resolve_source.horizons_data <- function(library, ask = interactive(), verbose = TRUE,
                                          collector = log_open("select_training"), debug = FALSE,
-                                         call = rlang::caller_env()) {
+                                         consent = "ask", call = rlang::caller_env()) {
 
   list(pool = library, record = library_record("object"))
 
@@ -204,14 +206,14 @@ resolve_source.horizons_data <- function(library, ask = interactive(), verbose =
 #' @noRd
 resolve_source.character <- function(library, ask = interactive(), verbose = TRUE,
                                      collector = log_open("select_training"), debug = FALSE,
-                                     call = rlang::caller_env()) {
+                                     consent = "ask", call = rlang::caller_env()) {
 
   registry <- library_registry()
 
   if (library %in% names(registry)) {
 
     return(resolve_registered(registry[[library]], ask = ask, verbose = verbose,
-                              collector = collector, debug = debug, call = call))
+                              collector = collector, debug = debug, consent = consent, call = call))
 
   }
 
@@ -334,14 +336,14 @@ library_cache_path <- function(entry) {
 #' space is not built.
 #'
 #' @param entry A registry entry.
-#' @param ask,verbose,collector,debug As for [resolve_source()].
+#' @param ask,verbose,collector,debug,consent As for [resolve_source()].
 #' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` and `record`.
 #' @noRd
 resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
                                collector = log_open("select_training"), debug = FALSE,
-                               call = rlang::caller_env()) {
+                               consent = "ask", call = rlang::caller_env()) {
 
   path <- library_cache_path(entry)
 
@@ -382,13 +384,13 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
 
     }
 
-    library_consent(entry, path, ask = ask, rebuild = TRUE, call = call)
+    library_consent(entry, path, ask = ask, rebuild = TRUE, consent = consent, call = call)
 
     log_note(collector, "The cached {.val {entry$name}} library at {.path {path}} was built by an earlier version of horizons, so it was rebuilt.")
 
   } else {
 
-    library_consent(entry, path, ask = ask, call = call)
+    library_consent(entry, path, ask = ask, consent = consent, call = call)
 
   }
 
@@ -503,15 +505,30 @@ clear_stale_builds <- function(entry, dir, max_age_hours = 24) {
 #' `TRUE`; otherwise asks in an interactive session and stops in a
 #' non-interactive one, naming the option.
 #'
+#' The draw in a process of its own cannot ask, so it is given `consent =
+#' "defer"`, and stops here with a `horizons_consent_needed` condition
+#' carrying `path` and `rebuild`: the session asks, as above, and sends the
+#' draw again with `consent = "given"`, which proceeds without a word, since
+#' the session has said it (`run_draw()`).
+#'
 #' @param rebuild `logical.` Whether a cached library from an earlier
 #'   build is being replaced, which the message says instead of "not cached
 #'   yet".
+#' @param consent `character(1).` `"ask"` (the above), `"defer"` or
+#'   `"given"`.
 #' @param call The frame a refusal reports: the verb's.
 #' @return `NULL`, invisibly, once consent is given; aborts with
 #'   `horizons_error_consent` otherwise.
 #' @noRd
 library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
-                            call = rlang::caller_env()) {
+                            consent = "ask", call = rlang::caller_env()) {
+
+  if (identical(consent, "given")) return(invisible(NULL))
+
+  if (identical(consent, "defer")) {
+    rlang::abort("The library's download needs consent, which the session asks for.",
+                 class = "horizons_consent_needed", path = path, rebuild = rebuild)
+  }
 
   mb <- round(sum(entry$sources$bytes) / 1e6)
 

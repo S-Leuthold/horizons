@@ -194,6 +194,36 @@ log_event <- function(collector, type, topic, message, ids, n, .envir) {
 
 }
 
+#' Add events recorded on another collector to a verb call's collector
+#'
+#' @description
+#' For work a verb hands to code with a collector of its own, which returns
+#' its events as data: `select_training()`'s draw, which can run in a
+#' process of its own. The events keep their order, after those already
+#' added.
+#'
+#' @param collector From [log_open()].
+#' @param events The other collector's `events`.
+#' @return `collector`, invisibly.
+#' @keywords internal
+#' @noRd
+log_append <- function(collector, events) {
+
+  if (isTRUE(collector$closed)) {
+
+    abort_horizons(
+      "Events were added to {.fn {collector$verb}}'s collector after it was closed.",
+      kind = "internal"
+    )
+
+  }
+
+  collector$events <- c(collector$events, events)
+
+  invisible(collector)
+
+}
+
 #' The log rows a verb call's collector holds
 #'
 #' @description

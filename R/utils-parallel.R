@@ -417,9 +417,10 @@ isolated_profile <- function() {
 #' Sends `expr` to a new R process ([isolated_profile()]) and returns its
 #' value here, as if it had run in this session:
 #'
-#' * The process is given this session's library paths first, so it loads
-#'   what this session would (a process started by mirai sees `R_LIBS` and
-#'   the startup files, not paths set at run time), then any `options`.
+#' * The process is given this session's library paths (`libraries`) first,
+#'   so it loads what this session would (a process started by mirai sees
+#'   `R_LIBS` and the startup files, not paths set at run time), then any
+#'   `options`.
 #' * Its random stream is seeded with one integer drawn here, from the
 #'   caller's stream, under the kinds every unit pins ([with_unit_seed()]),
 #'   so what it draws follows the caller's seed, and this session's stream
@@ -444,11 +445,12 @@ isolated_profile <- function() {
 #' @param what Character(1). What runs, for the death's message: `"a Cubist
 #'   fit"`, `"the library draw"`.
 #' @param options Named list of options to set in the process first.
+#' @param libraries Character. The library paths the process loads from.
 #' @param call The frame a death reports.
 #' @return The value of `expr`.
 #' @keywords internal
 #' @noRd
-run_isolated <- function(expr, args = list(), what, options = list(),
+run_isolated <- function(expr, args = list(), what, options = list(), libraries = .libPaths(),
                          call = rlang::caller_env()) {
 
   reserved <- intersect(names(args), ISOLATED_NAMES)
@@ -469,7 +471,7 @@ run_isolated <- function(expr, args = list(), what, options = list(),
 
   task <- mirai::mirai(
     .expr    = body,
-    .args    = c(args, list(.horizons_libs    = .libPaths(),
+    .args    = c(args, list(.horizons_libs    = libraries,
                             .horizons_options = options,
                             .horizons_seed    = seed)),
     .compute = isolated_profile()

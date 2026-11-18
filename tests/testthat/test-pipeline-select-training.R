@@ -1,6 +1,12 @@
 # tests/testthat/test-pipeline-select-training.R
 # Tests for select_training(): the verb end to end.
 
+## The draws here run in this session: the tests replace functions inside the
+## draw (the registry, the space's build, the search), which a process of its
+## own would not see, and a process loads horizons for each draw. The draw's
+## own process is tested with isolate = TRUE, in test-pipeline-select-training.R.
+withr::local_options(horizons.isolate = FALSE)
+
 
 ## =============================================================================
 ## Helpers
@@ -2917,5 +2923,141 @@ test_that("select_training() refuses to return a record of the wrong shape", {
     expect_error(quiet_select(fx, k = 5), "selection\\$groups",
                  class = "horizons_error_validation")
   )
+
+})
+
+
+## =============================================================================
+## The draw in a process of its own (isolate = TRUE)
+## =============================================================================
+## The draw runs in a process started for it, which loads the installed
+## horizons, so these tests run on an installed build. The file's option runs
+## every other draw here in this session.
+
+## A draw of the fixture with its tree, its warnings and its value, under
+## isolate as given
+draw_with_isolate <- function(fx, isolate, ...) {
+  warned <- list()
+  out    <- utils::capture.output(value <- withCallingHandlers(
+    select_training(fx$targets, fx$pool, seed = 7L, ...,
+                    control = control_horizons(isolate = isolate, verbose = TRUE)),
+    warning = function(w) {
+      warned[[length(warned) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  ))
+  list(value = value, output = out, warnings = warned)
+}
+
+test_that("select_training() draws in a process of its own what it draws in this session, tree, log and warnings too", {
+
+  skip_unless_slow_tier()
+  skip_on_cran()
+  skip_if_dev_package()
+
+  fx <- select_fixture()
+  withr::local_options(cli.num_colors = 1L)
+
+  ## k above oc's measured rows, so it is skipped with a warning; clustered,
+  ## so the draw's seeded steps run
+  there <- draw_with_isolate(fx, TRUE, k = 200, scope = "cluster", clusters = 2L)
+  here  <- draw_with_isolate(fx, FALSE, k = 200, scope = "cluster", clusters = 2L)
+
+  ## Everything but the times and the setting that chose where it ran
+  same <- function(x) {
+    x$selection$timestamp <- NULL
+    x$selection$settings$control$isolate <- NULL
+    x$log$time <- NULL
+    x
+  }
+
+  expect_identical(same(there$value), same(here$value))
+  expect_identical(there$output, here$output)
+  expect_true(any(grepl("Selecting training set", there$output, fixed = TRUE)))
+  expect_length(there$warnings, 1L)
+  expect_s3_class(there$warnings[[1]], "horizons_warning_skipped")
+  expect_identical(lapply(there$warnings, class), lapply(here$warnings, class))
+  expect_identical(vapply(there$warnings, conditionMessage, character(1)),
+                   vapply(here$warnings, conditionMessage, character(1)))
+  expect_true(there$value$selection$settings$control$isolate)
+
+})
+
+test_that("select_training() refuses in its own process as it does here, naming itself, with the findings", {
+
+  skip_unless_slow_tier()
+  skip_on_cran()
+  skip_if_dev_package()
+
+  fx <- select_fixture()
+
+  ## A property the pool lacks is found once the library is read, in the
+  ## draw's process
+  err <- expect_error(
+    select_training(fx$targets, fx$pool, k = 10, properties = "nope",
+                    control = control_horizons(isolate = TRUE)),
+    class = "horizons_error_input"
+  )
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(err$findings, "`properties` not in the pool's responses: \"nope\"", fixed = TRUE)
+
+})
+
+test_that("select_training() draws in this session under isolate = FALSE, load_all() or another installed version", {
+
+  fx <- select_fixture()
+
+  ## A process of its own would fail the call
+  local_mocked_bindings(mirai = function(...) stop("a process was started"), .package = "mirai")
+
+  draw <- function(isolate = TRUE) {
+    suppressWarnings(select_training(fx$targets, fx$pool, k = 10, seed = 7L,
+                                     control = control_horizons(isolate = isolate)))
+  }
+
+  expect_s3_class(draw(isolate = FALSE), "horizons_data")
+
+  local_mocked_bindings(running_under_load_all = function() TRUE)
+  expect_s3_class(draw(), "horizons_data")
+
+  local_mocked_bindings(running_under_load_all = function() FALSE,
+                        in_session_library = function() list(lib = .libPaths()[1], version = "0.0.0"))
+  expect_s3_class(draw(), "horizons_data")
+
+  ## And on the version it was loaded from, in a process of its own
+  local_mocked_bindings(in_session_library = function() {
+    list(lib = .libPaths()[1], version = as.character(getNamespaceVersion("horizons")))
+  })
+  expect_error(draw(), "a process was started")
+
+})
+
+test_that("select_training() stops with horizons_error_process_died when the draw's process dies", {
+
+  skip_on_os("windows")
+
+  fx <- select_fixture()
+
+  ## The draw's process killed as it starts, in place of the draw
+  real_mirai <- mirai::mirai
+  local_mocked_bindings(running_under_load_all = function() FALSE,
+                        in_session_library = function() {
+                          list(lib = .libPaths()[1], version = as.character(getNamespaceVersion("horizons")))
+                        })
+  local_mocked_bindings(mirai = function(.expr, ..., .compute = NULL) {
+    killed <- quote(tools::pskill(Sys.getpid(), 9L))
+    real_mirai(.expr = killed, .compute = .compute)
+  }, .package = "mirai")
+
+  err <- expect_error(
+    with_deadline(select_training(fx$targets, fx$pool, k = 10, control = control_horizons(isolate = TRUE)), 30),
+    class = "horizons_error_process_died"
+  )
+
+  expect_s3_class(err, "horizons_error_run")
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               paste(PROCESS_DIED, "the library draw ended without returning its result"), fixed = TRUE)
 
 })
