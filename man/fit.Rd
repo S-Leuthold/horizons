@@ -270,7 +270,7 @@ Each \code{cubist} fit runs in a process of its own, wherever it runs, as in
 seed alone; a member whose fit's process dies, in its re-tune, its
 out-of-fold pass or its final fit, fails with
 \code{horizons_error_process_died}. \code{control_horizons(isolate = FALSE)} fits it
-here instead, which the tree and the \code{log} say.
+in the process that runs it instead, which the tree and the \code{log} say.
 }
 
 \section{Outcome range}{

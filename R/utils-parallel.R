@@ -510,6 +510,42 @@ check_daemon_memory <- function(reports, models, isolate, n_rows, n_predictors, 
 
 }
 
+#' The progress tree's lines on how a run goes: its parallel axis and its
+#' isolated fits
+#'
+#' @description
+#' The one place `evaluate()`'s and `fit()`'s trees say it, so the two verbs
+#' say it alike: the Parallel line for a parallel axis (its daemons, and
+#' whether they have no dispatcher or would need more memory than the
+#' machine has), or that debug turned it off; then [isolation_tree_line()].
+#'
+#' @param axis Character(1). `"configs"`, `"resamples"` or `"sequential"`.
+#' @param n_daemons Integer(1). The daemons the run began with.
+#' @param models Character. The models the run fits.
+#' @param isolate Logical(1). `control_horizons(isolate = )`.
+#' @param no_dispatcher,short_memory Logical(1). The daemons have no
+#'   dispatcher ([daemons_dispatch()]); they would need more memory than
+#'   this machine has ([check_daemon_memory()]).
+#' @param debug_off Logical(1). A parallel run asked for, run sequentially
+#'   since debug runs in this session.
+#' @return Character: the lines, without the tree's prefix.
+#' @keywords internal
+#' @noRd
+parallel_tree_lines <- function(axis, n_daemons, models, isolate, no_dispatcher = FALSE,
+                                short_memory = FALSE, debug_off = FALSE) {
+
+  parallel <- if (axis != "sequential") {
+    paste0("Parallel: over ", axis, " on mirai (", n_daemons, " daemons",
+           if (no_dispatcher) ", no dispatcher",
+           if (short_memory) ", more memory than available", ")")
+  } else if (debug_off) {
+    "Parallel: off, since debug runs in this session"
+  }
+
+  c(parallel, isolation_tree_line(models, isolate))
+
+}
+
 ## ---------------------------------------------------------------------------
 ## Isolated work: one call in a process of its own
 ## ---------------------------------------------------------------------------
@@ -690,8 +726,9 @@ ISOLATED_NAMES <- c(".horizons_libs", ".horizons_options", ".horizons_seed", ".h
 #'
 #' @description
 #' Base R alone, so the process loads nothing the expression does not name.
-#' A condition is kept without its call and trace, which can hold the data
-#' the call was given.
+#' A warning or a message is kept without its call (and a warning without
+#' its trace), which can hold the data the call was given; the error the
+#' call ends in keeps both, since the caller reports a refusal's call.
 #'
 #' @param expr A call.
 #' @return A call returning a list: `value`, `error` (the condition the call

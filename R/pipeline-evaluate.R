@@ -132,8 +132,9 @@
 #' Results do not depend on the backend, the number of daemons, which daemon
 #' runs a configuration or the order the work finishes in: every draw is
 #' seeded from the run's `seed` and its own name, where it is made, and each
-#' `cubist` fit runs in a process of its own (see "Isolated fits" below). The
-#' daemons' own seed (`mirai::daemons(seed = )`) has no effect on them.
+#' `cubist` fit runs in a process of its own (see "Isolated fits" below),
+#' unless `control_horizons(isolate = FALSE)`. The daemons' own seed
+#' (`mirai::daemons(seed = )`) has no effect on them.
 #'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
@@ -865,23 +866,12 @@ evaluate <- function(x,
 
     }
 
-    if (axis$axis != "sequential") {
-
-      ## A parallel axis has two daemons or more
-      cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
-                 " (", plan_workers, " daemons",
-                 if (no_dispatcher) ", no dispatcher",
-                 if (short_memory) ", more memory than available", ")\n"))
-
-    } else if (allow_par && debug) {
-
-      cat("\u2502  Parallel: off, since debug runs in this session\n")
-
+    ## A parallel axis has two daemons or more
+    for (line in parallel_tree_lines(axis$axis, plan_workers, configs$model, control$isolate,
+                                     no_dispatcher = no_dispatcher, short_memory = short_memory,
+                                     debug_off = allow_par && debug)) {
+      cat(paste0("\u2502  ", line, "\n"))
     }
-
-    iso_line <- isolation_tree_line(configs$model, control$isolate)
-
-    if (!is.null(iso_line)) cat(paste0("\u2502  ", iso_line, "\n"))
 
     cat("\u2502\n")
 

@@ -530,8 +530,10 @@ library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
   if (identical(consent, "given")) return(invisible(NULL))
 
   if (identical(consent, "defer")) {
+
     rlang::abort("The library's download needs consent, which the session asks for.",
                  class = "horizons_consent_needed", path = path, rebuild = rebuild)
+
   }
 
   mb <- round(sum(entry$sources$bytes) / 1e6)

@@ -57,10 +57,10 @@
 #' distance cutoff comes from a generator inside the Cubist C code that no
 #' seed reaches and that carries on from every Cubist fit made before it in
 #' the same process, which also keeps memory from each fit. With
-#' `control_horizons(isolate = FALSE)` the fits run in the session, and a
-#' `cubist` configuration's scores can then differ slightly between runs, and
-#' with them, when candidates are close, the one chosen. See GitHub issue
-#' #51.
+#' `control_horizons(isolate = FALSE)` the fits run in the process that runs
+#' them (the session, or a daemon on a parallel run), and a `cubist`
+#' configuration's scores can then differ slightly between runs, and with
+#' them, when candidates are close, the one chosen. See GitHub issue #51.
 #'
 #' **Choosing models for large spectral libraries:**
 #'

@@ -182,8 +182,9 @@ the worker count cancels. \code{"configs"} asked for explicitly without an
 Results do not depend on the backend, the number of daemons, which daemon
 runs a configuration or the order the work finishes in: every draw is
 seeded from the run's \code{seed} and its own name, where it is made, and each
-\code{cubist} fit runs in a process of its own (see "Isolated fits" below). The
-daemons' own seed (\code{mirai::daemons(seed = )}) has no effect on them.
+\code{cubist} fit runs in a process of its own (see "Isolated fits" below),
+unless \code{control_horizons(isolate = FALSE)}. The daemons' own seed
+(\code{mirai::daemons(seed = )}) has no effect on them.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{# Laptop: four cores, parallelise the folds inside each config.
 mirai::daemons(4)

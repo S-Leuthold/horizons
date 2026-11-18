@@ -179,6 +179,10 @@ describe("a cubist fit through define_model_spec()", {
 
   it("does not depend on the Cubist fits made before it in the session", {
 
+    ## Seven isolated fits at 300 predictors, several seconds
+    skip_unless_slow_tier()
+    skip_on_cran()
+
     ## Cubist's neighbour cutoff (`maxd`) comes from a generator in its C code
     ## that carries on from every fit in a process; at 300 predictors it moves
     ## by several units from one fit to the next there. Each fit in a process

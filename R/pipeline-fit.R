@@ -216,7 +216,7 @@
 #' seed alone; a member whose fit's process dies, in its re-tune, its
 #' out-of-fold pass or its final fit, fails with
 #' `horizons_error_process_died`. `control_horizons(isolate = FALSE)` fits it
-#' here instead, which the tree and the `log` say.
+#' in the process that runs it instead, which the tree and the `log` say.
 #'
 #' @section Outcome range:
 #' Every prediction `fit()` scores (out-of-fold, test and calibration) is
@@ -807,21 +807,12 @@ fit <- function(x,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
     ))
 
-    if (allow_par) {
-
-      ## A parallel fit runs the members' folds on the daemons
-      cat(paste0("\u2502  Parallel: over resamples on mirai (", n_daemons, " daemons",
-                 if (short_memory) ", more memory than available", ")\n"))
-
-    } else if (par_by_user && debug) {
-
-      cat("\u2502  Parallel: off, since debug runs in this session\n")
-
+    ## A parallel fit runs the members' folds on the daemons
+    for (line in parallel_tree_lines(if (allow_par) "resamples" else "sequential", n_daemons,
+                                     member_configs$model, control$isolate,
+                                     short_memory = short_memory, debug_off = par_by_user && debug)) {
+      cat(paste0("\u2502  ", line, "\n"))
     }
-
-    iso_line <- isolation_tree_line(member_configs$model, control$isolate)
-
-    if (!is.null(iso_line)) cat(paste0("\u2502  ", iso_line, "\n"))
 
     cat("\u2502\n")
 

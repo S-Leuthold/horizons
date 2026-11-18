@@ -986,7 +986,11 @@ describe("fit() - allow_par without a usable backend", {
 ##
 ## rf and cubist, fit60()'s members. Each cubist fit runs in a process of its
 ## own, so its neighbour cutoff does not depend on the fits made before it,
-## here or on a daemon.
+## here or on a daemon. The cubist member is end-to-end cover of that path,
+## not its guard: on this fixture's ten predictors the cutoff can come out
+## the same with isolation off. The guard is the direct test at 300
+## predictors (test-isolated-engines.R, "a cubist fit through
+## define_model_spec()").
 
 describe("fit() - on two daemons", {
 

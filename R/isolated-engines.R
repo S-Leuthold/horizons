@@ -119,7 +119,9 @@ register_isolated_engine <- function(model, engine, mode = "regression") {
   registered <- parsnip::get_from_env(model)
 
   if (is.null(registered) || !any(registered$engine == engine & registered$mode == mode)) {
+
     return(invisible(NULL))
+
   }
 
   if (any(registered$engine == twin & registered$mode == mode)) return(invisible(NULL))
