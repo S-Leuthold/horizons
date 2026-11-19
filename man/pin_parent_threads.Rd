@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils-parallel.R
 \name{pin_parent_threads}
 \alias{pin_parent_threads}
-\title{Pin BLAS, OpenMP, data.table and ranger threads in the parent}
+\title{Pin BLAS, OpenMP, data.table and the engines' threads in the parent}
 \usage{
 pin_parent_threads()
 }
@@ -17,6 +17,7 @@ OpenBLAS reads its thread count when it loads, so setting
 code (proven 2026-09-15: the environment variable changed nothing, the
 runtime call did). \code{RhpcBLASctl} provides the runtime call and is a
 Suggests; without it the parent relies on the environment variables being
-set before R starts.
+set before R starts. The engines' thread options are the ones
+\code{MODEL_SPECS} declares (\code{engine_thread_options()}), set to one.
 }
 \keyword{internal}

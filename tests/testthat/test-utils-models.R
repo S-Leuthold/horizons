@@ -155,6 +155,23 @@ describe("define_model_spec()", {
 
 })
 
+describe("engine_thread_options()", {
+
+  it("gives each thread option the rows declare, at the count asked for", {
+
+    expect_identical(engine_thread_options(), list(ranger.num.threads = 1L))
+    expect_identical(engine_thread_options(3), list(ranger.num.threads = 3L))
+
+    specs <- MODEL_SPECS
+    specs$xgboost$threads$option <- "horizons.test.threads"
+    local_mocked_bindings(MODEL_SPECS = specs)
+
+    expect_identical(engine_thread_options(), list(ranger.num.threads = 1L, horizons.test.threads = 1L))
+
+  })
+
+})
+
 describe("engine_spec()", {
 
   it("finds each engine's row, its isolated twin's too, and none for an engine no row names", {

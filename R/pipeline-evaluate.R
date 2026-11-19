@@ -3831,13 +3831,14 @@ evaluate_config_worker <- function(config_i, payload_path) {
     ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
     ## so setting OPENBLAS_NUM_THREADS here, after the library is loaded in
     ## this worker, changed nothing when measured (2026-09-15). What can be
-    ## set at runtime in the worker is set here. A daemon starts with the
-    ## session's environment variables from when daemons() was called, not
-    ## its in-process settings.
+    ## set at runtime in the worker is set here: data.table's threads, and
+    ## the thread options the model table declares for its engines. A daemon
+    ## starts with the session's environment variables from when daemons()
+    ## was called, not its in-process settings.
     if (requireNamespace("data.table", quietly = TRUE)) {
       data.table::setDTthreads(1L)
     }
-    options(ranger.num.threads = 1L)
+    options(engine_thread_options())
 
     cfg <- shared$configs[config_i, ]
 

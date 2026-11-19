@@ -25,6 +25,11 @@
 # - `seed`: TRUE when the engine takes a seed, which each stage gives it
 #   (seed_engine(), R/utils-rng.R) rather than letting parsnip or bonsai draw
 #   one from the stream.
+# - `threads`: how the engine's threads are set, for an engine that can run
+#   more than one: `argument`, its fit argument, and `option`, an R option
+#   it reads (ranger reads `ranger.num.threads` to predict). Every place that
+#   pins threads sets each `option` (engine_thread_options()). An engine with
+#   no `threads` runs on one thread, or on what BLAS and OpenMP are given.
 # - `isolate`: the promises the engine breaks when its fits share a process,
 #   each named with the upstream report about it. Such a model is fitted
 #   through its engine's isolated twin, each fit in a process of its own
@@ -46,7 +51,8 @@ MODEL_SPECS <- list(
     fixed       = list(trees = 500),
     tuned       = c("mtry", "min_n"),
     engine_args = list(importance = "impurity"),
-    seed        = TRUE
+    seed        = TRUE,
+    threads     = list(argument = "num.threads", option = "ranger.num.threads")
   ),
 
   cubist = list(
@@ -65,7 +71,8 @@ MODEL_SPECS <- list(
     packages = "xgboost",
     fixed    = list(trees = 500),
     tuned    = c("tree_depth", "learn_rate", "mtry", "min_n", "loss_reduction", "sample_size"),
-    seed     = TRUE
+    seed     = TRUE,
+    threads  = list(argument = "nthread")
   ),
 
   plsr = list(
@@ -108,7 +115,8 @@ MODEL_SPECS <- list(
     packages = c("bonsai", "lightgbm"),
     fixed    = list(trees = 500),
     tuned    = c("tree_depth", "learn_rate", "mtry", "min_n"),
-    seed     = TRUE
+    seed     = TRUE,
+    threads  = list(argument = "num_threads")
   ),
 
   mars = list(
@@ -123,6 +131,10 @@ MODEL_SPECS <- list(
 
 # The short model names configure() takes
 VALID_MODELS <- names(MODEL_SPECS)
+
+# The threads each fit runs on: what every place that pins threads sets the
+# engines' thread options to (engine_thread_options(), R/utils-models.R)
+ENGINE_THREADS <- 1L
 
 # The packages each feature-selection method's recipe step calls when it is
 # trained, keyed by VALID_FEATURE_SELECTION: the step's required_pkgs() less

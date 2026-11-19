@@ -196,16 +196,20 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("runs its configuration with data.table and ranger on one thread", {
+  it("runs its configuration with data.table and each engine thread option on one thread", {
 
     skip_if_not_installed("RhpcBLASctl")
     skip_if_not_installed("data.table")
 
     ## Both counts are raised first: a session started with the thread
     ## variables at 1 would pass before the worker set anything. data.table
-    ## caps at OMP_NUM_THREADS and at OpenMP's count, so both go first.
+    ## caps at OMP_NUM_THREADS and at OpenMP's count, so both go first. A
+    ## second engine's option, so a worker that names ranger's alone fails.
+    specs <- MODEL_SPECS
+    specs$xgboost$threads$option <- "horizons.test.threads"
+    local_mocked_bindings(MODEL_SPECS = specs, .package = "horizons")
     withr::local_envvar(OMP_NUM_THREADS = NA)
-    withr::local_options(ranger.num.threads = 7L)
+    withr::local_options(ranger.num.threads = 7L, horizons.test.threads = 7L)
 
     old_omp <- RhpcBLASctl::omp_get_max_threads()
     old_dt  <- data.table::getDTthreads()
@@ -222,7 +226,8 @@ describe("evaluate() parallel worker footprint", {
 
     testthat::local_mocked_bindings(
       evaluate_single_config = function(...) {
-        seen <<- c(dt = data.table::getDTthreads(), ranger = getOption("ranger.num.threads"))
+        seen <<- c(dt = data.table::getDTthreads(), ranger = getOption("ranger.num.threads"),
+                   other = getOption("horizons.test.threads"))
         tibble::tibble(config_id = "cfg_001", status = "failed")
       },
       .package = "horizons"
@@ -230,7 +235,7 @@ describe("evaluate() parallel worker footprint", {
 
     horizons:::evaluate_config_worker(1L, worker_payload_file())
 
-    expect_identical(seen, c(dt = 1L, ranger = 1L))
+    expect_identical(seen, c(dt = 1L, ranger = 1L, other = 1L))
 
   })
 

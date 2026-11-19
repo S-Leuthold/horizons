@@ -112,9 +112,10 @@ fit_quantile_forest <- function(features, residuals, seed = NULL) {
     quantreg      = TRUE,
     num.trees     = UQ_QUANTILE_TREES,
     min.node.size = uq_min_node_size(nrow(features)),
-    ## Pinned at the call site. Unset, ranger falls back to
-    ## getOption("ranger.num.threads", detectCores()), i.e. every core,
-    ## which oversubscribes under any parallel dispatch (M6, 2026-09-15).
+    ## Pinned at the call site. Unset, ranger 0.18 takes
+    ## R_RANGER_NUM_THREADS, else the ranger.num.threads option, else the
+    ## Ncpus option, else two threads, which oversubscribes under any
+    ## parallel dispatch (M6, 2026-09-15).
     num.threads   = 1L,
     seed          = seed
   )

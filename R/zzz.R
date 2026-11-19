@@ -109,10 +109,9 @@ read_built <- function(path) {
       MKL_NUM_THREADS        = "1"
     )
 
-    # ranger reads this option; xgboost has no such option (the former
-    # `xgboost.nthread` entry here was dead) and parsnip's translate() emits
-    # nthread = 1 for the xgboost engine.
-    options(ranger.num.threads = 1)
+    # The thread options the model table declares for its engines
+    # (MODEL_SPECS, R/constants.R)
+    options(engine_thread_options())
 
   }
 

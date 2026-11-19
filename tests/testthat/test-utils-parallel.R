@@ -694,20 +694,23 @@ without_rhpcblasctl <- function(env = parent.frame()) {
 
 describe("pin_parent_threads()", {
 
-  it("pins ranger's threads and restores them", {
+  it("pins each engine thread option the model table declares, and restores them", {
 
-    old_ranger <- getOption("ranger.num.threads")
-    withr::defer(options(ranger.num.threads = old_ranger))
-
-    options(ranger.num.threads = 7L)
+    ## A second engine's option, so a pin that names ranger's alone fails
+    specs <- MODEL_SPECS
+    specs$xgboost$threads$option <- "horizons.test.threads"
+    local_mocked_bindings(MODEL_SPECS = specs)
+    withr::local_options(ranger.num.threads = 7L, horizons.test.threads = NULL)
 
     unpin <- pin_parent_threads()
 
     expect_identical(getOption("ranger.num.threads"), 1L)
+    expect_identical(getOption("horizons.test.threads"), 1L)
 
     unpin()
 
     expect_identical(getOption("ranger.num.threads"), 7L)
+    expect_null(getOption("horizons.test.threads"))
 
   })
 

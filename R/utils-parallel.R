@@ -1157,7 +1157,7 @@ in_config_order <- function(rows, config_ids) {
 ## Thread pinning (parent side)
 ## ---------------------------------------------------------------------------
 
-#' Pin BLAS, OpenMP, data.table and ranger threads in the parent
+#' Pin BLAS, OpenMP, data.table and the engines' threads in the parent
 #'
 #' @description
 #' Pinning has to happen in the parent before workers are forked or spawned.
@@ -1166,7 +1166,8 @@ in_config_order <- function(rows, config_ids) {
 #' code (proven 2026-09-15: the environment variable changed nothing, the
 #' runtime call did). `RhpcBLASctl` provides the runtime call and is a
 #' Suggests; without it the parent relies on the environment variables being
-#' set before R starts.
+#' set before R starts. The engines' thread options are the ones
+#' `MODEL_SPECS` declares (`engine_thread_options()`), set to one.
 #'
 #' @return A function that restores the previous settings; call it from
 #'   `on.exit()`.
@@ -1192,8 +1193,9 @@ pin_parent_threads <- function() {
 
   }
 
-  restore$ranger <- getOption("ranger.num.threads")
-  options(ranger.num.threads = 1L)
+  pinned          <- engine_thread_options()
+  restore$options <- stats::setNames(lapply(names(pinned), getOption), names(pinned))
+  options(pinned)
 
   function() {
 
@@ -1207,7 +1209,7 @@ pin_parent_threads <- function() {
 
     if (!is.null(restore$dt)) data.table::setDTthreads(restore$dt)
 
-    options(ranger.num.threads = restore$ranger)
+    options(restore$options)
 
     invisible(NULL)
 

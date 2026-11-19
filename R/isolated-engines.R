@@ -216,9 +216,10 @@ register_isolated_engine <- function(model, engine, mode = "regression") {
 #' and the engine's name. It calls the function with those arguments in a
 #' process started for this one fit (`run_isolated()`), whose random stream
 #' is seeded from one draw of the caller's, and returns the fitted model,
-#' which predicts here as the engine's would. A warning or error the fit
-#' raises is raised here with its class; a process that ends without its
-#' result is `horizons_error_process_died`.
+#' which predicts here as the engine's would. The process is given the
+#' engines' thread options as they are set here (`engine_thread_options()`).
+#' A warning or error the fit raises is raised here with its class; a
+#' process that ends without its result is `horizons_error_process_died`.
 #'
 #' @param ... The engine's fit arguments, by name: the data, the model's
 #'   arguments and any engine arguments.
@@ -236,7 +237,12 @@ isolated_fit <- function(..., .isolated_fit, .isolated_engine) {
   pkg  <- .isolated_fit["pkg"]
   fn   <- if (is.na(pkg)) as.name(.isolated_fit[["fun"]]) else call("::", as.name(pkg), as.name(.isolated_fit[["fun"]]))
 
-  run_isolated(call_by_name(fn, args), args, what = paste0("a ", .isolated_engine, " fit"))
+  ## The engines' thread options as this session has them, unset ones left
+  ## out, so the fit's process runs on the threads a fit here would
+  threads <- names(engine_thread_options())
+  threads <- Filter(Negate(is.null), stats::setNames(lapply(threads, getOption), threads))
+
+  run_isolated(call_by_name(fn, args), args, what = paste0("a ", .isolated_engine, " fit"), options = threads)
 
 }
 

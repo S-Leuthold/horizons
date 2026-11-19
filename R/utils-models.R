@@ -70,6 +70,26 @@ engine_spec <- function(engine) {
 
 }
 
+#' The engines' thread options, at a thread count
+#'
+#' @description
+#' Each `option` the rows of `MODEL_SPECS` declare under `threads`, as a
+#' named list for [options()]. The one reader of them, for every place that
+#' pins threads: [pin_parent_threads()], the configs-axis worker,
+#' `.onLoad()` and [isolated_fit()].
+#'
+#' @param n Integer(1). The thread count.
+#' @return Named list: option name -> `n`.
+#' @keywords internal
+#' @noRd
+engine_thread_options <- function(n = ENGINE_THREADS) {
+
+  option <- unique(unlist(lapply(MODEL_SPECS, function(row) row$threads$option), use.names = FALSE))
+
+  stats::setNames(rep(list(as.integer(n)), length(option)), option)
+
+}
+
 #' A model's name in the progress trees and reports
 #'
 #' @param model Character(1). A short model name.
