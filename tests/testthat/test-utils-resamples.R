@@ -862,10 +862,11 @@ describe("strata_tree_line()", {
 ## =========================================================================
 ##
 ## A fold's frame is built from the transformed training rows (the hoist):
-## the outcome, the bands a selection kept shared by name, and the columns
-## the prep made (PCA's scores) placed from its bakes. These hold it to the
-## fold baked whole, and to holding nothing a model could take as a
-## predictor besides.
+## the outcome and the prepped predictors, each placed from the fold's bakes,
+## and a column identical to the transformed rows' column of the same name
+## (a band a selection kept) is that column itself, shared. These hold it to
+## the fold baked whole, to sharing what it left as it was, and to holding
+## nothing a model could take as a predictor besides.
 
 ## Helper: training rows with spectra, an id, a meta column and a sibling
 ## response; three folds; and one configuration's fold preps
@@ -954,6 +955,43 @@ describe("prep_folds()", {
     for (selection in c("boruta", "cars")) {
 
       expect_folds_baked_whole(prep_fold_case(selection), selection)
+
+    }
+
+  })
+
+  it("assembles a fold as the fold baked whole when a step rewrites a band in place", {
+
+    ## A step that changes a band under its own name: the fold's frame holds
+    ## the fold's bake of it, not the transformed rows' column of that name
+    case <- prep_fold_case("none")
+    case$inputs$recipe <- case$inputs$recipe |> recipes::step_mutate(spec01 = spec01 * 2)
+    case$prepped <- prep_folds(case$inputs$recipe, case$folds, case$inputs$data, case$role_map,
+                               seed = 8L, scope = case$scope)
+
+    expect_folds_baked_whole(case, "spec01 doubled")
+
+  })
+
+  it("shares each column a fold left as it was with the transformed rows, rather than copying it", {
+
+    ## Ten folds of a library-sized frame hold one copy of its bands, not ten
+    addresses <- function(frame, cols) vapply(cols, function(col) rlang::obj_address(frame[[col]]), character(1))
+
+    for (selection in c("none", "correlation")) {
+
+      case <- prep_fold_case(selection)
+
+      for (i in seq_len(nrow(case$folds))) {
+
+        frame <- case$prepped$folds$splits[[i]]$data
+        kept  <- intersect(names(frame), names(case$inputs$data))
+
+        expect_gt(length(kept), 1L)
+        expect_identical(addresses(frame, kept), addresses(case$inputs$data, kept),
+                         label = paste(selection, case$folds$id[[i]]))
+
+      }
 
     }
 

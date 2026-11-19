@@ -315,10 +315,12 @@ fold_workflow <- function(model_spec, outcome_col) {
 #' keeps `data`'s positions, so a prediction's `.row` names the row of `data`
 #' it was made for, as it does when tune preps. The frame holds the outcome
 #' and the prepped recipe's predictors and nothing else, so a workflow of the
-#' model alone takes exactly them as predictors. A predictor `data` already
-#' holds under its name, a spectral band a selection kept, is `data`'s own
-#' column, shared rather than copied, and checked equal to the fold's baked
-#' values; one the prep made (a PCA score) is placed from the baked rows.
+#' model alone takes exactly them as predictors. Every column is placed from
+#' the fold's two bakes; where the result is identical to `data`'s column of
+#' the same name (a spectral band a selection kept, or the outcome under no
+#' transformation), `data`'s own vector is used, so it is shared rather than
+#' copied. A column the prep made or changed (a PCA score, the transformed
+#' outcome) is the fold's own.
 #'
 #' The selection steps' warnings are muffled ([quiet_selection_warnings()]):
 #' a configuration's come from its final fit's recipe alone. Any other
@@ -382,30 +384,20 @@ prep_folds <- function(recipe, folds, data, role_map, seed, scope) {
     ## The fold's frame, at data's positions
     ## -----------------------------------------------------------------------
 
+    blank <- rep(NA_integer_, n)
+
+    ### Every column placed from the fold's two bakes; one identical to data's
+    ### column of the same name (a band a selection kept) is data's own
+    ### vector, shared rather than copied
     place <- function(col) {
-      v         <- an[[col]][rep(NA_integer_, n)]
+      v         <- an[[col]][blank]
       v[in_id]  <- an[[col]]
       v[out_id] <- as[[col]]
-      v
+      if (col %in% names(data) && identical(v, data[[col]])) data[[col]] else v
     }
 
-    ### A column shared with data must be what the fold baked: a step that
-    ### rewrote one under its own name would otherwise be read unchanged
-    shared <- function(col) {
-      if (!identical(an[[col]], data[[col]][in_id]) || !identical(as[[col]], data[[col]][out_id])) {
-        abort_horizons(c(
-          "Fold {fold}'s prepped column {.field {col}} differs from the column of the same name it would share.",
-          "i" = "A recipe step changed a column in place, which the folds' frames assume no step does."
-        ), kind = "internal")
-      }
-      data[[col]]
-    }
-
-    predictors <- prepped_predictors(caught$value$prepped, an)
-
-    columns <- c(list(place(outcome_col)),
-                 lapply(predictors, function(col) if (col %in% names(data)) shared(col) else place(col)))
-    names(columns) <- c(outcome_col, predictors)
+    cols    <- c(outcome_col, prepped_predictors(caught$value$prepped, an))
+    columns <- lapply(stats::setNames(cols, cols), place)
 
     rsample::make_splits(
       x     = list(analysis = in_id, assessment = out_id),
