@@ -192,6 +192,12 @@ broken_memory <- function(model, isolate) {
 
   slope <- contract_slope(contract_run(model, isolate)$rss)
 
+  ## Every reading is printed, held or not, so a run's log records the slope
+  ## and its margin on the machine it ran on
+  cat(sprintf("\nengine contract, memory: %s with isolation %s, %.3f MB a fit over fits %d to %d (flat: under %.2f)\n",
+              model, if (isolate) "on" else "off", slope, min(CONTRACT_WINDOW), max(CONTRACT_WINDOW),
+              CONTRACT_RSS_SLOPE))
+
   if (slope >= CONTRACT_RSS_SLOPE) {
     return(sprintf("resident memory grows %.2f MB a fit over fits %d to %d", slope, min(CONTRACT_WINDOW),
                    max(CONTRACT_WINDOW)))
