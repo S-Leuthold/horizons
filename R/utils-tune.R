@@ -215,6 +215,84 @@ text_records <- function(x, pinned = FALSE) {
 
 }
 
+#' Record the warnings a fold's prep raises, with the fold
+#'
+#' @description
+#' Inside tune a recipe step's warning was kept as a note on its fold, so a
+#' row read "(3 of 10 folds)". The folds are now prepped in the unit
+#' ([prep_folds()]), so the warnings another package raises there are
+#' recorded and muffled here, each with the fold it came from, and
+#' [fold_warning_records()] gives the row the same count. A horizons
+#' warning goes on to the unit, which records it with its class for the
+#' verb's log; the selection steps' are muffled before they reach here
+#' ([quiet_selection_warnings()]).
+#'
+#' @param expr The fold's prep and bakes.
+#' @param fold Character(1). The fold's id.
+#' @return List with `value` (the value of `expr`) and `arrivals` (tibble:
+#'   `cause`, `where` and `fold`, one row per warning recorded).
+#' @keywords internal
+#' @noRd
+capture_fold_warnings <- function(expr, fold) {
+
+  arrivals <- list()
+
+  value <- withCallingHandlers(
+    expr,
+    warning = function(w) {
+      if (inherits(w, "horizons_warning")) return(invisible(NULL))
+      ### A warning signalled without a muffle restart cannot be muffled,
+      ### so it goes on to the unit, which records it
+      if (is.null(findRestart("muffleWarning"))) return(invisible(NULL))
+      parts <- condition_parts(w)
+      arrivals[[length(arrivals) + 1L]] <<- tibble::tibble(cause = parts$cause,
+                                                           where = parts$where,
+                                                           fold  = fold)
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  list(value    = value,
+       arrivals = if (length(arrivals) == 0) {
+         tibble::tibble(cause = character(0), where = character(0), fold = character(0))
+       } else {
+         dplyr::bind_rows(arrivals)
+       })
+
+}
+
+#' Warning records from the warnings each fold's prep raised
+#'
+#' @param arrivals List of [capture_fold_warnings()]'s `arrivals`, one per
+#'   fold.
+#' @param n_folds Integer. The folds prepped.
+#' @return Records shaped like [new_warning_log()]'s, one per distinct text
+#'   and location: `scope` `"cv"`, `folds` the folds that raised it, `n` how
+#'   often it arrived.
+#' @keywords internal
+#' @noRd
+fold_warning_records <- function(arrivals, n_folds) {
+
+  arrivals <- dplyr::bind_rows(arrivals)
+
+  if (nrow(arrivals) == 0) return(new_warning_log())
+
+  key    <- paste0(arrivals$cause, "\r", ifelse(is.na(arrivals$where), "", arrivals$where))
+  keys   <- unique(key)
+  groups <- split(seq_len(nrow(arrivals)), factor(key, levels = keys))
+
+  tibble::tibble(
+    cause   = vapply(groups, function(i) arrivals$cause[i[1]], character(1), USE.NAMES = FALSE),
+    where   = vapply(groups, function(i) arrivals$where[i[1]], character(1), USE.NAMES = FALSE),
+    n       = vapply(groups, length, integer(1), USE.NAMES = FALSE),
+    scope   = "cv",
+    folds   = unname(lapply(groups, function(i) unique(arrivals$fold[i]))),
+    n_folds = as.integer(n_folds),
+    pinned  = FALSE
+  )
+
+}
+
 #' Warning records from what a unit recorded
 #'
 #' @description

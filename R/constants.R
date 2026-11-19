@@ -199,6 +199,11 @@ VALID_FEATURE_SELECTION <- c(
   "cars"
 )
 
+### The selections whose prep reads the outcome, so a fold's prep is named by
+### the response transformation as well (fold_prep_scope()): two
+### configurations that differ only in it select on different outcomes.
+OUTCOME_SELECTIONS <- c("correlation", "boruta", "cars")
+
 ## Metrics --------------------------------------------------------------------
 
 # Metrics evaluate() and fit() accept as `metric`, the ones configs are ranked
@@ -313,7 +318,7 @@ SEED_MAX <- as.double(.Machine$integer.max)
 ### (unit_seed(), R/utils-rng.R). Recorded on the object and in the settings a
 ### checkpoint resumes under. Bump it whenever a unit would get another seed
 ### from the same root: the hash or its key, a unit's name, or the kinds.
-SEED_RULE <- 1L
+SEED_RULE <- 2L
 
 ## Prediction Guardrails --------------------------------------------------------
 
@@ -460,7 +465,10 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      name (SEED_RULE 1), so the split, the folds and each stage move.
 #   7  2026-11-18: every engine with a thread argument is given one thread
 #      (MODEL_SPECS' `threads`); lightgbm had used every core.
-SCORING_SCHEMA <- 7L
+#   8  2026-11-?: each fold's recipe prepped once inside its configuration,
+#      so CARS's and Boruta's bands are selected once per fold under their
+#      own unit's seed and shared by every candidate (SEED_RULE 2).
+SCORING_SCHEMA <- 8L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

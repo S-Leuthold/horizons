@@ -207,6 +207,221 @@ rebuild_resamples <- function(data, idx) {
 
 
 ## ---------------------------------------------------------------------------
+## Prep once: each fold's recipe prepped once, every candidate scored on it
+## ---------------------------------------------------------------------------
+##
+## tune preps a workflow's recipe on every fold for every tune call, so a
+## configuration's grid and each of its Bayesian iterations prep the folds
+## again, and a selection step (CARS, Boruta) selects afresh for each
+## candidate on a stream tune draws. Instead each fold's recipe is prepped
+## once, inside the configuration's (or member's) unit and under a seed of
+## its own, and tune searches a workflow of the model alone over folds that
+## hold the baked rows. The final fit keeps the whole workflow on the raw
+## rows, so the stored workflow and predict() do not change.
+
+#' The frame and recipe a configuration's folds are prepped from
+#'
+#' @description
+#' The rows the folds were cut from with their spectra transformed once
+#' ([hoist_spectra()]), and the configuration's recipe built over them
+#' without the transform step (`build_recipe(transformed = TRUE)`). Both
+#' draw step ids from the stream (`recipes::rand_id()`), so the caller's
+#' stream is left as found: the whole recipe, built before this, keeps the
+#' ids it would have had.
+#'
+#' @param config_row Single-row tibble from `config$configs`.
+#' @param data Data frame. The rows the folds were cut from.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param sg_window,pca_threshold Passed to [build_recipe()].
+#' @return List with `data` (the transformed frame) and `recipe`.
+#' @keywords internal
+#' @noRd
+fold_prep_inputs <- function(config_row, data, role_map, sg_window, pca_threshold) {
+
+  local_rng_state()
+
+  ## A failure to transform is the folds' preparation's, as it was when each
+  ## fold's prep transformed its own rows
+  hoisted <- unit_step("fold_prep", hoist_spectra(data, config_row, role_map,
+                                                  sg_window = sg_window))
+
+  recipe <- unit_step("recipe", build_recipe(config_row, hoisted, role_map,
+                                             sg_window     = sg_window,
+                                             pca_threshold = pca_threshold,
+                                             transformed   = TRUE))
+
+  list(data = hoisted, recipe = recipe)
+
+}
+
+#' The unit a configuration's fold preps are named under
+#'
+#' @description
+#' Named by what is prepped rather than by the configuration: the verb, then
+#' `"prep"`, the preprocessing, the feature selection, and, for a selection
+#' that reads the outcome (`OUTCOME_SELECTIONS`), the response
+#' transformation. Two configurations that prep the same recipe on the same
+#' rows draw the same seeds, so a selection step chooses the same bands on
+#' each fold for both. A fold's prep is the fold's id under it, and the
+#' prep that bounds the tuning parameters is `"training"` under it.
+#'
+#' @param verb Character(1). `"evaluate"` or `"fit"`.
+#' @param config_row Single-row tibble from `config$configs`.
+#' @return Character: the name's parts.
+#' @keywords internal
+#' @noRd
+fold_prep_scope <- function(verb, config_row) {
+
+  selection <- tolower(as.character(config_row$feature_selection))
+
+  c(verb, "prep", tolower(as.character(config_row$preprocessing)), selection,
+    if (selection %in% OUTCOME_SELECTIONS) tolower(as.character(config_row$transformation)))
+
+}
+
+#' The workflow tune searches over prepped folds: the model alone
+#'
+#' @description
+#' The outcome and every other column of a prepped fold's frame
+#' ([prep_folds()]) as the predictors, and the model. No recipe step is
+#' tuned ([build_recipe()] has no `tune()`), so its parameter set is the
+#' configuration's workflow's, which the grid and the bounds are read from.
+#'
+#' @param model_spec A parsnip model specification.
+#' @param outcome_col Character(1). The outcome column.
+#' @return An untrained `workflow`.
+#' @keywords internal
+#' @noRd
+fold_workflow <- function(model_spec, outcome_col) {
+
+  workflows::workflow() |>
+    workflows::add_variables(outcomes = dplyr::all_of(outcome_col), predictors = dplyr::everything()) |>
+    workflows::add_model(model_spec)
+
+}
+
+#' Prep each fold's recipe once, and the folds tune searches over
+#'
+#' @description
+#' For each fold of `folds`, the recipe is prepped on the fold's analysis
+#' rows of `data` under the fold's own unit ([with_unit_seed()], `scope`
+#' then the fold's id), its analysis rows baked with `new_data = NULL`, so a
+#' `skip = TRUE` response transformation applies, and its assessment rows
+#' with `new_data`, so it does not: tune then scores each fold's
+#' predictions against the outcome as measured, on the scale
+#' [tuning_metric_set()] back-transforms to.
+#'
+#' Each fold becomes an `rsplit` over a frame of `nrow(data)` rows that
+#' keeps `data`'s positions, so a prediction's `.row` names the row of `data`
+#' it was made for, as it does when tune preps. The frame holds the outcome
+#' and the prepped recipe's predictors and nothing else, so a workflow of the
+#' model alone takes exactly them as predictors. A predictor `data` already
+#' holds under its name, a spectral band a selection kept, is `data`'s own
+#' column, shared rather than copied, and checked equal to the fold's baked
+#' values; one the prep made (a PCA score) is placed from the baked rows.
+#'
+#' The selection steps' warnings are muffled ([quiet_selection_warnings()]):
+#' a configuration's come from its final fit's recipe alone. Any other
+#' package's warning is recorded with the fold it came from
+#' ([capture_fold_warnings()]), and a horizons warning goes on to the unit.
+#' A step's error is raised as it is.
+#'
+#' @param recipe The untrained recipe each fold is prepped with.
+#' @param folds An `rset` of one id column, cut from `data`.
+#' @param data Data frame. The rows `folds` index.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param seed The run's root.
+#' @param scope Character. The units' name before the fold's id
+#'   ([fold_prep_scope()]).
+#' @return List with `folds` (an `rset` with `folds`' ids) and `warnings`
+#'   (records shaped like `new_warning_log()`'s, scope `"cv"`, each with the
+#'   folds that raised it).
+#' @keywords internal
+#' @noRd
+prep_folds <- function(recipe, folds, data, role_map, seed, scope) {
+
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
+  id_col      <- id_column(role_map)
+  ids         <- if (id_col %in% names(data)) data[[id_col]]
+  n           <- nrow(data)
+  split_class <- setdiff(class(folds$splits[[1]]), "rsplit")
+
+  arrivals <- vector("list", nrow(folds))
+
+  splits <- lapply(seq_len(nrow(folds)), function(i) {
+
+    fold   <- folds$id[[i]]
+    in_id  <- folds$splits[[i]]$in_id
+    out_id <- rsample::complement(folds$splits[[i]])
+
+    ## -----------------------------------------------------------------------
+    ## The fold's one prep, and its two bakes
+    ## -----------------------------------------------------------------------
+
+    caught <- capture_fold_warnings(with_unit_seed(seed, c(scope, fold), quiet_selection_warnings({
+      prepped <- recipes::prep(recipe, training = data[in_id, , drop = FALSE])
+      list(prepped    = prepped,
+           analysis   = recipes::bake(prepped, new_data = NULL),
+           assessment = recipes::bake(prepped, new_data = data[out_id, , drop = FALSE]))
+    })), fold)
+
+    arrivals[[i]] <<- caught$arrivals
+
+    an <- caught$value$analysis
+    as <- caught$value$assessment
+
+    ## Placed by position, so the rows must be the fold's, in its order
+    check_rows_aligned(paste0("The baked analysis rows of fold ", fold), "the fold's analysis rows",
+                       n = nrow(an), n_expected = length(in_id),
+                       ids = an[[id_col]], expected_ids = ids[in_id])
+    check_rows_aligned(paste0("The baked assessment rows of fold ", fold), "the fold's assessment rows",
+                       n = nrow(as), n_expected = length(out_id),
+                       ids = as[[id_col]], expected_ids = ids[out_id])
+
+    ## -----------------------------------------------------------------------
+    ## The fold's frame, at data's positions
+    ## -----------------------------------------------------------------------
+
+    place <- function(col) {
+      v         <- an[[col]][rep(NA_integer_, n)]
+      v[in_id]  <- an[[col]]
+      v[out_id] <- as[[col]]
+      v
+    }
+
+    ### A column shared with data must be what the fold baked: a step that
+    ### rewrote one under its own name would otherwise be read unchanged
+    shared <- function(col) {
+      if (!identical(an[[col]], data[[col]][in_id]) || !identical(as[[col]], data[[col]][out_id])) {
+        abort_horizons(c(
+          "Fold {fold}'s prepped column {.field {col}} differs from the column of the same name it would share.",
+          "i" = "A recipe step changed a column in place, which the folds' frames assume no step does."
+        ), kind = "internal")
+      }
+      data[[col]]
+    }
+
+    predictors <- prepped_predictors(caught$value$prepped, an)
+
+    columns <- c(list(place(outcome_col)),
+                 lapply(predictors, function(col) if (col %in% names(data)) shared(col) else place(col)))
+    names(columns) <- c(outcome_col, predictors)
+
+    rsample::make_splits(
+      x     = list(analysis = in_id, assessment = out_id),
+      data  = tibble::new_tibble(columns, nrow = n),
+      class = split_class
+    )
+
+  })
+
+  list(folds    = rsample::manual_rset(splits, ids = folds$id),
+       warnings = fold_warning_records(arrivals, nrow(folds)))
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## The evaluation split, stored slim and pointed at the object's rows
 ## ---------------------------------------------------------------------------
 ##

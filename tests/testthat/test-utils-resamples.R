@@ -160,6 +160,18 @@ describe("resample_indices() / rebuild_resamples()", {
 
   })
 
+  it("cuts the folds from the split's training part itself, the frame a configuration reads (#116)", {
+
+    ## evaluate_single_config() reads its training rows from the folds
+    ## rather than copying them out of the split again, so on the configs
+    ## axis the rebuilt folds must index that training part, row for row
+    fx <- make_resample_fixture(n = 60, n_wn = 5, strata = FALSE)
+    rb <- rebuild_resamples(fx$split$data, resample_indices(fx$split, fx$folds))
+
+    expect_identical(rb$cv_folds$splits[[1]]$data, rsample::training(rb$split))
+
+  })
+
 })
 
 
@@ -839,6 +851,185 @@ describe("strata_tree_line()", {
                             strata_warnings = character(0)), "split"),
       "Stratified split failed, retrying without strata"
     )
+
+  })
+
+})
+
+
+## =========================================================================
+## prep_folds(): each fold's recipe prepped once, the folds tune searches
+## =========================================================================
+##
+## A fold's frame is built from the transformed training rows (the hoist):
+## the outcome, the bands a selection kept shared by name, and the columns
+## the prep made (PCA's scores) placed from its bakes. These hold it to the
+## fold baked whole, and to holding nothing a model could take as a
+## predictor besides.
+
+## Helper: training rows with spectra, an id, a meta column and a sibling
+## response; three folds; and one configuration's fold preps
+prep_fold_case <- function(selection, transformation = "none", n = 60, n_wn = 30) {
+
+  set.seed(8)
+
+  wn <- paste0("wn_", seq(4000, by = -4, length.out = n_wn))
+  x  <- matrix(stats::rnorm(n * n_wn), n, dimnames = list(NULL, wn))
+
+  train           <- tibble::as_tibble(x)
+  train$SOC       <- 5 + 1.5 * x[, 5] + x[, 12] + stats::rnorm(n, sd = 0.5)
+  train$sample_id <- sprintf("S%03d", seq_len(n))
+  train$batch     <- rep(c("a", "b", "c"), length.out = n)
+  train$clay      <- stats::runif(n)
+
+  role_map <- tibble::tibble(
+    variable = c(wn, "SOC", "sample_id", "batch", "clay"),
+    role     = c(rep("predictor", n_wn), "outcome", "id", "meta", "response")
+  )
+
+  folds  <- rsample::vfold_cv(train, v = 3)
+  config <- tibble::tibble(config_id = "cfg", model = "elastic_net", transformation = transformation,
+                           preprocessing = "snv", feature_selection = selection)
+
+  inputs <- fold_prep_inputs(config, train, role_map, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD)
+  scope  <- fold_prep_scope("evaluate", config)
+
+  list(train = train, role_map = role_map, folds = folds, inputs = inputs, scope = scope,
+       prepped = prep_folds(inputs$recipe, folds, inputs$data, role_map, seed = 8L, scope = scope))
+
+}
+
+## The case's folds, each fold's frame against the same prep's bakes
+expect_folds_baked_whole <- function(case, label) {
+
+  for (i in seq_len(nrow(case$folds))) {
+
+    in_id  <- case$folds$splits[[i]]$in_id
+    out_id <- rsample::complement(case$folds$splits[[i]])
+    split  <- case$prepped$folds$splits[[i]]
+    cols   <- names(split$data)
+
+    p  <- with_unit_seed(8L, c(case$scope, case$folds$id[[i]]), quiet_selection_warnings(
+      recipes::prep(case$inputs$recipe, training = case$inputs$data[in_id, , drop = FALSE])
+    ))
+    an <- recipes::bake(p, new_data = NULL)
+    as <- recipes::bake(p, new_data = case$inputs$data[out_id, , drop = FALSE])
+
+    expect_identical(as.data.frame(rsample::analysis(split)), as.data.frame(an[, cols]),
+                     label = paste(label, case$folds$id[[i]], "analysis"))
+    expect_identical(as.data.frame(rsample::assessment(split)), as.data.frame(as[, cols]),
+                     label = paste(label, case$folds$id[[i]], "assessment"))
+
+  }
+
+}
+
+describe("prep_folds()", {
+
+  it("assembles every fold as the fold baked whole, for no selection, PCA and correlation", {
+
+    for (selection in c("none", "pca", "correlation")) {
+
+      expect_folds_baked_whole(prep_fold_case(selection), selection)
+
+    }
+
+    ## Under a transformed response too: the analysis rows' outcome
+    ## transformed, the assessment rows' as measured
+    logged <- prep_fold_case("correlation", transformation = "log")
+    expect_folds_baked_whole(logged, "correlation, log")
+
+    for (i in seq_len(nrow(logged$folds))) {
+      out_id <- rsample::complement(logged$folds$splits[[i]])
+      expect_identical(rsample::assessment(logged$prepped$folds$splits[[i]])$SOC, logged$train$SOC[out_id])
+    }
+
+  })
+
+  it("assembles every fold as the fold baked whole, for Boruta and CARS", {
+
+    skip_unless_slow_tier()
+    skip_if_not_installed("Boruta")
+
+    for (selection in c("boruta", "cars")) {
+
+      expect_folds_baked_whole(prep_fold_case(selection), selection)
+
+    }
+
+  })
+
+  it("holds the outcome and the prepped predictors only, at the training rows' positions, with the folds' ids", {
+
+    case <- prep_fold_case("none")
+    spec <- grep("^spec[0-9]+$", names(case$inputs$data), value = TRUE)
+
+    expect_identical(case$prepped$folds$id, case$folds$id)
+
+    for (i in seq_len(nrow(case$folds))) {
+
+      split <- case$prepped$folds$splits[[i]]
+
+      ## No id, meta or held response for a model to take as a predictor
+      expect_identical(names(split$data), c("SOC", spec))
+      expect_identical(nrow(split$data), nrow(case$train))
+      expect_identical(split$in_id, case$folds$splits[[i]]$in_id)
+      expect_identical(as.integer(split, data = "assessment"), rsample::complement(case$folds$splits[[i]]))
+
+    }
+
+  })
+
+  it("records another package's warning with the folds that raised it", {
+
+    ## Two indicator columns, each constant on one fold's analysis rows only:
+    ## step_corr() warns of the correlation it cannot compute on those two
+    ## folds, and changes no column
+    case   <- prep_fold_case("none")
+    ids_of <- function(i) case$train$sample_id[rsample::complement(case$folds$splits[[i]])]
+    recipe <- case$inputs$recipe |>
+      recipes::step_mutate(z1 = as.numeric(sample_id %in% !!ids_of(1)),
+                           z2 = as.numeric(sample_id %in% !!ids_of(2))) |>
+      recipes::step_corr(recipes::all_predictors())
+
+    out <- prep_folds(recipe, case$folds, case$inputs$data, case$role_map, seed = 8L, scope = case$scope)
+
+    excluded <- grepl("The correlation matrix has missing values", out$warnings$cause, fixed = TRUE)
+
+    expect_identical(sum(excluded), 1L)
+    expect_identical(out$warnings$scope[excluded], "cv")
+    expect_identical(out$warnings$folds[excluded][[1]], case$folds$id[1:2])
+    expect_identical(out$warnings$n[excluded], 2L)
+    expect_identical(out$warnings$n_folds[excluded], 3L)
+    expect_match(render_warning_log(out$warnings), "The correlation matrix has missing values.*2 of 3 folds",
+                 all = FALSE)
+
+  })
+
+})
+
+describe("capture_fold_warnings()", {
+
+  it("records another package's warning with its fold and muffles it, and lets a horizons warning go on", {
+
+    seen <- character(0)
+
+    out <- withCallingHandlers(
+      capture_fold_warnings({
+        warning("a step warned", call. = FALSE)
+        warn_in_unit("quality", "A horizons notice.")
+        "the prep"
+      }, "Fold2"),
+      warning = function(w) {
+        seen <<- c(seen, conditionMessage(w))
+        rlang::cnd_muffle(w)
+      }
+    )
+
+    expect_identical(out$value, "the prep")
+    expect_identical(out$arrivals$cause, "a step warned")
+    expect_identical(out$arrivals$fold, "Fold2")
+    expect_identical(seen, "A horizons notice.")
 
   })
 

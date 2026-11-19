@@ -380,9 +380,12 @@ describe("evaluate_single_config() - failure paths", {
     ## step_select_boruta() used to catch this and select the columns most
     ## correlated with the outcome, so the config succeeded under the boruta
     ## label. rf fails where evaluate_single_config() preps the recipe to
-    ## bound mtry; elastic_net has no mtry and fails inside tune_grid().
+    ## bound mtry; elastic_net has no mtry and fails at its first fold's
+    ## prep.
     local_mocked_bindings(Boruta = function(...) stop("Boruta could not run"),
                           .package = "Boruta")
+
+    step <- c(rf = "^Recipe preparation failed: ", elastic_net = "^Fold preparation failed: ")
 
     for (model in c("rf", "elastic_net")) {
 
@@ -403,6 +406,7 @@ describe("evaluate_single_config() - failure paths", {
 
       ## The step's own class and words on the row, not Boruta's error's
       expect_identical(result$class, "horizons_error_boruta", label = model)
+      expect_match(result$error_message, step[[model]], label = model)
       expect_match(result$error_message, "Boruta feature selection failed: Boruta could not run",
                    fixed = TRUE, label = model)
 
@@ -1503,6 +1507,45 @@ describe("evaluate_single_config() - the stages' units", {
 
   })
 
+  it("preps each fold, and the bounds, from its own unit's seed, named by what is prepped", {
+
+    ## rf bounds mtry, so the fold recipe is prepped on the whole training
+    ## part too. Every recipe prep is recorded with the stream it starts from;
+    ## each unit's must be among them.
+    setup     <- make_eval_setup()
+    real_prep <- recipes::prep
+    starts    <- list()
+
+    local_mocked_bindings(prep = function(x, ...) {
+      starts[[length(starts) + 1L]] <<- get0(".Random.seed", envir = globalenv())
+      real_prep(x, ...)
+    }, .package = "recipes")
+
+    result <- evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      seed          = 42L
+    )
+
+    pinned <- function(name) {
+      withr::with_seed(unit_seed(42L, name), .rng_kind = "Mersenne-Twister",
+                       .rng_normal_kind = "Inversion", .rng_sample_kind = "Rejection",
+                       get(".Random.seed", envir = globalenv()))
+    }
+    started <- function(name) any(vapply(starts, identical, logical(1), pinned(name)))
+
+    expect_identical(result$status, "success")
+
+    for (unit in c(setup$folds$id, "training")) {
+      expect_true(started(c("evaluate", "prep", "raw", "none", unit)), label = unit)
+    }
+
+  })
+
 })
 
 
@@ -1875,7 +1918,193 @@ describe("evaluate_single_config() - a selection step's warning comes from the f
       expect_identical(hit$step, "selection_record", label = model)
       expect_match(hit$message, "Boruta rejected all", fixed = TRUE, label = model)
 
+      ## And the row has it from the final fit, not also from the folds'
+      ## preps
+      shown <- grep("Boruta rejected all", result$warnings[[1]], fixed = TRUE, value = TRUE)
+      expect_gt(length(shown), 0L)
+      expect_false(any(grepl("of 3 folds", shown, fixed = TRUE)), label = model)
+
     }
+
+  })
+
+})
+
+
+
+## =========================================================================
+## Prep once: each fold's recipe prepped once, every candidate scored on it
+## =========================================================================
+
+## The configuration's grid search, recorded as it ran, and the same search
+## as tune ran it before: the whole recipe in the workflow over the raw
+## folds, with the grid, metrics, parameters and control the configuration
+## used, under the grid stage's seed
+grid_as_before <- function(config, setup, grid_size = 3L) {
+
+  real_tune_grid <- tune::tune_grid
+  ran            <- NULL
+
+  local_mocked_bindings(tune_grid = function(object, ...) {
+    result <- real_tune_grid(object, ...)
+    ran    <<- list(args = list(...), result = result)
+    result
+  }, .package = "tune")
+
+  row <- evaluate_single_config(
+    config_row    = config,
+    split         = setup$split,
+    cv_folds      = setup$folds,
+    role_map      = setup$role_map,
+    grid_size     = grid_size,
+    bayesian_iter = 0,
+    seed          = 42L
+  )
+
+  recipe <- build_recipe(config, setup$folds$splits[[1]]$data, setup$role_map)
+  wflow  <- workflows::workflow() |>
+    workflows::add_recipe(recipe) |>
+    workflows::add_model(define_model_spec(config$model))
+  stage  <- c("evaluate", config$config_id, "tune")
+
+  before <- with_unit_seed(42L, stage, suppressMessages(real_tune_grid(
+    seed_engine(wflow, unit_seed(42L, stage)),
+    resamples  = setup$folds,
+    grid       = ran$args$grid,
+    metrics    = ran$args$metrics,
+    param_info = ran$args$param_info,
+    control    = ran$args$control
+  )))
+
+  per_fold <- function(r) {
+    m <- tune::collect_metrics(r, summarize = FALSE)
+    m[order(m$.config, m$id, m$.metric), ]
+  }
+
+  list(row = row, folds = ran$args$resamples, now = per_fold(ran$result), before = per_fold(before))
+
+}
+
+describe("evaluate_single_config() - each fold's recipe prepped once", {
+
+  it("scores every candidate on every fold as tuning the whole recipe did, for no selection, PCA and correlation", {
+
+    setup <- make_eval_setup(n = 60, n_wn = 30)
+
+    for (selection in c("none", "pca", "correlation")) {
+
+      got <- grid_as_before(make_eval_config(model = "elastic_net", feature_selection = selection), setup)
+
+      expect_identical(got$row$status, "success", label = selection)
+      expect_identical(got$now, got$before, label = selection)
+
+    }
+
+  })
+
+  it("scores them so under a transformed response too, each fold assessed on the outcome as measured", {
+
+    setup <- make_eval_setup(n = 60, n_wn = 30)
+    train <- setup$folds$splits[[1]]$data
+
+    got <- grid_as_before(make_eval_config(model = "elastic_net", transformation = "log"), setup)
+
+    expect_identical(got$row$status, "success")
+    expect_identical(got$now, got$before)
+
+    for (i in seq_len(nrow(setup$folds))) {
+      in_id  <- setup$folds$splits[[i]]$in_id
+      out_id <- rsample::complement(setup$folds$splits[[i]])
+      expect_identical(rsample::assessment(got$folds$splits[[i]])$SOC, train$SOC[out_id])
+      expect_equal(rsample::analysis(got$folds$splits[[i]])$SOC, log(train$SOC[in_id] + 1))
+    }
+
+  })
+
+  it("preps a selection step once per fold whatever the candidates, so every candidate in a fold sees one band set", {
+
+    ## CARS draws its partition (cars_folds()) once a prep: three folds, the
+    ## bounds prep and the final fit, for a grid of two and a Bayesian
+    ## iteration that tuning the whole recipe would prep the folds again for
+    setup     <- make_eval_setup(n = 60, n_wn = 30)
+    real_cars <- cars_folds
+    preps     <- 0L
+
+    local_mocked_bindings(cars_folds = function(...) {
+      preps <<- preps + 1L
+      real_cars(...)
+    })
+
+    result <- evaluate_single_config(
+      config_row    = make_eval_config(feature_selection = "cars"),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 1,
+      seed          = 42L
+    )
+
+    expect_identical(result$status, "success")
+    expect_identical(preps, nrow(setup$folds) + 2L)
+
+  })
+
+  it("selects the same bands on every fold for two configurations that prep one recipe", {
+
+    skip_unless_slow_tier()
+
+    ## rf and elastic_net with CARS on the same preprocessing and response:
+    ## their fold preps are one unit each, by what is prepped, not by the
+    ## configuration, so CARS draws the same on each fold for both
+    setup      <- make_eval_setup(n = 60, n_wn = 30)
+    real_folds <- prep_folds
+    bands      <- list()
+
+    local_mocked_bindings(prep_folds = function(...) {
+      out <- real_folds(...)
+      bands[[length(bands) + 1L]] <<- lapply(out$folds$splits, function(s) names(s$data))
+      out
+    })
+
+    for (model in c("rf", "elastic_net")) {
+
+      result <- evaluate_single_config(
+        config_row    = make_eval_config(model = model, feature_selection = "cars",
+                                         config_id = paste0("cfg_", model)),
+        split         = setup$split,
+        cv_folds      = setup$folds,
+        role_map      = setup$role_map,
+        grid_size     = 2,
+        bayesian_iter = 0,
+        seed          = 42L
+      )
+
+      expect_identical(result$status, "success", label = model)
+
+    }
+
+    expect_length(bands, 2L)
+    expect_identical(bands[[1]], bands[[2]])
+
+    ## CARS selected, rather than keeping every band, on some fold
+    expect_true(any(lengths(bands[[1]]) < 1L + 22L))
+
+  })
+
+  it("builds the transformed rows and the fold recipe without moving the caller's stream", {
+
+    ## The whole recipe, built before them, draws its step ids from the
+    ## stream (recipes::rand_id()), so the recipe stored is the one it was
+    setup <- make_eval_setup(n_wn = 30)
+
+    withr::local_seed(3)
+    before <- .Random.seed
+
+    fold_prep_inputs(make_eval_config(transformation = "log", feature_selection = "pca"),
+                     setup$train_data, setup$role_map, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD)
+
+    expect_identical(.Random.seed, before)
 
   })
 
