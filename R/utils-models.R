@@ -4,7 +4,8 @@
 #' Builds a model's tunable parsnip specification from its row of
 #' `MODEL_SPECS`: parsnip's model function `fn`, called with the row's
 #' `fixed` arguments and each of its `tuned` arguments as `tune::tune()`; the
-#' engine `model_engine()` names, with the row's `engine_args`; and the
+#' engine `model_engine()` names, with the row's `engine_args` and its
+#' thread argument (`threads$argument`) at `ENGINE_THREADS`; and the
 #' regression mode. Each argument is captured as parsnip captures one written
 #' in the call (`500`, `tune::tune()`, `"impurity"`). Used by
 #' `evaluate_single_config()` and `fit_single_config()` to build the workflow
@@ -32,10 +33,15 @@ define_model_spec <- function(model, isolate = TRUE) {
   tuned <- rep(list(quote(tune::tune())), length(row$tuned))
   names(tuned) <- row$tuned
 
+  ## The engine's thread argument at the package's count, which an engine
+  ## left to its own default may set to every core (bonsai's lightgbm does)
+  threads <- if (!is.null(row$threads$argument)) stats::setNames(list(ENGINE_THREADS), row$threads$argument)
+
   ## Each call is put together from the row and evaluated here, so parsnip
   ## captures every argument as the expression the row holds
   spec <- eval(rlang::call2(row$fn, !!!row$fixed, !!!tuned, .ns = "parsnip"))
-  spec <- eval(rlang::call2("set_engine", spec, model_engine(model, isolate), !!!row$engine_args, .ns = "parsnip"))
+  spec <- eval(rlang::call2("set_engine", spec, model_engine(model, isolate), !!!row$engine_args, !!!threads,
+                            .ns = "parsnip"))
 
   parsnip::set_mode(spec, "regression")
 

@@ -113,7 +113,7 @@ describe("define_model_spec()", {
 
   })
 
-  it("builds each model's spec from its row: fn's class, the fixed and engine arguments, and a tune() for each tuned one", {
+  it("builds each model's spec from its row: fn's class, the fixed, engine and thread arguments, and a tune() for each tuned one", {
 
     for (model in VALID_MODELS) {
 
@@ -135,10 +135,14 @@ describe("define_model_spec()", {
         expect_identical(rlang::quo_get_expr(spec$args[[arg]]), quote(tune::tune()), label = paste(model, arg))
       }
 
-      expect_setequal(names(spec$eng_args) %||% character(0), names(row$engine_args) %||% character(0))
+      ## The engine arguments, and the thread argument at the package's count
+      engine_args <- row$engine_args
+      if (!is.null(row$threads$argument)) engine_args[[row$threads$argument]] <- ENGINE_THREADS
 
-      for (arg in names(row$engine_args)) {
-        expect_identical(rlang::eval_tidy(spec$eng_args[[arg]]), row$engine_args[[arg]], label = paste(model, arg))
+      expect_setequal(names(spec$eng_args) %||% character(0), names(engine_args) %||% character(0))
+
+      for (arg in names(engine_args)) {
+        expect_identical(rlang::eval_tidy(spec$eng_args[[arg]]), engine_args[[arg]], label = paste(model, arg))
       }
 
     }

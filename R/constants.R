@@ -26,10 +26,11 @@
 #   (seed_engine(), R/utils-rng.R) rather than letting parsnip or bonsai draw
 #   one from the stream.
 # - `threads`: how the engine's threads are set, for an engine that can run
-#   more than one: `argument`, its fit argument, and `option`, an R option
-#   it reads (ranger reads `ranger.num.threads` to predict). Every place that
-#   pins threads sets each `option` (engine_thread_options()). An engine with
-#   no `threads` runs on one thread, or on what BLAS and OpenMP are given.
+#   more than one: `argument`, its fit argument, which define_model_spec()
+#   sets to ENGINE_THREADS, and `option`, an R option it reads (ranger reads
+#   `ranger.num.threads` to predict), which every place that pins threads
+#   sets (engine_thread_options()). An engine with no `threads` runs on one
+#   thread, or on what BLAS and OpenMP are given.
 # - `isolate`: the promises the engine breaks when its fits share a process,
 #   each named with the upstream report about it. Such a model is fitted
 #   through its engine's isolated twin, each fit in a process of its own
@@ -449,7 +450,9 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      estimate clamped to outcome_range, as every other score is (#104).
 #   6  2026-11-09: every draw is seeded from the run's seed and its unit's
 #      name (SEED_RULE 1), so the split, the folds and each stage move.
-SCORING_SCHEMA <- 6L
+#   7  2026-11-18: every engine with a thread argument is given one thread
+#      (MODEL_SPECS' `threads`); lightgbm had used every core.
+SCORING_SCHEMA <- 7L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

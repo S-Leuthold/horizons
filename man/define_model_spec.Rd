@@ -22,7 +22,8 @@ A \code{parsnip} model specification with \code{mode = "regression"}.
 Builds a model's tunable parsnip specification from its row of
 \code{MODEL_SPECS}: parsnip's model function \code{fn}, called with the row's
 \code{fixed} arguments and each of its \code{tuned} arguments as \code{tune::tune()}; the
-engine \code{model_engine()} names, with the row's \code{engine_args}; and the
+engine \code{model_engine()} names, with the row's \code{engine_args} and its
+thread argument (\code{threads$argument}) at \code{ENGINE_THREADS}; and the
 regression mode. Each argument is captured as parsnip captures one written
 in the call (\code{500}, \code{tune::tune()}, \code{"impurity"}). Used by
 \code{evaluate_single_config()} and \code{fit_single_config()} to build the workflow
