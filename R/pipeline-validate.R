@@ -483,28 +483,6 @@ validate <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 11b: P010 — Cubist feasibility at full resolution
-  ## ---------------------------------------------------------------------------
-
-  n_pred_cols        <- length(predictor_cols)
-  n_cells            <- n_total * n_pred_cols
-  cubist_flagged_ids <- check_cubist_feasibility(
-    configs      = x$config$configs,
-    n_total      = n_total,
-    n_predictors = n_pred_cols,
-    max_cells    = CUBIST_MAX_CELLS
-  )
-
-  checks <- rbind(checks, run_check(
-    "P010", "Cubist feasibility at full resolution",
-    condition = length(cubist_flagged_ids) == 0,
-    severity  = "WARNING",
-    value     = paste0(length(cubist_flagged_ids), " config(s); ", n_total, " x ",
-                       n_pred_cols, " = ", format(n_cells, big.mark = ",", scientific = FALSE),
-                       " cells")
-  ))
-
-  ## ---------------------------------------------------------------------------
   ## Step 12: Outlier removal (if requested)
   ## ---------------------------------------------------------------------------
   ## Only spectral outliers leave the object here, since that detector reads
@@ -663,12 +641,6 @@ validate <- function(x,
     sym  <- if (p007$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
     cat(paste0("\u2502  \u251C\u2500 ", sym, " Near-zero variance: ",
                length(nzv_cols), "\n"))
-
-    p010 <- checks[checks$check_id == "P010", ]
-    sym  <- if (p010$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-    cat(paste0("\u2502  \u251C\u2500 ", sym, " Cubist feasibility: ",
-               n_total, " x ", n_pred_cols, " cells, ",
-               length(cubist_flagged_ids), " config(s) flagged\n"))
 
     ## Outlier detection ----------------------------------------------------------
 
@@ -901,37 +873,5 @@ tukey_fences <- function(values, threshold) {
        upper   = q[2] + threshold * iqr,
        n       = n,
        skipped = NA_character_)
-
-}
-
-
-#' Flag cubist configs at risk of not finishing on a large predictor table
-#'
-#' @description
-#' Cubist fits a linear model in every rule, so its cost grows sharply with
-#' predictor count in a way most other `MODEL_SPECS` entries do not (see
-#' `CUBIST_MAX_CELLS` in `R/constants.R` for the measurement this threshold
-#' is set from). Flags configuration rows that pair `model == "cubist"` with
-#' `feature_selection == "none"` — i.e. no dimension reduction ahead of
-#' Cubist — once the analysis table's cell count exceeds `max_cells`.
-#'
-#' @param configs `tibble`. `x$config$configs`, with `model` and
-#'   `feature_selection` columns.
-#' @param n_total `integer(1)`. `nrow(analysis)`.
-#' @param n_predictors `integer(1)`. Predictor column count.
-#' @param max_cells `numeric(1)`. Cell-count (`n_total * n_predictors`)
-#'   threshold above which cubist + `"none"` configs are flagged.
-#'
-#' @return `character`. `config_id` values of flagged rows (`character(0)`
-#'   if none, including when the table is below `max_cells`).
-#'
-#' @noRd
-check_cubist_feasibility <- function(configs, n_total, n_predictors, max_cells) {
-
-  if ((n_total * n_predictors) <= max_cells) return(character(0))
-
-  flagged <- configs$model == "cubist" & configs$feature_selection == "none"
-
-  configs$config_id[flagged]
 
 }

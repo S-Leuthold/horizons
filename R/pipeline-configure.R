@@ -73,16 +73,13 @@
 #' tune tasks finished in 29.5 minutes, while the same config with
 #' `feature_selection = "pca"` finished in 368 s (test RPD 3.82) — OSSL's
 #' published pipeline is SNV -> PCA(120) -> Cubist (Safanelli et al. 2025,
-#' PLOS ONE 20(1):e0296545). `validate()`'s P010 check reports when a
-#' `cubist` config with `feature_selection = "none"` sits on a table whose
-#' `n_rows * n_predictors` exceeds `CUBIST_MAX_CELLS` (a conservative floor
-#' well under the measured failure point, not a benchmark); the fix is
-#' `feature_selection = "pca"`. `svm_rbf` (kernlab) and `mars` (earth) also
-#' scale with `p` on well-established grounds — an RBF kernel matrix costs
-#' `O(n^2 p)` to build, and MARS's forward pass searches every predictor at
-#' every candidate knot — but neither has been measured at library scale,
-#' and `validate()` does not report them. A slow run with either on a
-#' full-resolution table is a signal to add `feature_selection` there too.
+#' PLOS ONE 20(1):e0296545). On a large full-resolution table, give a
+#' `cubist` configuration `feature_selection = "pca"`. `svm_rbf` (kernlab)
+#' and `mars` (earth) also scale with `p` on well-established grounds — an
+#' RBF kernel matrix costs `O(n^2 p)` to build, and MARS's forward pass
+#' searches every predictor at every candidate knot — but neither has been
+#' measured at library scale. A slow run with either on a full-resolution
+#' table is a signal to add `feature_selection` there too.
 #' See GitHub issue #40.
 #'
 #' **Recipe settings:**
