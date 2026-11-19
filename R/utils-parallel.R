@@ -1193,9 +1193,7 @@ pin_parent_threads <- function() {
 
   }
 
-  pinned          <- engine_thread_options()
-  restore$options <- stats::setNames(lapply(names(pinned), getOption), names(pinned))
-  options(pinned)
+  restore$options <- options(engine_thread_options())
 
   function() {
 

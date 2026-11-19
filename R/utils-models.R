@@ -37,11 +37,10 @@ define_model_spec <- function(model, isolate = TRUE) {
   ## left to its own default may set to every core (bonsai's lightgbm does)
   threads <- if (!is.null(row$threads$argument)) stats::setNames(list(ENGINE_THREADS), row$threads$argument)
 
-  ## Each call is put together from the row and evaluated here, so parsnip
-  ## captures every argument as the expression the row holds
+  ## The model's call is put together from the row and evaluated here, so
+  ## parsnip captures every argument as the expression the row holds
   spec <- eval(rlang::call2(row$fn, !!!row$fixed, !!!tuned, .ns = "parsnip"))
-  spec <- eval(rlang::call2("set_engine", spec, model_engine(model, isolate), !!!row$engine_args, !!!threads,
-                            .ns = "parsnip"))
+  spec <- parsnip::set_engine(spec, model_engine(model, isolate), !!!row$engine_args, !!!threads)
 
   parsnip::set_mode(spec, "regression")
 
@@ -76,7 +75,7 @@ engine_spec <- function(engine) {
 
 }
 
-#' The engines' thread options, at a thread count
+#' The engines' thread options, at the package's thread count
 #'
 #' @description
 #' Each `option` the rows of `MODEL_SPECS` declare under `threads`, as a
@@ -84,15 +83,14 @@ engine_spec <- function(engine) {
 #' pins threads: [pin_parent_threads()], the configs-axis worker,
 #' `.onLoad()` and [isolated_fit()].
 #'
-#' @param n Integer(1). The thread count.
-#' @return Named list: option name -> `n`.
+#' @return Named list: option name -> `ENGINE_THREADS`.
 #' @keywords internal
 #' @noRd
-engine_thread_options <- function(n = ENGINE_THREADS) {
+engine_thread_options <- function() {
 
   option <- unique(unlist(lapply(MODEL_SPECS, function(row) row$threads$option), use.names = FALSE))
 
-  stats::setNames(rep(list(as.integer(n)), length(option)), option)
+  stats::setNames(rep(list(ENGINE_THREADS), length(option)), option)
 
 }
 

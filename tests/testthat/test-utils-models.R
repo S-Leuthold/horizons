@@ -161,10 +161,14 @@ describe("define_model_spec()", {
 
 describe("engine_thread_options()", {
 
-  it("gives each thread option the rows declare, at the count asked for", {
+  it("gives each thread option the rows declare, at the package's thread count", {
 
     expect_identical(engine_thread_options(), list(ranger.num.threads = 1L))
-    expect_identical(engine_thread_options(3), list(ranger.num.threads = 3L))
+
+    local({
+      local_mocked_bindings(ENGINE_THREADS = 3L, .package = "horizons")
+      expect_identical(engine_thread_options(), list(ranger.num.threads = 3L))
+    })
 
     specs <- MODEL_SPECS
     specs$xgboost$threads$option <- "horizons.test.threads"
