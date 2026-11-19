@@ -412,7 +412,10 @@ describe("evaluate_single_config() - failure paths", {
 
   it("returns matching column structure and NA metrics on failure", {
 
-    config <- make_eval_config(model = "nope")
+    ## A spec that fails as it is built: an unknown model is refused at the
+    ## door, and one reaching the builder is an internal error
+    local_mocked_bindings(define_model_spec = function(...) stop("no spec for this model"))
+    config <- make_eval_config()
 
     result <- evaluate_single_config(
       config_row    = config,
