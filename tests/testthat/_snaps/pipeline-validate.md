@@ -9,6 +9,7 @@
       │  ├─ ✓ Outcome variance: 26.61
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
+      │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
       │  ├─ ℹ Spectral outliers: 2
       │  ├─ ℹ Response outliers: 1
       │  └─ Status: PASSED
@@ -25,6 +26,7 @@
       │  ├─ ✗ Outcome variance: 0
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
+      │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
       │  ├─ ℹ Spectral outliers: 2
       │  ├─ ℹ Response outliers: not run
       │  └─ Status: FAILED
@@ -44,6 +46,7 @@
       │  ├─ ✓ Outcome variance: 26.61
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
+      │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
       │  ├─ ℹ Spectral outliers: 3
       │  ├─ ℹ Response outliers: 1 on the whole table, not removed
       │  │  └─ Trim requested: evaluate() fences its training partition (1.5 x IQR) and trims training rows only; test rows untouched
