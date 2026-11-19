@@ -839,7 +839,7 @@ fit <- function(x,
     cfg <- all_configs[all_configs$config_id == config_id, ]
 
     ## Pretty config description
-    model_name  <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
+    model_name  <- model_label(cfg$model)
     config_desc <- paste(model_name, cfg$transformation, cfg$preprocessing,
                          cfg$feature_selection, sep = " + ")
     is_last     <- i == n_best

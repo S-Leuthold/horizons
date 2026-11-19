@@ -3791,10 +3791,7 @@ summary.horizons_data <- function(object, ...) {
 
         ## Look up model display name from configs
         cfg_row    <- x$config$configs[x$config$configs$config_id == best_id, ]
-        model_name <- if (nrow(cfg_row) > 0) {
-          dn <- MODEL_DISPLAY_NAMES[cfg_row$model]
-          if (is.na(dn)) cfg_row$model else dn
-        } else {
+        model_name <- if (nrow(cfg_row) > 0) model_label(cfg_row$model) else {
           best_id
         }
 

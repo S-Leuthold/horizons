@@ -100,6 +100,48 @@ define_model_spec <- function(model, isolate = TRUE) {
 }
 
 ## ---------------------------------------------------------------------------
+## The model table's readers
+## ---------------------------------------------------------------------------
+
+#' The `MODEL_SPECS` row of an engine
+#'
+#' @description
+#' The one reader of an engine's traits (whether it takes a seed, its
+#' threads), keyed by the engine's name as a fitted spec carries it. An
+#' isolated twin finds its engine's row ([isolated_engine_name()]), so
+#' isolating an engine keeps every trait it has. The xgb meta-learner's
+#' `"xgboost"` and `"glmnet"` find the xgboost and elastic_net rows.
+#'
+#' @param engine Character(1). The engine, as parsnip names it.
+#' @return The row (a list), or `NULL` for an engine no row names.
+#' @keywords internal
+#' @noRd
+engine_spec <- function(engine) {
+
+  for (row in MODEL_SPECS) {
+
+    if (identical(engine, row$engine) || identical(engine, isolated_engine_name(row$engine))) return(row)
+
+  }
+
+  NULL
+
+}
+
+#' A model's name in the progress trees and reports
+#'
+#' @param model Character(1). A short model name.
+#' @return Character(1): its `label` in `MODEL_SPECS`, or `model` itself for
+#'   a name the table does not hold.
+#' @keywords internal
+#' @noRd
+model_label <- function(model) {
+
+  MODEL_SPECS[[model]]$label %||% model
+
+}
+
+## ---------------------------------------------------------------------------
 ## The packages a set of configurations needs, checked at the door
 ## ---------------------------------------------------------------------------
 ## Several engines and one selection step live in Suggests packages. Every
@@ -114,7 +156,8 @@ define_model_spec <- function(model, isolate = TRUE) {
 #' @description
 #' Pure: no `requireNamespace()` calls and no side effects, so "which
 #' packages, and why" is testable without touching the search path. Reads
-#' `MODEL_PACKAGES` and `SELECTION_PACKAGES` (`R/constants.R`).
+#' each model's `packages` in `MODEL_SPECS` and `SELECTION_PACKAGES`
+#' (`R/constants.R`).
 #'
 #' @param models Character. The `model` of each configuration (may repeat).
 #' @param feature_selection Character. The `feature_selection` of each
@@ -138,7 +181,7 @@ needed_packages <- function(models,
     for (pkg in pkgs) needed[[pkg]] <<- unique(c(needed[[pkg]], reason))
   }
 
-  for (m in unique(models)) add(MODEL_PACKAGES[[m]], m)
+  for (m in unique(models)) add(MODEL_SPECS[[m]]$packages, m)
 
   for (fs in unique(feature_selection)) {
     add(SELECTION_PACKAGES[[fs]], paste(fs, "feature selection"))

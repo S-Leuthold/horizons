@@ -118,6 +118,25 @@ describe("define_model_spec()", {
 
 })
 
+describe("engine_spec()", {
+
+  it("finds each engine's row, its isolated twin's too, and none for an engine no row names", {
+
+    for (model in VALID_MODELS) {
+
+      row <- MODEL_SPECS[[model]]
+
+      expect_identical(engine_spec(row$engine), row, label = model)
+      expect_identical(engine_spec(isolated_engine_name(row$engine)), row, label = model)
+
+    }
+
+    expect_null(engine_spec("not_an_engine"))
+
+  })
+
+})
+
 
 ## ---------------------------------------------------------------------------
 ## check_packages() — the missing-package gate every verb shares (#65)
@@ -179,7 +198,7 @@ describe("check_packages() - missing package gate", {
 
 describe("needed_packages()", {
 
-  it("matches MODEL_PACKAGES for a single model", {
+  it("gives a single model's packages, each needed for it", {
 
     expect_identical(needed_packages("rf"), list(ranger = "rf"))
 
@@ -234,12 +253,12 @@ describe("needed_packages()", {
 ## ---------------------------------------------------------------------------
 ## The package tables against what the models and steps require
 ## ---------------------------------------------------------------------------
-## MODEL_PACKAGES and SELECTION_PACKAGES are what the door checks. Each entry
+## Each model's `packages` and SELECTION_PACKAGES are what the door checks. Each entry
 ## is read here against what parsnip and recipes say the real objects need, so
 ## a table that drifts from an engine or a step fails the suite, rather than
 ## letting a package past the door to fail mid-run.
 
-describe("MODEL_PACKAGES - against parsnip's required_pkgs()", {
+describe("each model's packages - against parsnip's required_pkgs()", {
 
   for (m in setdiff(VALID_MODELS, "lightgbm")) {
 
@@ -247,7 +266,7 @@ describe("MODEL_PACKAGES - against parsnip's required_pkgs()", {
 
       required <- parsnip::required_pkgs(define_model_spec(m), infra = FALSE)
 
-      expect_setequal(MODEL_PACKAGES[[m]], setdiff(required, "horizons"))
+      expect_setequal(MODEL_SPECS[[m]]$packages, setdiff(required, "horizons"))
 
     })
 
@@ -260,7 +279,7 @@ describe("MODEL_PACKAGES - against parsnip's required_pkgs()", {
 
     required <- parsnip::required_pkgs(define_model_spec("lightgbm"), infra = FALSE)
 
-    expect_setequal(MODEL_PACKAGES[["lightgbm"]], setdiff(required, "horizons"))
+    expect_setequal(MODEL_SPECS[["lightgbm"]]$packages, setdiff(required, "horizons"))
 
   })
 

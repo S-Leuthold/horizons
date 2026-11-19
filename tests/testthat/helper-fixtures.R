@@ -123,3 +123,20 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
   )
 
 }
+
+
+## ---------------------------------------------------------------------------
+## A model's packages replaced, for the door checks
+## ---------------------------------------------------------------------------
+
+#' MODEL_SPECS with each named model's `packages` replaced, for the calling
+#' frame: a package installed nowhere stands for a missing engine, whatever
+#' this machine has installed
+local_missing_packages <- function(packages, .env = parent.frame()) {
+
+  specs <- MODEL_SPECS
+  for (m in names(packages)) specs[[m]]$packages <- packages[[m]]
+
+  testthat::local_mocked_bindings(MODEL_SPECS = specs, .package = "horizons", .env = .env)
+
+}

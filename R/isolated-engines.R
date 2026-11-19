@@ -3,7 +3,7 @@
 ## ---------------------------------------------------------------------------
 ## Some engines carry state from one fit to the next in the process that
 ## fits them, which no argument of theirs resets. A model whose MODEL_SPECS
-## entry has `isolate = TRUE` is fitted through a twin of its engine, which
+## row names an `isolate` reason is fitted through a twin of its engine, which
 ## horizons registers with parsnip at load: the engine's own registration,
 ## copied under the name "<engine>_isolated", whose fit function runs the
 ## engine's own registered fit function in a process started for that one fit
@@ -33,6 +33,20 @@ isolated_engine_name <- function(engine) {
 }
 
 
+#' Whether a `MODEL_SPECS` row isolates its engine's fits
+#'
+#' @param row A row of `MODEL_SPECS`.
+#' @return Logical(1): `TRUE` when the row names at least one `isolate`
+#'   reason.
+#' @keywords internal
+#' @noRd
+isolates <- function(row) {
+
+  length(row$isolate) > 0
+
+}
+
+
 #' The engine a model is fitted with
 #'
 #' @description
@@ -50,7 +64,7 @@ model_engine <- function(model, isolate = TRUE) {
 
   spec <- MODEL_SPECS[[model]]
 
-  if (isTRUE(isolate) && isTRUE(spec$isolate)) isolated_engine_name(spec$engine) else spec$engine
+  if (isTRUE(isolate) && isolates(spec)) isolated_engine_name(spec$engine) else spec$engine
 
 }
 
@@ -66,7 +80,7 @@ isolated_models <- function(models) {
 
   models <- unique(as.character(models))
 
-  models[vapply(models, function(m) isTRUE(MODEL_SPECS[[m]]$isolate), logical(1))]
+  models[vapply(models, function(m) isolates(MODEL_SPECS[[m]]), logical(1))]
 
 }
 
@@ -86,7 +100,7 @@ register_isolated_engines <- function() {
 
   for (spec in MODEL_SPECS) {
 
-    if (isTRUE(spec$isolate)) register_isolated_engine(spec$fn, spec$engine)
+    if (isolates(spec)) register_isolated_engine(spec$fn, spec$engine)
 
   }
 

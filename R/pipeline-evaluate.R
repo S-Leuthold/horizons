@@ -952,7 +952,7 @@ evaluate <- function(x,
       cfg <- configs[i, ]
 
       ## Pretty config description — always show full pipeline
-      model_name  <- MODEL_DISPLAY_NAMES[cfg$model] %||% cfg$model
+      model_name  <- model_label(cfg$model)
       config_desc <- paste(model_name, cfg$transformation, cfg$preprocessing,
                            cfg$feature_selection, sep = " + ")
       is_last     <- i == nrow(configs)
@@ -1407,7 +1407,7 @@ evaluate <- function(x,
 
       ## Best config description
       best_cfg   <- configs[configs$config_id == best_config_id, ]
-      best_model <- MODEL_DISPLAY_NAMES[best_cfg$model] %||% best_cfg$model
+      best_model <- model_label(best_cfg$model)
       best_row   <- all_results[all_results$config_id == best_config_id, ]
 
       cat(paste0(
