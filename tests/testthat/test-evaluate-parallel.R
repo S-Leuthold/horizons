@@ -160,9 +160,7 @@ describe("evaluate() parallel worker footprint", {
     ## variables at 1 would pass before the worker set anything. data.table
     ## caps at OMP_NUM_THREADS and at OpenMP's count, so both go first. A
     ## second engine's option, so a worker that names ranger's alone fails.
-    specs <- MODEL_SPECS
-    specs$xgboost$threads$option <- "horizons.test.threads"
-    local_mocked_bindings(MODEL_SPECS = specs, .package = "horizons")
+    local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
     withr::local_envvar(OMP_NUM_THREADS = NA)
     withr::local_options(ranger.num.threads = 7L, horizons.test.threads = 7L)
 

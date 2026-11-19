@@ -697,9 +697,7 @@ describe("pin_parent_threads()", {
   it("pins each engine thread option the model table declares, and restores them", {
 
     ## A second engine's option, so a pin that names ranger's alone fails
-    specs <- MODEL_SPECS
-    specs$xgboost$threads$option <- "horizons.test.threads"
-    local_mocked_bindings(MODEL_SPECS = specs)
+    local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
     withr::local_options(ranger.num.threads = 7L, horizons.test.threads = NULL)
 
     unpin <- pin_parent_threads()

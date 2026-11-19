@@ -126,17 +126,18 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
 
 
 ## ---------------------------------------------------------------------------
-## A model's packages replaced, for the door checks
+## The model table with some rows' fields replaced
 ## ---------------------------------------------------------------------------
 
-#' MODEL_SPECS with each named model's `packages` replaced, for the calling
-#' frame: a package installed nowhere stands for a missing engine, whatever
-#' this machine has installed
-local_missing_packages <- function(packages, .env = parent.frame()) {
+#' MODEL_SPECS with the named rows' fields replaced, for the calling frame.
+#' `rows` holds a list of fields per model, merged with utils::modifyList():
+#' a field that is a list is replaced field by field (`threads`), any other
+#' whole (`packages`). A package installed nowhere stands for a missing
+#' engine, and a second engine's thread option for a table that declares
+#' more than ranger's, whatever this machine has installed.
+local_model_specs <- function(rows, .env = parent.frame()) {
 
-  specs <- MODEL_SPECS
-  for (m in names(packages)) specs[[m]]$packages <- packages[[m]]
-
-  testthat::local_mocked_bindings(MODEL_SPECS = specs, .package = "horizons", .env = .env)
+  testthat::local_mocked_bindings(MODEL_SPECS = utils::modifyList(MODEL_SPECS, rows), .package = "horizons",
+                                  .env = .env)
 
 }

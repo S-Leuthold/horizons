@@ -257,7 +257,7 @@ describe("evaluate() - gate checks", {
 
     ## Packages that are installed nowhere, for cubist's engine and for the
     ## boruta step
-    local_missing_packages(list(cubist = c("rules", "horizonsFakePkgXYZ123")))
+    local_model_specs(list(cubist = list(packages = c("rules", "horizonsFakePkgXYZ123"))))
     steps <- SELECTION_PACKAGES
     steps[["boruta"]] <- "horizonsFakePkgABC456"
     local_mocked_bindings(SELECTION_PACKAGES = steps)

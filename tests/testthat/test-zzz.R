@@ -81,9 +81,7 @@ describe(".onLoad()", {
 
     ## A second engine's thread option, so a setting that names ranger's
     ## alone fails
-    specs <- MODEL_SPECS
-    specs$xgboost$threads$option <- "horizons.test.threads"
-    local_mocked_bindings(MODEL_SPECS = specs, .package = "horizons")
+    local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
 
     withr::local_options(ranger.num.threads = NULL, horizons.test.threads = NULL)
     withr::local_envvar(HORIZONS_THREAD_CONTROL = "TRUE", OMP_NUM_THREADS = NA,

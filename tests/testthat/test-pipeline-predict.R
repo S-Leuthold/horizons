@@ -1547,7 +1547,7 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     ## must not need it installed to predict the rf one. mars is mapped to a
     ## package that is never installed, so the check below sees a missing
     ## package wherever it runs, whether or not earth is installed.
-    local_missing_packages(list(mars = "horizonsFakePkgXYZ123"))
+    local_model_specs(list(mars = list(packages = "horizonsFakePkgXYZ123")))
 
     obj <- make_ns_probe_fit(
       "rf", config_id = "cfg_rf",

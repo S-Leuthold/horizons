@@ -175,7 +175,6 @@ describe("isolated_fit()", {
 
   it("gives the fit's process the engines' thread options this session has set, and no others", {
 
-    d    <- isolated_data()
     sent <- NULL
 
     local_mocked_bindings(run_isolated = function(expr, args = list(), what, options = list(), ...) {
@@ -184,16 +183,18 @@ describe("isolated_fit()", {
     })
 
     ## A second engine's option, unset here
-    specs <- MODEL_SPECS
-    specs$xgboost$threads$option <- "horizons.test.threads"
-    local_mocked_bindings(MODEL_SPECS = specs)
+    local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
+
+    ## Called as a twin's fit is, with a function that needs no engine: only
+    ## what it sends is read
+    fit <- function() isolated_fit(x = 1, .isolated_fit = c(fun = "identity"), .isolated_engine = "a test")
 
     withr::local_options(ranger.num.threads = 3L, horizons.test.threads = NULL)
-    expect_error(parsnip::fit_xy(cubist_spec("Cubist_isolated"), x = d$x, y = d$y), class = "isolated_sent")
+    expect_error(fit(), class = "isolated_sent")
     expect_identical(sent, list(ranger.num.threads = 3L))
 
     options(ranger.num.threads = NULL)
-    expect_error(parsnip::fit_xy(cubist_spec("Cubist_isolated"), x = d$x, y = d$y), class = "isolated_sent")
+    expect_error(fit(), class = "isolated_sent")
     expect_length(sent, 0L)
 
   })

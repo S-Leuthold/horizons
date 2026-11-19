@@ -170,9 +170,7 @@ describe("engine_thread_options()", {
       expect_identical(engine_thread_options(), list(ranger.num.threads = 3L))
     })
 
-    specs <- MODEL_SPECS
-    specs$xgboost$threads$option <- "horizons.test.threads"
-    local_mocked_bindings(MODEL_SPECS = specs)
+    local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
 
     expect_identical(engine_thread_options(), list(ranger.num.threads = 1L, horizons.test.threads = 1L))
 

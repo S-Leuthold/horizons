@@ -841,7 +841,7 @@ describe("fit() - the members' packages", {
     )
 
     ## cubist's engine is installed nowhere
-    local_missing_packages(list(cubist = c("rules", "horizonsFakePkgXYZ123")))
+    local_model_specs(list(cubist = list(packages = c("rules", "horizonsFakePkgXYZ123"))))
 
     err <- expect_error(fit(x, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE),
                         class = "horizons_error_missing_package")

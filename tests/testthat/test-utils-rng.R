@@ -346,9 +346,7 @@ describe("seed_engine()", {
 
     ## cubist's engine takes no seed; given one here, its twin must be found
     ## to take it
-    specs <- MODEL_SPECS
-    specs$cubist$seed <- TRUE
-    local_mocked_bindings(MODEL_SPECS = specs)
+    local_model_specs(list(cubist = list(seed = TRUE)))
 
     twin <- workflow_for(define_model_spec("cubist"))
     expect_identical(workflows::extract_spec_parsnip(twin)$engine, "Cubist_isolated")
