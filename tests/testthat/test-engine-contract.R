@@ -54,6 +54,12 @@ CONTRACT_FITS      <- 40L
 CONTRACT_WINDOW    <- 21:40
 CONTRACT_RSS_SLOPE <- 0.75
 
+## How long a promise's reading may take, in seconds, before its test fails
+## rather than waits: the reader that builds a model's runs waits on fresh
+## processes, and isolated cubist's runs, the longest, take about 90 s on
+## Linux
+CONTRACT_DEADLINE <- 600
+
 ## 200 rows by 300 predictors to fit, and 150 by 40 fitted between: a fit of
 ## another row count moves the stream Cubist's C code keeps, and at 300
 ## predictors the leak it leaves is about 1.4 MB a fit. The 40 rows to
@@ -315,7 +321,7 @@ describe("the engine contract: (a) repeats", {
       skip_unless_contract_runs()
       skip_without_packages(model)
 
-      expect_null(broken_repeats(model, isolate = TRUE), label = model)
+      expect_null(with_deadline(broken_repeats(model, isolate = TRUE), CONTRACT_DEADLINE), label = model)
 
     })
 
@@ -334,7 +340,7 @@ describe("the engine contract: (b) memory", {
       ## The one reading this promise needs from the platform
       skip_if_not(ps::ps_is_supported(), "ps cannot read a process's memory on this platform")
 
-      expect_null(broken_memory(model, isolate = TRUE), label = model)
+      expect_null(with_deadline(broken_memory(model, isolate = TRUE), CONTRACT_DEADLINE), label = model)
 
     })
 
@@ -394,7 +400,7 @@ describe("the engine contract: the canaries", {
         skip_without_packages(model)
         if (promise == "memory") skip_if_not(ps::ps_is_supported(), "ps cannot read a process's memory on this platform")
 
-        why <- promise_broken[[promise]](model, isolate = FALSE)
+        why <- with_deadline(promise_broken[[promise]](model, isolate = FALSE), CONTRACT_DEADLINE)
 
         ## Strict: the promise holding is the failure
         if (is.null(why)) {
