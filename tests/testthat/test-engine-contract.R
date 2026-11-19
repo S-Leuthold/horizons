@@ -43,9 +43,6 @@ CONTRACT_PARAMS <- list(
   mars        = list(prod_degree = 1L, num_terms = 10L)
 )
 
-## The promises an `isolate` reason can name
-CONTRACT_PROMISES <- c("repeats", "memory")
-
 ## The fits a memory sequence makes, the fits its slope is read over, and the
 ## slope above which a process's memory is not flat (MB a fit). The caller's
 ## allocator settles over the first twenty fits: an isolated cubist fit hands
@@ -232,8 +229,16 @@ describe("the engine contract's table", {
 
     for (model in names(MODEL_SPECS)) {
       expect_setequal(names(CONTRACT_PARAMS[[model]]) %||% character(0), MODEL_SPECS[[model]]$tuned %||% character(0))
-      expect_true(all(names(MODEL_SPECS[[model]]$isolate) %in% CONTRACT_PROMISES), label = model)
-      expect_true(all(nzchar(MODEL_SPECS[[model]]$isolate)), label = model)
+
+      ## A set `isolate` is a named character vector: each name a promise
+      ## this file reads (`promise_broken`), each value the upstream report
+      ## that answers it. Anything else, TRUE or FALSE included, would turn
+      ## isolation on with no canary to say when it is no longer needed.
+      iso <- MODEL_SPECS[[model]]$isolate %||% character(0)
+      expect_identical(typeof(iso), "character", label = paste0("the type of ", model, "'s isolate"))
+      expect_true(all(rlang::names2(iso) %in% names(promise_broken)),
+                  label = paste0(model, "'s isolate names promises"))
+      expect_true(all(nzchar(iso)), label = paste0(model, "'s isolate names its reports"))
     }
 
   })
