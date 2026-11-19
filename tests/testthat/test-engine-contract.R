@@ -9,7 +9,8 @@
 ##   (b) memory: a process's memory stays flat over many fits;
 ##   (c) the engine loads and fits on a mirai daemon started from an
 ##       installed build;
-##   (d) it runs on the package's thread count.
+##   (d) its fit is given the package's thread count through the argument
+##       its row declares (BLAS and OpenMP threads are not checked here).
 ##
 ## Each model is fitted through the package's own path for one fit, the calls
 ## fit_single_config()'s final fit makes. An engine that breaks a promise is
@@ -193,6 +194,9 @@ contract_slope <- function(rss) {
 
 broken_memory <- function(model, isolate) {
 
+  ## The one reading this promise needs from the platform
+  skip_if_not(ps::ps_is_supported(), "ps cannot read a process's memory on this platform")
+
   slope <- contract_slope(contract_run(model, isolate)$rss)
 
   ## Every reading is printed, held or not, so a run's log records the slope
@@ -286,7 +290,7 @@ describe("the engine contract: (d) threads", {
 
 describe("the engine contract: an isolated engine's twin", {
 
-  for (model in names(Filter(isolates, MODEL_SPECS))) {
+  for (model in isolated_models(VALID_MODELS)) {
 
     it(paste0("tunes ", model, "'s twin as its engine, and reads its engine's traits for it"), {
 
@@ -297,7 +301,12 @@ describe("the engine contract: an isolated engine's twin", {
       own  <- define_model_spec(model, isolate = FALSE)
 
       ## tidymodels code that branches on an engine's name would treat the
-      ## twin as another engine
+      ## twin as another engine. The tunable() comparison bites for a model
+      ## whose tunable() method reads parsnip's registry of the engine's
+      ## arguments or branches on the engine's name, as boost_tree()'s does;
+      ## rules' method for cubist_rules() returns a fixed table, so for
+      ## cubist the twin's registered arguments are compared directly
+      ## (test-isolated-engines.R)
       expect_identical(twin$engine, isolated_engine_name(own$engine))
       expect_identical(tune::tunable(twin), tune::tunable(own))
       expect_identical(engine_spec(twin$engine), MODEL_SPECS[[model]])
@@ -337,8 +346,6 @@ describe("the engine contract: (b) memory", {
 
       skip_unless_contract_runs()
       skip_without_packages(model)
-      ## The one reading this promise needs from the platform
-      skip_if_not(ps::ps_is_supported(), "ps cannot read a process's memory on this platform")
 
       expect_null(with_deadline(broken_memory(model, isolate = TRUE), CONTRACT_DEADLINE), label = model)
 
@@ -390,7 +397,7 @@ describe("the engine contract: (c) a fresh daemon", {
 
 describe("the engine contract: the canaries", {
 
-  for (model in names(Filter(isolates, MODEL_SPECS))) {
+  for (model in isolated_models(VALID_MODELS)) {
 
     for (promise in names(MODEL_SPECS[[model]]$isolate)) {
 
@@ -398,19 +405,14 @@ describe("the engine contract: the canaries", {
 
         skip_unless_contract_runs()
         skip_without_packages(model)
-        if (promise == "memory") skip_if_not(ps::ps_is_supported(), "ps cannot read a process's memory on this platform")
 
         why <- with_deadline(promise_broken[[promise]](model, isolate = FALSE), CONTRACT_DEADLINE)
 
         ## Strict: the promise holding is the failure
-        if (is.null(why)) {
-          fail(sprintf(paste0(
-            "%s no longer breaks '%s' without isolation, so the containment has outlived this reason ",
-            "(upstream: %s). Remove `%s` from `MODEL_SPECS$%s$isolate`; with no reason left, remove `isolate`."),
-            MODEL_SPECS[[model]]$label, promise, MODEL_SPECS[[model]]$isolate[[promise]], promise, model))
-        } else {
-          succeed()
-        }
+        expect(!is.null(why), sprintf(paste0(
+          "%s no longer breaks '%s' without isolation, so the containment has outlived this reason ",
+          "(upstream: %s). Remove `%s` from `MODEL_SPECS$%s$isolate`; with no reason left, remove `isolate`."),
+          model_label(model), promise, MODEL_SPECS[[model]]$isolate[[promise]], promise, model))
 
       })
 
