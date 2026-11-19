@@ -218,13 +218,13 @@ text_records <- function(x, pinned = FALSE) {
 #' Record the warnings a fold's prep raises, with the fold
 #'
 #' @description
-#' Inside tune a recipe step's warning was kept as a note on its fold, so a
-#' row read "(3 of 10 folds)". The folds are now prepped in the unit
-#' ([prep_folds()]), so the warnings another package raises there are
-#' recorded and muffled here, each with the fold it came from, and
-#' [fold_warning_records()] gives the row the same count. A horizons
-#' warning goes on to the unit, which records it with its class for the
-#' verb's log; the selection steps' are muffled before they reach here
+#' Each fold's recipe is prepped in the unit ([prep_folds()]), not inside
+#' tune, so the warnings another package raises there are recorded and
+#' muffled here, each with the fold it came from, and
+#' [fold_warning_records()] gives the row the folds that raised each, as
+#' "(3 of 10 folds)", the count tune's notes give. A horizons warning goes
+#' on to the unit, which records it with its class for the verb's log; the
+#' selection steps' are muffled before they reach here
 #' ([quiet_selection_warnings()]).
 #'
 #' @param expr The fold's prep and bakes.

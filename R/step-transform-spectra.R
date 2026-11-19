@@ -493,7 +493,9 @@ transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
 #' The step's id is drawn from the stream (`recipes::rand_id()`), so the
 #' caller's stream is left as found. The step's warning about a spectrum it
 #' cannot use is muffled ([quiet_selection_warnings()]): this is not the
-#' recipe the configuration returns, and the final fit's recipe raises it.
+#' recipe the configuration returns, and the rows a verb models hold no such
+#' spectrum, since [validate_horizons_data()] refuses one in a row not
+#' flagged and [modelling_rows()] leaves flagged rows out.
 #'
 #' @param data Data frame. The rows the configuration's folds were cut from.
 #' @param config_row Single-row tibble; its `preprocessing` is read.

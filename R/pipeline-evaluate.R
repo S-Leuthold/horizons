@@ -3509,8 +3509,9 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' so they run the installed copy. Under `devtools::load_all()` that copy is not this source
 #' tree, and a daemon would run stale code silently. Otherwise every daemon
 #' connected is asked, one task each ([daemon_reports()]), which horizons it
-#' loads and which of the packages the run needs it cannot load, and either
-#' is refused before anything is drawn. A package a daemon lacks would
+#' loads and which of the packages the run needs (its configurations'
+#' engines' and feature selections', [needed_packages()]) it cannot load,
+#' and either is refused before anything is drawn. A package a daemon lacks would
 #' otherwise reach the run only as tune's failure to bind the daemon's error
 #' ("Argument 1 must be a data frame"), never naming the package. Without
 #' mirai's dispatcher the tasks are not bound one to each daemon, so one may

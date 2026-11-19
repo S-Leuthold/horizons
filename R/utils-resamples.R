@@ -240,8 +240,8 @@ fold_prep_inputs <- function(config_row, data, role_map, sg_window, pca_threshol
 
   local_rng_state()
 
-  ## A failure to transform is the folds' preparation's, as it was when each
-  ## fold's prep transformed its own rows
+  ## The transform is the first part of the folds' preparation, so a failure
+  ## in it is named as theirs
   hoisted <- unit_step("fold_prep", hoist_spectra(data, config_row, role_map,
                                                   sg_window = sg_window))
 
@@ -264,6 +264,13 @@ fold_prep_inputs <- function(config_row, data, role_map, sg_window, pca_threshol
 #' rows draw the same seeds, so a selection step chooses the same bands on
 #' each fold for both. A fold's prep is the fold's id under it, and the
 #' prep that bounds the tuning parameters is `"training"` under it.
+#'
+#' The name seeds the prep; it does not identify the prepped fold. Every
+#' fold recipe keeps the response transformation, so under no selection or
+#' PCA two configurations that differ only in it share the name while their
+#' folds' outcome columns differ. A cache of prepped folds keyed on this
+#' name must add the transformation to the key, or hold the predictors only
+#' and place the outcome per configuration.
 #'
 #' @param verb Character(1). `"evaluate"` or `"fit"`.
 #' @param config_row Single-row tibble from `config$configs`.
