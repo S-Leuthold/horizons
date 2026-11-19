@@ -10,6 +10,15 @@
 #' structured list. All console output (tree rendering, progress messages) is
 #' the responsibility of the calling `fit()` function.
 #'
+#' Each fold's recipe is prepped once, as in [evaluate_single_config()]: the
+#' warm-start re-tune, its Bayesian iterations and the out-of-fold
+#' predictions run a workflow of the model alone on those folds, which keep
+#' the positions of the rows they were cut from, so each out-of-fold
+#' prediction's `.row` names its sample. The final fit runs the whole
+#' workflow on `train_data`, so the stored workflow, and with it `predict()`,
+#' the prediction intervals and the applicability domain, bakes new rows
+#' through the whole recipe.
+#'
 #' The member is one unit (`run_unit()`): a run failure in any step ends it,
 #' and the member records the step (`UNIT_STEPS`), the cause, its root class
 #' and, with `keep_traces`, its backtrace. A door, internal or dependency

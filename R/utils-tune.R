@@ -697,8 +697,10 @@ render_warning_log <- function(records, max_shown = 5L) {
 #' tune catches the errors and warnings raised inside `tune_grid()`,
 #' `tune_bayes()`, `fit_resamples()` and `last_fit()` and stores them in the
 #' result's `.notes` column instead of signalling them, so a capture site
-#' that only watches for conditions never sees them. A recipe step that fails
-#' or warns during prep inside tuning leaves its only trace there. This
+#' that only watches for conditions never sees them. A model fit that fails
+#' or warns inside tuning, or a recipe step inside `last_fit()` (each fold's
+#' recipe is prepped in the unit, [prep_folds()]), leaves its only trace
+#' there. This
 #' reads the notes back through [condition_summary()] and returns one line
 #' per distinct message (see [summarise_warning_records()]), most frequent
 #' first, each saying how many folds raised it (`"3 of 5 folds"`) when the
@@ -760,9 +762,9 @@ tune_failure_cause <- function(tune_results) {
 #' * A recipe step that failed inside tune (an error note at a preprocessor
 #'   location) is reproduced outside it, when `recipe` is given, by prepping
 #'   the recipe once on the training part: the step's error then ends the
-#'   unit with its own class, or propagates for the kinds no unit contains. A
-#'   failure that does not reproduce there (one fold's rows only) is read
-#'   from the notes, as below. Prepping only on failure costs a run that
+#'   unit with its own class, or propagates for the kinds no unit contains.
+#'   Only `last_fit()` preps a recipe inside tune, each fold's being prepped
+#'   in the unit ([prep_folds()]). Prepping only on failure costs a run that
 #'   does not fail nothing, where a prep with feature selection can take
 #'   minutes.
 #' * An isolated fit whose process died, an error note starting with
@@ -881,8 +883,9 @@ abort_tune_failure <- function(results, what, call = rlang::caller_env()) {
 ## candidate that failed on one fold is compared with the others on the folds
 ## that survived, which is a different and easier test. A candidate missing a
 ## fold is left out instead, as scikit-learn leaves out one whose mean is NaN.
-## A recipe step that fails on a fold fails every candidate there, so its
-## configuration then has none to choose from and fails.
+## A model that fails on a fold for every candidate leaves its configuration
+## none to choose from, so it fails. (A recipe step that fails on a fold
+## fails the fold's prep, in the unit, before tune runs.)
 
 #' A metric's mean and standard error over the folds
 #'

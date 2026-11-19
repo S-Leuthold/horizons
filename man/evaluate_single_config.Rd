@@ -129,5 +129,17 @@ The configuration is one unit (\code{run_unit()}): a run failure in any step
 ends it, and the row records the step (\code{UNIT_STEPS}), the cause, its root
 class and, with \code{keep_traces}, its backtrace. A door, internal or
 dependency error is not the configuration's and propagates.
+
+Each fold's recipe is prepped once, inside the unit. The training rows'
+spectra are transformed once, with the transform step's own code
+(\code{hoist_spectra()}); each fold's recipe, the configuration's without that
+step, is prepped on the fold's analysis rows under a seed named by what
+is prepped (\code{fold_prep_scope()}); and tune scores every grid and Bayesian
+candidate on those folds with a workflow of the model alone
+(\code{prep_folds()}). A feature selection therefore selects once per fold,
+for every candidate. The final fit, \code{last_fit()} on the split, runs the
+whole workflow on the raw rows. A step that fails in a fold's prep ends
+the configuration with the step's own class, and another package's
+warning there reaches the row with the folds that raised it.
 }
 \keyword{internal}

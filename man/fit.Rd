@@ -204,8 +204,8 @@ Before a parallel run \code{fit()} refuses a session loaded with
 \code{devtools::load_all()}, and, asking every daemon connected one task each,
 daemons that load another version of horizons
 (\code{horizons_error_dependency}) or cannot load a package the members need
-(\code{horizons_error_missing_package}), since tune's tasks run horizons'
-recipe steps and the members' engines.
+(\code{horizons_error_missing_package}), since tune's tasks fit the members'
+engines, horizons' own PLS engine among them.
 }
 
 \section{Cold start from one configuration}{

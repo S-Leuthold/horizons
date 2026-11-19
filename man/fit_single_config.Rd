@@ -132,6 +132,15 @@ This function is the \strong{capture layer} — it runs silently and returns a
 structured list. All console output (tree rendering, progress messages) is
 the responsibility of the calling \code{fit()} function.
 
+Each fold's recipe is prepped once, as in \code{\link[=evaluate_single_config]{evaluate_single_config()}}: the
+warm-start re-tune, its Bayesian iterations and the out-of-fold
+predictions run a workflow of the model alone on those folds, which keep
+the positions of the rows they were cut from, so each out-of-fold
+prediction's \code{.row} names its sample. The final fit runs the whole
+workflow on \code{train_data}, so the stored workflow, and with it \code{predict()},
+the prediction intervals and the applicability domain, bakes new rows
+through the whole recipe.
+
 The member is one unit (\code{run_unit()}): a run failure in any step ends it,
 and the member records the step (\code{UNIT_STEPS}), the cause, its root class
 and, with \code{keep_traces}, its backtrace. A door, internal or dependency
