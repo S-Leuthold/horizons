@@ -6,7 +6,8 @@
 ##
 ##   (a) repeats: the same seed and data give the same predictions, fit after
 ##       fit in one process and in a fresh one;
-##   (b) memory: a process's memory stays flat over many fits;
+##   (b) memory: a process's memory stays flat over many fits (read on Linux
+##       only, below);
 ##   (c) the engine loads and fits on a mirai daemon started from an
 ##       installed build;
 ##   (d) its fit is given the package's thread count through the argument
@@ -23,6 +24,9 @@
 ## (a), (b), (c) and the canaries start fresh processes (run_isolated()),
 ## which load horizons from the library R_LIBS names: an installed build, in
 ## the slow tier. (d) and the checks on the table run in the default tier.
+## Every memory reading, (b) and the memory canary alike, runs on Linux only,
+## the one platform where resident memory has been measured with margin
+## (CONTRACT_RSS_SLOPE); the rest run everywhere.
 
 ## ---------------------------------------------------------------------------
 ## What the contract fits
@@ -52,10 +56,11 @@ CONTRACT_PARAMS <- list(
 ## fits 21 to 40: on Linux, in three processes per engine, the engines with
 ## isolation at most 0.27 (isolated Cubist; every other engine 0.00) and
 ## Cubist without it 1.51 in each, so the threshold is 2.8 times the worst
-## flat slope and half the least leak; on a Windows runner, in one process
-## per engine, the engines with isolation -0.43 to 0.13 and Cubist without
-## it 0.23. Resident memory on Windows does not show the leak, so the memory
-## canary runs on Linux only (skip_unless_canary_reads()).
+## flat slope and half the least leak. On a Windows runner, in one process
+## per engine, resident memory has no such margin either way: two runs of
+## the same engine (mars, with isolation) read -0.02 and 1.14, and Cubist
+## without isolation 0.23, inside the isolated engines' -0.43 to 0.13. So
+## every memory reading runs on Linux only (skip_unless_memory_reads()).
 CONTRACT_FITS      <- 40L
 CONTRACT_WINDOW    <- 21:40
 CONTRACT_RSS_SLOPE <- 0.75
@@ -199,8 +204,7 @@ contract_slope <- function(rss) {
 
 broken_memory <- function(model, isolate) {
 
-  ## The one reading this promise needs from the platform
-  skip_if_not(ps::ps_is_supported(), "ps cannot read a process's memory on this platform")
+  skip_unless_memory_reads()
 
   slope <- contract_slope(contract_run(model, isolate)$rss)
 
@@ -232,15 +236,17 @@ skip_unless_contract_runs <- function() {
   skip_if_dev_package()
 }
 
-## Where a canary's reading can show its promise broken. Resident memory shows
-## Cubist's leak with margin on Linux and not on Windows (CONTRACT_RSS_SLOPE),
-## so the memory canary runs on Linux only: elsewhere a flat reading would
-## say nothing about the leak.
-skip_unless_canary_reads <- function(promise) {
-  skip_if(promise == "memory" && Sys.info()[["sysname"]] != "Linux", paste(
-    "the memory canary runs on Linux only, where resident memory shows Cubist's leak with margin",
-    "(1.51 MB a fit without isolation, against 0.75); on Windows it does not (0.23 MB a fit without",
-    "isolation, inside the isolated engines' -0.43 to 0.13)"))
+## Where a memory reading means something: on Linux, where resident memory
+## (read through ps) separates a flat engine from Cubist's leak with margin.
+## Elsewhere a reading could neither show the leak nor hold a flat engine
+## under the threshold (CONTRACT_RSS_SLOPE), so (b) and the memory canary
+## skip, saying why.
+skip_unless_memory_reads <- function() {
+  skip_if(Sys.info()[["sysname"]] != "Linux", paste(
+    "memory readings run on Linux only, where resident memory separates a flat engine from Cubist's leak",
+    "with margin (at most 0.27 MB a fit with isolation, 1.51 without, against 0.75); on Windows two runs of",
+    "the same engine (mars) read -0.02 and 1.14 MB a fit, and Cubist without isolation 0.23, inside the",
+    "isolated engines' -0.43 to 0.13"))
 }
 
 ## ---------------------------------------------------------------------------
@@ -421,7 +427,6 @@ describe("the engine contract: the canaries", {
 
         skip_unless_contract_runs()
         skip_without_packages(model)
-        skip_unless_canary_reads(promise)
 
         why <- with_deadline(promise_broken[[promise]](model, isolate = FALSE), CONTRACT_DEADLINE)
 
