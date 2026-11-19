@@ -10,6 +10,10 @@
 # parsnip does not have (the PLS engine, R/pls-engine.R). The fields:
 #
 # - `fn`, `engine`: parsnip's model, by name, and the engine.
+# - `fixed`: the model's arguments held at one value; `tuned`: the names of
+#   those tuned, each `tune::tune()` in the spec; `engine_args`: arguments
+#   passed to the engine. define_model_spec() (R/utils-models.R) builds the
+#   spec from these alone.
 # - `label`: the model's name in the progress trees and reports
 #   (model_label()).
 # - `packages`: what fitting and predicting with it needs, checked at every
@@ -35,11 +39,14 @@
 MODEL_SPECS <- list(
 
   rf = list(
-    fn       = "rand_forest",
-    engine   = "ranger",
-    label    = "Random Forest",
-    packages = "ranger",
-    seed     = TRUE
+    fn          = "rand_forest",
+    engine      = "ranger",
+    label       = "Random Forest",
+    packages    = "ranger",
+    fixed       = list(trees = 500),
+    tuned       = c("mtry", "min_n"),
+    engine_args = list(importance = "impurity"),
+    seed        = TRUE
   ),
 
   cubist = list(
@@ -47,6 +54,7 @@ MODEL_SPECS <- list(
     engine   = "Cubist",
     label    = "Cubist",
     packages = c("rules", "Cubist"),
+    tuned    = c("committees", "neighbors", "max_rules"),
     isolate  = c(repeats = "topepo/Cubist#6", memory = "topepo/Cubist#8")
   ),
 
@@ -55,6 +63,8 @@ MODEL_SPECS <- list(
     engine   = "xgboost",
     label    = "XGBoost",
     packages = "xgboost",
+    fixed    = list(trees = 500),
+    tuned    = c("tree_depth", "learn_rate", "mtry", "min_n", "loss_reduction", "sample_size"),
     seed     = TRUE
   ),
 
@@ -62,28 +72,33 @@ MODEL_SPECS <- list(
     fn       = "pls",
     engine   = "pls",
     label    = "PLS",
-    packages = "pls"
+    packages = "pls",
+    tuned    = "num_comp"
   ),
 
   elastic_net = list(
     fn       = "linear_reg",
     engine   = "glmnet",
     label    = "Elastic Net",
-    packages = "glmnet"
+    packages = "glmnet",
+    tuned    = c("penalty", "mixture")
   ),
 
   svm_rbf = list(
     fn       = "svm_rbf",
     engine   = "kernlab",
     label    = "SVM-RBF",
-    packages = "kernlab"
+    packages = "kernlab",
+    tuned    = c("cost", "rbf_sigma")
   ),
 
   mlp = list(
-    fn       = "mlp",
-    engine   = "nnet",
-    label    = "Neural Network",
-    packages = "nnet"
+    fn          = "mlp",
+    engine      = "nnet",
+    label       = "Neural Network",
+    packages    = "nnet",
+    tuned       = c("hidden_units", "penalty", "epochs"),
+    engine_args = list(MaxNWts = 10000)
   ),
 
   lightgbm = list(
@@ -91,6 +106,8 @@ MODEL_SPECS <- list(
     engine   = "lightgbm",
     label    = "LightGBM",
     packages = c("bonsai", "lightgbm"),
+    fixed    = list(trees = 500),
+    tuned    = c("tree_depth", "learn_rate", "mtry", "min_n"),
     seed     = TRUE
   ),
 
@@ -98,7 +115,8 @@ MODEL_SPECS <- list(
     fn       = "mars",
     engine   = "earth",
     label    = "MARS",
-    packages = "earth"
+    packages = "earth",
+    tuned    = c("prod_degree", "num_terms")
   )
 
 )

@@ -1,10 +1,14 @@
 #' Define a Parsnip Model Specification
 #'
 #' @description
-#' Maps a short model name (from `VALID_MODELS`) to a tunable parsnip model
-#' specification. Each spec has `tune()` placeholders for hyperparameters
-#' and the correct engine set. Used by `evaluate_single_config()` to build
-#' the workflow for each config.
+#' Builds a model's tunable parsnip specification from its row of
+#' `MODEL_SPECS`: parsnip's model function `fn`, called with the row's
+#' `fixed` arguments and each of its `tuned` arguments as `tune::tune()`; the
+#' engine `model_engine()` names, with the row's `engine_args`; and the
+#' regression mode. Each argument is captured as parsnip captures one written
+#' in the call (`500`, `tune::tune()`, `"impurity"`). Used by
+#' `evaluate_single_config()` and `fit_single_config()` to build the workflow
+#' for each config.
 #'
 #' @param model Character. One of the short names in `VALID_MODELS`:
 #'   "rf", "cubist", "xgboost", "plsr", "elastic_net", "svm_rbf",
@@ -17,85 +21,23 @@
 #' @keywords internal
 define_model_spec <- function(model, isolate = TRUE) {
 
-  switch(model,
+  row <- MODEL_SPECS[[model]]
 
-    "rf" = parsnip::rand_forest(
-      trees = 500,
-      mtry  = tune::tune(),
-      min_n = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("rf", isolate), importance = "impurity") |>
-      parsnip::set_mode("regression"),
+  ### The verbs' doors refuse a model outside VALID_MODELS first
+  if (is.null(row)) {
+    abort_horizons("{.fn define_model_spec} was given {.val {model}}, which {.code MODEL_SPECS} does not hold.",
+                   kind = "internal")
+  }
 
-    "cubist" = parsnip::cubist_rules(
-      committees = tune::tune(),
-      neighbors  = tune::tune(),
-      max_rules  = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("cubist", isolate)) |>
-      parsnip::set_mode("regression"),
+  tuned <- rep(list(quote(tune::tune())), length(row$tuned))
+  names(tuned) <- row$tuned
 
-    "xgboost" = parsnip::boost_tree(
-      trees          = 500,
-      tree_depth     = tune::tune(),
-      learn_rate     = tune::tune(),
-      mtry           = tune::tune(),
-      min_n          = tune::tune(),
-      loss_reduction = tune::tune(),
-      sample_size    = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("xgboost", isolate)) |>
-      parsnip::set_mode("regression"),
+  ## Each call is put together from the row and evaluated here, so parsnip
+  ## captures every argument as the expression the row holds
+  spec <- eval(rlang::call2(row$fn, !!!row$fixed, !!!tuned, .ns = "parsnip"))
+  spec <- eval(rlang::call2("set_engine", spec, model_engine(model, isolate), !!!row$engine_args, .ns = "parsnip"))
 
-    "lightgbm" = parsnip::boost_tree(
-      trees      = 500,
-      tree_depth = tune::tune(),
-      learn_rate = tune::tune(),
-      mtry       = tune::tune(),
-      min_n      = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("lightgbm", isolate)) |>
-      parsnip::set_mode("regression"),
-
-    "elastic_net" = parsnip::linear_reg(
-      penalty = tune::tune(),
-      mixture = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("elastic_net", isolate)) |>
-      parsnip::set_mode("regression"),
-
-    "svm_rbf" = parsnip::svm_rbf(
-      cost      = tune::tune(),
-      rbf_sigma = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("svm_rbf", isolate)) |>
-      parsnip::set_mode("regression"),
-
-    "mars" = parsnip::mars(
-      prod_degree = tune::tune(),
-      num_terms   = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("mars", isolate)) |>
-      parsnip::set_mode("regression"),
-
-    "plsr" = parsnip::pls(
-      num_comp = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("plsr", isolate)) |>
-      parsnip::set_mode("regression"),
-
-    "mlp" = parsnip::mlp(
-      hidden_units = tune::tune(),
-      penalty      = tune::tune(),
-      epochs       = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("mlp", isolate), MaxNWts = 10000) |>
-      parsnip::set_mode("regression")
-
-    ### No default: the door validators refuse a model outside VALID_MODELS,
-    ### and a NULL spec fails loudly in add_model().
-
-  )
+  parsnip::set_mode(spec, "regression")
 
 }
 

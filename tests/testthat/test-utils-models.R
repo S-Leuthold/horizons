@@ -113,8 +113,45 @@ describe("define_model_spec()", {
 
   })
 
-  ## An unknown model is refused at every verb's door (config_findings(),
-  ## test-class-core.R), before a spec is built.
+  it("builds each model's spec from its row: fn's class, the fixed and engine arguments, and a tune() for each tuned one", {
+
+    for (model in VALID_MODELS) {
+
+      row  <- MODEL_SPECS[[model]]
+      spec <- define_model_spec(model)
+
+      expect_s3_class(spec, row$fn)
+      expect_identical(spec$mode, "regression", label = model)
+      expect_identical(spec$engine, model_engine(model), label = model)
+
+      set <- names(spec$args)[!vapply(spec$args, rlang::quo_is_null, logical(1))]
+      expect_setequal(set, c(names(row$fixed), row$tuned))
+
+      for (arg in names(row$fixed)) {
+        expect_identical(rlang::eval_tidy(spec$args[[arg]]), row$fixed[[arg]], label = paste(model, arg))
+      }
+
+      for (arg in row$tuned) {
+        expect_identical(rlang::quo_get_expr(spec$args[[arg]]), quote(tune::tune()), label = paste(model, arg))
+      }
+
+      expect_setequal(names(spec$eng_args) %||% character(0), names(row$engine_args) %||% character(0))
+
+      for (arg in names(row$engine_args)) {
+        expect_identical(rlang::eval_tidy(spec$eng_args[[arg]]), row$engine_args[[arg]], label = paste(model, arg))
+      }
+
+    }
+
+  })
+
+  it("refuses a model the table does not hold, as an internal error", {
+
+    ## An unknown model is refused at every verb's door first
+    ## (config_findings(), test-class-core.R)
+    expect_error(define_model_spec("not_a_model"), class = "horizons_error_internal")
+
+  })
 
 })
 
