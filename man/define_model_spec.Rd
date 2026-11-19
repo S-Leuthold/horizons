@@ -4,12 +4,16 @@
 \alias{define_model_spec}
 \title{Define a Parsnip Model Specification}
 \usage{
-define_model_spec(model)
+define_model_spec(model, isolate = TRUE)
 }
 \arguments{
 \item{model}{Character. One of the short names in \code{VALID_MODELS}:
 "rf", "cubist", "xgboost", "plsr", "elastic_net", "svm_rbf",
 "mars", "lightgbm", "mlp".}
+
+\item{isolate}{Logical. Whether a model \code{MODEL_SPECS} marks \code{isolate}
+takes its engine's isolated twin, which fits each model in a process of
+its own (\code{model_engine()}); \code{control_horizons(isolate = )}.}
 }
 \value{
 A \code{parsnip} model specification with \code{mode = "regression"}.

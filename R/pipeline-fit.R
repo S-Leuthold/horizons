@@ -170,9 +170,9 @@
 #'   Default TRUE.
 #' @param seed `NULL` or a whole number: the run's seed. The CV folds, the
 #'   calibration split and each member's stages are seeded from it and their
-#'   own names, so a member's results depend on the seed alone (except
-#'   `cubist`, whose neighbour step no seed reaches; see the reproducibility
-#'   note in [configure()]). The
+#'   own names, so a member's results depend on the seed alone (for `cubist`,
+#'   because each of its fits runs in a process of its own; see the
+#'   reproducibility note in [configure()]). The
 #'   train/test split is `evaluate()`'s, except on a cold start, where `fit()`
 #'   draws that split as `evaluate()` would at this seed. `NULL` (the
 #'   default) takes the seed the object records (`evaluate()`'s, or a re-fit's
@@ -182,7 +182,7 @@
 #'   recorded as `models$seed`, which [ensemble()] takes.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `min_calib_rows`, `min_ad_rows` and
+#'   `keep_traces`, `isolate`, `min_calib_rows`, `min_ad_rows` and
 #'   `min_degradation_rows`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as
 #'   `models$control`.
@@ -206,7 +206,17 @@
 #' must be a data frame or a named atomic vector". `fit()` parallelises folds
 #' only in this version; a configs axis across the `n_best` members is gated
 #' on the fitted-object memory contract (a fitted object is hundreds of MB
-#' and would cross to workers).
+#' and would cross to workers). Before anything is fitted, a parallel `fit()`
+#' checks that the daemons on this machine fit in its memory, as
+#' [evaluate()] does ("Parallelism" there), warning with class
+#' `horizons_warning_input` when they would not.
+#'
+#' Each `cubist` fit runs in a process of its own, wherever it runs, as in
+#' [evaluate()] ("Isolated fits" there), so a member's results depend on the
+#' seed alone; a member whose fit's process dies, in its re-tune, its
+#' out-of-fold pass or its final fit, fails with
+#' `horizons_error_process_died`. `control_horizons(isolate = FALSE)` fits it
+#' in the process that runs it instead, which the tree and the `log` say.
 #'
 #' @section Outcome range:
 #' Every prediction `fit()` scores (out-of-fold, test and calibration) is
@@ -478,13 +488,29 @@ fit <- function(x,
 
   check_config_packages(member_configs, "fit")
 
+  ## Fits a model's engine would otherwise carry state across run in this
+  ## session when isolation is turned off, which the log notes
+  log_isolation_off(collector, member_configs$model, control$isolate)
+
   ## tune's tasks on the daemons run horizons' recipe steps and the PLS
   ## engine, and fit the members' engines, so every daemon must run this
   ## session's horizons and load the members' packages: checked before
   ## anything is drawn
+  ## The daemons on this machine against the memory it has, for this run's
+  ## data, said once and on the tree's parallel line
+  short_memory <- FALSE
+  n_daemons    <- NA_integer_
+
   if (allow_par) {
-    check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection), collector,
-                           results = member_results(list()))
+    ### Read before the check, which spends a task on each daemon and so can
+    ### end a pool set with `maxtasks`
+    n_daemons <- connected_daemons()
+    reports   <- check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection),
+                                        collector, results = member_results(list()))
+    short_memory <- check_daemon_memory(reports, member_configs$model, control$isolate,
+                                        n_rows       = nrow(x$data$analysis),
+                                        n_predictors = sum(role_map$role == "predictor"),
+                                        collector    = collector, verb = "fit")
   }
 
   ## configure() stores the screening and the final re-tune budgets
@@ -781,10 +807,11 @@ fit <- function(x,
       if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
     ))
 
-    if (par_by_user && debug) {
-
-      cat("\u2502  Parallel: off, since debug runs in this session\n")
-
+    ## A parallel fit runs the members' folds on the daemons
+    for (line in parallel_tree_lines(if (allow_par) "resamples" else "sequential", n_daemons,
+                                     member_configs$model, control$isolate,
+                                     short_memory = short_memory, debug_off = par_by_user && debug)) {
+      cat(paste0("\u2502  ", line, "\n"))
     }
 
     cat("\u2502\n")
@@ -855,7 +882,8 @@ fit <- function(x,
       min_ad_rows          = control$min_ad_rows,
       min_degradation_rows = control$min_degradation_rows,
       debug                = debug,
-      keep_traces          = control$keep_traces
+      keep_traces          = control$keep_traces,
+      isolate              = control$isolate
     ), member_results(results_list), verb = "fit", daemons = allow_par)
 
     results_list[[i]] <- config_result

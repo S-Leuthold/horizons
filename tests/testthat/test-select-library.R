@@ -3,6 +3,12 @@
 # end to end against a miniature OSSL written to disk and served over
 # file:// URLs, so nothing touches the network or the user's cache.
 
+## The draws here run in this session: the tests replace functions inside the
+## draw (the registry, the space's build, the search), which a process of its
+## own would not see, and a process loads horizons for each draw. The draw's
+## own process is tested with isolate = TRUE, in test-pipeline-select-training.R.
+withr::local_options(horizons.isolate = FALSE)
+
 
 ## ---------------------------------------------------------------------------
 ## The three forms
@@ -331,14 +337,18 @@ test_that("a cached library from another build is built again, after asking why,
   expect_identical(nrow(first$pool$data$analysis), 8L)
 
   ## The issue's case: a release whose recipe keeps two rows, under the same
-  ## name and version, and a raised build
-  newer        <- entry
-  newer$build  <- 3L
-  newer$recipe <- function(raw, entry, verbose = TRUE) {
-    pool <- build_ossl_library(raw, entry, verbose = verbose)
-    subset_rows(pool, pool$data$analysis$sample_id[1:2])
-  }
-  local_mocked_bindings(library_registry = function() list(mini = newer))
+  ## name and version, and a raised build. The entry names its recipe, so
+  ## the recipe it names is replaced
+  newer       <- entry
+  newer$build <- 3L
+  real_build  <- build_ossl_library
+  local_mocked_bindings(
+    library_registry   = function() list(mini = newer),
+    build_ossl_library = function(raw, entry, verbose = TRUE) {
+      pool <- real_build(raw, entry, verbose = verbose)
+      subset_rows(pool, pool$data$analysis$sample_id[1:2])
+    }
+  )
 
   collector <- log_open("select_training")
 

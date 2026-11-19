@@ -687,6 +687,10 @@ tune_failure_cause <- function(tune_results) {
 #'   from the notes, as below. Prepping only on failure costs a run that
 #'   does not fail nothing, where a prep with feature selection can take
 #'   minutes.
+#' * An isolated fit whose process died, an error note starting with
+#'   `PROCESS_DIED` ([abort_process_died()]), ends the unit with
+#'   `horizons_error_process_died`, whatever fold or candidate it was: the
+#'   configuration or member fails, as a process's death is its own failure.
 #' * A result in which every model failed ([tune::.is_cataclysmic()]) ends the
 #'   unit: `failure` and the most frequent error note are its message, and it
 #'   carries the trace tune kept for the first error (tune keeps one for an
@@ -727,6 +731,17 @@ check_tune_result <- function(results,
     unit_step("prep", quiet_selection_warnings(recipes::prep(recipe)))
   }
 
+  ## A fit's own process that died ----------------------------------------------
+
+  ### An isolated fit whose process ended without its result
+  ### (abort_process_died()) fails the unit whatever fold or candidate it
+  ### was, since the fold rule would otherwise leave only that candidate out
+  ### and the unit could succeed on what remained. tune kept the error as
+  ### text, which starts with PROCESS_DIED.
+  died <- errors[["note"]][grepl(PROCESS_DIED, errors[["note"]], fixed = TRUE)]
+
+  if (length(died) > 0) abort_process_died_in_tune(died[1], call = call)
+
   ## Every model failed, or, under debug, any did ---------------------------------
 
   every_model <- !is.null(failure) && tune::.is_cataclysmic(results)
@@ -735,6 +750,23 @@ check_tune_result <- function(results,
 
   abort_tune_failure(results, if (every_model) failure else "a fit failed inside tune",
                      call = call)
+
+}
+
+#' Abort a unit because an isolated fit's process died inside tune
+#'
+#' @param note Character(1). tune's note: the text of the
+#'   `horizons_error_process_died` raised inside the fit.
+#' @param call The frame the failure reports.
+#' @return Does not return; aborts with class `horizons_error_process_died`
+#'   (kind `run`), the note as its message, as raised.
+#' @keywords internal
+#' @noRd
+abort_process_died_in_tune <- function(note, call = rlang::caller_env()) {
+
+  cause <- condition_summary(note)
+
+  abort_horizons("{cause}", kind = "run", class = "horizons_error_process_died", call = call)
 
 }
 

@@ -434,6 +434,15 @@ tune_warmstart_bayes <- function(workflow,
 #' on candidates left out ([incomplete_note()]), and under `debug` the first
 #' stops the call.
 #'
+#' An isolated fit whose process dies ([run_isolated()]) fails the unit
+#' with `horizons_error_process_died`, whether tune kept it as a note or
+#' dropped the candidate, so the search is not fallen back from. tune keeps
+#' no note of a dropped candidate, and on the resamples axis prints its
+#' reason on the daemon, so the deaths are read from the processes the fits
+#' ran in ([isolated_deaths()]): this one, and each daemon when the folds ran
+#' on them. The record is emptied before the search too, since what it holds
+#' then is other units' deaths, read already from tune's notes.
+#'
 #' A daemon that dies during an iteration on the resamples axis does not
 #' reach here at all: tune prints "Optimization stopped prematurely" and
 #' returns the iterations so far. The verb reads the death from the
@@ -478,6 +487,12 @@ bayes_search <- function(workflow,
   interrupted <- FALSE
   n_dropped   <- 0L
   search_cap  <- paste0(toupper(substr(search, 1, 1)), substring(search, 2))
+
+  ## The deaths of isolated fits' processes, read where the fits ran: on the
+  ## daemons when tune sends them the folds. What the record holds now is
+  ## other units', so it is emptied first.
+  on_daemons <- isTRUE(allow_par)
+  isolated_deaths(on_daemons)
 
   read_log <- function(m) {
     text <- cli::ansi_strip(conditionMessage(m))
@@ -532,6 +547,14 @@ bayes_search <- function(workflow,
     stop(stopped)
 
   }
+
+  ## An isolated fit's process that died fails the unit, as it does in the
+  ## grid (check_tune_result()), even where tune dropped every candidate it
+  ## killed and kept no note of it; under debug too, before the dropped
+  ## candidate is reported as a failure with no record of why
+  died <- isolated_deaths(on_daemons)
+
+  if (length(died) > 0) abort_process_died_in_tune(died[1])
 
   if (debug && !is.null(all_failed)) {
 

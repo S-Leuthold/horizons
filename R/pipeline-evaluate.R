@@ -30,8 +30,9 @@
 #'   train/test split, the CV folds and each configuration's stages) is
 #'   seeded from it and its own name, so a configuration's results depend on
 #'   the seed alone, not on the other configurations, the order they run in,
-#'   the workers or the session's generator (except `cubist`, whose neighbour
-#'   step no seed reaches; see the reproducibility note in [configure()]).
+#'   the workers or the session's generator (for `cubist`, because each of
+#'   its fits runs in a process of its own; see the reproducibility note in
+#'   [configure()]).
 #'   `NULL` (the default) takes the
 #'   seed the object records (a [select_training()] result's), else one
 #'   integer from the session's random stream, which is left where it was:
@@ -41,8 +42,8 @@
 #'   [ensemble()] take it unless given one.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
-#'   `output_dir`, `verbose`, `debug`, `breaker` and `keep_traces`, and
-#'   refuses any other field that is set. The
+#'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces` and
+#'   `isolate`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as
 #'   `evaluation$control`.
 #'
@@ -57,12 +58,15 @@
 #'   values) and tuned with this run's settings
 #'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
 #'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
-#'   and `outcome_range`) and this run's response trim
-#'   (`response_threshold`, `NA` when none was requested); either mismatch
-#'   aborts, naming what differs. A run left to draw its seed from the
-#'   session draws another in a new session, so its split moves: the
-#'   refusal then names the seed the checkpoints were tuned with, to pass as
-#'   `seed =`.
+#'   and `outcome_range`), this run's response trim
+#'   (`response_threshold`, `NA` when none was requested) and, when the grid
+#'   has a `cubist` configuration, `control_horizons(isolate = )`, which
+#'   decides its scores (see "Isolated fits"); either mismatch aborts,
+#'   naming what differs. A row that does not record a setting this run
+#'   records, written by an earlier version, is evaluated again. A run left
+#'   to draw its seed from the session draws another in a new session, so
+#'   its split moves: the refusal then names the seed the checkpoints were
+#'   tuned with, to pass as `seed =`.
 #'   So re-standardized spectra, a rescaled outcome, or another outcome on the
 #'   same samples is refused rather than resumed, while adding a sibling
 #'   response with `add_response()` or a `meta` column resumes. Keep one
@@ -127,10 +131,10 @@
 #'
 #' Results do not depend on the backend, the number of daemons, which daemon
 #' runs a configuration or the order the work finishes in: every draw is
-#' seeded from the run's `seed` and its own name, where it is made (except
-#' `cubist`, whose neighbour step no seed reaches; see the reproducibility
-#' note in [configure()]). The daemons' own seed (`mirai::daemons(seed = )`)
-#' has no effect on them.
+#' seeded from the run's `seed` and its own name, where it is made, and each
+#' `cubist` fit runs in a process of its own (see "Isolated fits" below),
+#' unless `control_horizons(isolate = FALSE)`. The daemons' own seed
+#' (`mirai::daemons(seed = )`) has no effect on them.
 #'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
@@ -188,9 +192,11 @@
 #' own, it cancels the configurations still running on the daemons, so a
 #' configuration still running stops before it writes its checkpoint; a
 #' checkpoint is written whole or not at all, so one the cancel reaches
-#' mid-write is either complete or absent. A configuration
-#' inside a compiled fit (a Cubist fit, say) stops only when that fit
-#' returns, its daemon busy until then, and writes nothing. On the resamples
+#' mid-write is either complete or absent. A configuration in an isolated
+#' fit (each `cubist` fit; see "Isolated fits") stops at once, its fit's
+#' process ended with it. One inside another compiled fit (an xgboost fit,
+#' say) stops only when that fit returns, its daemon busy until then, and
+#' writes nothing. On the resamples
 #' axis the folds' tasks are tune's, which `evaluate()` does not cancel: they
 #' run to their end on the daemons, and write nothing. The cancellation and
 #' the longest-first start both need mirai's dispatcher, which mirai keeps
@@ -211,6 +217,42 @@
 #' configuration's `warnings`, with the unit's. Messages and printed output are
 #' not relayed, and a warning raised while a daemon loads horizons itself is
 #' dropped.
+#'
+#' A parallel run checks, before anything is drawn, that the daemons on this
+#' machine fit in the memory it has. Each daemon holds a copy of the run's
+#' data and, while it fits a model whose fits are isolated, that fit's
+#' process beside it; what one needs is estimated from the run's rows and
+#' predictors, by a rule fitted to measured runs, so it is approximate. When
+#' the daemons on this machine (each names its machine in the check at the
+#' door) would need more than the memory available, `evaluate()` warns once,
+#' with class `horizons_warning_input`, naming the count that fits, records
+#' it on the `log`, and under `verbose` the tree's parallel line says "more
+#' memory than available"; the run goes on. The memory available is
+#' `ps::ps_system_memory()`'s, which under a container's or `systemd-run`'s
+#' memory cap is the machine's, not the cap's. Daemons on another machine
+#' are not checked.
+#'
+#' @section Isolated fits:
+#' A model whose engine keeps state from one fit to the next in the process
+#' that fits it is fitted in a process of its own, started for that one fit
+#' and ended once the fitted model is back: `cubist`, whose Cubist C code
+#' carries the generator behind its neighbour step's distance cutoff, and
+#' memory, across fits. Its results then depend on the seed alone, and a
+#' long run's memory does not grow with its fits. The fitted model comes
+#' back to the process that asked for it and predicts there. This holds
+#' wherever the fit runs: in this session, on a configs-axis daemon, or in
+#' one of tune's fold tasks on the resamples axis, where each daemon fitting
+#' a `cubist` fold has its fit's process beside it. Starting the process
+#' costs about 0.7 s a fit, measured on Linux. A fit's warnings and errors are raised
+#' in the process that asked, with their classes, so a configuration records
+#' them as it would. A fit's process that ends without its result (killed,
+#' most often for memory) fails its configuration, whatever fold or stage it
+#' was, with `error_message` saying so and `class`
+#' `horizons_error_process_died`, and the run goes on, since no daemon died.
+#' `control_horizons(isolate = FALSE)`, or `options(horizons.isolate =
+#' FALSE)`, fits them in the process that runs the configuration instead;
+#' the tree says which models were isolated, or that isolation was off, and
+#' a run with it off records a note on the `log`.
 #'
 #' @section Response outliers:
 #' When `validate()` was asked to remove response outliers
@@ -259,7 +301,9 @@
 #' configurations need, which this session has, is refused before the run
 #' (`horizons_error_missing_package`, see "Parallelism"); one found lacking
 #' it mid-run stops the run as systemic on the configs axis, and on the
-#' resamples axis fails the configurations it runs with tune's error.
+#' resamples axis fails the configurations it runs with tune's error. An
+#' isolated fit whose process dies fails its configuration with
+#' `horizons_error_process_died` (see "Isolated fits").
 #' So does a daemon that dies, during a Bayesian iteration too (see
 #' "Parallelism"). When some configurations failed and
 #' the rest are returned, one `horizons_warning_partial_failure` names them
@@ -528,9 +572,17 @@ evaluate <- function(x,
   ## On either axis the daemons run horizons code (on the resamples axis,
   ## tune's tasks run the recipe steps and the PLS engine), so they must
   ## run this session's horizons: checked here, before anything is drawn.
+  ## The daemons on this machine against the memory it has, for this run's
+  ## data, said once and on the tree's parallel line
+  short_memory <- FALSE
+
   if (axis$axis != "sequential") {
-    check_parallel_workers("evaluate", needed_packages(configs$model, configs$feature_selection), collector,
-                           results = results_so_far(list()))
+    reports <- check_parallel_workers("evaluate", needed_packages(configs$model, configs$feature_selection), collector,
+                                      results = results_so_far(list()))
+    short_memory <- check_daemon_memory(reports, configs$model, control$isolate,
+                                        n_rows       = nrow(analysis),
+                                        n_predictors = sum(role_map$role == "predictor"),
+                                        collector    = collector, verb = "evaluate")
   }
 
   ## Without mirai's dispatcher the configs axis runs as asked, but loses the
@@ -546,6 +598,10 @@ evaluate <- function(x,
     ))
 
   }
+
+  ## Fits a model's engine would otherwise carry state across run in this
+  ## session when isolation is turned off, which the log notes
+  log_isolation_off(collector, configs$model, control$isolate)
 
   if (axis$axis != "sequential") {
 
@@ -654,7 +710,8 @@ evaluate <- function(x,
   ## place a setting is added. The metric is absent on purpose: every row
   ## carries all six cv_ columns and the ranking is recomputed on each run, so
   ## changing it cannot make a row stale. So is the parallel axis, which the
-  ## results do not depend on.
+  ## results do not depend on. Isolation is recorded below it, for the grids
+  ## it changes.
 
   settings <- eval_settings(
     cv_folds        = cv_folds,
@@ -682,6 +739,14 @@ evaluate <- function(x,
     ## no trim was requested, as prune_threshold is when not pruning.
     response_threshold = if (is.null(trim_request)) NA_real_ else trim_request$threshold
   )
+
+  ## Whether the models MODEL_SPECS marks `isolate` were fitted each in a
+  ## process of its own (control_horizons(isolate = )): for cubist that
+  ## decides its neighbour step's cutoff, and so its scores, so a row fitted
+  ## under the other setting is refused, and one written before the setting
+  ## was recorded is re-evaluated. Recorded only when the grid fits such a
+  ## model, so another grid's checkpoints resume as before.
+  if (length(isolated_models(configs$model)) > 0) settings$isolate <- control$isolate
 
   ## -----------------------------------------------------------------------
   ## Step 6: Load checkpoints (if any)
@@ -801,17 +866,11 @@ evaluate <- function(x,
 
     }
 
-    if (axis$axis != "sequential") {
-
-      ## A parallel axis has two daemons or more
-      cat(paste0("\u2502  Parallel: over ", axis$axis, " on ", plan_label,
-                 " (", plan_workers, " daemons",
-                 if (no_dispatcher) ", no dispatcher", ")\n"))
-
-    } else if (allow_par && debug) {
-
-      cat("\u2502  Parallel: off, since debug runs in this session\n")
-
+    ## A parallel axis has two daemons or more
+    for (line in parallel_tree_lines(axis$axis, plan_workers, configs$model, control$isolate,
+                                     no_dispatcher = no_dispatcher, short_memory = short_memory,
+                                     debug_off = allow_par && debug)) {
+      cat(paste0("\u2502  ", line, "\n"))
     }
 
     cat("\u2502\n")
@@ -948,7 +1007,8 @@ evaluate <- function(x,
         pca_threshold   = recipe_cfg$pca_threshold,
         outcome_range   = outcome_range,
         debug           = debug,
-        keep_traces     = control$keep_traces
+        keep_traces     = control$keep_traces,
+        isolate         = control$isolate
       ), results_so_far(results_list), output_dir, daemons = axis$tune_allow_par)
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -1115,6 +1175,7 @@ evaluate <- function(x,
       settings        = settings,
       checkpoint_dir  = normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE),
       keep_traces     = control$keep_traces,
+      isolate         = control$isolate,
       pkg_version     = as.character(utils::packageVersion("horizons"))
     )
 
@@ -3462,7 +3523,8 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' @param results The verb's results table with no rows, which a stop
 #'   before the first unit carries, so it has the shape of one after it.
 #' @param call The frame a refusal reports: the verb's.
-#' @return `NULL`, invisibly.
+#' @return The daemons' reports ([daemon_reports()]), invisibly, for the
+#'   memory check.
 #' @keywords internal
 #' @noRd
 check_parallel_workers <- function(verb, needed, collector, results = NULL, call = rlang::caller_env()) {
@@ -3502,7 +3564,7 @@ check_parallel_workers <- function(verb, needed, collector, results = NULL, call
 
   }
 
-  invisible(NULL)
+  invisible(reports)
 
 }
 
@@ -3539,9 +3601,10 @@ running_under_load_all <- function() {
 #' @param verb Character(1). The verb asking.
 #' @param results The verb's results table with no rows, for a stop.
 #' @param call The frame a refusal reports.
-#' @return List, one report per task: `pid` (integer), `version`
-#'   (character, `NA` when horizons cannot be loaded) and `missing`
-#'   (character). A seam, so a test can report other daemons.
+#' @return List, one report per task: `pid` (integer), `host` (the machine's
+#'   name, which the memory check reads), `version` (character, `NA` when
+#'   horizons cannot be loaded) and `missing` (character). A seam, so a test
+#'   can report other daemons.
 #' @keywords internal
 #' @noRd
 daemon_reports <- function(packages, verb = "evaluate", results = NULL, call = rlang::caller_env()) {
@@ -3552,6 +3615,7 @@ daemon_reports <- function(packages, verb = "evaluate", results = NULL, call = r
   tasks <- unclass(mirai::everywhere({
     loads <- vapply(packages, requireNamespace, logical(1), quietly = TRUE)
     list(pid     = Sys.getpid(),
+         host    = Sys.info()[["nodename"]],
          version = if (loads[["horizons"]]) as.character(utils::packageVersion("horizons")) else NA_character_,
          missing = packages[!loads])
   }, .args = list(packages = packages), .compute = NULL))
@@ -3668,7 +3732,7 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
-#'   `keep_traces` and `pkg_version`. There is no `allow_par`: on
+#'   `keep_traces`, `isolate` and `pkg_version`. There is no `allow_par`: on
 #'   the configs axis tune always runs sequentially inside the worker. There
 #'   is no `debug` either, since a debug run never dispatches.
 #'
@@ -3810,6 +3874,7 @@ evaluate_config_worker <- function(config_i, payload_path) {
     pca_threshold    = shared$pca_threshold,
     outcome_range    = shared$outcome_range,
     keep_traces      = shared$keep_traces,
+    isolate          = shared$isolate,
     outside_warnings = outside
   )
 

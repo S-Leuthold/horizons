@@ -431,6 +431,43 @@ describe("evaluate() - its control", {
 
   })
 
+  it("says in the tree which models fit in a process of their own, and with isolation off says so and notes it", {
+
+    ## Read the fixture before the runner is mocked (helper-memo.R)
+    template <- ev60()$evaluation$results[1, ]
+    seen     <- list()
+
+    local_mocked_bindings(evaluate_single_config = function(config_row, ..., isolate) {
+      seen[[config_row$config_id]] <<- isolate
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    run <- function(...) {
+      out <- utils::capture.output(ev <- suppressWarnings(evaluate(
+        make_eval_object(n = 60, n_configs = 2), seed = 42L,
+        control = control_horizons(verbose = TRUE, ...)
+      )))
+      list(line = grep("Isolated fits:", out, value = TRUE, fixed = TRUE), ev = ev)
+    }
+
+    ## The line's wording is isolation_tree_line()'s, pinned in its own test
+    ## (test-isolated-engines.R) and the tree's snapshot
+    on <- run()
+    expect_identical(on$line, paste0("│  ", isolation_tree_line(c("rf", "cubist"), TRUE)))
+    expect_false(any(on$ev$log$type == "note" & grepl("isolate = FALSE", on$ev$log$message, fixed = TRUE)))
+    expect_true(on$ev$evaluation$control$isolate)
+    expect_identical(unlist(seen), c(cfg_001 = TRUE, cfg_002 = TRUE))
+
+    off <- run(isolate = FALSE)
+    note <- off$ev$log[off$ev$log$type == "note" & grepl("isolate = FALSE", off$ev$log$message, fixed = TRUE), ]
+    expect_identical(off$line, paste0("│  ", isolation_tree_line(c("rf", "cubist"), FALSE)))
+    expect_identical(nrow(note), 1L)
+    expect_identical(note$ids, list("cubist"))
+    expect_false(off$ev$evaluation$control$isolate)
+    expect_identical(unlist(seen), c(cfg_001 = FALSE, cfg_002 = FALSE))
+
+  })
+
   it("refuses a control field it does not use, before anything runs", {
 
     local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
@@ -2188,7 +2225,10 @@ describe("evaluate() - checkpoint data provenance", {
                                    ## and its outcome range (#76), likewise
                                    outcome_range = c(0, Inf),
                                    ## no response trim requested (#77)
-                                   response_threshold = NA_real_))
+                                   response_threshold = NA_real_,
+                                   ## and isolation, since the grid fits
+                                   ## cubist
+                                   isolate = TRUE))
 
     row <- readRDS(file.path(tmpdir, "checkpoints", "cfg_001.rds"))
     expect_identical(row$data_hash, manifest$data_hash)
@@ -2831,6 +2871,75 @@ describe("evaluate() - tuning-settings provenance", {
 
   })
 
+  ## Isolation decides cubist's neighbour cutoff, and so its scores, so a grid
+  ## that fits cubist records it; another grid does not, and resumes across
+  ## a change of it.
+
+  it("refuses to resume a grid with cubist under the other isolate setting, naming it, and evaluates again a row that does not record it", {
+
+    ## CK-A's grid fits rf and cubist, each cubist fit in a process of its own
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
+    first  <- ck$value$first
+
+    expect_true(all(vapply(first$evaluation$results$settings, `[[`, logical(1), "isolate")))
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                control = control_horizons(output_dir = tmpdir, isolate = FALSE))),
+      horizons_error_input = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_error_input")
+    expect_match(flat_message(err), "isolate = TRUE (this run: FALSE)", fixed = TRUE)
+
+    ## Rows written before isolation was recorded are evaluated again, as a
+    ## row missing any setting is
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      row <- readRDS(f)
+      row$settings[[1]]$isolate <- NULL
+      saveRDS(row, f)
+    }
+
+    template <- first$evaluation$results[1, ]
+    ran      <- character(0)
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      ran <<- c(ran, config_row$config_id)
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    again <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
+
+    expect_setequal(ran, obj$config$configs$config_id)
+    expect_true(all(vapply(again$evaluation$results$settings, `[[`, logical(1), "isolate")))
+
+  })
+
+  it("records no isolate setting for a grid that fits no isolated model, which resumes across a change of it", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- character(0)
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      ran <<- c(ran, config_row$config_id)
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model <- c("rf", "plsr")
+    tmpdir <- withr::local_tempdir()
+
+    first <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                       control = control_horizons(output_dir = tmpdir, isolate = FALSE)))
+    expect_false("isolate" %in% names(first$evaluation$results$settings[[1]]))
+    expect_length(ran, 2L)
+
+    resumed <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
+    expect_length(ran, 2L)
+    expect_identical(resumed$evaluation$results$config_id, first$evaluation$results$config_id)
+
+  })
+
 })
 
 
@@ -3158,6 +3267,135 @@ describe("evaluate() - the circuit breaker", {
 ## configuration. These mock the axis and the count; the two after them kill
 ## a real daemon.
 
+## An isolated fit's process that dies is its configuration's failure: the
+## row reads failed with the reason, and the run goes on, since no daemon
+## of the user's pool died (local_dying_fits(), helper-parallel.R).
+
+describe("evaluate() - an isolated fit's process that dies", {
+
+  it("fails its configuration with the reason, whatever fold it was, and the run goes on", {
+
+    skip_on_os("windows")
+
+    ## One grid fit of the cubist configuration dies: its other candidates
+    ## were scored on every fold, so the fold rule alone would keep it
+    local_dying_fits(function(i) i == 2L)
+
+    before <- connected_daemons()
+    ev     <- with_deadline(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L)), 300)
+    res    <- ev$evaluation$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2],
+                 paste("^Grid search failed:", PROCESS_DIED, "a Cubist fit ended without returning its result"))
+    expect_identical(connected_daemons(), before)
+
+  })
+
+  it("fails its configuration when the process dies during the Bayesian search", {
+
+    skip_unless_slow_tier()
+    skip_on_os("windows")
+
+    ## Every fit once the search starts dies, so tune drops each candidate it
+    ## proposes
+    in_search <- FALSE
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      in_search <<- TRUE
+      on.exit(in_search <<- FALSE)
+      real_bayes(...)
+    }, .package = "tune")
+    local_dying_fits(function(i) in_search)
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$tuning$bayesian_iter <- 2L
+
+    res <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE)), 300)$evaluation$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2], paste("^Bayesian search failed:", PROCESS_DIED))
+
+    ## Under debug, which stops at the first failure, the death is the reason
+    ## given, not a candidate dropped with no record of why
+    err <- expect_error(
+      with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE,
+                                              control = control_horizons(debug = TRUE))), 300),
+      class = "horizons_error_process_died"
+    )
+    expect_match(conditionMessage(err), PROCESS_DIED, fixed = TRUE)
+
+  })
+
+  it("does not fail a later configuration's Bayesian search with a death an earlier one's grid met", {
+
+    skip_unless_slow_tier()
+    skip_on_os("windows")
+
+    ## cubist first, its second grid fit dying; then rf, whose search reads
+    ## the deaths recorded in this session once it returns
+    local_dying_fits(function(i) i == 2L)
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model <- c("cubist", "rf")
+    obj$config$tuning$bayesian_iter <- 2L
+
+    res <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE)), 300)$evaluation$results
+
+    expect_identical(res$status, c("failed", "success"))
+    expect_identical(res$class[1], "horizons_error_process_died")
+
+  })
+
+  it("fails its configuration on the resamples axis too, where tune prints the dropped candidate's reason on a daemon (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_on_os("windows")
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+
+    ## On the daemons, every isolated fit's process dies while the flag
+    ## exists, which the search alone creates: so each candidate the search
+    ## proposes fails in every fold, and tune drops it with its note
+    flag <- withr::local_tempfile()
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("isolated_fit", ns)
+      unlockBinding("isolated_fit", ns)
+      assign("isolated_fit", function(..., .isolated_fit, .isolated_engine) {
+        if (file.exists(flag)) {
+          get("run_isolated", ns)(quote(tools::pskill(Sys.getpid(), 9L)), what = "a Cubist fit")
+        }
+        real(..., .isolated_fit = .isolated_fit, .isolated_engine = .isolated_engine)
+      }, envir = ns)
+    }, .args = list(flag = flag), .compute = NULL)[], 30)
+
+    real_bayes <- tune::tune_bayes
+    local_mocked_bindings(tune_bayes = function(...) {
+      file.create(flag)
+      on.exit(unlink(flag))
+      real_bayes(...)
+    }, .package = "tune")
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$tuning$bayesian_iter <- 2L
+
+    res <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L, prune = FALSE,
+      control = control_horizons(allow_par = TRUE, parallelize_over = "resamples")
+    )), 600)$evaluation$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2], paste("^Bayesian search failed:", PROCESS_DIED))
+
+  })
+
+})
+
 describe("evaluate() - a worker's death", {
 
   it("stops the run as systemic when the daemons fall across a configuration, with the rows finished so far", {
@@ -3436,9 +3674,9 @@ describe("evaluate() - a package missing where a configuration ran", {
 
     ## cubist's engine cannot be loaded where its configuration runs, though
     ## the door found it in this session
-    local_mocked_bindings(define_model_spec = function(model) {
+    local_mocked_bindings(define_model_spec = function(model, ...) {
       if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
-      real_spec(model)
+      real_spec(model, ...)
     })
 
     err <- expect_error(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L)),

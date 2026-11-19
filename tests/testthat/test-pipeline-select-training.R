@@ -1,6 +1,12 @@
 # tests/testthat/test-pipeline-select-training.R
 # Tests for select_training(): the verb end to end.
 
+## The draws here run in this session: the tests replace functions inside the
+## draw (the registry, the space's build, the search), which a process of its
+## own would not see, and a process loads horizons for each draw. The draw's
+## own process is tested with isolate = TRUE, in test-pipeline-select-training.R.
+withr::local_options(horizons.isolate = FALSE)
+
 
 ## =============================================================================
 ## Helpers
@@ -358,7 +364,7 @@ test_that("select_training() returns the pool's log", {
   fx$pool$log <- tibble::add_row(new_log(), verb = "spectra", type = "note", topic = NA_character_,
                                  message = "a note", ids = list("P001"), n = 1L)
 
-  expect_identical(quiet_select(fx, k = 5, properties = "clay")$log, fx$pool$log)
+  expect_identical(without_draw_note(quiet_select(fx, k = 5, properties = "clay")$log), fx$pool$log)
 
 })
 
@@ -414,7 +420,8 @@ test_that("select_training() writes its coverage warning to the log before raisi
   expect_match(conditionMessage(warned[[1]]), "Short by 400 cm-1 at the low end", fixed = TRUE)
 
   ## The row is on the object, after the pool's
-  row <- out$log[out$log$verb == "select_training", ]
+  row <- without_draw_note(out$log)
+  row <- row[row$verb == "select_training", ]
   expect_identical(nrow(row), 1L)
   expect_identical(row$type, "warning")
   expect_identical(row$topic, "coverage")
@@ -443,7 +450,8 @@ test_that("select_training() under warn = 2 ends in one error that keeps the sel
 
   expect_s3_class(err$object, "horizons_data")
   expect_identical(err$log$topic, "coverage")
-  expect_identical(err$object$log[err$object$log$verb == "select_training", ]$topic, "coverage")
+  kept <- without_draw_note(err$object$log)
+  expect_identical(kept[kept$verb == "select_training", ]$topic, "coverage")
 
 })
 
@@ -999,7 +1007,8 @@ test_that("every warning is recorded on the log, one row per topic, before it is
 
   run  <- collect_warnings(select_training(fx$targets, fx$pool, k = 60L, properties = "clay",
                                            control = control_horizons(min_resemblance_rows = 1000L)))
-  rows <- run$value$log[run$value$log$verb == "select_training", ]
+  rows <- without_draw_note(run$value$log)
+  rows <- rows[rows$verb == "select_training", ]
 
   ## Every warning a horizons warning, one per topic in the order the rows
   ## were written, each carrying its own row
@@ -2917,5 +2926,174 @@ test_that("select_training() refuses to return a record of the wrong shape", {
     expect_error(quiet_select(fx, k = 5), "selection\\$groups",
                  class = "horizons_error_validation")
   )
+
+})
+
+
+## =============================================================================
+## The draw in a process of its own (isolate = TRUE)
+## =============================================================================
+## The draw runs in a process started for it, which loads the installed
+## horizons, so these tests run on an installed build. The file's option runs
+## every other draw here in this session.
+
+## A draw of the fixture with its tree, its warnings and its value, under
+## isolate as given
+draw_with_isolate <- function(fx, isolate, ...) {
+  warned <- list()
+  out    <- utils::capture.output(value <- withCallingHandlers(
+    select_training(fx$targets, fx$pool, seed = 7L, ...,
+                    control = control_horizons(isolate = isolate, verbose = TRUE)),
+    warning = function(w) {
+      warned[[length(warned) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    }
+  ))
+  list(value = value, output = out, warnings = warned)
+}
+
+test_that("select_training() draws in a process of its own what it draws in this session, tree, log and warnings too", {
+
+  skip_unless_slow_tier()
+  skip_on_cran()
+  skip_if_dev_package()
+
+  fx <- select_fixture()
+  withr::local_options(cli.num_colors = 1L)
+
+  ## The decision on the real reader: this installed build, loaded from the
+  ## library that holds it, draws in a process of its own
+  expect_null(draw_in_session(resolve_control(control_horizons(isolate = TRUE), "select_training")))
+
+  ## k above oc's measured rows, so it is skipped with a warning; clustered,
+  ## so the draw's seeded steps run
+  there <- with_deadline(draw_with_isolate(fx, TRUE, k = 200, scope = "cluster", clusters = 2L), 60)
+  here  <- draw_with_isolate(fx, FALSE, k = 200, scope = "cluster", clusters = 2L)
+
+  ## Each says where it drew, and a draw here is noted
+  where <- function(run) grep("Draw:", run$output, value = TRUE, fixed = TRUE)
+  expect_identical(where(there), paste0("│  ├─ ", draw_tree_line(NULL)))
+  expect_identical(where(here), paste0("│  ├─ ", draw_tree_line("isolate")))
+  expect_identical(nrow(draw_notes(there$value$log)), 0L)
+  expect_identical(nrow(draw_notes(here$value$log)), 1L)
+
+  ## Everything else but the times and the setting that chose where it ran
+  same <- function(x) {
+    x$selection$timestamp <- NULL
+    x$selection$settings$control$isolate <- NULL
+    x$log <- without_draw_note(x$log)
+    x$log$time <- NULL
+    x
+  }
+
+  expect_identical(same(there$value), same(here$value))
+  rest <- function(run) run$output[!grepl("Draw:", run$output, fixed = TRUE)]
+  expect_identical(rest(there), rest(here))
+  expect_true(any(grepl("Selecting training set", there$output, fixed = TRUE)))
+  expect_length(there$warnings, 1L)
+  expect_s3_class(there$warnings[[1]], "horizons_warning_skipped")
+  expect_identical(lapply(there$warnings, class), lapply(here$warnings, class))
+  expect_identical(vapply(there$warnings, conditionMessage, character(1)),
+                   vapply(here$warnings, conditionMessage, character(1)))
+  expect_true(there$value$selection$settings$control$isolate)
+  expect_false(here$value$selection$settings$control$isolate)
+
+})
+
+test_that("select_training() refuses in its own process as it does here, naming itself, with the findings", {
+
+  skip_unless_slow_tier()
+  skip_on_cran()
+  skip_if_dev_package()
+
+  fx <- select_fixture()
+
+  ## A property the pool lacks is found once the library is read, in the
+  ## draw's process
+  err <- expect_error(
+    with_deadline(select_training(fx$targets, fx$pool, k = 10, properties = "nope",
+                                  control = control_horizons(isolate = TRUE)), 60),
+    class = "horizons_error_input"
+  )
+
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(err$findings, "`properties` not in the pool's responses: \"nope\"", fixed = TRUE)
+
+})
+
+test_that("select_training() draws in this session under isolate = FALSE, load_all() or a horizons installed again since it loaded, and says why", {
+
+  fx <- select_fixture()
+
+  ## A process of its own would fail the call
+  local_mocked_bindings(mirai = function(...) stop("a process was started"), .package = "mirai")
+
+  draw <- function(isolate = TRUE) {
+    suppressWarnings(select_training(fx$targets, fx$pool, k = 10, seed = 7L,
+                                     control = control_horizons(isolate = isolate)))
+  }
+
+  ## Each says why on the log, and records that the draw was not isolated
+  in_session <- function(out, why) {
+    expect_s3_class(out, "horizons_data")
+    expect_match(draw_notes(out$log)$message, why, fixed = TRUE)
+    expect_false(out$selection$settings$control$isolate)
+  }
+
+  in_session(draw(isolate = FALSE), "The draw ran in this session, as `control_horizons(isolate = FALSE)` asked")
+
+  local_mocked_bindings(running_under_load_all = function() TRUE)
+  in_session(draw(), "The draw ran in this session, under `devtools::load_all()`")
+
+  local_mocked_bindings(running_under_load_all = function() FALSE,
+                        in_session_library = function() list(lib = .libPaths()[1], built = "another build"))
+  in_session(draw(), "is not the one it loaded")
+
+  ## And on the build it was loaded from, in a process of its own
+  local_mocked_bindings(in_session_library = function() list(lib = .libPaths()[1], built = loaded_build$built))
+  expect_error(draw(), "a process was started")
+
+})
+
+test_that("the draw's process is given this session's horizons options, the download's and the tree's", {
+
+  withr::local_options(horizons.cache_dir = "a-cache", timeout = 1234, download.file.method = "libcurl",
+                       download.file.extra = "--proxy a-proxy", HTTPUserAgent = "an-agent", digits = 5)
+
+  got <- draw_options()
+
+  expect_identical(
+    got[c("horizons.cache_dir", "timeout", "download.file.method", "download.file.extra", "HTTPUserAgent", "digits")],
+    list(horizons.cache_dir = "a-cache", timeout = 1234, download.file.method = "libcurl",
+         download.file.extra = "--proxy a-proxy", HTTPUserAgent = "an-agent", digits = 5L)
+  )
+  expect_true(all(c("cli.num_colors", "cli.unicode") %in% names(got)))
+
+})
+
+test_that("select_training() stops with horizons_error_process_died when the draw's process dies", {
+
+  skip_on_os("windows")
+
+  fx <- select_fixture()
+
+  ## The draw's process killed as it starts, in place of the draw
+  real_mirai <- mirai::mirai
+  local_mocked_bindings(running_under_load_all = function() FALSE,
+                        in_session_library = function() list(lib = .libPaths()[1], built = loaded_build$built))
+  local_mocked_bindings(mirai = function(.expr, ..., .compute = NULL) {
+    killed <- quote(tools::pskill(Sys.getpid(), 9L))
+    real_mirai(.expr = killed, .compute = .compute)
+  }, .package = "mirai")
+
+  err <- expect_error(
+    with_deadline(select_training(fx$targets, fx$pool, k = 10, control = control_horizons(isolate = TRUE)), 30),
+    class = "horizons_error_process_died"
+  )
+
+  expect_s3_class(err, "horizons_error_run")
+  expect_identical(rlang::call_name(err$call), "select_training")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)),
+               paste(PROCESS_DIED, "the library draw ended without returning its result"), fixed = TRUE)
 
 })

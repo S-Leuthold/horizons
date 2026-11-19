@@ -26,7 +26,8 @@ fit_single_config(
   min_ad_rows = N_AD_TRAIN_MIN,
   min_degradation_rows = DEGRADATION_MIN_N,
   debug = FALSE,
-  keep_traces = FALSE
+  keep_traces = FALSE,
+  isolate = TRUE
 )
 }
 \arguments{
@@ -98,6 +99,10 @@ are still recorded.}
 
 \item{keep_traces}{Logical. Keep a failure's backtrace, as text, in the
 member's \code{trace}.}
+
+\item{isolate}{Logical. Fit a model whose engine \code{MODEL_SPECS} marks
+\code{isolate} through its isolated twin, each fit in a process of its own
+(\code{model_engine()}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
 }
 \value{
 List with fields: config_id, status, degraded (\code{NA} when the

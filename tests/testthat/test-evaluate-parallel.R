@@ -63,6 +63,7 @@ worker_payload <- function() {
                                                outcome_range = c(-Inf, Inf)),
     checkpoint_dir  = NULL,
     keep_traces     = FALSE,
+    isolate         = TRUE,
     pkg_version     = as.character(utils::packageVersion("horizons"))
   )
 
@@ -160,14 +161,14 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("carries the recipe settings, the outcome range and keep_traces in the payload and hands them to the config (#62, #76)", {
+  it("carries the recipe settings, the outcome range, keep_traces and isolate in the payload and hands them to the config (#62, #76)", {
 
     ## Run in-process: the worker body is an ordinary function, and what is
     ## under test is that it forwards shared$sg_window,
     ## shared$pca_threshold, shared$outcome_range and shared$keep_traces,
     ## not the dispatch. evaluate_single_config() is replaced with a
     ## recorder, so nothing is tuned.
-    expect_true(all(c("sg_window", "pca_threshold", "outcome_range", "keep_traces") %in%
+    expect_true(all(c("sg_window", "pca_threshold", "outcome_range", "keep_traces", "isolate") %in%
                       horizons:::SHARED_ARG_NAMES))
 
     ## A debug run never dispatches, so debug is never sent
@@ -175,12 +176,13 @@ describe("evaluate() parallel worker footprint", {
 
     shared <- worker_payload()
     shared$keep_traces <- TRUE
+    shared$isolate     <- FALSE
 
     seen <- NULL
 
     testthat::local_mocked_bindings(
       evaluate_single_config = function(...) {
-        seen <<- list(...)[c("sg_window", "pca_threshold", "outcome_range", "keep_traces")]
+        seen <<- list(...)[c("sg_window", "pca_threshold", "outcome_range", "keep_traces", "isolate")]
         tibble::tibble(config_id = "cfg_001", status = "failed")
       },
       .package = "horizons"
@@ -190,7 +192,7 @@ describe("evaluate() parallel worker footprint", {
 
     ## The outcome range rides the same payload (#76)
     expect_identical(seen, list(sg_window = 13L, pca_threshold = 0.9,
-                                outcome_range = c(-Inf, Inf), keep_traces = TRUE))
+                                outcome_range = c(-Inf, Inf), keep_traces = TRUE, isolate = FALSE))
 
   })
 
@@ -509,15 +511,12 @@ allow_par_run <- function() memo_fixture("allow_par_run", build_allow_par_run)
 
 build_allow_par_run <- function() {
 
+  ## rf and cubist: the results are compared with a run made later in the
+  ## session, and each cubist fit runs in a process of its own, so its
+  ## neighbour cutoff does not depend on the fits made before it
   daemons_before <- daemons_record()
   obj            <- make_eval_object(n_configs = 2)
   warnings       <- list()
-
-  ## xgboost, not the fixture's cubist: the results are compared with a run
-  ## made later in the session, and Cubist's neighbour cutoff comes from a
-  ## process-wide generator no seed reaches, so a cubist with neighbours
-  ## depends on the fits before it (configure()'s reproducibility note)
-  obj$config$configs$model <- c("rf", "xgboost")
 
   result <- withCallingHandlers(
     evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE)),
@@ -772,6 +771,54 @@ describe("evaluate() - a checkpoint a configs-axis worker could not write", {
     ## The payload the workers read is gone once evaluate() has returned,
     ## with the directory it was written to
     expect_false(dir.exists(file.path(tmpdir, "tmp")))
+
+  })
+
+})
+
+describe("evaluate() - the daemons' memory", {
+
+  it("warns once at its end when this machine's daemons would need more memory than it has, and says so on the tree's parallel line", {
+
+    ## A real result row to return, read before anything is mocked
+    ## (helper-memo.R)
+    template <- allow_par_run()$result$evaluation$results[1, ]
+
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      daemon_reports          = function(...) daemons_on(host = this_host()),
+      check_parallel_backend  = function(...) TRUE,
+      connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE,
+      memory_available        = function() 1e9,
+      evaluate_single_config  = function(config_row, ...) {
+        row <- template
+        row$config_id <- config_row$config_id
+        row
+      },
+      dispatch_configs        = function(configs, payload_path, finished, ...) {
+        for (i in seq_len(nrow(configs))) {
+          finished$rows <- c(finished$rows, list(evaluate_config_worker(i, payload_path)))
+        }
+      }
+    )
+
+    out <- utils::capture.output(got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                          output_dir = withr::local_tempdir(), verbose = TRUE))
+    ))
+
+    input <- Filter(function(w) inherits(w, "horizons_warning_input"), got$warnings)
+    row   <- got$value$log[got$value$log$topic %in% "input", ]
+
+    expect_length(input, 1L)
+    expect_match(gsub("\\s+", " ", conditionMessage(input[[1]])),
+                 "The 2 mirai daemons on this machine would need about", fixed = TRUE)
+    expect_identical(nrow(row), 1L)
+    expect_identical(input[[1]]$log, row)
+    expect_identical(grep("Parallel:", out, value = TRUE, fixed = TRUE),
+                     "│  Parallel: over configs on mirai (2 daemons, more memory than available)")
 
   })
 

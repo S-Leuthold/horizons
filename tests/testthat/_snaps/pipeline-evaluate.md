@@ -12,6 +12,7 @@
       │  Tuning: 3-fold CV (stratified), grid = 2, bayesian = 0
       │  Stratified CV on fewer strata: too little data for 4
       │  Configs: 3 total
+      │  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)
       │
       │  ├─ [1/3] Random Forest + none + raw + none
       │  │  ├─ Test metrics: RPD = 2.12, R² = 0.6, RMSE = 0.5
@@ -44,6 +45,7 @@
       │  Tuning: 3-fold CV (stratified), grid = 2, bayesian = 0
       │  Stratified CV on fewer strata: too little data for 4
       │  Configs: 3 total (2 from checkpoint)
+      │  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)
       │
       │  ├─ [1/3] Random Forest + none + raw + none
       │  │  └─ loaded from checkpoint

@@ -11,6 +11,7 @@
       │  CV: 3-fold stratified on SOC
       │  Stratified CV on fewer strata: too little data for 4
       │  Bayesian: 25 iterations with warm-start
+      │  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)
       │
       │  ├─ [1/2] Random Forest + none + raw + none
       │  │  ├─ Test: RPD = 1.1, R² = 0.61, RMSE = 0.512

@@ -984,10 +984,13 @@ describe("fit() - allow_par without a usable backend", {
 ## sequential loop. Each stage of fit_single_config() is a unit of its own,
 ## so the result does not depend on that.
 ##
-## rf and xgboost, engines the run's seed governs. Cubist, fit60()'s second
-## member, takes its neighbour cutoff from a process-wide generator no seed
-## reaches, so a cubist with neighbours depends on the fits made before it in
-## its process (configure()'s reproducibility note).
+## rf and cubist, fit60()'s members. Each cubist fit runs in a process of its
+## own, so its neighbour cutoff does not depend on the fits made before it,
+## here or on a daemon. The cubist member is end-to-end cover of that path,
+## not its guard: on this fixture's ten predictors the cutoff can come out
+## the same with isolation off. The guard is the direct test at 300
+## predictors (test-isolated-engines.R, "a cubist fit through
+## define_model_spec()").
 
 describe("fit() - on two daemons", {
 
@@ -997,7 +1000,7 @@ describe("fit() - on two daemons", {
     skip_on_cran()
     skip_if_dev_package()
 
-    obj <- make_fit_object(n = 60, n_configs = 2, models = c("rf", "xgboost"))
+    obj <- make_fit_object(n = 60, n_configs = 2)
     obj$config$tuning$final_bayesian_iter <- 2L
 
     seq_fit <- suppressWarnings(
@@ -1537,6 +1540,74 @@ describe("fit() - the progress tree", {
     }
 
     expect_snapshot(invisible(run()))
+
+  })
+
+})
+
+
+## =========================================================================
+## The parallel door: the daemons' memory, and isolation turned off
+## =========================================================================
+## What fit() checks and says at its door before anything is fitted, read
+## with the daemons, their reports and the members mocked, as evaluate()'s
+## door is (test-evaluate-parallel.R, "the daemons' memory").
+
+describe("fit() - its door on daemons", {
+
+  it("warns once when this machine's daemons would need more memory than it has, says so on the Parallel line, and notes isolation turned off", {
+
+    ## Read the fixture before anything is mocked (helper-memo.R)
+    obj <- mfo()
+
+    member <- function(id) list(
+      config_id = id, status = "success", degraded = FALSE, degraded_reason = NA_character_,
+      fitted_workflow = "fitted workflow", best_params = tibble::tibble(mtry = 2L, min_n = 5L),
+      warm_start = TRUE, start_grid_size = 2L, cv_predictions = NULL,
+      test_metrics = tibble::tibble(rmse = 0.5, rrmse = 20, rsq = 0.6, ccc = 0.7, rpd = 1.5, mae = 0.4),
+      cv_metrics = tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.45, 2.0), std_err = c(0.03, 0.1)),
+      uq = NULL, ad = NULL, warnings = NULL, error_message = NA_character_, runtime_secs = 1
+    )
+
+    local_mocked_bindings(
+      running_under_load_all = function() FALSE,
+      daemon_reports         = function(...) daemons_on(host = this_host()),
+      check_parallel_backend = function(...) TRUE,
+      connected_daemons      = function() 2L,
+      memory_available       = function() 1e9,
+      fit_single_config      = function(config_row, ...) member(config_row$config_id)
+    )
+
+    run <- function(...) {
+      out <- utils::capture.output(got <- collect_warnings(
+        fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+            control = control_horizons(allow_par = TRUE, verbose = TRUE, ...))
+      ))
+      c(got, list(output = out))
+    }
+
+    on    <- run()
+    input <- Filter(function(w) inherits(w, "horizons_warning_input"), on$warnings)
+    row   <- on$value$log[on$value$log$topic %in% "input", ]
+
+    expect_length(input, 1L)
+    expect_match(gsub("\\s+", " ", conditionMessage(input[[1]])),
+                 "The 2 mirai daemons on this machine would need about", fixed = TRUE)
+    expect_identical(nrow(row), 1L)
+    expect_identical(input[[1]]$log, row)
+    expect_identical(grep("Parallel:", on$output, value = TRUE, fixed = TRUE),
+                     "│  Parallel: over resamples on mirai (2 daemons, more memory than available)")
+    expect_false(any(grepl("isolate = FALSE", on$value$log$message[on$value$log$type == "note"], fixed = TRUE)))
+
+    ## With isolation off the tree says so, and the log notes the model
+    off  <- run(isolate = FALSE)
+    note <- off$value$log[off$value$log$type == "note" &
+                            grepl("isolate = FALSE", off$value$log$message, fixed = TRUE), ]
+
+    expect_identical(grep("Isolated fits:", off$output, value = TRUE, fixed = TRUE),
+                     paste0("│  ", isolation_tree_line(obj$config$configs$model, FALSE)))
+    expect_identical(nrow(note), 1L)
+    expect_identical(note$ids, list("cubist"))
 
   })
 

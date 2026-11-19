@@ -172,6 +172,15 @@ CONTROL_FIELDS <- list(
     verbs   = "fit"
   ),
 
+  ### Read from an option, as verbose is, so a script (or the test setup)
+  ### can turn isolated work off for every verb at once
+  isolate = list(
+    default = function() getOption("horizons.isolate", TRUE),
+    option  = "horizons.isolate",
+    check   = control_check_bool,
+    verbs   = c("evaluate", "fit", "select_training")
+  ),
+
   ### The reference is each row's distance to its nearest other row
   min_resemblance_rows = list(
     default = function() SELECT_RESEMBLANCE_MIN_ROWS,
@@ -245,6 +254,14 @@ CONTROL_FIELDS <- list(
 #'   rows [fit()]'s degradation check bootstraps from. Default 10. Below the
 #'   default the bootstrap interval widens and a healthy fit is flagged more
 #'   often.
+#' @param isolate `logical(1)`. Run work that would otherwise depend on what
+#'   ran before it in the session in a process started for it alone, which
+#'   ends when the work returns: each fit of a model whose engine carries
+#'   state from one fit to the next (`cubist`), in [evaluate()] and [fit()],
+#'   wherever the fit runs, and [select_training()]'s draw, so the session
+#'   never holds the library. `FALSE` runs both in the process that calls
+#'   them, and the run says so. Default `getOption("horizons.isolate", TRUE)`.
+#'   [evaluate()], [fit()], [select_training()].
 #' @param min_resemblance_rows A whole number of at least 2. The fewest library
 #'   rows [select_training()]'s resemblance check takes its reference
 #'   distribution from. Default 30.
@@ -272,6 +289,7 @@ control_horizons <- function(...,
                              min_calib_rows       = NULL,
                              min_ad_rows          = NULL,
                              min_degradation_rows = NULL,
+                             isolate              = NULL,
                              min_resemblance_rows = NULL) {
 
   ### By name only, so a value never lands on a field by its position

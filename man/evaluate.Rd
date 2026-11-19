@@ -41,8 +41,9 @@ receive test-set metrics from grid-search best. Default 1.0 (the
 train/test split, the CV folds and each configuration's stages) is
 seeded from it and its own name, so a configuration's results depend on
 the seed alone, not on the other configurations, the order they run in,
-the workers or the session's generator (except \code{cubist}, whose neighbour
-step no seed reaches; see the reproducibility note in \code{\link[=configure]{configure()}}).
+the workers or the session's generator (for \code{cubist}, because each of
+its fits runs in a process of its own; see the reproducibility note in
+\code{\link[=configure]{configure()}}).
 \code{NULL} (the default) takes the
 seed the object records (a \code{\link[=select_training]{select_training()}} result's), else one
 integer from the session's random stream, which is left where it was:
@@ -53,8 +54,8 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{evaluate()} reads \code{allow_par}, \code{parallelize_over},
-\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker} and \code{keep_traces}, and
-refuses any other field that is set. The
+\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces} and
+\code{isolate}, and refuses any other field that is set. The
 control it ran with, defaults filled in, is recorded as
 \code{evaluation$control}.}
 }
@@ -104,12 +105,15 @@ the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and pr
 values) and tuned with this run's settings
 (\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
 when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
-and \code{outcome_range}) and this run's response trim
-(\code{response_threshold}, \code{NA} when none was requested); either mismatch
-aborts, naming what differs. A run left to draw its seed from the
-session draws another in a new session, so its split moves: the
-refusal then names the seed the checkpoints were tuned with, to pass as
-\verb{seed =}.
+and \code{outcome_range}), this run's response trim
+(\code{response_threshold}, \code{NA} when none was requested) and, when the grid
+has a \code{cubist} configuration, \code{control_horizons(isolate = )}, which
+decides its scores (see "Isolated fits"); either mismatch aborts,
+naming what differs. A row that does not record a setting this run
+records, written by an earlier version, is evaluated again. A run left
+to draw its seed from the session draws another in a new session, so
+its split moves: the refusal then names the seed the checkpoints were
+tuned with, to pass as \verb{seed =}.
 So re-standardized spectra, a rescaled outcome, or another outcome on the
 same samples is refused rather than resumed, while adding a sibling
 response with \code{add_response()} or a \code{meta} column resumes. Keep one
@@ -177,10 +181,10 @@ the worker count cancels. \code{"configs"} asked for explicitly without an
 
 Results do not depend on the backend, the number of daemons, which daemon
 runs a configuration or the order the work finishes in: every draw is
-seeded from the run's \code{seed} and its own name, where it is made (except
-\code{cubist}, whose neighbour step no seed reaches; see the reproducibility
-note in \code{\link[=configure]{configure()}}). The daemons' own seed (\code{mirai::daemons(seed = )})
-has no effect on them.
+seeded from the run's \code{seed} and its own name, where it is made, and each
+\code{cubist} fit runs in a process of its own (see "Isolated fits" below),
+unless \code{control_horizons(isolate = FALSE)}. The daemons' own seed
+(\code{mirai::daemons(seed = )}) has no effect on them.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{# Laptop: four cores, parallelise the folds inside each config.
 mirai::daemons(4)
@@ -237,9 +241,11 @@ When the configs axis stops, by an error, an interrupt or a stop of its
 own, it cancels the configurations still running on the daemons, so a
 configuration still running stops before it writes its checkpoint; a
 checkpoint is written whole or not at all, so one the cancel reaches
-mid-write is either complete or absent. A configuration
-inside a compiled fit (a Cubist fit, say) stops only when that fit
-returns, its daemon busy until then, and writes nothing. On the resamples
+mid-write is either complete or absent. A configuration in an isolated
+fit (each \code{cubist} fit; see "Isolated fits") stops at once, its fit's
+process ended with it. One inside another compiled fit (an xgboost fit,
+say) stops only when that fit returns, its daemon busy until then, and
+writes nothing. On the resamples
 axis the folds' tasks are tune's, which \code{evaluate()} does not cancel: they
 run to their end on the daemons, and write nothing. The cancellation and
 the longest-first start both need mirai's dispatcher, which mirai keeps
@@ -260,6 +266,43 @@ sequential path, and a warning raised in its task before the unit runs
 configuration's \code{warnings}, with the unit's. Messages and printed output are
 not relayed, and a warning raised while a daemon loads horizons itself is
 dropped.
+
+A parallel run checks, before anything is drawn, that the daemons on this
+machine fit in the memory it has. Each daemon holds a copy of the run's
+data and, while it fits a model whose fits are isolated, that fit's
+process beside it; what one needs is estimated from the run's rows and
+predictors, by a rule fitted to measured runs, so it is approximate. When
+the daemons on this machine (each names its machine in the check at the
+door) would need more than the memory available, \code{evaluate()} warns once,
+with class \code{horizons_warning_input}, naming the count that fits, records
+it on the \code{log}, and under \code{verbose} the tree's parallel line says "more
+memory than available"; the run goes on. The memory available is
+\code{ps::ps_system_memory()}'s, which under a container's or \code{systemd-run}'s
+memory cap is the machine's, not the cap's. Daemons on another machine
+are not checked.
+}
+
+\section{Isolated fits}{
+
+A model whose engine keeps state from one fit to the next in the process
+that fits it is fitted in a process of its own, started for that one fit
+and ended once the fitted model is back: \code{cubist}, whose Cubist C code
+carries the generator behind its neighbour step's distance cutoff, and
+memory, across fits. Its results then depend on the seed alone, and a
+long run's memory does not grow with its fits. The fitted model comes
+back to the process that asked for it and predicts there. This holds
+wherever the fit runs: in this session, on a configs-axis daemon, or in
+one of tune's fold tasks on the resamples axis, where each daemon fitting
+a \code{cubist} fold has its fit's process beside it. Starting the process
+costs about 0.7 s a fit, measured on Linux. A fit's warnings and errors are raised
+in the process that asked, with their classes, so a configuration records
+them as it would. A fit's process that ends without its result (killed,
+most often for memory) fails its configuration, whatever fold or stage it
+was, with \code{error_message} saying so and \code{class}
+\code{horizons_error_process_died}, and the run goes on, since no daemon died.
+\code{control_horizons(isolate = FALSE)}, or \code{options(horizons.isolate = FALSE)}, fits them in the process that runs the configuration instead;
+the tree says which models were isolated, or that isolation was off, and
+a run with it off records a note on the \code{log}.
 }
 
 \section{Response outliers}{
@@ -312,7 +355,9 @@ failures are not checkpointed. A daemon that lacks a package the
 configurations need, which this session has, is refused before the run
 (\code{horizons_error_missing_package}, see "Parallelism"); one found lacking
 it mid-run stops the run as systemic on the configs axis, and on the
-resamples axis fails the configurations it runs with tune's error.
+resamples axis fails the configurations it runs with tune's error. An
+isolated fit whose process dies fails its configuration with
+\code{horizons_error_process_died} (see "Isolated fits").
 So does a daemon that dies, during a Bayesian iteration too (see
 "Parallelism"). When some configurations failed and
 the rest are returned, one \code{horizons_warning_partial_failure} names them

@@ -99,7 +99,7 @@ describe(".onLoad()", {
 
   })
 
-  it("loads rules, so an installed horizons can fit a cubist config", {
+  it("loads rules, so an installed horizons can fit a cubist config, and registers its engine's isolated twin", {
 
     ## load_all() loads every Import itself, so only an installed build
     ## shows a missing load
@@ -107,12 +107,13 @@ describe(".onLoad()", {
     skip_on_cran()
     skip_if_not_installed("callr")
 
-    has_cubist <- callr::r(function() {
+    engines <- callr::r(function() {
       library(horizons)
-      "Cubist" %in% parsnip::show_engines("cubist_rules")$engine
+      parsnip::show_engines("cubist_rules")$engine
     })
 
-    expect_true(has_cubist)
+    ## rules' engine, and its isolated twin, which horizons registers from it
+    expect_true(all(c("Cubist", "Cubist_isolated") %in% engines))
 
   })
 

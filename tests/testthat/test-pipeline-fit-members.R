@@ -604,8 +604,11 @@ describe("fit() - each member is one unit", {
       real_resamples(...)
     }, .package = "tune")
 
+    ## Fitted in this session, where the mock is: an isolated fit's process
+    ## would fit with the real engine
     got <- collect_warnings(
-      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE),
+      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+          control = control_horizons(isolate = FALSE)),
       "."
     )
     res <- got$value$models$results
@@ -615,6 +618,44 @@ describe("fit() - each member is one unit", {
                  "^OOF predictions failed: every out-of-fold fit failed \u2014 the engine broke on every fold")
     expect_identical(names(got$value$models$workflows), res$config_id[1])
     expect_true(any(vapply(got$warnings, inherits, logical(1), "horizons_warning_partial_failure")))
+
+  })
+
+  it("fails the member whose isolated final fit's process dies, outside tune, and returns the other", {
+
+    ## Real fits of the members
+    skip_unless_slow_tier()
+    skip_on_os("windows")
+
+    obj <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 0L
+
+    ## The cubist member's process dies on its final fit, the one fit made
+    ## outside tune's calls
+    in_tune     <- 0L
+    real_grid   <- tune::tune_grid
+    real_resamp <- tune::fit_resamples
+    inside <- function(f) function(...) {
+      in_tune <<- in_tune + 1L
+      on.exit(in_tune <<- in_tune - 1L)
+      f(...)
+    }
+    local_mocked_bindings(tune_grid = inside(real_grid), fit_resamples = inside(real_resamp),
+                          .package = "tune")
+    local_dying_fits(function(i) in_tune == 0L)
+
+    before <- connected_daemons()
+    got    <- with_deadline(collect_warnings(
+      fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE),
+      "."
+    ), 300)
+    res <- got$value$models$results
+
+    expect_identical(res$status, c("success", "failed"))
+    expect_identical(res$class[2], "horizons_error_process_died")
+    expect_match(res$error_message[2], paste("^Final model fit failed:", PROCESS_DIED, "a Cubist fit"))
+    expect_identical(names(got$value$models$workflows), res$config_id[1])
+    expect_identical(connected_daemons(), before)
 
   })
 
@@ -827,9 +868,9 @@ describe("fit() - the members' packages", {
     ## cubist's engine cannot be loaded where its member is fitted, though
     ## the door found it in this session
     real_spec <- define_model_spec
-    local_mocked_bindings(define_model_spec = function(model) {
+    local_mocked_bindings(define_model_spec = function(model, ...) {
       if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
-      real_spec(model)
+      real_spec(model, ...)
     })
 
     err <- expect_error(

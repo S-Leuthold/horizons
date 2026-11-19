@@ -64,6 +64,9 @@
 #'   failure is not fallen back from. Warnings are still recorded.
 #' @param keep_traces Logical. Keep a failure's backtrace, as text, in the
 #'   row's `trace`.
+#' @param isolate Logical. Fit a model whose engine `MODEL_SPECS` marks
+#'   `isolate` through its isolated twin, each fit in a process of its own
+#'   (`model_engine()`); `control_horizons(isolate = )`. Default `TRUE`.
 #' @param outside_warnings Character. Warnings the caller caught outside the
 #'   unit before it ran, as `condition_summary()` lines: the configs-axis
 #'   worker's, from loading the configuration's packages and rebuilding its
@@ -101,6 +104,7 @@ evaluate_single_config <- function(config_row,
                                    outcome_range   = DEFAULT_OUTCOME_RANGE,
                                    debug           = FALSE,
                                    keep_traces     = FALSE,
+                                   isolate         = TRUE,
                                    outside_warnings = character(0)) {
 
   start_time <- Sys.time()
@@ -146,7 +150,7 @@ evaluate_single_config <- function(config_row,
                                                sg_window     = sg_window,
                                                pca_threshold = pca_threshold))
 
-    model_spec <- unit_step("model_spec", define_model_spec(config_row$model))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate))
 
     wflow <- unit_step("workflow", workflows::workflow() |>
                          workflows::add_recipe(recipe) |>

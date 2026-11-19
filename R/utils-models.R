@@ -9,10 +9,13 @@
 #' @param model Character. One of the short names in `VALID_MODELS`:
 #'   "rf", "cubist", "xgboost", "plsr", "elastic_net", "svm_rbf",
 #'   "mars", "lightgbm", "mlp".
+#' @param isolate Logical. Whether a model `MODEL_SPECS` marks `isolate`
+#'   takes its engine's isolated twin, which fits each model in a process of
+#'   its own (`model_engine()`); `control_horizons(isolate = )`.
 #'
 #' @return A `parsnip` model specification with `mode = "regression"`.
 #' @keywords internal
-define_model_spec <- function(model) {
+define_model_spec <- function(model, isolate = TRUE) {
 
   switch(model,
 
@@ -21,7 +24,7 @@ define_model_spec <- function(model) {
       mtry  = tune::tune(),
       min_n = tune::tune()
     ) |>
-      parsnip::set_engine("ranger", importance = "impurity") |>
+      parsnip::set_engine(model_engine("rf", isolate), importance = "impurity") |>
       parsnip::set_mode("regression"),
 
     "cubist" = parsnip::cubist_rules(
@@ -29,7 +32,7 @@ define_model_spec <- function(model) {
       neighbors  = tune::tune(),
       max_rules  = tune::tune()
     ) |>
-      parsnip::set_engine("Cubist") |>
+      parsnip::set_engine(model_engine("cubist", isolate)) |>
       parsnip::set_mode("regression"),
 
     "xgboost" = parsnip::boost_tree(
@@ -41,7 +44,7 @@ define_model_spec <- function(model) {
       loss_reduction = tune::tune(),
       sample_size    = tune::tune()
     ) |>
-      parsnip::set_engine("xgboost") |>
+      parsnip::set_engine(model_engine("xgboost", isolate)) |>
       parsnip::set_mode("regression"),
 
     "lightgbm" = parsnip::boost_tree(
@@ -51,34 +54,34 @@ define_model_spec <- function(model) {
       mtry       = tune::tune(),
       min_n      = tune::tune()
     ) |>
-      parsnip::set_engine("lightgbm") |>
+      parsnip::set_engine(model_engine("lightgbm", isolate)) |>
       parsnip::set_mode("regression"),
 
     "elastic_net" = parsnip::linear_reg(
       penalty = tune::tune(),
       mixture = tune::tune()
     ) |>
-      parsnip::set_engine("glmnet") |>
+      parsnip::set_engine(model_engine("elastic_net", isolate)) |>
       parsnip::set_mode("regression"),
 
     "svm_rbf" = parsnip::svm_rbf(
       cost      = tune::tune(),
       rbf_sigma = tune::tune()
     ) |>
-      parsnip::set_engine("kernlab") |>
+      parsnip::set_engine(model_engine("svm_rbf", isolate)) |>
       parsnip::set_mode("regression"),
 
     "mars" = parsnip::mars(
       prod_degree = tune::tune(),
       num_terms   = tune::tune()
     ) |>
-      parsnip::set_engine("earth") |>
+      parsnip::set_engine(model_engine("mars", isolate)) |>
       parsnip::set_mode("regression"),
 
     "plsr" = parsnip::pls(
       num_comp = tune::tune()
     ) |>
-      parsnip::set_engine("pls") |>
+      parsnip::set_engine(model_engine("plsr", isolate)) |>
       parsnip::set_mode("regression"),
 
     "mlp" = parsnip::mlp(
@@ -86,7 +89,7 @@ define_model_spec <- function(model) {
       penalty      = tune::tune(),
       epochs       = tune::tune()
     ) |>
-      parsnip::set_engine("nnet", MaxNWts = 10000) |>
+      parsnip::set_engine(model_engine("mlp", isolate), MaxNWts = 10000) |>
       parsnip::set_mode("regression")
 
     ### No default: the door validators refuse a model outside VALID_MODELS,

@@ -143,11 +143,10 @@ config_costs <- function(configs) {
 #' @description
 #' Longest first: by [config_costs()], so the longest start first and the
 #' short ones fill the daemons at the end. Ties keep grid order, so the order
-#' is deterministic. The results do not depend on it, apart from `cubist`'s,
-#' whose neighbour step no seed reaches, so which process fits which Cubist
-#' configuration can move them (the reproducibility note in [configure()]):
-#' every other draw is seeded from the run's seed and its own name, and the
-#' rows are put back in configuration order before they are bound.
+#' is deterministic. The results do not depend on it: every draw is seeded
+#' from the run's seed and its own name, each fit of an engine that carries
+#' state from one fit to the next (`cubist`) runs in a process of its own,
+#' and the rows are put back in configuration order before they are bound.
 #'
 #' @param configs The configurations to run, with `model` and
 #'   `feature_selection` columns.
@@ -383,6 +382,545 @@ task_value <- function(value, transport) {
 }
 
 ## ---------------------------------------------------------------------------
+## The memory the daemons on this machine need
+## ---------------------------------------------------------------------------
+## The user's daemons(n) is the run's budget of cores, and each daemon holds
+## its own copy of the run's data, and, while it fits a model whose fits are
+## isolated, that fit's process too. A parallel evaluate() or fit() warns at
+## its door when the daemons on this machine would need more memory than the
+## machine has, and suggests a count that fits. The run goes on: the
+## estimate is from measured runs, and the user knows the machine.
+
+#' The memory available on this machine
+#'
+#' @description
+#' `ps::ps_system_memory()`'s `avail`: what the system can give processes
+#' without swapping. Under a container's or `systemd-run`'s memory cap it is
+#' the machine's, not the cap's.
+#'
+#' @return Numeric(1), in bytes, or `NA` when it cannot be read. A seam, so a
+#'   test can give another reading.
+#' @keywords internal
+#' @noRd
+memory_available <- function() {
+
+  tryCatch(as.numeric(ps::ps_system_memory()[["avail"]]), error = function(e) NA_real_)
+
+}
+
+#' The processes one daemon holds for a run
+#'
+#' @description
+#' The daemon, and an isolated fit's process beside it while it fits a model
+#' whose fits are isolated (each daemon fits one at a time). The one place a
+#' daemon's processes are counted, so work that starts more of them adds its
+#' count here.
+#'
+#' @param models Character. The models the run fits.
+#' @param isolate Logical(1). `control_horizons(isolate = )`.
+#' @return Named integer: one count per row of `DAEMON_MEMORY`.
+#' @keywords internal
+#' @noRd
+daemon_processes <- function(models, isolate) {
+
+  c(daemon   = 1L,
+    isolated = as.integer(isTRUE(isolate) && length(isolated_models(models)) > 0))
+
+}
+
+#' The memory one daemon needs for a run
+#'
+#' @param processes Named integer, from [daemon_processes()].
+#' @param n_rows,n_predictors The run's data: its rows and predictors.
+#' @return Numeric(1), in bytes: each process's `DAEMON_MEMORY` line at the
+#'   run's data, times how many of it the daemon holds.
+#' @keywords internal
+#' @noRd
+daemon_need <- function(processes, n_rows, n_predictors) {
+
+  bytes <- 8 * as.numeric(n_rows) * as.numeric(n_predictors)
+
+  sum(vapply(names(processes), function(p) {
+    processes[[p]] * (DAEMON_MEMORY[[p]][["base"]] + DAEMON_MEMORY[[p]][["per_byte"]] * bytes)
+  }, numeric(1)))
+
+}
+
+#' Warn when the daemons on this machine would need more memory than it has
+#'
+#' @description
+#' Run at a parallel `evaluate()`'s or `fit()`'s door, once the daemons have
+#' reported ([daemon_reports()]). The daemons counted are those on this
+#' machine, by the host name each reported; daemons elsewhere are not
+#' checked, since only this machine's memory can be read here. When those
+#' daemons' need ([daemon_need()]) is more than the memory available
+#' ([memory_available()]), an `input` warning is recorded on the verb's
+#' collector, raised once at its end, suggesting the most daemons that fit,
+#' or a sequential run below two. A reading that cannot be made is a note.
+#'
+#' @param reports The daemons' reports, one per task.
+#' @param models Character. The models the run fits.
+#' @param isolate Logical(1).
+#' @param n_rows,n_predictors The run's data.
+#' @param collector The verb's collector.
+#' @param verb Character(1).
+#' @return Logical(1): `TRUE` when it warned, for the tree's parallel line.
+#' @keywords internal
+#' @noRd
+check_daemon_memory <- function(reports, models, isolate, n_rows, n_predictors, collector, verb) {
+
+  here    <- Sys.info()[["nodename"]]
+  local   <- Filter(function(r) identical(r$host, here), reports)
+  n_local <- length(unique(vapply(local, function(r) r$pid, integer(1))))
+
+  if (n_local == 0L) return(FALSE)
+
+  available <- memory_available()
+
+  if (!is.finite(available)) {
+    log_note(collector, "{.fn {verb}} could not read the memory available on this machine, so it did not check that its mirai daemons fit in it.")
+    return(FALSE)
+  }
+
+  processes <- daemon_processes(models, isolate)
+  need      <- daemon_need(processes, n_rows, n_predictors)
+  total     <- n_local * need
+
+  if (total <= available) return(FALSE)
+
+  fits <- floor(available / need)
+  gb   <- function(bytes) format(round(bytes / 1e9, 1), nsmall = 1)
+  iso  <- isolated_models(models)
+
+  log_warning(collector, "input", c(
+    "The {n_local} mirai daemon{?s} on this machine would need about {gb(need)} GB each for this run, {gb(total)} GB in all, and {gb(available)} GB is available.",
+    "i" = if (processes[["isolated"]] > 0) {
+      "Each holds a copy of the run's data, and each fit of {.val {iso}} runs in a process of its own beside it."
+    } else {
+      "Each holds a copy of the run's data."
+    },
+    "i" = if (fits >= 2) {
+      "{.code mirai::daemons({fits})} fits; the estimate is from measured runs, so it is approximate."
+    } else {
+      "Fewer than two daemons fit, so a sequential run does ({.code control_horizons(allow_par = FALSE)}); the estimate is from measured runs, so it is approximate."
+    }
+  ))
+
+  TRUE
+
+}
+
+#' The progress tree's lines on how a run goes: its parallel axis and its
+#' isolated fits
+#'
+#' @description
+#' The one place `evaluate()`'s and `fit()`'s trees say it, so the two verbs
+#' say it alike: the Parallel line for a parallel axis (its daemons, and
+#' whether they have no dispatcher or would need more memory than the
+#' machine has), or that debug turned it off; then [isolation_tree_line()].
+#'
+#' @param axis Character(1). `"configs"`, `"resamples"` or `"sequential"`.
+#' @param n_daemons Integer(1). The daemons the run began with.
+#' @param models Character. The models the run fits.
+#' @param isolate Logical(1). `control_horizons(isolate = )`.
+#' @param no_dispatcher,short_memory Logical(1). The daemons have no
+#'   dispatcher ([daemons_dispatch()]); they would need more memory than
+#'   this machine has ([check_daemon_memory()]).
+#' @param debug_off Logical(1). A parallel run asked for, run sequentially
+#'   since debug runs in this session.
+#' @return Character: the lines, without the tree's prefix.
+#' @keywords internal
+#' @noRd
+parallel_tree_lines <- function(axis, n_daemons, models, isolate, no_dispatcher = FALSE,
+                                short_memory = FALSE, debug_off = FALSE) {
+
+  parallel <- if (axis != "sequential") {
+    paste0("Parallel: over ", axis, " on mirai (", n_daemons, " daemons",
+           if (no_dispatcher) ", no dispatcher",
+           if (short_memory) ", more memory than available", ")")
+  } else if (debug_off) {
+    "Parallel: off, since debug runs in this session"
+  }
+
+  c(parallel, isolation_tree_line(models, isolate))
+
+}
+
+## ---------------------------------------------------------------------------
+## Isolated work: one call in a process of its own
+## ---------------------------------------------------------------------------
+## Some work runs in a process started for it alone and ended once its value
+## is back: a fit whose engine carries state from one fit to the next
+## (MODEL_SPECS' `isolate`, R/isolated-engines.R), and select_training()'s
+## draw, so this session never holds the library. It is one mirai() call to a
+## profile no daemons() call sets, which mirai answers by starting a new R
+## process for that one call (mirai's ephemeral daemon, the path it takes
+## when no daemons are set). horizons never sets that profile, or any other,
+## and the user's daemons are not touched: the process works the same in
+## this session, on a configs-axis daemon and in one of tune's fold tasks.
+
+#' The compute profile isolated work is sent to
+#'
+#' @description
+#' A name no `mirai::daemons()` call sets, so every `mirai()` sent to it
+#' starts a process of its own. The process id makes it this process's, so a
+#' daemon running isolated work uses its own, and no profile a user set by
+#' name can be taken for it.
+#'
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+isolated_profile <- function() {
+
+  paste0("horizons-isolated-", Sys.getpid())
+
+}
+
+#' Run one call in a process of its own
+#'
+#' @description
+#' Sends `expr` to a new R process ([isolated_profile()]) and returns its
+#' value here, as if it had run in this session:
+#'
+#' * The process starts with this session's library paths (`libraries`):
+#'   `R_LIBS` names them while it is started, and its body sets them first,
+#'   so it loads what this session would (a process started by mirai sees
+#'   `R_LIBS` and the startup files, not paths set at run time), whatever
+#'   its arguments hold. Then any `options` are set.
+#' * Its random stream is seeded with one integer drawn here, from the
+#'   caller's stream, under the kinds every unit pins ([with_unit_seed()]),
+#'   so what it draws follows the caller's seed, and this session's stream
+#'   moves by that one draw.
+#' * The warnings and messages it raises are kept in order and muffled
+#'   there, and what it prints is captured; here the output is printed, then
+#'   each condition is raised again with its class and fields, then its
+#'   error, if it ended in one, is raised as the condition it was. mirai
+#'   relays none of these on its own.
+#' * A process that ends without returning (killed, out of memory,
+#'   `errorValue` 19) is `horizons_error_process_died` ([abort_process_died()]),
+#'   and is recorded in this process ([note_process_death()]), where a
+#'   Bayesian search reads it.
+#' * Leaving before the value is back (an error, an interrupt) drops the
+#'   call, which ends its process.
+#'
+#' The call sent is a base-R body around `expr`, and `args` are plain
+#' values the body finds by name: nothing of horizons is in the body, so a
+#' process running a fit loads only what `expr` names. A function or a
+#' fitted object among `args` carries its environment or its package with
+#' it, which the process loads from `libraries` as it reads its message.
+#'
+#' @param expr A call, quoted, evaluated in the process with `args` in scope.
+#' @param args Named list of the values `expr` reads.
+#' @param what Character(1). What runs, for the death's message: `"a Cubist
+#'   fit"`, `"the library draw"`.
+#' @param options Named list of options to set in the process first.
+#' @param libraries Character. The library paths the process loads from.
+#' @param call The frame a death reports.
+#' @return The value of `expr`.
+#' @keywords internal
+#' @noRd
+run_isolated <- function(expr, args = list(), what, options = list(), libraries = .libPaths(),
+                         call = rlang::caller_env()) {
+
+  reserved <- intersect(names(args), ISOLATED_NAMES)
+
+  if (length(args) > 0 && (is.null(names(args)) || any(!nzchar(names(args))) || length(reserved) > 0)) {
+
+    abort_horizons("Every argument sent to an isolated call must have a name of its own.",
+                   kind = "internal")
+
+  }
+
+  ## One draw from the caller's stream, as resolve_seed() draws a root
+  seed <- sample.int(100000L, 1L)
+
+  ### mirai takes a call held in a variable as the call to send; a call
+  ### written in place would be sent as written
+  body <- isolated_body(expr)
+
+  ## The process starts with these libraries on its startup path, not only
+  ## given them in the body: a value sent that holds a function or a fitted
+  ## object loads its package as the process reads the message, before the
+  ## body runs. mirai starts the process inside mirai(), which it inherits
+  ## this variable from.
+  libs_were <- Sys.getenv("R_LIBS", unset = NA)
+  Sys.setenv(R_LIBS = paste(libraries, collapse = .Platform$path.sep))
+  on.exit(if (is.na(libs_were)) Sys.unsetenv("R_LIBS") else Sys.setenv(R_LIBS = libs_were), add = TRUE)
+
+  task <- mirai::mirai(
+    .expr    = body,
+    .args    = c(args, list(.horizons_libs    = libraries,
+                            .horizons_options = options,
+                            .horizons_seed    = seed)),
+    .compute = isolated_profile()
+  )
+
+  ## Dropped and collected unless its value came back, so the process ends:
+  ## mirai closes the call's socket when the task is collected, and the
+  ## process ends with it, inside compiled code too
+  collected <- FALSE
+  on.exit(if (!collected) {
+    mirai::stop_mirai(task)
+    rm(task)
+    gc(verbose = FALSE)
+  }, add = TRUE)
+
+  value     <- mirai::collect_mirai(task)
+  collected <- TRUE
+
+  ### A miraiError is the body's own failure (an option it could not set),
+  ### raised as the condition it was; any other error value, the process's
+  ### end without a result, recorded here as it is raised
+  value <- task_value(value, function(v) {
+    withCallingHandlers(abort_process_died(v, what, call = call),
+                        horizons_error_process_died = note_process_death)
+  })
+
+  if (length(value$output) > 0) cat(value$output, sep = "\n")
+
+  for (cnd in value$conditions) {
+
+    if (inherits(cnd, "warning")) warning(cnd) else if (inherits(cnd, "message")) message(cnd)
+
+  }
+
+  if (!is.null(value$error)) stop(value$error)
+
+  value$value
+
+}
+
+#' A call to `fn` with each of `args` passed by its own name
+#'
+#' @description
+#' How isolated work is called: each argument is a symbol of its own name,
+#' which the process finds among the values [run_isolated()] sends it (and
+#' the session among the same values, for work it runs itself), so the call
+#' holds none of the data, and nor does a trace that records it.
+#'
+#' @param fn The function, by name: a symbol, or a `pkg::fun` call.
+#' @param args Named list: the values the call takes, every one named.
+#' @return A call.
+#' @keywords internal
+#' @noRd
+call_by_name <- function(fn, args) {
+
+  if (length(args) > 0 && (is.null(names(args)) || any(!nzchar(names(args))))) {
+
+    abort_horizons("Every argument of an isolated call must have a name of its own.", kind = "internal")
+
+  }
+
+  as.call(c(list(fn), stats::setNames(lapply(names(args), as.name), names(args))))
+
+}
+
+#' The names an isolated call's body keeps for itself
+#'
+#' @keywords internal
+#' @noRd
+ISOLATED_NAMES <- c(".horizons_libs", ".horizons_options", ".horizons_seed", ".horizons_value",
+                    ".horizons_error", ".horizons_conditions", ".horizons_output")
+
+#' The body an isolated call runs, around its expression
+#'
+#' @description
+#' Base R alone, so the process loads nothing the expression does not name.
+#' A warning or a message is kept without its call (and a warning without
+#' its trace), which can hold the data the call was given; the error the
+#' call ends in keeps both, since the caller reports a refusal's call.
+#'
+#' The body is parsed from text ([ISOLATED_BODY]) at each call rather than
+#' written as code in this function, so it is the same plain call however
+#' horizons was installed: code here would carry the source references of a
+#' keep-source install, and under covr the counts it adds, both of which
+#' travel with the body and make the process load horizons.
+#'
+#' @param expr A call.
+#' @return A call returning a list: `value`, `error` (the condition the call
+#'   ended in, or `NULL`), `conditions` (the warnings and messages raised, in
+#'   order) and `output` (what it printed, as lines).
+#' @keywords internal
+#' @noRd
+isolated_body <- function(expr) {
+
+  ### substitute() through do.call(), so it works on the parsed call rather
+  ### than on the symbol holding it
+  do.call(substitute, list(str2lang(ISOLATED_BODY), list(.horizons_expr = expr)))
+
+}
+
+#' The text of the body an isolated call runs
+#'
+#' @description
+#' [isolated_body()] parses it and puts the call to run in place of
+#' `.horizons_expr`. Text, not code, for the reason given there.
+#'
+#' @keywords internal
+#' @noRd
+ISOLATED_BODY <- '{
+
+  .libPaths(.horizons_libs)
+  if (length(.horizons_options) > 0) options(.horizons_options)
+  set.seed(.horizons_seed, kind = "Mersenne-Twister", normal.kind = "Inversion",
+           sample.kind = "Rejection")
+
+  .horizons_error      <- NULL
+  .horizons_conditions <- list()
+
+  .horizons_output <- utils::capture.output(
+    .horizons_value <- tryCatch(
+      withCallingHandlers(
+        .horizons_expr,
+        warning = function(w) {
+          w$call <- NULL
+          w$trace <- NULL
+          .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- w
+          if (!is.null(findRestart("muffleWarning"))) invokeRestart("muffleWarning")
+        },
+        message = function(m) {
+          m$call <- NULL
+          .horizons_conditions[[length(.horizons_conditions) + 1L]] <<- m
+          if (!is.null(findRestart("muffleMessage"))) invokeRestart("muffleMessage")
+        }
+      ),
+      error = function(e) {
+        .horizons_error <<- e
+        NULL
+      }
+    )
+  )
+
+  list(value = .horizons_value, error = .horizons_error,
+       conditions = .horizons_conditions, output = .horizons_output)
+
+}'
+
+#' Stop the call because an isolated process ended without its result
+#'
+#' @description
+#' The process [run_isolated()] started for one call ended without sending
+#' its value back: killed, most often by the system for memory, which mirai
+#' reads as `errorValue` 19 (Connection reset). A daemon of the user's pool
+#' did not die, so no pool shrank. The message starts with `PROCESS_DIED`, by
+#' which [check_tune_result()] finds it in tune's notes, where tune keeps an
+#' error raised inside a fit as text.
+#'
+#' @param value The task's error value.
+#' @param what Character(1). What ran in the process.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_process_died`
+#'   (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_process_died <- function(value, what, call = rlang::caller_env()) {
+
+  code   <- as.integer(value)
+  reason <- if (identical(code, 19L)) "{.code errorValue} 19, Connection reset" else "{.code errorValue} {code}"
+
+  abort_horizons(c(
+    paste0(PROCESS_DIED, " {what} ended without returning its result (mirai's ", reason, ")."),
+    "i" = "A process ends this way when it is killed, most often by the system when memory runs out.",
+    "i" = "{.code control_horizons(isolate = FALSE)} runs the work in this session instead."
+  ), kind = "run", class = "horizons_error_process_died", call = call)
+
+}
+
+## ---------------------------------------------------------------------------
+## The deaths of isolated work's processes, where they were met
+## ---------------------------------------------------------------------------
+## tune keeps an error raised inside a fit as a note, where check_tune_result()
+## finds a process's death, except in a Bayesian search, which drops a
+## candidate that failed in every fold, note and all. So each death is also
+## recorded in the process whose call met it (run_isolated()), and the search
+## reads the record there once it returns: here, or on each daemon when its
+## folds ran on them (bayes_search()).
+
+#' The deaths of the processes `run_isolated()` started from this process
+#'
+#' @description
+#' `messages` holds each death's message, as tune would keep it in a note,
+#' oldest first, until [take_process_deaths()] takes them.
+#'
+#' @keywords internal
+#' @noRd
+process_deaths <- new.env(parent = emptyenv())
+process_deaths$messages <- character(0)
+
+#' Record the death of a process `run_isolated()` started
+#'
+#' @param cnd The `horizons_error_process_died` being raised.
+#' @return `NULL`, invisibly; the condition goes on being raised.
+#' @keywords internal
+#' @noRd
+note_process_death <- function(cnd) {
+
+  process_deaths$messages <- c(process_deaths$messages, conditionMessage(cnd))
+
+  invisible(NULL)
+
+}
+
+#' Take the deaths recorded in this process, leaving none
+#'
+#' @return Character: each death's message, oldest first.
+#' @keywords internal
+#' @noRd
+take_process_deaths <- function() {
+
+  taken <- process_deaths$messages
+  process_deaths$messages <- character(0)
+
+  taken
+
+}
+
+#' Take the deaths recorded here and, for work run on them, on each daemon
+#'
+#' @description
+#' This process's record ([take_process_deaths()]) and, when `on_daemons`,
+#' each connected daemon's, read with one task on each, as the door's check
+#' reaches them ([daemon_reports()]), and left empty. A daemon gone before
+#' its task returns is not waited for: its death is the verb's to read from
+#' the count of connected daemons.
+#'
+#' @param on_daemons Logical(1). Whether the work ran on the user's daemons
+#'   (tune's folds on the resamples axis).
+#' @return Character: the deaths' messages.
+#' @keywords internal
+#' @noRd
+isolated_deaths <- function(on_daemons) {
+
+  here <- take_process_deaths()
+
+  ### tune runs the folds here when no daemons are set, whatever allow_par
+  ### says
+  if (!isTRUE(on_daemons) || !mirai::daemons_set(.compute = NULL) || connected_daemons() == 0L) {
+
+    return(here)
+
+  }
+
+  ## A mirai_map, whose elements are plain mirai. Called through the
+  ## namespace, which every daemon that ran tune's folds has loaded
+  tasks <- unclass(mirai::everywhere(
+    get("take_process_deaths", envir = asNamespace("horizons"))(),
+    .compute = NULL
+  ))
+
+  while (any(vapply(tasks, mirai::unresolved, logical(1))) && connected_daemons() > 0L) {
+    Sys.sleep(DISPATCH_POLL_SECONDS)
+  }
+
+  there <- lapply(tasks, function(task) {
+    if (!mirai::unresolved(task) && is.character(task$data)) task$data else character(0)
+  })
+
+  c(here, unlist(there, use.names = FALSE))
+
+}
+
+## ---------------------------------------------------------------------------
 ## The configs axis's dispatch
 ## ---------------------------------------------------------------------------
 
@@ -417,9 +955,11 @@ task_value <- function(value, transport) {
 #' cancels every task still in flight (`mirai::stop_mirai()`), so a
 #' configuration still running stops before it writes its checkpoint. It is
 #' an `on.exit()`, not a calling handler, so it runs on all three. A
-#' configuration inside a compiled fit stops only when that fit returns, and
-#' writes nothing, since the interrupt is raised once R checks for it, long
-#' before the checkpoint. Cancelling needs mirai's dispatcher: without it
+#' configuration in an isolated fit stops at once, since its daemon waits on
+#' the fit's process in R, and the process is ended as the wait is left
+#' ([run_isolated()]). One inside another compiled fit stops only when that
+#' fit returns, and writes nothing, since the interrupt is raised once R
+#' checks for it, long before the checkpoint. Cancelling needs mirai's dispatcher: without it
 #' `stop_mirai()` does nothing and the task runs to its end, which
 #' `evaluate()` warns of ([daemons_dispatch()]).
 #'

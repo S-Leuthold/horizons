@@ -46,6 +46,7 @@ describe("control_horizons()", {
       min_calib_rows       = 1,
       min_ad_rows          = "10",
       min_degradation_rows = -5,
+      isolate              = "no",
       min_resemblance_rows = NA_real_
     )
 
@@ -209,6 +210,30 @@ describe("resolve_control()", {
     expect_error(resolve_control(NULL, "evaluate"), "getOption(\"horizons.verbose\")",
                  fixed = TRUE, class = "horizons_error_input")
     expect_false(resolve_control(control_horizons(verbose = FALSE), "evaluate")$verbose)
+
+  })
+
+  it("reads isolate from horizons.isolate when it is not set, for the three verbs that isolate work", {
+
+    withr::local_options(horizons.isolate = NULL)
+
+    for (verb in c("evaluate", "fit", "select_training")) {
+      expect_true(resolve_control(NULL, verb)$isolate, label = verb)
+    }
+
+    withr::local_options(horizons.isolate = FALSE)
+    expect_false(resolve_control(NULL, "fit")$isolate)
+    expect_true(resolve_control(control_horizons(isolate = TRUE), "select_training")$isolate)
+
+    ## ensemble() fits no model whose fits are isolated
+    expect_null(resolve_control(NULL, "ensemble")$isolate)
+    expect_error(resolve_control(control_horizons(isolate = FALSE), "ensemble"),
+                 "isolate: evaluate(), fit(), select_training()", fixed = TRUE,
+                 class = "horizons_error_input")
+
+    withr::local_options(horizons.isolate = "yes")
+    expect_error(resolve_control(NULL, "evaluate"), "getOption(\"horizons.isolate\")",
+                 fixed = TRUE, class = "horizons_error_input")
 
   })
 

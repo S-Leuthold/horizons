@@ -340,3 +340,22 @@ space_on <- function(M, wn, snv = TRUE, derivative = 1L, window = 11L,
   build_similarity_space(tr, wn, ncomp = ncomp, ...)
 
 }
+
+
+## ---------------------------------------------------------------------------
+## The note a draw in the session writes
+## ---------------------------------------------------------------------------
+## select_training() notes on the log a draw that ran in the session rather
+## than in a process of its own (log_draw_in_session()), which every draw in
+## the selection test files does: they set horizons.isolate = FALSE, so the
+## session's mocks reach the draw. A test of the other rows reads around it.
+
+draw_note_text <- "The draw ran in this session"
+
+draw_notes <- function(log) {
+  log[log$type == "note" & grepl(draw_note_text, log$message, fixed = TRUE), ]
+}
+
+without_draw_note <- function(log) {
+  log[!(log$type == "note" & grepl(draw_note_text, log$message, fixed = TRUE)), ]
+}

@@ -17,11 +17,17 @@ VALID_MODELS <- c(
   "mars"
 )
 
-# Model specifications lookup — maps short names to tidymodels constructors
-# Used by evaluate() to instantiate parsnip model specs
+# Model specifications lookup: each short name's parsnip model (`fn`) and
+# engine. `isolate = TRUE` marks an engine that carries state from one fit to
+# the next in its process, which none of its arguments resets: each of its
+# fits then runs in a process of its own, through the engine's isolated twin
+# (model_engine(), register_isolated_engines(), R/isolated-engines.R), unless
+# control_horizons(isolate = FALSE). Cubist's C code keeps its generator's
+# stream behind the neighbour step's distance and leaks two (p + 2)^2
+# matrices a fit (R/isolated-engines.R).
 MODEL_SPECS <- list(
   rf          = list(fn = "rand_forest",  engine = "ranger"),
-  cubist      = list(fn = "cubist_rules", engine = "Cubist"),
+  cubist      = list(fn = "cubist_rules", engine = "Cubist", isolate = TRUE),
   xgboost     = list(fn = "boost_tree",   engine = "xgboost"),
   plsr        = list(fn = "pls",          engine = "pls"),
   elastic_net = list(fn = "linear_reg",   engine = "glmnet"),
@@ -291,8 +297,41 @@ SHARED_ARG_NAMES <- c(
   "settings",
   "checkpoint_dir",
   "keep_traces",
+  "isolate",
   "pkg_version"
 )
+
+# What one mirai daemon on this machine needs for a run, in bytes, by the
+# processes it holds: the daemon itself, and, when the run fits a model whose
+# fits are isolated (MODEL_SPECS' `isolate`), that fit's process beside it.
+# Each is `base` plus `per_byte` times the run's data, its rows times its
+# predictors times 8 bytes (daemon_need(), R/utils-parallel.R). Each line
+# goes through two measured points, at 1,047 rows by 1,701 predictors (14.2 MB
+# of data) and at 10,341 rows by 1,701 (140.7 MB), and is rounded up (`base`
+# to 0.05 GB, `per_byte` to 0.5), so it lies above both:
+#
+# - The daemon: its peak less its size once connected (0.08 GB), the largest
+#   measured at each size: 1.58 GB at 1,047 rows (a grid of every model on
+#   eight daemons, through evaluate() and fit()) and 3.08 GB at 10,341 rows
+#   (elastic net and xgboost configurations, in fit(); Cubist configurations
+#   with their fits isolated peaked at 2.46 GB).
+# - The isolated fit's process: its peak, the largest measured, a Cubist fit
+#   at 100 committees: 0.64 GB on a 750-row fold of 1,691 predictors and
+#   1.25 GB on a 7,444-row fold after correlation selection (about 360
+#   predictors).
+#
+# A run of other models, selections or committees can need more or less, so
+# the warning calls the estimate approximate.
+DAEMON_MEMORY <- list(
+  daemon   = c(base = 1.45e9, per_byte = 12),
+  isolated = c(base = 0.6e9, per_byte = 5)
+)
+
+# How the message starts when a process horizons started for one call
+# (run_isolated(), R/utils-parallel.R) ends without its result. tune keeps an
+# error raised inside a fit only as its text, so check_tune_result() finds a
+# process's death in tune's notes by this phrase.
+PROCESS_DIED <- "The process horizons started for"
 
 # Seconds between the configs axis's polls of the tasks in flight and the
 # daemons connected (await_round(), R/utils-parallel.R). mirai's info() costs

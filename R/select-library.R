@@ -30,8 +30,8 @@
 #'   `title`, `build` (see the entry), `sources` (a data.frame of `table`, `file`, `url`, `bytes`,
 #'   `md5`), `filters`, `properties` (short name, source column, unit),
 #'   `license`, `short_cite`, `citation`, `credit`, and
-#'   `recipe`, the
-#'   function that builds the library from the verified source files.
+#'   `recipe`, the name of the horizons function that builds the library
+#'   from the verified source files.
 #' @noRd
 library_registry <- function() {
 
@@ -129,7 +129,10 @@ library_registry <- function() {
         "Soil Survey Laboratory."
       ),
 
-      recipe = build_ossl_library
+      ## By name, found in the namespace that builds the library: an entry
+      ## is sent to the draw's process, where a function would load horizons
+      ## before the process has set its library paths
+      recipe = "build_ossl_library"
 
     )
 
@@ -335,13 +338,15 @@ library_cache_path <- function(entry) {
 #'
 #' @param entry A registry entry.
 #' @param ask,verbose,collector,debug As for [resolve_source()].
+#' @param consent `character(1).` How the download is consented to
+#'   ([library_consent()]): `"ask"`, `"defer"` or `"given"`.
 #' @param call The frame a refusal reports: the verb's.
 #'
 #' @return `list` with `pool` and `record`.
 #' @noRd
 resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
                                collector = log_open("select_training"), debug = FALSE,
-                               call = rlang::caller_env()) {
+                               consent = "ask", call = rlang::caller_env()) {
 
   path <- library_cache_path(entry)
 
@@ -382,13 +387,13 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
 
     }
 
-    library_consent(entry, path, ask = ask, rebuild = TRUE, call = call)
+    library_consent(entry, path, ask = ask, rebuild = TRUE, consent = consent, call = call)
 
     log_note(collector, "The cached {.val {entry$name}} library at {.path {path}} was built by an earlier version of horizons, so it was rebuilt.")
 
   } else {
 
-    library_consent(entry, path, ask = ask, call = call)
+    library_consent(entry, path, ask = ask, consent = consent, call = call)
 
   }
 
@@ -410,7 +415,8 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
   on.exit(unlink(raw_dir, recursive = TRUE), add = TRUE)
 
   raw  <- download_sources(entry, raw_dir, verbose = verbose, call = call)
-  pool <- entry$recipe(raw, entry, verbose = verbose)
+  recipe <- get(entry$recipe, envir = asNamespace("horizons"), mode = "function")
+  pool   <- recipe(raw, entry, verbose = verbose)
 
   record <- library_record(
     "registered",
@@ -503,15 +509,32 @@ clear_stale_builds <- function(entry, dir, max_age_hours = 24) {
 #' `TRUE`; otherwise asks in an interactive session and stops in a
 #' non-interactive one, naming the option.
 #'
+#' The draw in a process of its own cannot ask, so it is given `consent =
+#' "defer"`, and stops here with a `horizons_consent_needed` condition
+#' carrying `path` and `rebuild`: the session asks, as above, and sends the
+#' draw again with `consent = "given"`, which proceeds without a word, since
+#' the session has said it (`run_draw()`).
+#'
 #' @param rebuild `logical.` Whether a cached library from an earlier
 #'   build is being replaced, which the message says instead of "not cached
 #'   yet".
+#' @param consent `character(1).` `"ask"` (the above), `"defer"` or
+#'   `"given"`.
 #' @param call The frame a refusal reports: the verb's.
 #' @return `NULL`, invisibly, once consent is given; aborts with
 #'   `horizons_error_consent` otherwise.
 #' @noRd
 library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
-                            call = rlang::caller_env()) {
+                            consent = "ask", call = rlang::caller_env()) {
+
+  if (identical(consent, "given")) return(invisible(NULL))
+
+  if (identical(consent, "defer")) {
+
+    rlang::abort("The library's download needs consent, which the session asks for.",
+                 class = "horizons_consent_needed", path = path, rebuild = rebuild)
+
+  }
 
   mb <- round(sum(entry$sources$bytes) / 1e6)
 
