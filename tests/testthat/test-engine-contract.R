@@ -225,7 +225,7 @@ describe("the engine contract's table", {
     expect_setequal(names(CONTRACT_PARAMS), names(MODEL_SPECS))
 
     for (model in names(MODEL_SPECS)) {
-      expect_setequal(names(CONTRACT_PARAMS[[model]]), MODEL_SPECS[[model]]$tuned)
+      expect_setequal(names(CONTRACT_PARAMS[[model]]) %||% character(0), MODEL_SPECS[[model]]$tuned %||% character(0))
       expect_true(all(names(MODEL_SPECS[[model]]$isolate) %in% CONTRACT_PROMISES), label = model)
       expect_true(all(nzchar(MODEL_SPECS[[model]]$isolate)), label = model)
     }
