@@ -3536,11 +3536,12 @@ describe("evaluate() - a worker's death", {
     ## once; never the parent, which preps the whole training part. The
     ## function is written into the step, so the daemon needs nothing from
     ## here. Once only: with every daemon gone, tune would wait for its
-    ## queued folds for ever (a documented limit).
-    killed <- withr::local_tempfile(pattern = "killed")
+    ## queued folds for ever (a documented limit). The kill is claimed with
+    ## dir.create(), which succeeds in one process only, so two daemons
+    ## cannot both pass the check before either has claimed it.
+    killed <- file.path(withr::local_tempdir(), "killed")
     kill <- bquote((function(x) {
-      if (length(x) < 45 && !file.exists(.(killed)) && Sys.getpid() != .(Sys.getpid())) {
-        file.create(.(killed))
+      if (length(x) < 45 && Sys.getpid() != .(Sys.getpid()) && dir.create(.(killed), showWarnings = FALSE)) {
         tools::pskill(Sys.getpid(), tools::SIGKILL)
       }
       x
@@ -3556,7 +3557,7 @@ describe("evaluate() - a worker's death", {
       class = "horizons_error_systemic"
     )
 
-    expect_true(file.exists(killed))
+    expect_true(dir.exists(killed))
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
     expect_length(gregexpr("A mirai daemon stopped while", msg, fixed = TRUE)[[1]], 1L)
@@ -3577,12 +3578,13 @@ describe("evaluate() - a worker's death", {
     ## daemons connected, and the search it cut short is never kept. The kill
     ## is armed at the search's second Gaussian-process prediction, once an
     ## iteration has run, and fires once, on a daemon, from a recipe step that
-    ## needs nothing from here.
+    ## needs nothing from here. Once is claimed with dir.create(), which
+    ## succeeds in one process only: a pool left with no daemon would wait
+    ## inside tune.
     armed  <- withr::local_tempfile(pattern = "armed")
-    killed <- withr::local_tempfile(pattern = "killed")
+    killed <- file.path(withr::local_tempdir(), "killed")
     kill <- bquote((function(x) {
-      if (file.exists(.(armed)) && !file.exists(.(killed)) && Sys.getpid() != .(Sys.getpid())) {
-        file.create(.(killed))
+      if (file.exists(.(armed)) && Sys.getpid() != .(Sys.getpid()) && dir.create(.(killed), showWarnings = FALSE)) {
         tools::pskill(Sys.getpid(), tools::SIGKILL)
       }
       x
@@ -3611,7 +3613,7 @@ describe("evaluate() - a worker's death", {
       class = "horizons_error_systemic"
     )
 
-    expect_true(file.exists(killed))
+    expect_true(dir.exists(killed))
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "A mirai daemon stopped", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
