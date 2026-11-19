@@ -333,7 +333,24 @@ describe("seed_engine()", {
 
   it("names the engines that take a seed", {
 
-    expect_setequal(SEEDED_ENGINES, c("ranger", "xgboost", "lightgbm"))
+    seeded <- Filter(function(row) isTRUE(row$seed), MODEL_SPECS)
+
+    expect_setequal(vapply(seeded, `[[`, character(1), "engine"), c("ranger", "xgboost", "lightgbm"))
+
+  })
+
+  it("seeds an isolated twin of an engine that takes a seed, as its engine is seeded", {
+
+    skip_if_not_installed("rules")
+    skip_if_not_installed("Cubist")
+
+    ## cubist's engine takes no seed; given one here, its twin must be found
+    ## to take it
+    local_model_specs(list(cubist = list(seed = TRUE)))
+
+    twin <- workflow_for(define_model_spec("cubist"))
+    expect_identical(workflows::extract_spec_parsnip(twin)$engine, "Cubist_isolated")
+    expect_identical(engine_args(seed_engine(twin, 11L))$seed, 11L)
 
   })
 

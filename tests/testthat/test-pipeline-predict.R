@@ -1420,7 +1420,7 @@ describe("predict.horizons_fit() - selected training set", {
 ## ensure_predict_namespaces() — per-model coverage and scoping (#65)
 ## ---------------------------------------------------------------------------
 ## Every model horizons supports maps to at least one predict-time namespace
-## (MODEL_PACKAGES, R/constants.R). Some of those packages are
+## (its `packages` in MODEL_SPECS, R/constants.R). Some of those packages are
 ## Suggests, so whether they are installed varies by machine. The tests below
 ## read what ensure_predict_namespaces() asks the missing-package gate for,
 ## which does not vary; the gate's own tests (test-utils-models.R) and the
@@ -1474,15 +1474,9 @@ requested_packages <- function(obj, config_ids) {
 
 describe("ensure_predict_namespaces() - per-model coverage", {
 
-  it("MODEL_PACKAGES covers exactly the supported models", {
-
-    expect_setequal(names(MODEL_PACKAGES), VALID_MODELS)
-
-  })
-
   for (m in VALID_MODELS) {
 
-    pkgs <- MODEL_PACKAGES[[m]]
+    pkgs <- MODEL_SPECS[[m]]$packages
 
     it(paste0("model '", m, "' requires its engine package(s)"), {
 
@@ -1553,9 +1547,7 @@ describe("ensure_predict_namespaces() - per-model coverage", {
     ## must not need it installed to predict the rf one. mars is mapped to a
     ## package that is never installed, so the check below sees a missing
     ## package wherever it runs, whether or not earth is installed.
-    unavailable <- MODEL_PACKAGES
-    unavailable[["mars"]] <- "horizonsFakePkgXYZ123"
-    local_mocked_bindings(MODEL_PACKAGES = unavailable)
+    local_model_specs(list(mars = list(packages = "horizonsFakePkgXYZ123")))
 
     obj <- make_ns_probe_fit(
       "rf", config_id = "cfg_rf",

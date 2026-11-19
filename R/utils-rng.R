@@ -209,7 +209,9 @@ seed_tree_line <- function(root) {
 #'
 #' @description
 #' Sets `seed` among the engine arguments of a workflow's model, for the
-#' engines that take one (`SEEDED_ENGINES`), keeping every other engine
+#' engines that take one (their `seed` in `MODEL_SPECS`, read through
+#' [engine_spec()], so an isolated twin is seeded as its engine is), keeping
+#' every other engine
 #' argument. parsnip and bonsai otherwise draw the engine's seed from the
 #' stream (`sample.int(10^5, 1)`), which moves with whatever drew before and
 #' is not recorded. Other engines' workflows are returned unchanged.
@@ -224,7 +226,7 @@ seed_engine <- function(workflow, seed) {
 
   spec <- workflows::extract_spec_parsnip(workflow)
 
-  if (!spec$engine %in% SEEDED_ENGINES) return(workflow)
+  if (!isTRUE(engine_spec(spec$engine)$seed)) return(workflow)
 
   args      <- as.list(spec$eng_args)
   args$seed <- as.integer(seed)

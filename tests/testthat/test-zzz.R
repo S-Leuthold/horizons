@@ -79,23 +79,29 @@ describe(".onLoad()", {
 
   it("sets one thread for workers when HORIZONS_THREAD_CONTROL is TRUE, and nothing otherwise", {
 
-    withr::local_options(ranger.num.threads = NULL)
+    ## A second engine's thread option, so a setting that names ranger's
+    ## alone fails
+    local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
+
+    withr::local_options(ranger.num.threads = NULL, horizons.test.threads = NULL)
     withr::local_envvar(HORIZONS_THREAD_CONTROL = "TRUE", OMP_NUM_THREADS = NA,
                         OPENBLAS_NUM_THREADS = NA, MKL_NUM_THREADS = NA)
 
     horizons:::.onLoad(NULL, "horizons")
 
     expect_identical(unname(Sys.getenv(thread_vars)), rep("1", 3))
-    expect_equal(getOption("ranger.num.threads"), 1)
+    expect_identical(getOption("ranger.num.threads"), 1L)
+    expect_identical(getOption("horizons.test.threads"), 1L)
 
     withr::local_envvar(HORIZONS_THREAD_CONTROL = NA, OMP_NUM_THREADS = NA,
                         OPENBLAS_NUM_THREADS = NA, MKL_NUM_THREADS = NA)
-    options(ranger.num.threads = NULL)
+    options(ranger.num.threads = NULL, horizons.test.threads = NULL)
 
     horizons:::.onLoad(NULL, "horizons")
 
     expect_identical(unname(Sys.getenv(thread_vars, unset = NA)), rep(NA_character_, 3))
     expect_null(getOption("ranger.num.threads"))
+    expect_null(getOption("horizons.test.threads"))
 
   })
 

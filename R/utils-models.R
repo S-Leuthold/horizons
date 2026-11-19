@@ -1,10 +1,15 @@
 #' Define a Parsnip Model Specification
 #'
 #' @description
-#' Maps a short model name (from `VALID_MODELS`) to a tunable parsnip model
-#' specification. Each spec has `tune()` placeholders for hyperparameters
-#' and the correct engine set. Used by `evaluate_single_config()` to build
-#' the workflow for each config.
+#' Builds a model's tunable parsnip specification from its row of
+#' `MODEL_SPECS`: parsnip's model function `fn`, called with the row's
+#' `fixed` arguments and each of its `tuned` arguments as `tune::tune()`; the
+#' engine `model_engine()` names, with the row's `engine_args` and its
+#' thread argument (`threads$argument`) at `ENGINE_THREADS`; and the
+#' regression mode. Each argument is captured as parsnip captures one written
+#' in the call (`500`, `tune::tune()`, `"impurity"`). Used by
+#' `evaluate_single_config()` and `fit_single_config()` to build the workflow
+#' for each config.
 #'
 #' @param model Character. One of the short names in `VALID_MODELS`:
 #'   "rf", "cubist", "xgboost", "plsr", "elastic_net", "svm_rbf",
@@ -17,85 +22,88 @@
 #' @keywords internal
 define_model_spec <- function(model, isolate = TRUE) {
 
-  switch(model,
+  row <- MODEL_SPECS[[model]]
 
-    "rf" = parsnip::rand_forest(
-      trees = 500,
-      mtry  = tune::tune(),
-      min_n = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("rf", isolate), importance = "impurity") |>
-      parsnip::set_mode("regression"),
+  ### The verbs' doors refuse a model outside VALID_MODELS first
+  if (is.null(row)) {
+    abort_horizons("{.fn define_model_spec} was given {.val {model}}, which {.code MODEL_SPECS} does not hold.",
+                   kind = "internal")
+  }
 
-    "cubist" = parsnip::cubist_rules(
-      committees = tune::tune(),
-      neighbors  = tune::tune(),
-      max_rules  = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("cubist", isolate)) |>
-      parsnip::set_mode("regression"),
+  tuned <- rep(list(quote(tune::tune())), length(row$tuned))
+  names(tuned) <- row$tuned
 
-    "xgboost" = parsnip::boost_tree(
-      trees          = 500,
-      tree_depth     = tune::tune(),
-      learn_rate     = tune::tune(),
-      mtry           = tune::tune(),
-      min_n          = tune::tune(),
-      loss_reduction = tune::tune(),
-      sample_size    = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("xgboost", isolate)) |>
-      parsnip::set_mode("regression"),
+  ## The engine's thread argument at the package's count, which an engine
+  ## left to its own default may set to every core (bonsai's lightgbm does)
+  threads <- if (!is.null(row$threads$argument)) stats::setNames(list(ENGINE_THREADS), row$threads$argument)
 
-    "lightgbm" = parsnip::boost_tree(
-      trees      = 500,
-      tree_depth = tune::tune(),
-      learn_rate = tune::tune(),
-      mtry       = tune::tune(),
-      min_n      = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("lightgbm", isolate)) |>
-      parsnip::set_mode("regression"),
+  ## The model's call is put together from the row and evaluated here, so
+  ## parsnip captures every argument as the expression the row holds
+  spec <- eval(rlang::call2(row$fn, !!!row$fixed, !!!tuned, .ns = "parsnip"))
+  spec <- parsnip::set_engine(spec, model_engine(model, isolate), !!!row$engine_args, !!!threads)
 
-    "elastic_net" = parsnip::linear_reg(
-      penalty = tune::tune(),
-      mixture = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("elastic_net", isolate)) |>
-      parsnip::set_mode("regression"),
+  parsnip::set_mode(spec, "regression")
 
-    "svm_rbf" = parsnip::svm_rbf(
-      cost      = tune::tune(),
-      rbf_sigma = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("svm_rbf", isolate)) |>
-      parsnip::set_mode("regression"),
+}
 
-    "mars" = parsnip::mars(
-      prod_degree = tune::tune(),
-      num_terms   = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("mars", isolate)) |>
-      parsnip::set_mode("regression"),
+## ---------------------------------------------------------------------------
+## The model table's readers
+## ---------------------------------------------------------------------------
 
-    "plsr" = parsnip::pls(
-      num_comp = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("plsr", isolate)) |>
-      parsnip::set_mode("regression"),
+#' The `MODEL_SPECS` row of an engine
+#'
+#' @description
+#' The one reader of an engine's traits (whether it takes a seed, its
+#' threads), keyed by the engine's name as a fitted spec carries it. An
+#' isolated twin finds its engine's row ([isolated_engine_name()]), so
+#' isolating an engine keeps every trait it has. The xgb meta-learner's
+#' `"xgboost"` and `"glmnet"` find the xgboost and elastic_net rows.
+#'
+#' @param engine Character(1). The engine, as parsnip names it.
+#' @return The row (a list), or `NULL` for an engine no row names.
+#' @keywords internal
+#' @noRd
+engine_spec <- function(engine) {
 
-    "mlp" = parsnip::mlp(
-      hidden_units = tune::tune(),
-      penalty      = tune::tune(),
-      epochs       = tune::tune()
-    ) |>
-      parsnip::set_engine(model_engine("mlp", isolate), MaxNWts = 10000) |>
-      parsnip::set_mode("regression")
+  for (row in MODEL_SPECS) {
 
-    ### No default: the door validators refuse a model outside VALID_MODELS,
-    ### and a NULL spec fails loudly in add_model().
+    if (identical(engine, row$engine) || identical(engine, isolated_engine_name(row$engine))) return(row)
 
-  )
+  }
+
+  NULL
+
+}
+
+#' The engines' thread options, at the package's thread count
+#'
+#' @description
+#' Each `option` the rows of `MODEL_SPECS` declare under `threads`, as a
+#' named list for [options()]. The one reader of them, for every place that
+#' pins threads: [pin_parent_threads()], the configs-axis worker,
+#' `.onLoad()` and [isolated_fit()].
+#'
+#' @return Named list: option name -> `ENGINE_THREADS`.
+#' @keywords internal
+#' @noRd
+engine_thread_options <- function() {
+
+  option <- unique(unlist(lapply(MODEL_SPECS, function(row) row$threads$option), use.names = FALSE))
+
+  stats::setNames(rep(list(ENGINE_THREADS), length(option)), option)
+
+}
+
+#' A model's name in the progress trees and reports
+#'
+#' @param model Character(1). A short model name.
+#' @return Character(1): its `label` in `MODEL_SPECS`, or `model` itself for
+#'   a name the table does not hold.
+#' @keywords internal
+#' @noRd
+model_label <- function(model) {
+
+  MODEL_SPECS[[model]]$label %||% model
 
 }
 
@@ -114,7 +122,8 @@ define_model_spec <- function(model, isolate = TRUE) {
 #' @description
 #' Pure: no `requireNamespace()` calls and no side effects, so "which
 #' packages, and why" is testable without touching the search path. Reads
-#' `MODEL_PACKAGES` and `SELECTION_PACKAGES` (`R/constants.R`).
+#' each model's `packages` in `MODEL_SPECS` and `SELECTION_PACKAGES`
+#' (`R/constants.R`).
 #'
 #' @param models Character. The `model` of each configuration (may repeat).
 #' @param feature_selection Character. The `feature_selection` of each
@@ -138,7 +147,7 @@ needed_packages <- function(models,
     for (pkg in pkgs) needed[[pkg]] <<- unique(c(needed[[pkg]], reason))
   }
 
-  for (m in unique(models)) add(MODEL_PACKAGES[[m]], m)
+  for (m in unique(models)) add(MODEL_SPECS[[m]]$packages, m)
 
   for (fs in unique(feature_selection)) {
     add(SELECTION_PACKAGES[[fs]], paste(fs, "feature selection"))

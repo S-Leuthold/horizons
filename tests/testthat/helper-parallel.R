@@ -188,3 +188,50 @@ collect_warnings <- function(expr, pattern = "", class = "warning") {
   })
   list(value = value, warnings = warned)
 }
+
+## A worker's payload for one rf config on 40 rows, as evaluate() builds it,
+## with no checkpoint directory
+worker_payload <- function() {
+
+  obj   <- make_eval_object(n = 40, n_wn = 20, n_configs = 1)
+  set.seed(1)
+  split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
+  folds <- rsample::vfold_cv(rsample::training(split), v = 3)
+
+  list(
+    data            = split$data,
+    resample_idx    = horizons:::resample_indices(split, folds),
+    configs         = obj$config$configs,
+    role_map        = obj$data$role_map,
+    grid_size       = 2L,
+    bayesian_iter   = 0L,
+    prune           = FALSE,
+    prune_threshold = 1,
+    seed            = 42L,
+    sg_window       = 13L,
+    pca_threshold   = 0.9,
+    outcome_range   = c(-Inf, Inf),
+    data_fp         = horizons:::eval_data_fingerprint(rsample::training(split),
+                                                       obj$data$role_map),
+    settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
+                                               outcome_range = c(-Inf, Inf)),
+    checkpoint_dir  = NULL,
+    keep_traces     = FALSE,
+    isolate         = TRUE,
+    pkg_version     = as.character(utils::packageVersion("horizons"))
+  )
+
+}
+
+## The payload written to a file as evaluate() writes it, in a directory
+## deleted when the calling frame exits: its absolute path, which the worker
+## reads as a daemon does
+worker_payload_file <- function(shared = worker_payload(), .env = parent.frame()) {
+
+  path <- file.path(withr::local_tempdir(.local_envir = .env), "payload.rds")
+
+  stopifnot(is.null(horizons:::write_output_file(shared, path)))
+
+  path
+
+}

@@ -549,9 +549,9 @@ check_predict_dots <- function(..., .level_default = NULL, .collector,
 #' Most of this is an availability check, not a dispatch fix. Once
 #' `workflows`/`parsnip` are loaded, `parsnip`'s own `predict.model_fit()`
 #' dispatch loads each model's own engine package itself; horizons does not
-#' need to preload it for dispatch to work (see the rationale comment on
-#' [MODEL_PACKAGES], `R/constants.R`). Checking here instead means a
-#' genuinely missing (Suggested) engine package is refused with an
+#' need to preload it for dispatch to work (each model's `packages` in
+#' `MODEL_SPECS`, `R/constants.R`, are what it checks). Checking here instead
+#' means a genuinely missing (Suggested) engine package is refused with an
 #' actionable, package-naming message up front, through the check every
 #' verb shares ([check_packages()]), rather than surfacing as an obscure
 #' failure partway through prediction. `ranger` for the UQ quantile forest is

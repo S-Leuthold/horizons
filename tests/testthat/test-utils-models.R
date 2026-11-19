@@ -113,8 +113,87 @@ describe("define_model_spec()", {
 
   })
 
-  ## An unknown model is refused at every verb's door (config_findings(),
-  ## test-class-core.R), before a spec is built.
+  it("builds each model's spec from its row: fn's class, the fixed, engine and thread arguments, and a tune() for each tuned one", {
+
+    for (model in VALID_MODELS) {
+
+      row  <- MODEL_SPECS[[model]]
+      spec <- define_model_spec(model)
+
+      expect_s3_class(spec, row$fn)
+      expect_identical(spec$mode, "regression", label = model)
+      expect_identical(spec$engine, model_engine(model), label = model)
+
+      set <- names(spec$args)[!vapply(spec$args, rlang::quo_is_null, logical(1))]
+      expect_setequal(set, c(names(row$fixed), row$tuned))
+
+      for (arg in names(row$fixed)) {
+        expect_identical(rlang::eval_tidy(spec$args[[arg]]), row$fixed[[arg]], label = paste(model, arg))
+      }
+
+      for (arg in row$tuned) {
+        expect_identical(rlang::quo_get_expr(spec$args[[arg]]), quote(tune::tune()), label = paste(model, arg))
+      }
+
+      ## The engine arguments, and the thread argument at the package's count
+      engine_args <- row$engine_args
+      if (!is.null(row$threads$argument)) engine_args[[row$threads$argument]] <- ENGINE_THREADS
+
+      expect_setequal(names(spec$eng_args) %||% character(0), names(engine_args) %||% character(0))
+
+      for (arg in names(engine_args)) {
+        expect_identical(rlang::eval_tidy(spec$eng_args[[arg]]), engine_args[[arg]], label = paste(model, arg))
+      }
+
+    }
+
+  })
+
+  it("refuses a model the table does not hold, as an internal error", {
+
+    ## An unknown model is refused at every verb's door first
+    ## (config_findings(), test-class-core.R)
+    expect_error(define_model_spec("not_a_model"), class = "horizons_error_internal")
+
+  })
+
+})
+
+describe("engine_thread_options()", {
+
+  it("gives each thread option the rows declare, at the package's thread count", {
+
+    expect_identical(engine_thread_options(), list(ranger.num.threads = 1L))
+
+    local({
+      local_mocked_bindings(ENGINE_THREADS = 3L, .package = "horizons")
+      expect_identical(engine_thread_options(), list(ranger.num.threads = 3L))
+    })
+
+    local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
+
+    expect_identical(engine_thread_options(), list(ranger.num.threads = 1L, horizons.test.threads = 1L))
+
+  })
+
+})
+
+describe("engine_spec()", {
+
+  it("finds each engine's row, its isolated twin's too, and none for an engine no row names", {
+
+    for (model in VALID_MODELS) {
+
+      row <- MODEL_SPECS[[model]]
+
+      expect_identical(engine_spec(row$engine), row, label = model)
+      expect_identical(engine_spec(isolated_engine_name(row$engine)), row, label = model)
+
+    }
+
+    expect_null(engine_spec("not_an_engine"))
+
+  })
 
 })
 
@@ -179,7 +258,7 @@ describe("check_packages() - missing package gate", {
 
 describe("needed_packages()", {
 
-  it("matches MODEL_PACKAGES for a single model", {
+  it("gives a single model's packages, each needed for it", {
 
     expect_identical(needed_packages("rf"), list(ranger = "rf"))
 
@@ -234,12 +313,12 @@ describe("needed_packages()", {
 ## ---------------------------------------------------------------------------
 ## The package tables against what the models and steps require
 ## ---------------------------------------------------------------------------
-## MODEL_PACKAGES and SELECTION_PACKAGES are what the door checks. Each entry
+## Each model's `packages` and SELECTION_PACKAGES are what the door checks. Each entry
 ## is read here against what parsnip and recipes say the real objects need, so
 ## a table that drifts from an engine or a step fails the suite, rather than
 ## letting a package past the door to fail mid-run.
 
-describe("MODEL_PACKAGES - against parsnip's required_pkgs()", {
+describe("each model's packages - against parsnip's required_pkgs()", {
 
   for (m in setdiff(VALID_MODELS, "lightgbm")) {
 
@@ -247,7 +326,7 @@ describe("MODEL_PACKAGES - against parsnip's required_pkgs()", {
 
       required <- parsnip::required_pkgs(define_model_spec(m), infra = FALSE)
 
-      expect_setequal(MODEL_PACKAGES[[m]], setdiff(required, "horizons"))
+      expect_setequal(MODEL_SPECS[[m]]$packages, setdiff(required, "horizons"))
 
     })
 
@@ -260,7 +339,7 @@ describe("MODEL_PACKAGES - against parsnip's required_pkgs()", {
 
     required <- parsnip::required_pkgs(define_model_spec("lightgbm"), infra = FALSE)
 
-    expect_setequal(MODEL_PACKAGES[["lightgbm"]], setdiff(required, "horizons"))
+    expect_setequal(MODEL_SPECS[["lightgbm"]]$packages, setdiff(required, "horizons"))
 
   })
 

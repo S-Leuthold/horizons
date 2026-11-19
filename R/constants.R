@@ -4,74 +4,146 @@
 
 ## Model Types ----------------------------------------------------------------
 
-# Valid model types — short names used in configure() and config grids
-VALID_MODELS <- c(
-  "rf",
-  "cubist",
-  "xgboost",
-  "plsr",
-  "elastic_net",
-  "svm_rbf",
-  "mlp",
-  "lightgbm",
-  "mars"
-)
-
-# Model specifications lookup: each short name's parsnip model (`fn`) and
-# engine. `isolate = TRUE` marks an engine that carries state from one fit to
-# the next in its process, which none of its arguments resets: each of its
-# fits then runs in a process of its own, through the engine's isolated twin
-# (model_engine(), register_isolated_engines(), R/isolated-engines.R), unless
-# control_horizons(isolate = FALSE). Cubist's C code keeps its generator's
-# stream behind the neighbour step's distance and leaks two (p + 2)^2
-# matrices a fit (R/isolated-engines.R).
-MODEL_SPECS <- list(
-  rf          = list(fn = "rand_forest",  engine = "ranger"),
-  cubist      = list(fn = "cubist_rules", engine = "Cubist", isolate = TRUE),
-  xgboost     = list(fn = "boost_tree",   engine = "xgboost"),
-  plsr        = list(fn = "pls",          engine = "pls"),
-  elastic_net = list(fn = "linear_reg",   engine = "glmnet"),
-  svm_rbf     = list(fn = "svm_rbf",      engine = "kernlab"),
-  mlp         = list(fn = "mlp",          engine = "nnet"),
-  lightgbm    = list(fn = "boost_tree",   engine = "lightgbm"),
-  mars        = list(fn = "mars",         engine = "earth")
-)
-
-# The engines that take a seed, which each stage gives them (seed_engine(),
-# R/utils-rng.R) rather than letting parsnip or bonsai draw one from the
-# stream. Keyed by engine, not model, so the xgb meta-learner shares it.
-SEEDED_ENGINES <- c("ranger", "xgboost", "lightgbm")
-
-# The packages each model needs, to fit it and to predict from it (#65),
-# keyed by the same short names as MODEL_SPECS and VALID_MODELS. Not derivable
-# from MODEL_SPECS$engine alone: cubist_rules() needs `rules` (registers the
-# parsnip spec) alongside `Cubist` (the model implementation), and
-# boost_tree(engine = "lightgbm") needs `bonsai` (registers the engine)
-# alongside `lightgbm`.
+# Everything horizons declares about each model, one row per short name (the
+# names configure() takes, VALID_MODELS). A new model is a row here, its
+# cells in CONFIG_COST_SECONDS and its fixed point in the engine contract
+# test (tests/testthat/test-engine-contract.R), with registration code only
+# for an engine parsnip does not have (the PLS engine, R/pls-engine.R). The
+# contract test holds every row's engine to the promises horizons makes
+# about it, through the containment the row declares. The fields:
 #
-# Mostly an AVAILABILITY CHECK, not a dispatch fix: once workflows and parsnip
-# are loaded (ensure_predict_namespaces() always requires both, along with
-# recipes), parsnip's own predict.model_fit() dispatch loads each model's
-# engine package itself via load_libs(), and tune loads it to fit. Checking at
-# the door instead means a genuinely missing (Suggested) engine package is
-# refused with an actionable, package-naming message before any work, rather
-# than failing every configuration that needs it. The one dispatch-critical
-# case is `ranger` for the UQ quantile forest: stats::predict() there
-# dispatches on a bare ranger::ranger object directly, with no
-# parsnip/workflows layer to auto-load it, so a missing ranger namespace
-# genuinely breaks dispatch, not just availability (see the ranger branch in
-# ensure_predict_namespaces()). Read by needed_packages() (R/utils-models.R).
-MODEL_PACKAGES <- list(
-  rf          = "ranger",
-  cubist      = c("rules", "Cubist"),
-  xgboost     = "xgboost",
-  plsr        = "pls",
-  elastic_net = "glmnet",
-  svm_rbf     = "kernlab",
-  mlp         = "nnet",
-  lightgbm    = c("bonsai", "lightgbm"),
-  mars        = "earth"
+# - `fn`, `engine`: parsnip's model, by name, and the engine.
+# - `fixed`: the model's arguments held at one value; `tuned`: the names of
+#   those tuned, each `tune::tune()` in the spec; `engine_args`: arguments
+#   passed to the engine. define_model_spec() (R/utils-models.R) builds the
+#   spec from these alone.
+# - `label`: the model's name in the progress trees and reports
+#   (model_label()).
+# - `packages`: what fitting and predicting with it needs, checked at every
+#   verb's door (needed_packages(), R/utils-models.R), so a missing engine is
+#   refused once, by name, before any work. Not derivable from the engine
+#   alone: cubist_rules() needs `rules` (which registers the parsnip spec)
+#   beside `Cubist`, and lightgbm needs `bonsai` (which registers the engine)
+#   beside `lightgbm`.
+# - `seed`: TRUE when the engine takes a seed, which each stage gives it
+#   (seed_engine(), R/utils-rng.R) rather than letting parsnip or bonsai draw
+#   one from the stream.
+# - `threads`: how the engine's threads are set, for an engine that can run
+#   more than one: `argument`, its fit argument, which define_model_spec()
+#   sets to ENGINE_THREADS, and `option`, an R option it reads (ranger reads
+#   `ranger.num.threads` to predict), which every place that pins threads
+#   sets (engine_thread_options()). An engine with no `threads` runs on one
+#   thread, or on what BLAS and OpenMP are given.
+# - `isolate`: the promises the engine breaks when its fits share a process,
+#   each named with the upstream report about it. Such a model is fitted
+#   through its engine's isolated twin, each fit in a process of its own
+#   (model_engine(), register_isolated_engines(), R/isolated-engines.R),
+#   unless control_horizons(isolate = FALSE). Cubist's C code keeps its
+#   generator's stream behind the neighbour step's distance, so a fit's
+#   predictions depend on the fits before it (`repeats`), and leaks two
+#   (p + 2)^2 matrices a fit (`memory`). The contract test checks that each
+#   reason still holds without isolation, so a reason the engine's own fix
+#   has answered is dropped rather than kept. tidymodels code that branches
+#   on an engine's name (parsnip's tunable() for lightgbm, tune's checks for
+#   glmnet) would see a twin as another engine; the contract test compares a
+#   twin's tunable() with its engine's.
+#
+# An engine's traits are read through engine_spec() (R/utils-models.R), which
+# finds the row of an isolated twin's engine too.
+MODEL_SPECS <- list(
+
+  rf = list(
+    fn          = "rand_forest",
+    engine      = "ranger",
+    label       = "Random Forest",
+    packages    = "ranger",
+    fixed       = list(trees = 500),
+    tuned       = c("mtry", "min_n"),
+    engine_args = list(importance = "impurity"),
+    seed        = TRUE,
+    threads     = list(argument = "num.threads", option = "ranger.num.threads")
+  ),
+
+  cubist = list(
+    fn       = "cubist_rules",
+    engine   = "Cubist",
+    label    = "Cubist",
+    packages = c("rules", "Cubist"),
+    tuned    = c("committees", "neighbors", "max_rules"),
+    isolate  = c(repeats = "topepo/Cubist#6", memory = "topepo/Cubist#8")
+  ),
+
+  xgboost = list(
+    fn       = "boost_tree",
+    engine   = "xgboost",
+    label    = "XGBoost",
+    packages = "xgboost",
+    fixed    = list(trees = 500),
+    tuned    = c("tree_depth", "learn_rate", "mtry", "min_n", "loss_reduction", "sample_size"),
+    seed     = TRUE,
+    threads  = list(argument = "nthread")
+  ),
+
+  plsr = list(
+    fn       = "pls",
+    engine   = "pls",
+    label    = "PLS",
+    packages = "pls",
+    tuned    = "num_comp"
+  ),
+
+  elastic_net = list(
+    fn       = "linear_reg",
+    engine   = "glmnet",
+    label    = "Elastic Net",
+    packages = "glmnet",
+    tuned    = c("penalty", "mixture")
+  ),
+
+  svm_rbf = list(
+    fn       = "svm_rbf",
+    engine   = "kernlab",
+    label    = "SVM-RBF",
+    packages = "kernlab",
+    tuned    = c("cost", "rbf_sigma")
+  ),
+
+  mlp = list(
+    fn          = "mlp",
+    engine      = "nnet",
+    label       = "Neural Network",
+    packages    = "nnet",
+    tuned       = c("hidden_units", "penalty", "epochs"),
+    engine_args = list(MaxNWts = 10000)
+  ),
+
+  lightgbm = list(
+    fn       = "boost_tree",
+    engine   = "lightgbm",
+    label    = "LightGBM",
+    packages = c("bonsai", "lightgbm"),
+    fixed    = list(trees = 500),
+    tuned    = c("tree_depth", "learn_rate", "mtry", "min_n"),
+    seed     = TRUE,
+    threads  = list(argument = "num_threads")
+  ),
+
+  mars = list(
+    fn       = "mars",
+    engine   = "earth",
+    label    = "MARS",
+    packages = "earth",
+    tuned    = c("prod_degree", "num_terms")
+  )
+
 )
+
+# The short model names configure() takes
+VALID_MODELS <- names(MODEL_SPECS)
+
+# The threads each fit runs on: what every place that pins threads sets the
+# engines' thread options to (engine_thread_options(), R/utils-models.R)
+ENGINE_THREADS <- 1L
 
 # The packages each feature-selection method's recipe step calls when it is
 # trained, keyed by VALID_FEATURE_SELECTION: the step's required_pkgs() less
@@ -90,21 +162,9 @@ SELECTION_PACKAGES <- list(
 # further at the predictors the recipe keeps and the smallest fold's rows less
 # one (cap_pls_components(), R/pls-engine.R). MIR models often want more than
 # the handful a default range allows, and 30 keeps a grid's points where
-# models land.
+# models land. Not a field of MODEL_SPECS: CARS caps its components with it
+# too (R/step-select-cars.R).
 PLS_MAX_COMP <- 30L
-
-# Human-readable model names for CLI tree output
-MODEL_DISPLAY_NAMES <- c(
-  rf          = "Random Forest",
-  cubist      = "Cubist",
-  xgboost     = "XGBoost",
-  plsr        = "PLS",
-  elastic_net = "Elastic Net",
-  svm_rbf     = "SVM-RBF",
-  mlp         = "Neural Network",
-  lightgbm    = "LightGBM",
-  mars        = "MARS"
-)
 
 ## Transformations ------------------------------------------------------------
 
@@ -351,7 +411,8 @@ DISPATCH_POLL_SECONDS <- 0.1
 # relative to one another are used (the order, and the ETA's weights), and
 # the table is not scaled by them. A new model or selection adds its cells
 # (test-utils-parallel.R holds the table to VALID_MODELS x
-# VALID_FEATURE_SELECTION).
+# VALID_FEATURE_SELECTION). Kept apart from MODEL_SPECS: it is one
+# measurement over models and selections, documented and refitted whole.
 CONFIG_COST_SECONDS <- c(
   "rf/none"           = 12861, "rf/pca"          = 672, "rf/correlation"          = 1974,
   "rf/boruta"         = 11089, "rf/cars"         = 5379,
@@ -397,7 +458,9 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      estimate clamped to outcome_range, as every other score is (#104).
 #   6  2026-11-09: every draw is seeded from the run's seed and its unit's
 #      name (SEED_RULE 1), so the split, the folds and each stage move.
-SCORING_SCHEMA <- 6L
+#   7  2026-11-18: every engine with a thread argument is given one thread
+#      (MODEL_SPECS' `threads`); lightgbm had used every core.
+SCORING_SCHEMA <- 7L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

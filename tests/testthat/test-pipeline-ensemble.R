@@ -457,10 +457,9 @@ describe("ensemble() - predict namespaces", {
 
     fitted <- ens_fitted()
 
-    models <- MODEL_PACKAGES
-    for (m in unique(fitted$config$configs$model)) models[[m]] <- "horizonsFakePkgXYZ123"
-    local_mocked_bindings(MODEL_PACKAGES = models,
-                          build_oof_matrix = function(...) stop("the meta-learner was built"))
+    members <- unique(fitted$config$configs$model)
+    local_model_specs(stats::setNames(rep(list(list(packages = "horizonsFakePkgXYZ123")), length(members)), members))
+    local_mocked_bindings(build_oof_matrix = function(...) stop("the meta-learner was built"))
 
     err <- expect_error(ensemble(fitted, method = "weighted"),
                         class = "horizons_error_missing_package")
