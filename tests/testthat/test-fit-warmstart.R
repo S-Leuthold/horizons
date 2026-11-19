@@ -911,6 +911,9 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 
 describe("bayes_search()", {
 
+  ## A model's workflow, which the search reads its engine from
+  lm_workflow <- workflows::workflow(recipes::recipe(mpg ~ ., data = mtcars), parsnip::linear_reg())
+
   it("raises a package missing on a worker during the search again, rather than falling back from it", {
 
     ## tune's loop recovers from the error and returns; the search records it
@@ -920,7 +923,7 @@ describe("bayes_search()", {
     }, .package = "tune")
 
     expect_no_warning(expect_error(
-      bayes_search(workflow = NULL, resamples = NULL, initial = NULL, iter = 1L,
+      bayes_search(workflow = lm_workflow, resamples = NULL, initial = NULL, iter = 1L,
                    param_info = NULL, metrics = NULL),
       class = "packageNotFoundError"
     ))
@@ -937,7 +940,7 @@ describe("bayes_search()", {
     }, .package = "tune")
 
     err <- expect_error(
-      bayes_search(workflow = NULL, resamples = NULL, initial = NULL, iter = 1L,
+      bayes_search(workflow = lm_workflow, resamples = NULL, initial = NULL, iter = 1L,
                    param_info = NULL, metrics = NULL, debug = TRUE),
       class = "horizons_error_run"
     )
@@ -947,6 +950,38 @@ describe("bayes_search()", {
     expect_match(msg, "tune keeps no record of why: All models failed for: penalty", fixed = TRUE)
     expect_match(msg, "...", fixed = TRUE)
     expect_lt(nchar(msg), 500)
+
+  })
+
+  it("reads the record of isolated fits' deaths only for a model fitted through an isolated twin", {
+
+    skip_if_not_installed("rules")
+    skip_if_not_installed("Cubist")
+
+    reads <- list()
+    local_mocked_bindings(isolated_deaths = function(on_daemons) {
+      reads[[length(reads) + 1L]] <<- on_daemons
+      character(0)
+    })
+    local_mocked_bindings(tune_bayes = function(...) NULL, .package = "tune")
+
+    ## The search returns nothing, which it warns of: not what this reads
+    search <- function(spec) {
+      reads <<- list()
+      suppressWarnings(bayes_search(workflow = workflows::workflow(recipes::recipe(mpg ~ ., data = mtcars), spec),
+                                    resamples = NULL, initial = NULL, iter = 1L, param_info = NULL,
+                                    metrics = NULL, allow_par = TRUE))
+      reads
+    }
+
+    ## rf, and cubist with isolation off: no process of their own, so no
+    ## record emptied or read, here or on a daemon
+    expect_length(search(define_model_spec("rf")), 0L)
+    expect_length(search(define_model_spec("cubist", isolate = FALSE)), 0L)
+
+    ## cubist through its twin: emptied before the search, read after it, on
+    ## the daemons
+    expect_identical(search(define_model_spec("cubist")), list(TRUE, TRUE))
 
   })
 

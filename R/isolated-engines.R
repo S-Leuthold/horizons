@@ -69,6 +69,24 @@ model_engine <- function(model, isolate = TRUE) {
 }
 
 
+#' Whether a workflow's model is fitted through an isolated twin
+#'
+#' @param workflow A workflow with a model.
+#' @return Logical(1): `TRUE` when the model's engine is the isolated twin of
+#'   the engine of a `MODEL_SPECS` row ([engine_spec()]), so each of its fits
+#'   runs in a process of its own.
+#' @keywords internal
+#' @noRd
+fits_isolated <- function(workflow) {
+
+  engine <- workflows::extract_spec_parsnip(workflow)$engine
+  row    <- engine_spec(engine)
+
+  !is.null(row) && identical(engine, isolated_engine_name(row$engine))
+
+}
+
+
 #' The models among `models` whose fits are isolated when isolation is on
 #'
 #' @param models Character. Short model names, possibly repeated.

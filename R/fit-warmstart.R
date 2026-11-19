@@ -441,7 +441,10 @@ tune_warmstart_bayes <- function(workflow,
 #' reason on the daemon, so the deaths are read from the processes the fits
 #' ran in ([isolated_deaths()]): this one, and each daemon when the folds ran
 #' on them. The record is emptied before the search too, since what it holds
-#' then is other units' deaths, read already from tune's notes.
+#' then is other units' deaths, read already from tune's notes. A search
+#' whose model is not fitted through an isolated twin ([fits_isolated()])
+#' starts no such process, so it neither empties nor reads the record, and
+#' sends the daemons no task for it.
 #'
 #' A daemon that dies during an iteration on the resamples axis does not
 #' reach here at all: tune prints "Optimization stopped prematurely" and
@@ -490,9 +493,11 @@ bayes_search <- function(workflow,
 
   ## The deaths of isolated fits' processes, read where the fits ran: on the
   ## daemons when tune sends them the folds. What the record holds now is
-  ## other units', so it is emptied first.
+  ## other units', so it is emptied first. Only a model fitted through an
+  ## isolated twin starts such processes.
+  isolated   <- fits_isolated(workflow)
   on_daemons <- isTRUE(allow_par)
-  isolated_deaths(on_daemons)
+  if (isolated) isolated_deaths(on_daemons)
 
   read_log <- function(m) {
     text <- cli::ansi_strip(conditionMessage(m))
@@ -552,7 +557,7 @@ bayes_search <- function(workflow,
   ## grid (check_tune_result()), even where tune dropped every candidate it
   ## killed and kept no note of it; under debug too, before the dropped
   ## candidate is reported as a failure with no record of why
-  died <- isolated_deaths(on_daemons)
+  died <- if (isolated) isolated_deaths(on_daemons) else character(0)
 
   if (length(died) > 0) abort_process_died_in_tune(died[1])
 
