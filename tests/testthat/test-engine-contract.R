@@ -48,9 +48,14 @@ CONTRACT_PARAMS <- list(
 ## slope above which a process's memory is not flat (MB a fit). The caller's
 ## allocator settles over the first twenty fits: an isolated cubist fit hands
 ## back a fitted object of over a megabyte, and its caller's resident memory
-## climbs for about 25 fits and then stops. Measured over fits 21 to 40 in
-## three processes per engine, the worst flat slope was 0.37 (one allocator
-## step of 5 MB) and Cubist's leak in one process 1.48.
+## climbs for about 25 fits and then stops. Read on this file's own runs over
+## fits 21 to 40: on Linux, in three processes per engine, the engines with
+## isolation at most 0.27 (isolated Cubist; every other engine 0.00) and
+## Cubist without it 1.51 in each, so the threshold is 2.8 times the worst
+## flat slope and half the least leak; on a Windows runner, in one process
+## per engine, the engines with isolation -0.43 to 0.13 and Cubist without
+## it 0.23. Resident memory on Windows does not show the leak, so the memory
+## canary runs on Linux only (skip_unless_canary_reads()).
 CONTRACT_FITS      <- 40L
 CONTRACT_WINDOW    <- 21:40
 CONTRACT_RSS_SLOPE <- 0.75
@@ -225,6 +230,17 @@ skip_unless_contract_runs <- function() {
   skip_unless_slow_tier()
   skip_on_cran()
   skip_if_dev_package()
+}
+
+## Where a canary's reading can show its promise broken. Resident memory shows
+## Cubist's leak with margin on Linux and not on Windows (CONTRACT_RSS_SLOPE),
+## so the memory canary runs on Linux only: elsewhere a flat reading would
+## say nothing about the leak.
+skip_unless_canary_reads <- function(promise) {
+  skip_if(promise == "memory" && Sys.info()[["sysname"]] != "Linux", paste(
+    "the memory canary runs on Linux only, where resident memory shows Cubist's leak with margin",
+    "(1.51 MB a fit without isolation, against 0.75); on Windows it does not (0.23 MB a fit without",
+    "isolation, inside the isolated engines' -0.43 to 0.13)"))
 }
 
 ## ---------------------------------------------------------------------------
@@ -405,6 +421,7 @@ describe("the engine contract: the canaries", {
 
         skip_unless_contract_runs()
         skip_without_packages(model)
+        skip_unless_canary_reads(promise)
 
         why <- with_deadline(promise_broken[[promise]](model, isolate = FALSE), CONTRACT_DEADLINE)
 
