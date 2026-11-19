@@ -123,13 +123,13 @@ one_fold_failing_recipe <- function(config_row, train_data, role_map, ..., trans
 ## An engine that fails, for every candidate, on the one cross-validation
 ## analysis set that lacks the first training row's outcome, and nowhere
 ## else: the whole training part holds it.
-fail_without_row_one <- function(setup) {
+fail_without_row_one <- function(setup, cause = "boom on one fold") {
 
   real_glmnet <- glmnet::glmnet
   value       <- rsample::training(setup$split)$SOC[1]
 
   function(x, y, ...) {
-    if (length(y) > 15 && !any(y == value)) stop("boom on one fold")
+    if (length(y) > 15 && !any(y == value)) stop(cause)
     real_glmnet(x, y, ...)
   }
 
@@ -854,41 +854,36 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
   })
 
-  it("reproduces a step's failure inside the re-tune by prepping the recipe, so it fails with its class", {
+  it("fails with the step's class when the step fails as a fold's recipe is prepped", {
 
-    ## elastic_net has no mtry, so its recipe is prepped only inside tune;
-    ## tune's notes show the step failed, and the prep outside tune raises
-    ## the step's own error
+    ## elastic_net has no mtry, so its recipe is first prepped on the folds,
+    ## once each, before the re-tune, and the step's own error ends the
+    ## member there
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
     result <- run_fit("elastic_net", setup)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
-                     "Recipe preparation failed: boom from step (in `step_mutate()`)")
+                     "Fold preparation failed: boom from step (in `step_mutate()`)")
     expect_identical(result$class, "simpleError")
 
-    ## The re-tune started before it failed, so how it started is recorded.
-    expect_false(result$warm_start)
-    expect_false(is.na(result$start_grid_size))
+    ## It failed before the re-tune started, so there is no start to record
+    expect_true(is.na(result$warm_start))
+    expect_true(is.na(result$start_grid_size))
 
   })
 
-  it("names the cause from tune's notes when every warm-start model failed on a failure the prep does not reproduce (#96)", {
+  it("fails with the step's class and words when the step fails only on a fold's rows", {
 
     local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
 
     result <- run_fit("elastic_net", setup)
 
     expect_identical(result$status, "failed")
-    expect_match(result$error_message,
-                 "^Warm-start grid search failed: all models failed during CV \u2014 ")
-    expect_match(result$error_message,
-                 "boom on a fold (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
-
-    ## tune keeps only the text, so the failure is a run failure; and its
-    ## own "All models failed" warning is not repeated as a warning
-    expect_identical(result$class, "horizons_error_run")
+    expect_identical(result$error_message,
+                     "Fold preparation failed: boom on a fold (in `step_mutate()`)")
+    expect_identical(result$class, "simpleError")
     expect_false(any(grepl("All models failed", result$warnings, fixed = TRUE)))
 
   })
@@ -959,15 +954,16 @@ describe("fit_single_config() chooses only among candidates scored on every fold
 
   it("fails a member whose every warm-start candidate failed on a fold, rather than choosing on the rest", {
 
-    local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
+    ## The engine fails on one fold for every candidate (fail_without_row_one())
+    local_mocked_bindings(glmnet = fail_without_row_one(setup), .package = "glmnet")
 
     result <- run_fit("elastic_net", setup)
 
     expect_identical(result$status, "failed")
     expect_match(result$error_message,
                  "^Warm-start grid search failed: no grid candidate was scored on every fold \u2014 ")
-    expect_match(result$error_message, "boom on one fold (in `step_mutate()`; 1 of 3 folds)",
-                 fixed = TRUE)
+    expect_match(result$error_message, "boom on one fold", fixed = TRUE)
+    expect_match(result$error_message, "1 of 3 folds)", fixed = TRUE)
     expect_identical(result$class, "horizons_error_run")
 
   })
@@ -1058,22 +1054,16 @@ describe("fit_single_config() chooses only among candidates scored on every fold
 
   it("fails a member whose out-of-fold fits missed a fold, rather than keeping predictions without it", {
 
-    ## The step fails on one fold, and only while the out-of-fold predictions
-    ## are made, so the re-tune chose its candidate on every fold
-    oof <- new.env()
+    ## The engine fails on one fold, and only while the out-of-fold
+    ## predictions are made, so the re-tune chose its candidate on every fold
+    oof    <- new.env()
     oof$on <- FALSE
 
-    fail_without_in_oof <- function(x, value) {
-      if (oof$on && length(x) > 15 && !any(x == value)) stop("boom on one out-of-fold fit")
-      x
-    }
-
-    local_mocked_bindings(build_recipe = function(config_row, train_data, role_map, ...) {
-      value <- train_data$wn_4000[1]
-      recipes::recipe(SOC ~ ., data = train_data) |>
-        recipes::update_role("sample_id", new_role = "id") |>
-        recipes::step_mutate(boom = fail_without_in_oof(wn_4000, !!value))
-    }, .package = "horizons")
+    fails_on_a_fold <- fail_without_row_one(setup, "boom on one out-of-fold fit")
+    real_glmnet     <- glmnet::glmnet
+    local_mocked_bindings(glmnet = function(x, y, ...) {
+      if (oof$on) fails_on_a_fold(x, y, ...) else real_glmnet(x, y, ...)
+    }, .package = "glmnet")
 
     real_resamples <- tune::fit_resamples
     local_mocked_bindings(fit_resamples = function(...) {
@@ -1087,8 +1077,8 @@ describe("fit_single_config() chooses only among candidates scored on every fold
     expect_identical(result$status, "failed")
     expect_match(result$error_message,
                  "^OOF predictions failed: out-of-fold predictions are missing for a fold \u2014 ")
-    expect_match(result$error_message, "boom on one out-of-fold fit (in `step_mutate()`; 1 of 3 folds)",
-                 fixed = TRUE)
+    expect_match(result$error_message, "boom on one out-of-fold fit", fixed = TRUE)
+    expect_match(result$error_message, "1 of 3 folds)", fixed = TRUE)
     expect_null(result$cv_predictions)
 
   })

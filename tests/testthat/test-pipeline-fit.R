@@ -410,6 +410,34 @@ describe("fit() - cv_predictions carries sample_id", {
 ## UQ integration
 ## =========================================================================
 
+describe("fit() - the folds a member reads its training rows from (#116)", {
+
+  it("hands each member folds cut from the training rows it passes, with UQ's calibration rows carved out", {
+
+    ## fit_single_config() transforms and preps the frame its folds were cut
+    ## from and fits the final model on train_data: the two must be one frame
+    seen <- NULL
+
+    testthat::with_mocked_bindings(
+      fit_single_config = function(...) {
+        seen <<- list(...)[c("cv_resamples", "train_data")]
+        stop("stopped once the member's arguments were seen")
+      },
+      tryCatch(
+        suppressWarnings(fit(make_fit_object(n = 250, n_configs = 1), n_best = 1L,
+                             compute_uq = TRUE, compute_ad = FALSE)),
+        error = function(e) NULL
+      ),
+      .package = "horizons"
+    )
+
+    expect_false(is.null(seen))
+    expect_identical(seen$cv_resamples$splits[[1]]$data, seen$train_data)
+
+  })
+
+})
+
 describe("fit() - UQ enabled", {
 
   ## fit250_uq(): n = 250, so the calibration split clears N_CALIB_MIN = 30

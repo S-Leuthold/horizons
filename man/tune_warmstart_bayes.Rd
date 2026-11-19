@@ -12,16 +12,17 @@ tune_warmstart_bayes(
   bayesian_iter,
   metric_set,
   allow_par = FALSE,
-  recipe = NULL,
   debug = FALSE,
   seed,
   config_id
 )
 }
 \arguments{
-\item{workflow}{A tidymodels workflow (recipe + model spec, not fitted).}
+\item{workflow}{A tidymodels workflow, not fitted: the member's model
+alone, as \code{\link[=fit_single_config]{fit_single_config()}} gives it, over prepped folds.}
 
-\item{cv_resamples}{A \code{vfold_cv} object.}
+\item{cv_resamples}{An \code{rset}: the member's folds, each recipe prepped
+once.}
 
 \item{initial_grid}{The starting grid, from \code{\link[=build_warmstart_grid]{build_warmstart_grid()}}.}
 
@@ -32,9 +33,6 @@ tune_warmstart_bayes(
 \item{metric_set}{A \code{yardstick::metric_set}.}
 
 \item{allow_par}{Logical. Passed to tune control functions.}
-
-\item{recipe}{The member's untrained recipe, to reproduce a step's failure
-inside tune with its class; \code{NULL} when it was prepped before tuning.}
 
 \item{debug}{Logical. Stop at the first failure rather than fall back.}
 
