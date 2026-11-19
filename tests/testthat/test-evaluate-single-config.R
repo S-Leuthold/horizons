@@ -2032,10 +2032,9 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
 
   it("preps a selection step once per fold whatever the candidates, so every candidate in a fold sees one band set", {
 
-    ## CARS draws its partition (cars_folds()) once a prep: three folds and
-    ## the final fit (elastic_net has no bounds prep), for a grid of two and a
-    ## Bayesian iteration that tuning the whole recipe would prep the folds
-    ## again for
+    ## CARS draws its partition (cars_folds()) once a prep: three folds, the
+    ## bounds prep and the final fit, for a grid of two and a Bayesian
+    ## iteration that tuning the whole recipe would prep the folds again for
     setup     <- make_eval_setup(n = 60, n_wn = 30)
     real_cars <- cars_folds
     preps     <- 0L
@@ -2046,7 +2045,7 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
     })
 
     result <- evaluate_single_config(
-      config_row    = make_eval_config(model = "elastic_net", feature_selection = "cars"),
+      config_row    = make_eval_config(feature_selection = "cars"),
       split         = setup$split,
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
@@ -2056,7 +2055,7 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
     )
 
     expect_identical(result$status, "success")
-    expect_identical(preps, nrow(setup$folds) + 1L)
+    expect_identical(preps, nrow(setup$folds) + 2L)
 
   })
 
