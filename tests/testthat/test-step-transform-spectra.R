@@ -115,3 +115,53 @@ describe("step_transform_spectra() bakes doubles", {
   })
 
 })
+
+describe("hoist_spectra()", {
+
+  it("is the step's bake of the whole training part for every preprocessing: names, order, values", {
+
+    ## Arrange: an id, a meta column and a sibling response around the
+    ## spectra, so the non-spectral columns' place in the frame shows
+    withr::local_seed(1)
+    d           <- transform_data()
+    d$sample_id <- sprintf("S%02d", seq_len(nrow(d)))
+    d$batch     <- rep(c("a", "b"), length.out = nrow(d))
+    d$clay      <- stats::runif(nrow(d))
+    role_map <- tibble::tibble(
+      variable = c(grep("^wn_", names(d), value = TRUE), "SOC", "sample_id", "batch", "clay"),
+      role     = c(rep("predictor", 30), "outcome", "id", "meta", "response")
+    )
+
+    for (method in VALID_PREPROCESSING) {
+
+      config <- tibble::tibble(transformation = "none", preprocessing = method,
+                               feature_selection = "none")
+
+      ## The whole recipe with nothing but the transform step
+      whole <- recipes::bake(recipes::prep(build_recipe(config, d, role_map)), new_data = NULL)
+
+      ## Act & Assert
+      expect_identical(hoist_spectra(d, config, role_map), whole, label = method)
+
+    }
+
+  })
+
+  it("leaves the caller's stream as it was", {
+
+    withr::local_seed(2)
+    d           <- transform_data()
+    d$sample_id <- sprintf("S%02d", seq_len(nrow(d)))
+    role_map <- tibble::tibble(variable = c(grep("^wn_", names(d), value = TRUE), "SOC", "sample_id"),
+                               role     = c(rep("predictor", 30), "outcome", "id"))
+    config   <- tibble::tibble(transformation = "none", preprocessing = "snv",
+                               feature_selection = "none")
+
+    before <- .Random.seed
+    hoist_spectra(d, config, role_map)
+
+    expect_identical(.Random.seed, before)
+
+  })
+
+})

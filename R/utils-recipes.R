@@ -11,6 +11,13 @@
 #' 3. Feature selection (pca/boruta/cars/correlation/none), on spectral
 #'    columns only
 #'
+#' With `transformed = TRUE` the data's spectra are already the transform
+#' step's output (`hoist_spectra()`), so step 2 is left out: the generated
+#' `spec` columns hold the predictor role by `outcome ~ .`, and the
+#' selection step selects them by the pattern it always uses. This is the
+#' recipe each fold is prepped with in [evaluate_single_config()] and
+#' [fit_single_config()]; the recipe their final fit runs is the whole one.
+#'
 #' Columns that are neither the outcome nor spectral predictors are given an
 #' explicit non-predictor role — `id`, `meta` and `response_hold` (sibling lab
 #' responses). Nothing is left to the `outcome ~ .` default, which would make
@@ -44,6 +51,9 @@
 #' @param pca_threshold Numeric in (0, 1]. Share of variance the `pca` feature
 #'   selection keeps, passed to `recipes::step_pca(threshold = )`. Default
 #'   0.995.
+#' @param transformed Logical. `TRUE` when `train_data`'s spectra are already
+#'   transformed (`hoist_spectra()`), so the recipe has no transform step.
+#'   Default `FALSE`.
 #'
 #' @return A `recipes::recipe` object ready for `workflows::add_recipe()`.
 #' @keywords internal
@@ -51,70 +61,16 @@ build_recipe <- function(config_row,
                          train_data,
                          role_map,
                          sg_window     = DEFAULT_SG_WINDOW,
-                         pca_threshold = DEFAULT_PCA_THRESHOLD) {
+                         pca_threshold = DEFAULT_PCA_THRESHOLD,
+                         transformed   = FALSE) {
 
-  ## Extract columns by role ------------------------------------------------
-
-  outcome_col    <- role_map$variable[role_map$role == "outcome"]
-  predictor_cols <- role_map$variable[role_map$role == "predictor"]
-  id_col         <- role_map$variable[role_map$role == "id"]
-  meta_cols      <- role_map$variable[role_map$role == "meta"]
-
-  ## Sibling responses: every lab-measured property joined by add_response()
-  ## that configure() did not promote to outcome. They are in the analysis
-  ## table but must never be modelled.
-  response_cols  <- setdiff(
-    role_map$variable[role_map$role == "response"],
-    outcome_col
-  )
+  outcome_col <- role_map$variable[role_map$role == "outcome"]
 
   ## -----------------------------------------------------------------------
   ## Step 1: Initialize recipe with roles
   ## -----------------------------------------------------------------------
 
-  ## Build formula: outcome ~ everything
-  rec_formula <- stats::as.formula(paste(outcome_col, "~ ."))
-
-  rec <- recipes::recipe(rec_formula, data = train_data)
-
-  ## Assign roles -----------------------------------------------------------
-
-  ## `id` is the one non-predictor role that stays required at bake. It is how
-  ## `predict()` labels each prediction with its sample, so a batch arriving
-  ## without it is a caller error worth aborting on. The hold roles below are the opposite
-  ## case: they exist only in the training table, so requiring them would make
-  ## every legitimate prediction batch fail.
-  rec <- recipes::update_role(rec, dplyr::all_of(id_col), new_role = "id")
-  rec <- recipes::update_role_requirements(rec, role = "id", bake = TRUE)
-
-  if (length(meta_cols) > 0) {
-
-    ## Every meta column is relaxed here, not just select_training()'s
-    ## provenance columns (.drawn_by, .min_distance, .group) — those are the
-    ## motivating case, but user-supplied meta from spectra() is treated the
-    ## same way, since no step consumes a meta column at bake time. On the
-    ## workflow path the relaxation also means meta columns are dropped before
-    ## bake() even when new data carries them: hardhat builds its extra-role
-    ## ptypes from the bake requirements, so a role at FALSE is excluded from
-    ## what forge() passes through. A future step that needs a meta column at
-    ## bake time would therefore see it silently absent rather than error.
-    rec <- recipes::update_role(rec, dplyr::all_of(meta_cols), new_role = "meta")
-    rec <- recipes::update_role_requirements(rec, role = "meta", bake = FALSE)
-
-  }
-
-  if (length(response_cols) > 0) {
-
-    ## Without an explicit role these fall through `outcome ~ .` to predictor,
-    ## which puts a lab measurement of the same sample into the model matrix —
-    ## target leakage that the pool-internal CV cannot see. They are also never
-    ## present at predict time, so the role is relaxed at bake like meta.
-    rec <- recipes::update_role(rec, dplyr::all_of(response_cols),
-                                new_role = "response_hold")
-    rec <- recipes::update_role_requirements(rec, role = "response_hold",
-                                             bake = FALSE)
-
-  }
+  rec <- recipe_roles(train_data, role_map)
 
   ## -----------------------------------------------------------------------
   ## Step 2: Response transformation
@@ -144,28 +100,13 @@ build_recipe <- function(config_row,
   ## -----------------------------------------------------------------------
   ## Step 3: Spectral preprocessing
   ## -----------------------------------------------------------------------
-  ## Targets predictor_cols by name (NOT all_predictors()), so only the
-  ## spectral columns are touched by spectral operations.
-  ##
-  ## The names go in as a literal vector (`!!`), not through dplyr::all_of().
-  ## tune reads every step argument with recipes:::find_tune_id(), which
-  ## evaluates the selector quosures outside a selecting context, and all_of()
-  ## evaluated there raises tidyselect's "Using `all_of()` outside of a
-  ## selecting function" deprecation on every tune and fit call. A character
-  ## vector is a selection in its own right: it resolves to the same columns
-  ## at prep() and refers to nothing in this frame.
-  ##
-  ## The window is configure()'s object-level `sg_window`; each method fixes
-  ## its own polynomial order (see transform_spectra_matrix()).
+  ## Left out when the data's spectra are already the step's output
 
-  preprocessing <- tolower(as.character(config_row$preprocessing))
+  if (!isTRUE(transformed)) {
 
-  rec <- rec |>
-    step_transform_spectra(
-      !!predictor_cols,
-      preprocessing = preprocessing,
-      window_size   = sg_window
-    )
+    rec <- add_spectral_step(rec, role_map, config_row$preprocessing, sg_window)
+
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 4: Feature selection
@@ -233,6 +174,128 @@ build_recipe <- function(config_row,
   ## worker. Passing environment() explicitly keeps that dependency visible.
 
   strip_selector_envs(rec, environment())
+
+}
+
+
+#' A recipe with build_recipe()'s roles and no steps
+#'
+#' @description
+#' Step 1 of [build_recipe()], which [hoist_spectra()] builds on too, so the
+#' two give every column the same role. Columns that are neither the
+#' outcome nor spectral predictors are given an explicit non-predictor role
+#' (`id`, `meta`, `response_hold`), so nothing is left to the `outcome ~ .`
+#' default, which would make a predictor of any column the role map did not
+#' name.
+#'
+#' @param train_data Data frame. The rows the recipe is built on.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @return A `recipes::recipe` with its roles.
+#' @keywords internal
+#' @noRd
+recipe_roles <- function(train_data, role_map) {
+
+  ## Extract columns by role ------------------------------------------------
+
+  outcome_col    <- role_map$variable[role_map$role == "outcome"]
+  id_col         <- role_map$variable[role_map$role == "id"]
+  meta_cols      <- role_map$variable[role_map$role == "meta"]
+
+  ## Sibling responses: every lab-measured property joined by add_response()
+  ## that configure() did not promote to outcome. They are in the analysis
+  ## table but must never be modelled.
+  response_cols  <- setdiff(
+    role_map$variable[role_map$role == "response"],
+    outcome_col
+  )
+
+  ## Build formula: outcome ~ everything
+  rec_formula <- stats::as.formula(paste(outcome_col, "~ ."))
+
+  rec <- recipes::recipe(rec_formula, data = train_data)
+
+  ## Assign roles -----------------------------------------------------------
+
+  ## `id` is the one non-predictor role that stays required at bake. It is how
+  ## `predict()` labels each prediction with its sample, so a batch arriving
+  ## without it is a caller error worth aborting on. The hold roles below are the opposite
+  ## case: they exist only in the training table, so requiring them would make
+  ## every legitimate prediction batch fail.
+  rec <- recipes::update_role(rec, dplyr::all_of(id_col), new_role = "id")
+  rec <- recipes::update_role_requirements(rec, role = "id", bake = TRUE)
+
+  if (length(meta_cols) > 0) {
+
+    ## Every meta column is relaxed here, not just select_training()'s
+    ## provenance columns (.drawn_by, .min_distance, .group) — those are the
+    ## motivating case, but user-supplied meta from spectra() is treated the
+    ## same way, since no step consumes a meta column at bake time. On the
+    ## workflow path the relaxation also means meta columns are dropped before
+    ## bake() even when new data carries them: hardhat builds its extra-role
+    ## ptypes from the bake requirements, so a role at FALSE is excluded from
+    ## what forge() passes through. A future step that needs a meta column at
+    ## bake time would therefore see it silently absent rather than error.
+    rec <- recipes::update_role(rec, dplyr::all_of(meta_cols), new_role = "meta")
+    rec <- recipes::update_role_requirements(rec, role = "meta", bake = FALSE)
+
+  }
+
+  if (length(response_cols) > 0) {
+
+    ## Without an explicit role these fall through `outcome ~ .` to predictor,
+    ## which puts a lab measurement of the same sample into the model matrix —
+    ## target leakage that the pool-internal CV cannot see. They are also never
+    ## present at predict time, so the role is relaxed at bake like meta.
+    rec <- recipes::update_role(rec, dplyr::all_of(response_cols),
+                                new_role = "response_hold")
+    rec <- recipes::update_role_requirements(rec, role = "response_hold",
+                                             bake = FALSE)
+
+  }
+
+  rec
+
+}
+
+
+#' Add build_recipe()'s spectral transform step to a recipe
+#'
+#' @description
+#' Step 3 of [build_recipe()], which [hoist_spectra()] builds on too, so the
+#' spectra a fold's recipe starts from are the ones the whole recipe's step
+#' makes.
+#'
+#' @param rec A recipe from [recipe_roles()], or one built on it.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param preprocessing Character(1). The configuration's preprocessing.
+#' @param sg_window Odd integer. The Savitzky-Golay window, in grid points.
+#' @return `rec` with `step_transform_spectra()` added.
+#' @keywords internal
+#' @noRd
+add_spectral_step <- function(rec, role_map, preprocessing, sg_window) {
+
+  ## Targets predictor_cols by name (NOT all_predictors()), so only the
+  ## spectral columns are touched by spectral operations.
+  ##
+  ## The names go in as a literal vector (`!!`), not through dplyr::all_of().
+  ## tune reads every step argument with recipes:::find_tune_id(), which
+  ## evaluates the selector quosures outside a selecting context, and all_of()
+  ## evaluated there raises tidyselect's "Using `all_of()` outside of a
+  ## selecting function" deprecation on every tune and fit call. A character
+  ## vector is a selection in its own right: it resolves to the same columns
+  ## at prep() and refers to nothing in this frame.
+  ##
+  ## The window is configure()'s object-level `sg_window`; each method fixes
+  ## its own polynomial order (see transform_spectra_matrix()).
+
+  predictor_cols <- role_map$variable[role_map$role == "predictor"]
+
+  rec |>
+    step_transform_spectra(
+      !!predictor_cols,
+      preprocessing = tolower(as.character(preprocessing)),
+      window_size   = sg_window
+    )
 
 }
 

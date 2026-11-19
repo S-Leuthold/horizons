@@ -473,6 +473,50 @@ transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
 }
 
 ## ---------------------------------------------------------------------------
+## The training rows' spectra, transformed once
+## ---------------------------------------------------------------------------
+
+#' Transform the spectra of the rows a configuration's folds are cut from
+#'
+#' @description
+#' The frame `step_transform_spectra()` bakes from `data` as [build_recipe()]
+#' adds it: a recipe of `build_recipe()`'s roles and the transform step alone
+#' (its `recipe_roles()` and `add_spectral_step()`), prepped on `data` and
+#' baked with `new_data = NULL`. It is the step's own output, not a copy of
+#' its rules: the non-spectral columns first, then the spectra under the
+#' names the step's `prep()` gives them (`recipes::names0()`), as doubles,
+#' with a spectrum the step cannot use set to `NA`. Every method is row-wise
+#' ([transform_spectra_matrix()]), so a fold's rows of this frame are what
+#' the step makes of that fold alone, and each fold's recipe is built over
+#' it without the step (`build_recipe(transformed = TRUE)`).
+#'
+#' The step's id is drawn from the stream (`recipes::rand_id()`), so the
+#' caller's stream is left as found. The step's warning about a spectrum it
+#' cannot use is muffled ([quiet_selection_warnings()]): this is not the
+#' recipe the configuration returns, and the final fit's recipe raises it.
+#'
+#' @param data Data frame. The rows the configuration's folds were cut from.
+#' @param config_row Single-row tibble; its `preprocessing` is read.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param sg_window Odd integer. The Savitzky-Golay window, in grid points.
+#' @return Tibble with `nrow(data)` rows: `data`'s non-spectral columns, then
+#'   the transformed spectra.
+#' @keywords internal
+#' @noRd
+hoist_spectra <- function(data, config_row, role_map, sg_window = DEFAULT_SG_WINDOW) {
+
+  local_rng_state()
+
+  rec <- add_spectral_step(recipe_roles(data, role_map), role_map,
+                           config_row$preprocessing, sg_window)
+
+  quiet_selection_warnings(
+    recipes::bake(recipes::prep(rec, training = data), new_data = NULL)
+  )
+
+}
+
+## ---------------------------------------------------------------------------
 ## required_pkgs
 ## ---------------------------------------------------------------------------
 

@@ -9,7 +9,8 @@ build_recipe(
   train_data,
   role_map,
   sg_window = DEFAULT_SG_WINDOW,
-  pca_threshold = DEFAULT_PCA_THRESHOLD
+  pca_threshold = DEFAULT_PCA_THRESHOLD,
+  transformed = FALSE
 )
 }
 \arguments{
@@ -26,6 +27,10 @@ points, passed to \code{step_transform_spectra(window_size = )}. Default 9.}
 \item{pca_threshold}{Numeric in (0, 1]. Share of variance the \code{pca} feature
 selection keeps, passed to \code{recipes::step_pca(threshold = )}. Default
 0.995.}
+
+\item{transformed}{Logical. \code{TRUE} when \code{train_data}'s spectra are already
+transformed (\code{hoist_spectra()}), so the recipe has no transform step.
+Default \code{FALSE}.}
 }
 \value{
 A \code{recipes::recipe} object ready for \code{workflows::add_recipe()}.
@@ -42,6 +47,13 @@ Recipe step order:
 \item Feature selection (pca/boruta/cars/correlation/none), on spectral
 columns only
 }
+
+With \code{transformed = TRUE} the data's spectra are already the transform
+step's output (\code{hoist_spectra()}), so step 2 is left out: the generated
+\code{spec} columns hold the predictor role by \code{outcome ~ .}, and the
+selection step selects them by the pattern it always uses. This is the
+recipe each fold is prepped with in \code{\link[=evaluate_single_config]{evaluate_single_config()}} and
+\code{\link[=fit_single_config]{fit_single_config()}}; the recipe their final fit runs is the whole one.
 
 Columns that are neither the outcome nor spectral predictors are given an
 explicit non-predictor role — \code{id}, \code{meta} and \code{response_hold} (sibling lab
