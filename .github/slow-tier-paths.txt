@@ -17,6 +17,8 @@
 ^R/(ad|ensemble-[a-z]+|pipeline-ensemble)\.R$
 ^R/step-[a-z-]+\.R$
 ^R/isolated-engines\.R$
+^R/utils-models\.R$
+^R/pls-engine\.R$
 ^tests/testthat/helper-.*\.R$
 ^tests/testthat/fixtures/
 ^tests/testthat\.R$

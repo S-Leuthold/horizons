@@ -10,8 +10,10 @@
 ## skip_if_dev_package() comes from helper-load-all.R, shared with
 ## test-pipeline-predict.R's fresh-process round trip.
 
-## local_test_daemons(), with_deadline() and keep_only_warning() come from
-## helper-parallel.R. Runs that
+## local_test_daemons(), with_deadline(), keep_only_warning() and the worker's
+## payload (worker_payload(), worker_payload_file()) come from
+## helper-parallel.R. Every model's configuration loading and fitting on a
+## fresh daemon is held in test-engine-contract.R. Runs that
 ## several tests read are built once, on first use, through helper-memo.R;
 ## each accessor is defined just above the tests that read it.
 
@@ -34,53 +36,6 @@
 ## The fix is structural — the worker lives at top level and takes its inputs as
 ## an argument — so the guard has to be structural too. These assertions fail if
 ## the body is ever inlined back into evaluate().
-
-## A worker's payload for one rf config on 40 rows, as evaluate() builds it,
-## with no checkpoint directory
-worker_payload <- function() {
-
-  obj   <- make_eval_object(n = 40, n_wn = 20, n_configs = 1)
-  set.seed(1)
-  split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
-  folds <- rsample::vfold_cv(rsample::training(split), v = 3)
-
-  list(
-    data            = split$data,
-    resample_idx    = horizons:::resample_indices(split, folds),
-    configs         = obj$config$configs,
-    role_map        = obj$data$role_map,
-    grid_size       = 2L,
-    bayesian_iter   = 0L,
-    prune           = FALSE,
-    prune_threshold = 1,
-    seed            = 42L,
-    sg_window       = 13L,
-    pca_threshold   = 0.9,
-    outcome_range   = c(-Inf, Inf),
-    data_fp         = horizons:::eval_data_fingerprint(rsample::training(split),
-                                                       obj$data$role_map),
-    settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
-                                               outcome_range = c(-Inf, Inf)),
-    checkpoint_dir  = NULL,
-    keep_traces     = FALSE,
-    isolate         = TRUE,
-    pkg_version     = as.character(utils::packageVersion("horizons"))
-  )
-
-}
-
-## The payload written to a file as evaluate() writes it, in a directory
-## deleted when the calling frame exits: its absolute path, which the worker
-## reads as a daemon does
-worker_payload_file <- function(shared = worker_payload(), .env = parent.frame()) {
-
-  path <- file.path(withr::local_tempdir(.local_envir = .env), "payload.rds")
-
-  stopifnot(is.null(horizons:::write_output_file(shared, path)))
-
-  path
-
-}
 
 describe("evaluate() parallel worker footprint", {
 
@@ -236,33 +191,6 @@ describe("evaluate() parallel worker footprint", {
     horizons:::evaluate_config_worker(1L, worker_payload_file())
 
     expect_identical(seen, c(dt = 1L, ranger = 1L, other = 1L))
-
-  })
-
-  it("fits a lightgbm configuration in a fresh process, which has not loaded bonsai (installed build)", {
-
-    skip_unless_slow_tier()
-    skip_on_cran()
-    skip_if_dev_package()
-    skip_if_not_installed("callr")
-    skip_if_not_installed("bonsai")
-    skip_if_not_installed("lightgbm")
-
-    shared <- worker_payload()
-    shared$configs$model <- "lightgbm"
-
-    ## A callr process rather than a daemon: a task sent from a session that
-    ## has loaded bonsai can load it on the daemon as well, which would pass
-    ## without the fix. bonsai registers lightgbm's engine only once
-    ## loaded, so the process reports whether it had.
-    res <- callr::r(function(payload_path) {
-      before <- isNamespaceLoaded("bonsai")
-      row    <- suppressWarnings(horizons:::evaluate_config_worker(1L, payload_path))
-      list(before = before, status = row$status, error = row$error_message)
-    }, args = list(payload_path = worker_payload_file(shared)), libpath = .libPaths())
-
-    expect_false(res$before)
-    expect_identical(res$status, "success", info = res$error)
 
   })
 

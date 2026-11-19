@@ -5,9 +5,12 @@
 ## Model Types ----------------------------------------------------------------
 
 # Everything horizons declares about each model, one row per short name (the
-# names configure() takes, VALID_MODELS). A new model is a row here and its
-# cells in CONFIG_COST_SECONDS, with registration code only for an engine
-# parsnip does not have (the PLS engine, R/pls-engine.R). The fields:
+# names configure() takes, VALID_MODELS). A new model is a row here, its
+# cells in CONFIG_COST_SECONDS and its fixed point in the engine contract
+# test (tests/testthat/test-engine-contract.R), with registration code only
+# for an engine parsnip does not have (the PLS engine, R/pls-engine.R). The
+# contract test holds every row's engine to the promises horizons makes
+# about it, through the containment the row declares. The fields:
 #
 # - `fn`, `engine`: parsnip's model, by name, and the engine.
 # - `fixed`: the model's arguments held at one value; `tuned`: the names of
@@ -38,7 +41,12 @@
 #   unless control_horizons(isolate = FALSE). Cubist's C code keeps its
 #   generator's stream behind the neighbour step's distance, so a fit's
 #   predictions depend on the fits before it (`repeats`), and leaks two
-#   (p + 2)^2 matrices a fit (`memory`).
+#   (p + 2)^2 matrices a fit (`memory`). The contract test checks that each
+#   reason still holds without isolation, so a reason the engine's own fix
+#   has answered is dropped rather than kept. tidymodels code that branches
+#   on an engine's name (parsnip's tunable() for lightgbm, tune's checks for
+#   glmnet) would see a twin as another engine; the contract test compares a
+#   twin's tunable() with its engine's.
 #
 # An engine's traits are read through engine_spec() (R/utils-models.R), which
 # finds the row of an isolated twin's engine too.
