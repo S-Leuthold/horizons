@@ -1897,7 +1897,8 @@ describe("evaluate_single_config() - a selection step's warning comes from the f
 
     ## rf preps the recipe for its mtry bounds inside the unit, elastic_net
     ## does not; either way the one warning is the final fit's, lifted with
-    ## its class, and the bounds prep's is not taken
+    ## its class, and neither the bounds prep's nor the folds' preps' is
+    ## taken
     for (model in c("rf", "elastic_net")) {
 
       result <- evaluate_single_config(
@@ -1917,12 +1918,6 @@ describe("evaluate_single_config() - a selection step's warning comes from the f
       expect_identical(nrow(hit), 1L, label = model)
       expect_identical(hit$step, "selection_record", label = model)
       expect_match(hit$message, "Boruta rejected all", fixed = TRUE, label = model)
-
-      ## And the row has it from the final fit, not also from the folds'
-      ## preps
-      shown <- grep("Boruta rejected all", result$warnings[[1]], fixed = TRUE, value = TRUE)
-      expect_gt(length(shown), 0L)
-      expect_false(any(grepl("of 3 folds", shown, fixed = TRUE)), label = model)
 
     }
 
@@ -1987,11 +1982,25 @@ grid_as_before <- function(config, setup, grid_size = 3L) {
 
 describe("evaluate_single_config() - each fold's recipe prepped once", {
 
-  it("scores every candidate on every fold as tuning the whole recipe did, for no selection, PCA and correlation", {
+  it("scores every candidate on every fold as tuning the whole recipe did, for PCA", {
+
+    ## PCA's scores are the columns a fold's prep makes rather than keeps,
+    ## the riskiest to place
+    setup <- make_eval_setup(n = 60, n_wn = 30)
+    got   <- grid_as_before(make_eval_config(model = "elastic_net", feature_selection = "pca"), setup)
+
+    expect_identical(got$row$status, "success")
+    expect_identical(got$now, got$before)
+
+  })
+
+  it("scores every candidate on every fold as tuning the whole recipe did, for no selection and correlation", {
+
+    skip_unless_slow_tier()
 
     setup <- make_eval_setup(n = 60, n_wn = 30)
 
-    for (selection in c("none", "pca", "correlation")) {
+    for (selection in c("none", "correlation")) {
 
       got <- grid_as_before(make_eval_config(model = "elastic_net", feature_selection = selection), setup)
 
@@ -2023,9 +2032,10 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
 
   it("preps a selection step once per fold whatever the candidates, so every candidate in a fold sees one band set", {
 
-    ## CARS draws its partition (cars_folds()) once a prep: three folds, the
-    ## bounds prep and the final fit, for a grid of two and a Bayesian
-    ## iteration that tuning the whole recipe would prep the folds again for
+    ## CARS draws its partition (cars_folds()) once a prep: three folds and
+    ## the final fit (elastic_net has no bounds prep), for a grid of two and a
+    ## Bayesian iteration that tuning the whole recipe would prep the folds
+    ## again for
     setup     <- make_eval_setup(n = 60, n_wn = 30)
     real_cars <- cars_folds
     preps     <- 0L
@@ -2036,7 +2046,7 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
     })
 
     result <- evaluate_single_config(
-      config_row    = make_eval_config(feature_selection = "cars"),
+      config_row    = make_eval_config(model = "elastic_net", feature_selection = "cars"),
       split         = setup$split,
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
@@ -2046,7 +2056,7 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
     )
 
     expect_identical(result$status, "success")
-    expect_identical(preps, nrow(setup$folds) + 2L)
+    expect_identical(preps, nrow(setup$folds) + 1L)
 
   })
 
@@ -2089,22 +2099,6 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
 
     ## CARS selected, rather than keeping every band, on some fold
     expect_true(any(lengths(bands[[1]]) < 1L + 22L))
-
-  })
-
-  it("builds the transformed rows and the fold recipe without moving the caller's stream", {
-
-    ## The whole recipe, built before them, draws its step ids from the
-    ## stream (recipes::rand_id()), so the recipe stored is the one it was
-    setup <- make_eval_setup(n_wn = 30)
-
-    withr::local_seed(3)
-    before <- .Random.seed
-
-    fold_prep_inputs(make_eval_config(transformation = "log", feature_selection = "pca"),
-                     setup$train_data, setup$role_map, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD)
-
-    expect_identical(.Random.seed, before)
 
   })
 

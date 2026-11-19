@@ -1046,28 +1046,100 @@ describe("prep_folds()", {
 
 })
 
-describe("capture_fold_warnings()", {
+describe("fold_prep_inputs()", {
 
-  it("records another package's warning with its fold and muffles it, and lets a horizons warning go on", {
+  it("builds the transformed rows and the fold recipe without moving the caller's stream", {
 
-    seen <- character(0)
+    ## The whole recipe, built before them, draws its step ids from the
+    ## stream (recipes::rand_id()), so the recipe stored is the one it was.
+    ## The case's training rows and role map; a log response and PCA, whose
+    ## steps draw ids.
+    case   <- prep_fold_case("none")
+    config <- tibble::tibble(config_id = "cfg", model = "elastic_net", transformation = "log",
+                             preprocessing = "snv", feature_selection = "pca")
 
-    out <- withCallingHandlers(
-      capture_fold_warnings({
-        warning("a step warned", call. = FALSE)
-        warn_in_unit("quality", "A horizons notice.")
-        "the prep"
-      }, "Fold2"),
-      warning = function(w) {
-        seen <<- c(seen, conditionMessage(w))
-        rlang::cnd_muffle(w)
+    withr::local_seed(3)
+    before <- .Random.seed
+
+    fold_prep_inputs(config, case$train, case$role_map, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD)
+
+    expect_identical(.Random.seed, before)
+
+  })
+
+})
+
+describe("fold_prep_scope()", {
+
+  it("names a fold's prep by the response transformation only for a selection that reads the outcome", {
+
+    ## Two configurations that differ only in the transformation must draw
+    ## other seeds for a selection that selects on the outcome, and the same
+    ## for one that does not
+    reads_outcome <- c(none = FALSE, pca = FALSE, correlation = TRUE, boruta = TRUE, cars = TRUE)
+
+    expect_setequal(names(reads_outcome), VALID_FEATURE_SELECTION)
+
+    for (verb in c("evaluate", "fit")) {
+
+      for (selection in names(reads_outcome)) {
+
+        config <- tibble::tibble(config_id = "cfg", model = "rf", transformation = "log",
+                                 preprocessing = "snv", feature_selection = selection)
+
+        expect_identical(fold_prep_scope(verb, config),
+                         c(verb, "prep", "snv", selection, if (reads_outcome[[selection]]) "log"),
+                         label = paste(verb, selection))
+
       }
-    )
 
-    expect_identical(out$value, "the prep")
-    expect_identical(out$arrivals$cause, "a step warned")
-    expect_identical(out$arrivals$fold, "Fold2")
-    expect_identical(seen, "A horizons notice.")
+    }
+
+  })
+
+})
+
+describe("fold_workflow()", {
+
+  it("has the parameter set of the configuration's recipe workflow, since no recipe step is tuned", {
+
+    ## tune searches the model alone over prepped folds, while the grid and
+    ## the bounds are read from the workflow with the whole recipe, so the
+    ## two must tune the same parameters: no recipe step is tuned, under any
+    ## selection or transformation
+    withr::local_seed(1)
+    wn <- paste0("wn_", seq(4000, by = -4, length.out = 20))
+    d  <- tibble::as_tibble(matrix(stats::rnorm(30 * 20), 30, dimnames = list(NULL, wn)))
+    d$SOC       <- stats::runif(30, 1, 5)
+    d$sample_id <- sprintf("S%02d", 1:30)
+    role_map <- tibble::tibble(variable = c(wn, "SOC", "sample_id"),
+                               role     = c(rep("predictor", 20), "outcome", "id"))
+
+    config_of <- function(selection, transformation) {
+      tibble::tibble(model = "rf", transformation = transformation, preprocessing = "snv",
+                     feature_selection = selection)
+    }
+
+    for (selection in VALID_FEATURE_SELECTION) {
+
+      for (transformation in VALID_TRANSFORMATIONS) {
+
+        expect_identical(nrow(tune::tune_args(build_recipe(config_of(selection, transformation), d, role_map))),
+                         0L, label = paste(selection, transformation))
+
+      }
+
+    }
+
+    ## So the model alone tunes what the whole workflow tunes: rf's mtry,
+    ## whose bounds are read from the recipe, among them
+    spec  <- define_model_spec("rf")
+    whole <- workflows::workflow() |>
+      workflows::add_recipe(build_recipe(config_of("pca", "log"), d, role_map)) |>
+      workflows::add_model(spec)
+
+    expect_identical(workflows::extract_parameter_set_dials(fold_workflow(spec, "SOC")),
+                     workflows::extract_parameter_set_dials(whole))
 
   })
 

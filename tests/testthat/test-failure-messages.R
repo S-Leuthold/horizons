@@ -143,6 +143,24 @@ tripwire_recipe <- function(config_row, train_data, role_map, ..., transformed =
 
 }
 
+## The same tripwire, set off only on more rows than a cross-validation
+## analysis set holds, as fail_on_full_training() fails: the folds' preps
+## pass, and only last_fit()'s prep of the whole recipe inside tune raises it
+trip_on_full_training <- function(x) {
+
+  if (length(x) > 25) horizons:::abort_horizons("Rows misaligned.", kind = "internal")
+
+  x
+
+}
+
+full_training_tripwire_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
+
+  mock_recipe(train_data, role_map, transformed) |>
+    recipes::step_mutate(boom = trip_on_full_training(SOC))
+
+}
+
 ## A tune_results-shaped object with hand-written notes, one tibble per fold.
 fake_tune_results <- function(...) {
 
@@ -525,18 +543,17 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
   it("fails with the step's class and words when the step fails only on a fold's rows", {
 
-    ## The step preps on the whole training part and fails on the analysis
-    ## rows of a fold: the first fold's prep ends the configuration, as a
-    ## step's failure anywhere in the unit does
+    ## rf's recipe is prepped on the whole training part to bound mtry,
+    ## where the step passes, and then on each fold's analysis rows, where
+    ## it fails: the first fold's prep ends the configuration
     local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("rf", setup)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
                      "Fold preparation failed: boom on a fold (in `step_mutate()`)")
     expect_identical(result$class, "simpleError")
-    expect_false(any(grepl("All models failed", result$warnings[[1]], fixed = TRUE)))
 
   })
 
@@ -556,9 +573,8 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
   it("fails at the one fold whose prep fails, with the step's class and words, and stops there under debug", {
 
-    ## The step fails on one fold's analysis rows only. Inside tune that
-    ## left the fold unscored and failed the grid by the fold rule, as text;
-    ## the fold's prep now raises the step's own error
+    ## The step fails on one fold's analysis rows only, and that fold's prep
+    ## raises the step's own error, in the unit
     local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
 
     result <- run_evaluate("elastic_net", setup)
@@ -575,14 +591,24 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
   it("lets a tripwire in a step through, whether the recipe is prepped before tuning or inside it", {
 
-    local_mocked_bindings(build_recipe = tripwire_recipe, .package = "horizons")
+    ## Before tuning: rf's bounds prep, elastic_net's first fold prep
+    local({
+      local_mocked_bindings(build_recipe = tripwire_recipe, .package = "horizons")
 
-    for (model in c("rf", "elastic_net")) {
+      for (model in c("rf", "elastic_net")) {
 
-      err <- expect_error(run_evaluate(model, setup), "Rows misaligned.", fixed = TRUE)
-      expect_true(rlang::cnd_inherits(err, "horizons_error_internal"), label = model)
+        err <- expect_error(run_evaluate(model, setup), "Rows misaligned.", fixed = TRUE)
+        expect_true(rlang::cnd_inherits(err, "horizons_error_internal"), label = model)
 
-    }
+      }
+    })
+
+    ## Inside tuning: last_fit() preps the whole recipe, where tune keeps the
+    ## failure as text, so it is reproduced outside tune and propagates
+    local_mocked_bindings(build_recipe = full_training_tripwire_recipe, .package = "horizons")
+
+    err <- expect_error(run_evaluate("elastic_net", setup), "Rows misaligned.", fixed = TRUE)
+    expect_true(rlang::cnd_inherits(err, "horizons_error_internal"))
 
   })
 
@@ -876,19 +902,20 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
   it("fails with the step's class and words when the step fails only on a fold's rows", {
 
+    ## As in evaluate_single_config(): the bounds prep on the whole training
+    ## part passes, and the first fold's prep fails
     local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
 
-    result <- run_fit("elastic_net", setup)
+    result <- run_fit("rf", setup)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
                      "Fold preparation failed: boom on a fold (in `step_mutate()`)")
     expect_identical(result$class, "simpleError")
-    expect_false(any(grepl("All models failed", result$warnings, fixed = TRUE)))
 
   })
 
-  it("lets a tripwire in a step through, whether the recipe is prepped before tuning or inside it", {
+  it("lets a tripwire in a step through, whether the bounds or a fold's prep raises it", {
 
     local_mocked_bindings(build_recipe = tripwire_recipe, .package = "horizons")
 

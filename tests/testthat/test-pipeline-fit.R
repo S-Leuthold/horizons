@@ -432,6 +432,7 @@ describe("fit() - the folds a member reads its training rows from (#116)", {
     )
 
     expect_false(is.null(seen))
+    expect_s3_class(seen$cv_resamples, "rset")
     expect_identical(seen$cv_resamples$splits[[1]]$data, seen$train_data)
 
   })

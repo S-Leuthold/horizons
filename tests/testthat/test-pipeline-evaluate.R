@@ -413,7 +413,7 @@ describe("evaluate() - success path", {
 })
 
 ## =========================================================================
-## Metric ranking
+## The folds a configuration reads its training rows from (#116)
 ## =========================================================================
 
 describe("evaluate() - the folds a configuration reads its training rows from (#116)", {
@@ -439,6 +439,10 @@ describe("evaluate() - the folds a configuration reads its training rows from (#
   })
 
 })
+
+## =========================================================================
+## Metric ranking
+## =========================================================================
 
 describe("evaluate() - its control", {
 

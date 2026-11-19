@@ -539,6 +539,26 @@ describe("fit_single_config() - failure paths", {
 
   })
 
+  it("names the recipe preparation when the recipe prepped for the bounds cannot be baked", {
+
+    ## The second bake handed a whole recipe is the bounds prep's (rf's mtry),
+    ## after the training rows' spectra are transformed
+    setup     <- fsc()$setup
+    real_bake <- recipes::bake
+    bakes     <- 0L
+    local_mocked_bindings(bake = function(object, ...) {
+      if (inherits(object, "recipe")) {
+        bakes <<- bakes + 1L
+        if (bakes == 2L) stop("the prepped recipe could not be baked")
+      }
+      real_bake(object, ...)
+    }, .package = "recipes")
+
+    expect_failed_at(run_on_shared(setup), "Recipe preparation",
+                     "the prepped recipe could not be baked", warm_start = NA)
+
+  })
+
   it("names the parameter finalization when the bounds cannot be set", {
 
     setup <- fsc()$setup

@@ -159,47 +159,6 @@ describe("define_model_spec()", {
 
 })
 
-describe("fold_workflow()", {
-
-  it("has the parameter set of the configuration's recipe workflow, for every model and selection", {
-
-    ## tune searches the model alone over prepped folds, while the grid and
-    ## the bounds are read from the workflow with the whole recipe, so the
-    ## two must tune the same parameters: no recipe step is tuned. bonsai
-    ## registers lightgbm's engine with parsnip when it loads.
-    skip_if_not_installed("bonsai")
-    withr::local_seed(1)
-    wn <- paste0("wn_", seq(4000, by = -4, length.out = 20))
-    d  <- tibble::as_tibble(matrix(stats::rnorm(30 * 20), 30, dimnames = list(NULL, wn)))
-    d$SOC       <- stats::runif(30, 1, 5)
-    d$sample_id <- sprintf("S%02d", 1:30)
-    role_map <- tibble::tibble(variable = c(wn, "SOC", "sample_id"),
-                               role     = c(rep("predictor", 20), "outcome", "id"))
-
-    for (model in VALID_MODELS) {
-
-      spec <- define_model_spec(model)
-
-      for (selection in VALID_FEATURE_SELECTION) {
-
-        config <- tibble::tibble(model = model, transformation = "log", preprocessing = "snv",
-                                 feature_selection = selection)
-        whole  <- workflows::workflow() |>
-          workflows::add_recipe(build_recipe(config, d, role_map)) |>
-          workflows::add_model(spec)
-
-        expect_identical(workflows::extract_parameter_set_dials(fold_workflow(spec, "SOC")),
-                         workflows::extract_parameter_set_dials(whole),
-                         label = paste(model, selection))
-
-      }
-
-    }
-
-  })
-
-})
-
 describe("engine_thread_options()", {
 
   it("gives each thread option the rows declare, at the package's thread count", {
