@@ -470,6 +470,37 @@ describe("config_fold_units()", {
 
 })
 
+describe("fold_prep_units()", {
+
+  it("lists each prep the configurations read once, longest first, a prep's training part before its folds", {
+
+    case    <- prep_fold_case("none")
+    configs <- tibble::tibble(
+      config_id         = paste0("cfg_", 1:5),
+      model             = c("elastic_net", "plsr", "elastic_net", "rf", "elastic_net"),
+      transformation    = c("none", "none", "log", "none", "none"),
+      preprocessing     = "snv",
+      feature_selection = c("correlation", "correlation", "pca", "none", "cars")
+    )
+
+    units <- fold_prep_units(configs, case$folds, case$role_map, "evaluate", NULL, 8L,
+                             DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD)
+    sel   <- vapply(units, function(u) u$row$feature_selection, character(1))
+    fold  <- vapply(units, `[[`, character(1), "fold")
+
+    ## CARS's three folds, then PCA's, then correlation's training part (plsr
+    ## bounds num_comp) and its folds; none for rf with no selection
+    expect_identical(sel, rep(c("cars", "pca", "correlation"), c(3L, 3L, 4L)))
+    expect_identical(fold, c(rep(case$folds$id, 2L), "training", case$folds$id))
+    expect_identical(anyDuplicated(fold_unit_files(units)), 0L)
+
+    ## The cost table covers every selection that has a prep, and only those
+    expect_setequal(names(FOLD_PREP_COST_SECONDS), setdiff(VALID_FEATURE_SELECTION, "none"))
+
+  })
+
+})
+
 describe("read_fold_entry()", {
 
   it("reads an entry only under its own key, and says why a file is not one", {

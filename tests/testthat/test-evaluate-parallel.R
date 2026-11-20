@@ -1243,7 +1243,12 @@ describe("evaluate() - the configs axis on mirai", {
     local_test_daemons(2)
     withr::local_dir(work)
 
-    ev <- with_deadline(suppressWarnings(evaluate(plsr_object(3), seed = 42L,
+    ## The third configuration reads a fold prep per fold, from the run's
+    ## tmp/, as its daemon is given it
+    obj <- plsr_object(3)
+    obj$config$configs$feature_selection[3] <- "pca"
+
+    ev <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L,
                                                   control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
                                                                              output_dir = "out", verbose = FALSE))), 120)
 
@@ -2598,19 +2603,23 @@ describe("evaluate() - the fold preparations on the daemons", {
     skip_if_dev_package()
 
     local_test_daemons(2)
-    dir <- withr::local_tempdir()
-    tmp <- file.path(dir, "tmp")
+    dir  <- withr::local_tempdir()
+    tmp  <- file.path(dir, "tmp")
+    done <- withr::local_tempdir()
 
     ## On the daemons every prep but the training part's waits three seconds
-    ## before it runs, in R code a cancellation interrupts
+    ## before it runs, in R code a cancellation interrupts, and each says
+    ## when it has finished
     with_deadline(mirai::everywhere({
       ns   <- asNamespace("horizons")
       real <- get("prep_fold_entry", envir = ns)
       utils::assignInNamespace("prep_fold_entry", function(unit, ...) {
         if (!identical(unit$fold, "training")) Sys.sleep(3)
-        real(unit, ...)
+        entry <- real(unit, ...)
+        file.create(file.path(done, unit$fold))
+        entry
       }, ns = "horizons")
-    })[], 30)
+    }, done = done)[], 30)
 
     ## The interrupt arrives as the window's second wait ends: the training
     ## part's prep was collected and written after the first, the first
@@ -2644,6 +2653,9 @@ describe("evaluate() - the fold preparations on the daemons", {
     expect_length(returned, 1L)
     expect_match(returned, "^fold-")
     expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+    ## The second fold's prep, cancelled in its wait, never finished
+    expect_setequal(list.files(done), c("training", "Fold1"))
 
   })
 
