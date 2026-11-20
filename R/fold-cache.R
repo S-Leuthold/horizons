@@ -694,3 +694,516 @@ assemble_folds <- function(entry_at, folds, inputs, role_map) {
        warnings = fold_warning_records(arrivals, nrow(folds)))
 
 }
+
+## ---------------------------------------------------------------------------
+## The run's fold preps: the units it needs, and where their entries are kept
+## ---------------------------------------------------------------------------
+
+#' The fold preps a run's configurations need, each once
+#'
+#' @description
+#' Each configuration's units ([config_fold_units()]), the training part's
+#' for a bounded model ([bounded_model()]), distinct by key: one unit
+#' however many configurations read it. They start longest first, by the
+#' cost of a fold's prep under their selection (`FOLD_PREP_COST_SECONDS`), a
+#' key's training part before its folds, ties in the order the
+#' configurations list them.
+#'
+#' @param configs The configurations still to run.
+#' @param folds The `rset` they are tuned over.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param verb,data,seed,sg_window,pca_threshold Passed to
+#'   [config_fold_units()].
+#' @return List of units, in the order to start them.
+#' @keywords internal
+#' @noRd
+fold_prep_units <- function(configs, folds, role_map, verb, data, seed, sg_window, pca_threshold) {
+
+  units <- list()
+
+  for (i in seq_len(nrow(configs))) {
+
+    cfg <- configs[i, ]
+    own <- config_fold_units(verb, cfg, folds, role_map, data, seed, sg_window, pca_threshold,
+                             bounded = bounded_model(cfg$model))
+
+    units <- c(units, if (!is.null(own$training)) list(own$training), own$folds)
+
+  }
+
+  if (length(units) == 0) return(list())
+
+  names <- vapply(units, `[[`, character(1), "name")
+  units <- units[!duplicated(names)]
+
+  cost     <- vapply(units, `[[`, numeric(1), "cost")
+  training <- vapply(units, function(u) u$fold_i == 0L, logical(1))
+
+  ### order() keeps ties in their listing order
+  units[order(-cost, !training)]
+
+}
+
+#' The files a run's fold preps are kept in
+#'
+#' @param units Units from [fold_prep_units()].
+#' @return Character: each unit's file name.
+#' @keywords internal
+#' @noRd
+fold_unit_files <- function(units) {
+
+  vapply(units, `[[`, character(1), "name")
+
+}
+
+#' Where a run keeps its fold preps' entries
+#'
+#' @description
+#' With an `output_dir`, the run's own files' directory, `tmp/`
+#' ([run_files_dir()]), created if absent: a failure to create it stops the
+#' run as a failed write does ([abort_output_write()]). It is held absolute,
+#' as a daemon is given it, and as given for this session's messages.
+#' Without one, an environment that dies with the call.
+#'
+#' @param output_dir The run's `output_dir`, or `NULL`.
+#' @param results The rows so far, carried by a stop.
+#' @param call The frame a stop reports.
+#' @return List with `dir` (absolute, or `NULL`), `shown` (the directory as
+#'   given, or `NULL`) and `memory` (an environment, or `NULL`).
+#' @keywords internal
+#' @noRd
+open_fold_store <- function(output_dir, results, call = rlang::caller_env()) {
+
+  if (is.null(output_dir)) {
+    return(list(dir = NULL, shown = NULL, memory = new.env(parent = emptyenv())))
+  }
+
+  shown       <- run_files_dir(output_dir)
+  not_created <- create_output_dir(shown)
+
+  if (!is.null(not_created)) abort_output_write(shown, not_created, results, call = call)
+
+  list(dir = normalizePath(shown, winslash = "/", mustWork = TRUE), shown = shown, memory = NULL)
+
+}
+
+#' Keep a fold prep's entry in the run's store
+#'
+#' @description
+#' With a directory, through [write_output_file()], which writes whole or not
+#' at all; a write that fails stops the run as systemic, naming the file,
+#' with the rows so far ([abort_output_write()]).
+#'
+#' @param store From [open_fold_store()].
+#' @param unit The unit the entry is of.
+#' @param entry From [prep_fold_entry()].
+#' @param results The rows so far, carried by a stop.
+#' @param call The frame a stop reports.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+put_fold_entry <- function(store, unit, entry, results, call = rlang::caller_env()) {
+
+  if (is.null(store$dir)) {
+    assign(unit$name, entry, envir = store$memory)
+    return(invisible(NULL))
+  }
+
+  failed <- write_output_file(entry, file.path(store$dir, unit$name))
+
+  if (!is.null(failed)) abort_output_write(file.path(store$shown, unit$name), failed, results, call = call)
+
+  invisible(NULL)
+
+}
+
+#' Read a fold prep's entry, under its own key only
+#'
+#' @description
+#' Read with base R, any warning before an error kept as
+#' [write_output_file()] keeps it, and held to the unit's key field by field
+#' ([compare_record()]), as a checkpoint row is held to the run's settings:
+#' an entry under the name its key gives that records another key (a file
+#' copied in, or a collision) is not read as the unit's.
+#'
+#' @param path The entry's file.
+#' @param key The unit's key ([fold_prep_key()]).
+#' @return List with `entry` (or `NULL`) and `error` (why the file is not the
+#'   unit's entry, or `NULL`).
+#' @keywords internal
+#' @noRd
+read_fold_entry <- function(path, key) {
+
+  said  <- character(0)
+  entry <- tryCatch(
+    withCallingHandlers(readRDS(path), warning = function(w) {
+      said <<- c(said, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }),
+    error = function(e) structure(list(reason = paste(unique(c(said, conditionMessage(e))), collapse = "; ")),
+                                  class = "horizons_unread")
+  )
+
+  if (inherits(entry, "horizons_unread")) return(list(entry = NULL, error = entry$reason))
+
+  if (!is.list(entry) || !all(c("key", "failed", "kept", "records") %in% names(entry))) {
+    return(list(entry = NULL, error = "not a fold preparation"))
+  }
+
+  cmp <- compare_record(entry$key, key)
+
+  if (length(cmp$differ) > 0 || length(cmp$missing) > 0) {
+    return(list(entry = NULL, error = "holds another fold preparation's record"))
+  }
+
+  list(entry = entry, error = NULL)
+
+}
+
+#' A configuration's entries, from the run's store
+#'
+#' @description
+#' The entries [evaluate_single_config()] and [fit_single_config()] take as
+#' `fold_entries`, read from the store the run's stage wrote. The session
+#' wrote each, so one it cannot read stops the run as systemic, with the
+#' rows so far ([abort_fold_entry_unread()]).
+#'
+#' @param store From [open_fold_store()].
+#' @param config_row Single-row tibble from `config$configs`.
+#' @param folds The `rset` it is tuned over.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param verb,data,seed,sg_window,pca_threshold As the stage's units were
+#'   listed with ([fold_prep_units()]).
+#' @param results The rows so far, carried by a stop.
+#' @param verb_label Character(1). The verb, for a stop's message.
+#' @param call The frame a stop reports.
+#' @return `NULL` with no feature selection; otherwise a list with
+#'   `training` and `folds`.
+#' @keywords internal
+#' @noRd
+config_fold_entries <- function(store, config_row, folds, role_map, verb, data, seed, sg_window,
+                                pca_threshold, results, call = rlang::caller_env()) {
+
+  units <- config_fold_units(verb, config_row, folds, role_map, data, seed, sg_window, pca_threshold,
+                             bounded = bounded_model(config_row$model))
+
+  if (is.null(units$folds)) return(NULL)
+
+  read <- function(unit) {
+
+    if (is.null(unit)) return(NULL)
+
+    if (is.null(store$dir)) {
+      entry <- get0(unit$name, envir = store$memory, inherits = FALSE)
+      if (is.null(entry)) abort_horizons("The run holds no fold preparation for {.val {unit$label}}.", kind = "internal")
+      return(entry)
+    }
+
+    got <- read_fold_entry(file.path(store$dir, unit$name), unit$key)
+
+    if (!is.null(got$error)) {
+      abort_fold_entry_unread(file.path(store$shown, unit$name), got$error, results, verb = verb, call = call)
+    }
+
+    got$entry
+
+  }
+
+  list(training = read(units$training), folds = lapply(units$folds, read))
+
+}
+
+#' Stop the call because a fold preparation the run wrote cannot be read
+#'
+#' @description
+#' The run wrote each fold preparation it reads, so one it cannot read means
+#' its directory changed under it (another run started into the same
+#' `output_dir`, say), and every configuration after would fail the same
+#' way: the run stops as systemic, with the rows so far, as a write that
+#' fails stops it.
+#'
+#' @param path The file.
+#' @param reason Character(1). Why it could not be read.
+#' @param results The rows so far, carried as `results`.
+#' @param verb Character(1). The verb that stops.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_fold_entry_unread <- function(path, reason, results, verb = "evaluate", call = rlang::caller_env()) {
+
+  dir  <- dirname(path)
+  name <- basename(path)
+
+  abort_horizons(c(
+    "{.fn {verb}} could not read a fold preparation it wrote to {.path {dir}}, so the run cannot go on.",
+    "x" = "{name}: {reason}",
+    "i" = "The rows finished so far are in this error's {.field results} field.",
+    "i" = "One {.arg output_dir} serves one run at a time, and a run started into it removes what an earlier run left."
+  ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
+
+}
+
+#' Remove a run's fold preparations once every configuration has its row
+#'
+#' @description
+#' Every `fold-*.rds` in the run's `tmp/` (after the clearing at the start of
+#' the call, every one there is this call's), then the directory when it is
+#' left empty, quietly, as [remove_run_file()] removes the payload: on
+#' Windows a file a daemon still had open stays until the next call clears
+#' it ([clear_run_files()]). Called once every task has been collected, so
+#' none does.
+#'
+#' @param dir The run's `tmp/` directory.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+remove_fold_entries <- function(dir) {
+
+  unlink(list.files(dir, pattern = "^fold-.*\\.rds$", full.names = TRUE))
+  remove_empty_dir(dir)
+
+}
+
+## ---------------------------------------------------------------------------
+## The stage: each fold prep the run needs, built once
+## ---------------------------------------------------------------------------
+
+#' Transform the spectra a fold prep's unit is prepped from, as a unit
+#'
+#' @description
+#' [hoist_spectra()] for the unit's preprocessing, inside a unit of its own,
+#' so its failure becomes each of its units' entries and the run goes on.
+#' Its warnings are not kept: each configuration transforms its own training
+#' rows the same way before it reads an entry (its Step 1b), and records
+#' them there.
+#'
+#' @param data The rows the folds were cut from.
+#' @param unit_row Single-row tibble from [fold_unit_row()].
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param sg_window Odd integer.
+#' @param debug Logical. Passed to [run_unit()].
+#' @return [run_unit()]'s value: `value` (the transformed rows), `failed`,
+#'   `records`.
+#' @keywords internal
+#' @noRd
+hoist_for_units <- function(data, unit_row, role_map, sg_window, debug = FALSE) {
+
+  run_unit(
+    unit_step("fold_prep", hoist_spectra(data, unit_row, role_map, sg_window = sg_window)),
+    unit = "fold preparation", id = tolower(unit_row$preprocessing), debug = debug
+  )
+
+}
+
+#' The entry of a unit whose spectra could not be transformed
+#'
+#' @param unit The unit.
+#' @param records The failed hoist's records ([hoist_for_units()]).
+#' @return An entry shaped as [prep_fold_entry()]'s, failed, holding the
+#'   hoist's failure.
+#' @keywords internal
+#' @noRd
+failed_fold_entry <- function(unit, records) {
+
+  list(key = unit$key, failed = TRUE,
+       records = records[records$type == "failure", , drop = FALSE],
+       kept = character(0), made = list(), n_predictors = 0L,
+       arrivals = no_arrivals(), runtime_secs = 0)
+
+}
+
+#' Build each fold prep a run needs, once, in this session
+#'
+#' @description
+#' The stage before any configuration runs. An entry the store already holds
+#' (a run interrupted and resumed into the same `output_dir`) is reused when
+#' it is this unit's ([read_fold_entry()]) and its prep did not fail; one
+#' that failed is built again, so a run after a fix prepares that fold
+#' again, and one that cannot be read or records another key is built again
+#' with one note on the log. The rest are built in this session, one
+#' transform of the spectra per preprocessing, each entry kept in the store
+#' as it is built.
+#'
+#' @param units From [fold_prep_units()].
+#' @param store From [open_fold_store()].
+#' @param data The rows the folds were cut from (the training part).
+#' @param folds The `rset`.
+#' @param role_map,seed,sg_window,pca_threshold,debug,keep_traces Passed to
+#'   [prep_fold_entry()].
+#' @param collector The verb's collector, for the note.
+#' @param output_dir The run's `output_dir`, for the note.
+#' @param results The rows so far, carried by a stop.
+#' @param call The frame a stop reports.
+#' @return [fold_stage_record()]'s table.
+#' @keywords internal
+#' @noRd
+build_fold_stage <- function(units, store, data, folds, role_map, seed, sg_window, pca_threshold,
+                             debug, keep_traces, collector, output_dir, results,
+                             call = rlang::caller_env()) {
+
+  start_time <- Sys.time()
+  reused     <- reuse_fold_entries(units, store, collector, output_dir)
+  entries    <- reused$entries
+  todo       <- which(vapply(entries, is.null, logical(1)))
+
+  ### One transform per preprocessing, held only while its units are built
+  pp <- vapply(units, function(u) tolower(u$row$preprocessing), character(1))
+
+  for (each in unique(pp[todo])) {
+
+    these <- todo[pp[todo] == each]
+    hoist <- hoist_for_units(data, units[[these[1]]]$row, role_map, sg_window, debug = debug)
+
+    for (i in these) {
+
+      unit  <- units[[i]]
+      entry <- if (hoist$failed) {
+        failed_fold_entry(unit, hoist$records)
+      } else {
+        prep_fold_entry(unit, hoist$value, if (unit$fold_i > 0L) fold_rows(folds$splits[[unit$fold_i]]),
+                        role_map, seed, sg_window, pca_threshold, debug = debug, keep_traces = keep_traces)
+      }
+
+      put_fold_entry(store, unit, entry, results, call = call)
+      entries[[i]] <- entry
+
+    }
+
+    rm(hoist)
+
+  }
+
+  fold_stage_record(units, entries, reused$kept,
+                    as.numeric(difftime(Sys.time(), start_time, units = "secs")))
+
+}
+
+#' The entries a store already holds that a run can use
+#'
+#' @inheritParams build_fold_stage
+#' @return List with `entries` (one per unit: the entry, or `NULL` where it
+#'   is to be built) and `kept` (logical, one per unit: reused).
+#' @keywords internal
+#' @noRd
+reuse_fold_entries <- function(units, store, collector, output_dir) {
+
+  entries  <- vector("list", length(units))
+  unusable <- character(0)
+
+  if (!is.null(store$dir)) {
+
+    for (i in seq_along(units)) {
+
+      path <- file.path(store$dir, units[[i]]$name)
+
+      if (!file.exists(path)) next
+
+      got <- read_fold_entry(path, units[[i]]$key)
+
+      if (!is.null(got$error)) {
+        unusable[file.path(basename(store$shown), units[[i]]$name)] <- got$error
+      } else if (!isTRUE(got$entry$failed)) {
+        entries[i] <- list(got$entry)
+      }
+
+    }
+
+  }
+
+  if (length(unusable) > 0) log_unusable_fold_entries(collector, unusable, output_dir)
+
+  list(entries = entries, kept = !vapply(entries, is.null, logical(1)))
+
+}
+
+#' Record the fold preparations in `output_dir` that could not be used
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param unusable Reasons, named by file relative to `output_dir`.
+#' @param output_dir The run's `output_dir`.
+#' @return `NULL`, invisibly; adds one note, its ids the files.
+#' @keywords internal
+#' @noRd
+log_unusable_fold_entries <- function(collector, unusable, output_dir) {
+
+  n_files <- length(unusable)
+  details <- paste0(names(unusable), ": ", unname(unusable))
+
+  ## Each detail is substituted, not inlined, so braces in upstream error
+  ## text are never read as cli markup.
+  log_note(collector, c(
+    "{n_files} fold preparation{?s} in {.path {output_dir}} could not be used, so {cli::qty(n_files)}{?it was/they were} prepared again.",
+    stats::setNames(sprintf("{details[%d]}", seq_len(n_files)), rep("x", n_files))
+  ), ids = names(unusable))
+
+  invisible(NULL)
+
+}
+
+#' What the stage built: one row per fold prep
+#'
+#' @description
+#' The predictors each prep kept, the count the configurations' cost
+#' depends on, known before any configuration runs; with whether it failed
+#' and whether it was reused from the run's store. The tree's line is read
+#' from it.
+#'
+#' @param units The stage's units.
+#' @param entries Their entries, in the same order.
+#' @param reused Logical, one per unit.
+#' @param seconds Numeric(1). The stage's wall time.
+#' @return Tibble: `prep` (the preprocessing, selection and, where it reads
+#'   the outcome, transformation), `fold`, `feature_selection`,
+#'   `n_predictors`, `failed`, `reused`, `cause` (a failure's message, else
+#'   `NA`), with the stage's seconds as the attribute `"seconds"`.
+#' @keywords internal
+#' @noRd
+fold_stage_record <- function(units, entries, reused, seconds) {
+
+  cause <- vapply(entries, function(e) {
+    failure <- e$records[e$records$type == "failure", , drop = FALSE]
+    if (isTRUE(e$failed) && nrow(failure) > 0) unit_failure_message(failure, "Fold preparation") else NA_character_
+  }, character(1))
+
+  record <- tibble::tibble(
+    prep              = vapply(units, function(u) sub("/[^/]+$", "", u$label), character(1)),
+    fold              = vapply(units, `[[`, character(1), "fold"),
+    feature_selection = vapply(units, function(u) tolower(u$row$feature_selection), character(1)),
+    n_predictors      = vapply(entries, function(e) as.integer(e$n_predictors), integer(1)),
+    failed            = vapply(entries, function(e) isTRUE(e$failed), logical(1)),
+    reused            = as.logical(reused),
+    cause             = cause
+  )
+
+  attr(record, "seconds") <- seconds
+
+  record
+
+}
+
+#' The progress tree's lines for the stage
+#'
+#' @param record From [fold_stage_record()].
+#' @param n_daemons Integer(1) or `NULL`. The daemons the preps ran on.
+#' @return Character: one line, then one per prep that failed.
+#' @keywords internal
+#' @noRd
+fold_stage_lines <- function(record, n_daemons = NULL) {
+
+  n_built  <- sum(!record$reused)
+  n_reused <- sum(record$reused)
+  n_preps  <- length(unique(record$prep))
+
+  c(
+    paste0("Fold preps: ", nrow(record), " for ", n_preps, " selection", if (n_preps != 1) "s",
+           if (n_reused > 0) paste0(", ", n_reused, " from the run's cache"),
+           if (n_built > 0) paste0(", in ", round(attr(record, "seconds"), 1), " s"),
+           if (!is.null(n_daemons) && n_built > 0) paste0(" on ", n_daemons, " daemons")),
+    vapply(which(record$failed), function(i) {
+      cli::col_red(paste0("\u2717 ", record$prep[i], " ", record$fold[i], ": ", record$cause[i]))
+    }, character(1))
+  )
+
+}

@@ -793,10 +793,26 @@ evaluate <- function(x,
   }
 
   ## Determine which configs still need evaluation
-  completed_ids <- names(checkpoint_results)
-  pending_ids   <- setdiff(configs$config_id, completed_ids)
-  n_total       <- nrow(configs)
-  n_pending     <- length(pending_ids)
+  completed_ids   <- names(checkpoint_results)
+  pending_ids     <- setdiff(configs$config_id, completed_ids)
+  pending_configs <- configs[configs$config_id %in% pending_ids, ]
+  n_total         <- nrow(configs)
+  n_pending       <- length(pending_ids)
+
+  ## -----------------------------------------------------------------------
+  ## Step 6b: The fold preps the pending configurations need
+  ## -----------------------------------------------------------------------
+  ## Each fold's prep is a unit of its own, named by what is prepped, and
+  ## built once for every configuration that reads it (fold_prep_units()):
+  ## listed before the manifest's clearing, which keeps their files.
+
+  fold_units <- if (!axis$dispatch_configs) {
+    fold_prep_units(pending_configs, cv_fold_obj, role_map, verb = "evaluate",
+                    data = data_fp$data_fields, seed = seed,
+                    sg_window = recipe_cfg$sg_window, pca_threshold = recipe_cfg$pca_threshold)
+  } else {
+    list()
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 7: Render tree header
@@ -930,8 +946,51 @@ evaluate <- function(x,
 
     ## The call that writes the manifest owns output_dir, so, its checkpoint
     ## gates passed, it removes the run files an earlier call left and this
-    ## one cannot use. Its own payload is written later, in Step 8.
-    clear_run_files(output_dir)
+    ## one cannot use: it keeps the fold preps it needs, which an
+    ## interrupted run left for it. Its own payload is written later, in
+    ## Step 8.
+    clear_run_files(output_dir, keep = fold_unit_files(fold_units))
+
+  }
+
+  ## -----------------------------------------------------------------------
+  ## Step 7c: Each fold prep, built once, before any configuration
+  ## -----------------------------------------------------------------------
+  ## With an output_dir the entries are run files in tmp/, kept through an
+  ## interruption, so a resumed run reuses them, and removed once every
+  ## configuration has its row: the removal is registered before the first
+  ## is written, and acts only once Step 8 has returned. Without one they
+  ## live in this call.
+
+  run_completed <- FALSE
+  fold_store    <- NULL
+
+  if (length(fold_units) > 0) {
+
+    fold_store <- open_fold_store(output_dir, results_so_far(unname(checkpoint_results)))
+
+    if (!is.null(fold_store$dir)) {
+      on.exit(if (isTRUE(run_completed)) remove_fold_entries(fold_store$dir), add = TRUE)
+    }
+
+    fold_stage <- build_fold_stage(
+      fold_units, fold_store, cv_fold_obj$splits[[1]]$data, cv_fold_obj, role_map,
+      seed          = seed,
+      sg_window     = recipe_cfg$sg_window,
+      pca_threshold = recipe_cfg$pca_threshold,
+      debug         = debug,
+      keep_traces   = control$keep_traces,
+      collector     = collector,
+      output_dir    = output_dir,
+      results       = results_so_far(unname(checkpoint_results))
+    )
+
+    if (verbose) {
+
+      for (line in fold_stage_lines(fold_stage)) cat(paste0("\u2502  ", line, "\n"))
+      cat("\u2502\n")
+
+    }
 
   }
 
@@ -993,6 +1052,14 @@ evaluate <- function(x,
 
       }
 
+      ## The configuration's fold preps, from the stage's store
+      fold_entries <- if (!is.null(fold_store)) {
+        config_fold_entries(fold_store, cfg, cv_fold_obj, role_map, verb = "evaluate",
+                            data = data_fp$data_fields, seed = seed,
+                            sg_window = recipe_cfg$sg_window, pca_threshold = recipe_cfg$pca_threshold,
+                            results = results_so_far(results_list))
+      }
+
       ## Evaluate this config. On the resamples axis tune runs its folds on
       ## the daemons, and a daemon that dies or leaves stops the run, with the
       ## rows so far.
@@ -1013,7 +1080,8 @@ evaluate <- function(x,
         outcome_range   = outcome_range,
         debug           = debug,
         keep_traces     = control$keep_traces,
-        isolate         = control$isolate
+        isolate         = control$isolate,
+        fold_entries    = fold_entries
       ), results_so_far(results_list), output_dir, daemons = axis$tune_allow_par)
 
       ## Stamp before anything else sees the row, so the in-memory results and
@@ -1141,9 +1209,6 @@ evaluate <- function(x,
 
     }
 
-    ## Filter to pending configs only
-    pending_configs <- configs[configs$config_id %in% pending_ids, ]
-
     ## Assemble everything a worker needs into one value, the payload, which
     ## is written to a file below and read by each task. Two serialization
     ## traps are avoided here; R/utils-resamples.R's header has the mechanism
@@ -1256,6 +1321,11 @@ evaluate <- function(x,
                             output_dir     = output_dir)
 
   }
+
+  ## Every configuration has its row, so the run is complete: its fold preps
+  ## go as the call exits, after the all-failed abort below too, whose rows
+  ## are all checkpointed
+  run_completed <- TRUE
 
   ## -----------------------------------------------------------------------
   ## Step 9: Aggregate results
@@ -1859,7 +1929,8 @@ create_output_dir <- function(path) {
 #' @description
 #' `<output_dir>/tmp/`, apart from the results (`checkpoints/` and
 #' `eval_manifest.rds`), so nothing that reads results lists what is in it:
-#' the configs axis's payload, for now.
+#' the configs axis's payload, and the fold preparations
+#' (`fold-<key>.rds`, [put_fold_entry()]).
 #'
 #' @param output_dir The run's `output_dir`.
 #' @return Character(1).
@@ -1896,21 +1967,29 @@ remove_run_file <- function(path) {
 #' The call that writes the manifest owns `output_dir`, so one directory
 #' serves one run at a time. Once that call's checkpoint gates have passed,
 #' it removes what an earlier call left in `tmp/` and it cannot use: a
-#' payload, which belongs to the call that wrote it, and the writer's
-#' temporary file from a write that was cut off. A call removes its own
-#' payload as it exits, so one is left only by a call that was killed, or
-#' on Windows by one whose daemon still had the file open. Any other file in
-#' `tmp/` is left alone; the directory goes when it is left empty.
+#' payload, which belongs to the call that wrote it, the writer's temporary
+#' file from a write that was cut off, and every fold preparation it does
+#' not need (another run's data, settings or seed are under other names). A
+#' call removes its own payload as it exits, and its fold preparations once
+#' every configuration has its row, so these are left by a call that was
+#' interrupted or killed, or on Windows by one whose daemon still had the
+#' file open. Any other file in `tmp/` is left alone; the directory goes
+#' when it is left empty.
 #'
 #' @param output_dir The run's `output_dir`.
+#' @param keep Character. The fold preparations' files this call needs
+#'   ([fold_unit_files()]), which it reuses or builds again.
 #' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
-clear_run_files <- function(output_dir) {
+clear_run_files <- function(output_dir, keep = character(0)) {
 
   dir <- run_files_dir(output_dir)
 
-  unlink(list.files(dir, pattern = "^payload-.*\\.rds$|\\.rds\\.tmp$", full.names = TRUE))
+  folds <- list.files(dir, pattern = "^fold-.*\\.rds$")
+
+  unlink(c(list.files(dir, pattern = "^payload-.*\\.rds$|\\.rds\\.tmp$", full.names = TRUE),
+           file.path(dir, setdiff(folds, keep))))
   remove_empty_dir(dir)
 
 }

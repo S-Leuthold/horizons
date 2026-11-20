@@ -470,6 +470,33 @@ describe("config_fold_units()", {
 
 })
 
+describe("read_fold_entry()", {
+
+  it("reads an entry only under its own key, and says why a file is not one", {
+
+    case <- prep_fold_case("pca")
+    dir  <- withr::local_tempdir()
+    unit <- case$units$folds[[1]]
+    path <- file.path(dir, unit$name)
+
+    saveRDS(case$entries[[1]], path)
+    expect_identical(read_fold_entry(path, unit$key), list(entry = case$entries[[1]], error = NULL))
+
+    ## Another prep's entry under this one's name: a copied file
+    saveRDS(case$entries[[2]], path)
+    expect_identical(read_fold_entry(path, unit$key)$error, "holds another fold preparation's record")
+
+    writeLines("not an entry", path)
+    expect_null(read_fold_entry(path, unit$key)$entry)
+    expect_match(read_fold_entry(path, unit$key)$error, "unknown input format|magic number|cannot", perl = TRUE)
+
+    saveRDS(list(a = 1), path)
+    expect_identical(read_fold_entry(path, unit$key)$error, "not a fold preparation")
+
+  })
+
+})
+
 describe("bounded_model()", {
 
   it("agrees with the parameter set the single-config runners read, for every model", {

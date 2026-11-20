@@ -1014,9 +1014,9 @@ describe("evaluate() - the configs axis on mirai", {
                                                            output_dir = dir, verbose = FALSE)))
     }
 
-    ## An earlier run's payload and a cut-off write of one, and a file of
-    ## the user's
-    left <- c("payload-old.rds", "file1.rds.tmp", "notes.txt")
+    ## An earlier run's payload, a cut-off write of one and a fold prep this
+    ## run does not need, and a file of the user's
+    left <- c("payload-old.rds", "file1.rds.tmp", "fold-0000.rds", "notes.txt")
     leave <- function(dir) {
       dir.create(file.path(dir, "tmp"))
       for (f in left) writeLines("left", file.path(dir, "tmp", f))

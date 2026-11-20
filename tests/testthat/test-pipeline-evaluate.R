@@ -3825,3 +3825,302 @@ describe("evaluate() - the ranking report when pruned configurations hold the me
   })
 
 })
+
+
+## =========================================================================
+## Each fold's prep, built once per run
+## =========================================================================
+##
+## Before any configuration runs, evaluate() builds each fold prep its
+## pending configurations need once (fold_prep_units()), and each
+## configuration assembles its folds from its own. With an output_dir the
+## entries are run files in tmp/: kept through an interruption and the stops
+## that leave configurations to run, reused by the resumed run, and removed
+## once every configuration has its row.
+
+## Five configurations on two fold preps: elastic_net and plsr on one
+## correlation prep (plsr bounds num_comp, so the training part's too), PCA
+## under no transformation and under log on one PCA prep, and rf with no
+## selection, which has none
+CACHE_CONFIGS <- list(
+  enet_corr = c(model = "elastic_net", transformation = "none", selection = "correlation"),
+  plsr_corr = c(model = "plsr",        transformation = "none", selection = "correlation"),
+  enet_pca  = c(model = "elastic_net", transformation = "none", selection = "pca"),
+  enet_plog = c(model = "elastic_net", transformation = "log",  selection = "pca"),
+  rf_none   = c(model = "rf",          transformation = "none", selection = "none")
+)
+
+cache_object <- function(ids = names(CACHE_CONFIGS)) {
+
+  obj  <- make_eval_object(n = 60, n_wn = 30, n_configs = length(ids))
+  spec <- CACHE_CONFIGS[ids]
+  of   <- function(field) unname(vapply(spec, `[[`, character(1), field))
+
+  obj$config$configs <- tibble::tibble(
+    config_id         = paste0("cfg_", ids),
+    model             = of("model"),
+    transformation    = of("transformation"),
+    preprocessing     = "snv",
+    feature_selection = of("selection")
+  )
+
+  obj
+
+}
+
+cache_run <- function(obj, dir = NULL, ...) {
+  suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                            control = control_horizons(output_dir = dir, verbose = FALSE, ...)))
+}
+
+## The configurations' results, without what varies from run to run
+cache_rows <- function(ev) {
+  r <- ev$evaluation$results
+  r[, setdiff(names(r), "runtime_secs")]
+}
+
+## The uninterrupted run into an output_dir, and what it left there
+build_cache_base <- function() {
+  dir <- tempfile("cache-base-")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  ev  <- cache_run(cache_object(), dir)
+  list(rows = cache_rows(ev), left = list.files(dir, recursive = TRUE, all.files = TRUE, include.dirs = TRUE))
+}
+cache_base <- function() memo_fixture("cache_base", build_cache_base)
+
+## Each fold prep built from here on, by the unit's file name
+count_fold_preps <- function(.env = parent.frame()) {
+  real <- prep_fold_entry
+  seen <- new.env(parent = emptyenv())
+  seen$names <- character(0)
+  testthat::local_mocked_bindings(prep_fold_entry = function(unit, ...) {
+    seen$names <- c(seen$names, unit$name)
+    real(unit, ...)
+  }, .env = .env)
+  seen
+}
+
+## A run stopped as the second configuration starts, as an interrupt stops it
+interrupted_run <- function(obj, dir) {
+  real  <- evaluate_single_config
+  calls <- 0L
+  testthat::with_mocked_bindings(
+    tryCatch(cache_run(obj, dir), interrupt = function(i) "interrupted"),
+    evaluate_single_config = function(...) {
+      calls <<- calls + 1L
+      if (calls == 2L) rlang::interrupt()
+      real(...)
+    }
+  )
+}
+
+describe("evaluate() - each fold's prep built once per run", {
+
+  it("builds each fold prep once however many configurations read it, in memory without an output_dir, each configuration scoring as it does alone", {
+
+    obj  <- cache_object()
+    real <- evaluate_single_config
+    args <- list()
+    rows <- list()
+
+    local_mocked_bindings(evaluate_single_config = function(...) {
+      call <- list(...)
+      row  <- real(...)
+      args[[call$config_row$config_id]] <<- call
+      rows[[call$config_row$config_id]] <<- row
+      row
+    })
+
+    writes <- 0L
+    real_write <- write_output_file
+    local_mocked_bindings(write_output_file = function(value, path) {
+      writes <<- writes + 1L
+      real_write(value, path)
+    })
+
+    seen   <- count_fold_preps()
+    before <- list.files(tempdir(), recursive = TRUE, all.files = TRUE)
+    ev     <- cache_run(obj)
+
+    ## The correlation prep's three folds and its training part (plsr bounds
+    ## num_comp), and the PCA prep's three folds: under no transformation
+    ## and under log, one; rf with no selection, none
+    expect_length(seen$names, 7L)
+    expect_identical(anyDuplicated(seen$names), 0L)
+    expect_true(all(ev$evaluation$results$status == "success"))
+
+    ## Nothing written without an output_dir
+    expect_identical(writes, 0L)
+    expect_identical(list.files(tempdir(), recursive = TRUE, all.files = TRUE), before)
+
+    ## Each configuration, run on its own on the same folds, preps its own
+    ## with the run's code and gives the same row
+    for (id in names(args)) {
+      alone <- do.call(real, utils::modifyList(args[[id]], list(fold_entries = NULL)))
+      kept  <- rows[[id]]
+      alone$runtime_secs <- kept$runtime_secs <- NULL
+      expect_identical(alone, kept, label = id)
+    }
+
+  })
+
+  it("leaves only the manifest and the checkpoints in output_dir once the run is complete", {
+
+    base <- cache_base()
+
+    expect_setequal(base$left, c("checkpoints", "eval_manifest.rds",
+                                 file.path("checkpoints", paste0("cfg_", names(CACHE_CONFIGS), ".rds"))))
+
+  })
+
+  it("keeps the fold preps through an interrupt; the resumed run reuses them, builds again one whose prep failed, removes one it does not need, and scores as the uninterrupted run", {
+
+    base <- cache_base()
+    obj  <- cache_object()
+    dir  <- withr::local_tempdir()
+
+    expect_identical(interrupted_run(obj, dir), "interrupted")
+
+    kept <- list.files(file.path(dir, "tmp"))
+    expect_length(kept, 7L)
+    expect_true(all(grepl("^fold-[0-9a-f]+\\.rds$", kept)))
+
+    ## An earlier run's prep this run does not need, and one it needs whose
+    ## prep failed, which a run after a fix prepares again
+    writeLines("left", file.path(dir, "tmp", "fold-0000.rds"))
+    failed        <- readRDS(file.path(dir, "tmp", kept[1]))
+    failed$failed <- TRUE
+    saveRDS(failed, file.path(dir, "tmp", kept[1]))
+
+    seen <- count_fold_preps()
+    ev   <- cache_run(obj, dir)
+
+    expect_identical(seen$names, kept[1])
+    expect_identical(cache_rows(ev), base$rows)
+    expect_false(dir.exists(file.path(dir, "tmp")))
+
+  })
+
+  it("does not read a fold prep whose file records another's: it builds it again, with one note on the log", {
+
+    skip_unless_slow_tier()
+
+    base <- cache_base()
+    obj  <- cache_object()
+    dir  <- withr::local_tempdir()
+
+    interrupted_run(obj, dir)
+    kept <- list.files(file.path(dir, "tmp"))
+
+    ## One prep's file copied over another's, under the name this run needs
+    file.copy(file.path(dir, "tmp", kept[1]), file.path(dir, "tmp", kept[2]), overwrite = TRUE)
+
+    seen <- count_fold_preps()
+    ev   <- cache_run(obj, dir)
+
+    expect_identical(seen$names, kept[2])
+    expect_identical(cache_rows(ev), base$rows)
+
+    notes <- ev$log$message[ev$log$type == "note"]
+    expect_identical(sum(grepl("1 fold preparation in .* could not be used, so it was prepared again", notes)), 1L)
+    expect_true(any(grepl("holds another fold preparation's record", notes, fixed = TRUE)))
+
+  })
+
+  it("keeps the fold preps after a breaker trip or a failed checkpoint write, and removes them after the all-failed abort", {
+
+    template <- ev60()$evaluation$results[1, ]
+    failing  <- function(config_row, ...) {
+      row <- mock_eval_row(template, config_row$config_id, "failed",
+                           error = "Recipe building failed: no recipe at 42 rows")
+      row$class <- "simpleError"
+      row
+    }
+    preps_in <- function(dir) list.files(file.path(dir, "tmp"), pattern = "^fold-")
+
+    ## The first three fail the same way across two models
+    dir <- withr::local_tempdir()
+    testthat::with_mocked_bindings(
+      expect_error(cache_run(cache_object(), dir), class = "horizons_error_systemic"),
+      evaluate_single_config = failing
+    )
+    expect_length(preps_in(dir), 7L)
+
+    ## The first checkpoint cannot be written
+    dir <- withr::local_tempdir()
+    dir.create(file.path(dir, "checkpoints", "cfg_enet_corr.rds"), recursive = TRUE)
+    testthat::with_mocked_bindings(
+      expect_error(cache_run(cache_object(), dir), class = "horizons_error_systemic"),
+      evaluate_single_config = function(config_row, ...) mock_eval_row(template, config_row$config_id, "success")
+    )
+    expect_length(preps_in(dir), 7L)
+
+    ## Every configuration has its row, all failed: the run is complete
+    dir <- withr::local_tempdir()
+    testthat::with_mocked_bindings(
+      expect_error(cache_run(cache_object(), dir, breaker = FALSE), class = "horizons_error_all_configs_failed"),
+      evaluate_single_config = failing
+    )
+    expect_false(dir.exists(file.path(dir, "tmp")))
+
+  })
+
+  it("stops as systemic before any configuration runs when a fold prep cannot be written, naming the directory", {
+
+    obj   <- cache_object(c("enet_corr", "rf_none"))
+    real  <- fold_prep_units
+    names <- NULL
+
+    ## The preps' names, from a run stopped as its first configuration starts
+    testthat::with_mocked_bindings(
+      tryCatch(cache_run(obj, withr::local_tempdir()), first = function(e) NULL),
+      fold_prep_units = function(...) {
+        units <- real(...)
+        names <<- fold_unit_files(units)
+        units
+      },
+      evaluate_single_config = function(...) rlang::abort("stop", class = "first")
+    )
+
+    expect_length(names, 3L)
+
+    ## A directory where the second would be written
+    dir <- withr::local_tempdir()
+    dir.create(file.path(dir, "tmp", names[2]), recursive = TRUE)
+    ran <- 0L
+
+    err <- testthat::with_mocked_bindings(
+      expect_error(cache_run(obj, dir), class = "horizons_error_systemic"),
+      evaluate_single_config = function(...) {
+        ran <<- ran + 1L
+        rlang::abort("ran")
+      }
+    )
+
+    expect_identical(ran, 0L)
+    expect_match(cli::ansi_strip(conditionMessage(err)), "could not write to", fixed = TRUE)
+    expect_match(cli::ansi_strip(conditionMessage(err)), names[2], fixed = TRUE)
+    expect_identical(nrow(err$results), 0L)
+
+  })
+
+  it("says on the tree how many fold preps it built and for how many selections, and nothing with no selection", {
+
+    obj <- cache_object(c("enet_corr", "rf_none"))
+
+    out <- utils::capture.output(suppressWarnings(
+      evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(verbose = TRUE))
+    ))
+
+    expect_true(any(grepl("^\u2502  Fold preps: 3 for 1 selection, in [0-9.]+ s$", out)))
+
+    ## None with no selection
+    out <- utils::capture.output(suppressWarnings(
+      evaluate(cache_object("rf_none"), prune = FALSE, seed = 42L, control = control_horizons(verbose = TRUE))
+    ))
+
+    expect_false(any(grepl("Fold preps", out, fixed = TRUE)))
+
+  })
+
+})
