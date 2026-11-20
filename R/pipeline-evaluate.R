@@ -118,8 +118,9 @@
 #'   read the file stops the run with `horizons_error_systemic`, the rows
 #'   finished so far as its `results`. The mode for a large config grid on a
 #'   many-core machine.
-#' * `"resamples"`: configs run sequentially; inside each, tune runs the CV
-#'   folds on the daemons. Useful width is capped at `cv_folds`. The mode
+#' * `"resamples"`: configs run sequentially; inside each, each fold's
+#'   recipe is prepped once in this session, and tune runs the CV folds'
+#'   fits on the daemons. Useful width is capped at `cv_folds`. The mode
 #'   for a few cores and a short grid.
 #' * `"auto"` (default): `"configs"` when the number of configs is at least
 #'   `cv_folds` and there is an `output_dir` to checkpoint into, otherwise
@@ -282,15 +283,18 @@
 #' `error_message` naming the step and the cause ("Grid search failed:
 #' ..."), the root `class` of the failure, and, with
 #' `control_horizons(keep_traces = TRUE)`, the backtrace as text in `trace`.
-#' A recipe step that fails inside tuning is reproduced by prepping the
-#' recipe once on the training part, so the step's own error is recorded with
-#' its class; a failure tune keeps only as text is `horizons_error_run`. A
-#' hyperparameter candidate scored on fewer cross-validation folds than were
-#' drawn takes no part in the prune gate or the choice of hyperparameters,
-#' and a configuration with no grid candidate scored on every fold fails; a
-#' `cv_*` mean is kept only when it covers every fold, so every ranked value
-#' is on the same folds (#101). A configuration whose final fit on the
-#' training part fails is failed too (#102). An error that is not the
+#' Each fold's recipe is prepped once, in the configuration's unit, so a
+#' recipe step that fails while a fold is prepped fails the configuration
+#' with the step's own class; one that fails only inside the final fit is
+#' reproduced by prepping the recipe once on the training part. A failure
+#' tune keeps only as text (a model's fit failing inside tuning) is
+#' `horizons_error_run`. A hyperparameter candidate scored on fewer
+#' cross-validation folds than were drawn takes no part in the prune gate or
+#' the choice of hyperparameters, and a configuration with no grid candidate
+#' scored on every fold fails; a `cv_*` mean is kept only when it covers
+#' every fold, so every ranked value is on the same folds (#101). A
+#' configuration whose final fit on the training part fails is failed too
+#' (#102). An error that is not the
 #' configuration's own (an input or dependency error, or a bug in horizons)
 #' stops the call. So does a failure every configuration would share: when
 #' the first configurations to run fail the same way across at least two
@@ -570,8 +574,9 @@ evaluate <- function(x,
   plan_workers  <- if (axis$axis == "sequential") 1L else connected_daemons()
 
   ## On either axis the daemons run horizons code (on the resamples axis,
-  ## tune's tasks run the recipe steps and the PLS engine), so they must
-  ## run this session's horizons: checked here, before anything is drawn.
+  ## tune's tasks fit the models' engines, the PLS engine among them), so
+  ## they must run this session's horizons: checked here, before anything is
+  ## drawn.
   ## The daemons on this machine against the memory it has, for this run's
   ## data, said once and on the tree's parallel line
   short_memory <- FALSE
@@ -3499,13 +3504,14 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #'
 #' @description
 #' On either parallel axis the daemons run horizons code: the configs-axis
-#' worker body, and on the resamples axis the recipe steps and the PLS engine
-#' that tune's tasks call. They load horizons by name, so they run the
-#' installed copy. Under `devtools::load_all()` that copy is not this source
+#' worker body, and on the resamples axis the engines of horizons' own (the
+#' PLS engine among them) that tune's tasks call. They load horizons by name,
+#' so they run the installed copy. Under `devtools::load_all()` that copy is not this source
 #' tree, and a daemon would run stale code silently. Otherwise every daemon
 #' connected is asked, one task each ([daemon_reports()]), which horizons it
-#' loads and which of the packages the run needs it cannot load, and either
-#' is refused before anything is drawn. A package a daemon lacks would
+#' loads and which of the packages the run needs (its configurations'
+#' engines' and feature selections', [needed_packages()]) it cannot load,
+#' and either is refused before anything is drawn. A package a daemon lacks would
 #' otherwise reach the run only as tune's failure to bind the daemon's error
 #' ("Argument 1 must be a data frame"), never naming the package. Without
 #' mirai's dispatcher the tasks are not bound one to each daemon, so one may

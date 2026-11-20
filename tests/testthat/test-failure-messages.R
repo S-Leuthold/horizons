@@ -15,22 +15,33 @@
 ## Called from inside a recipe step, so recipes wraps what it signals.
 fail_in_step <- function(x) stop("boom from step")
 
+## The start of each recipe below. They stand in for build_recipe(), so they
+## keep its contract: the spectral transform step, unless the data's spectra
+## are already transformed (the recipe a fold is prepped with). A step
+## below that reads a column names the outcome, which both frames hold.
+mock_recipe <- function(train_data, role_map, transformed) {
+
+  rec <- recipes::recipe(SOC ~ ., data = train_data) |>
+    recipes::update_role("sample_id", new_role = "id")
+
+  if (isTRUE(transformed)) rec else add_spectral_step(rec, role_map, "raw", DEFAULT_SG_WINDOW)
+
+}
+
 ## A recipe whose step errors at prep. Stands in for build_recipe(), so the
 ## failure reaches the runners the way a real step failure (Boruta, say) does.
-failing_recipe <- function(config_row, train_data, role_map, ...) {
+failing_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
 
-  recipes::recipe(SOC ~ ., data = train_data) |>
-    recipes::update_role("sample_id", new_role = "id") |>
-    recipes::step_mutate(boom = fail_in_step(wn_4000))
+  mock_recipe(train_data, role_map, transformed) |>
+    recipes::step_mutate(boom = fail_in_step(SOC))
 
 }
 
 ## A recipe whose step warns at prep and changes nothing: step_BoxCox()
 ## refuses the non-positive spectra and leaves them as they are.
-warning_recipe <- function(config_row, train_data, role_map, ...) {
+warning_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
 
-  recipes::recipe(SOC ~ ., data = train_data) |>
-    recipes::update_role("sample_id", new_role = "id") |>
+  mock_recipe(train_data, role_map, transformed) |>
     recipes::step_BoxCox(recipes::all_predictors())
 
 }
@@ -46,11 +57,10 @@ fail_on_full_training <- function(x) {
 
 }
 
-test_set_failing_recipe <- function(config_row, train_data, role_map, ...) {
+test_set_failing_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
 
-  recipes::recipe(SOC ~ ., data = train_data) |>
-    recipes::update_role("sample_id", new_role = "id") |>
-    recipes::step_mutate(boom = fail_on_full_training(wn_4000))
+  mock_recipe(train_data, role_map, transformed) |>
+    recipes::step_mutate(boom = fail_on_full_training(SOC))
 
 }
 
@@ -64,11 +74,10 @@ fail_long_on_a_fold <- function(x) {
 
 }
 
-long_fold_failing_recipe <- function(config_row, train_data, role_map, ...) {
+long_fold_failing_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
 
-  recipes::recipe(SOC ~ ., data = train_data) |>
-    recipes::update_role("sample_id", new_role = "id") |>
-    recipes::step_mutate(boom = fail_long_on_a_fold(wn_4000))
+  mock_recipe(train_data, role_map, transformed) |>
+    recipes::step_mutate(boom = fail_long_on_a_fold(SOC))
 
 }
 
@@ -83,11 +92,10 @@ fail_on_a_fold <- function(x) {
 
 }
 
-fold_failing_recipe <- function(config_row, train_data, role_map, ...) {
+fold_failing_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
 
-  recipes::recipe(SOC ~ ., data = train_data) |>
-    recipes::update_role("sample_id", new_role = "id") |>
-    recipes::step_mutate(boom = fail_on_a_fold(wn_4000))
+  mock_recipe(train_data, role_map, transformed) |>
+    recipes::step_mutate(boom = fail_on_a_fold(SOC))
 
 }
 
@@ -103,22 +111,53 @@ fail_without <- function(x, value) {
 
 }
 
-one_fold_failing_recipe <- function(config_row, train_data, role_map, ...) {
+one_fold_failing_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
 
-  value <- train_data$wn_4000[1]
+  value <- train_data$SOC[1]
 
-  recipes::recipe(SOC ~ ., data = train_data) |>
-    recipes::update_role("sample_id", new_role = "id") |>
-    recipes::step_mutate(boom = fail_without(wn_4000, !!value))
+  mock_recipe(train_data, role_map, transformed) |>
+    recipes::step_mutate(boom = fail_without(SOC, !!value))
+
+}
+
+## An engine that fails, for every candidate, on the one cross-validation
+## analysis set that lacks the first training row's outcome, and nowhere
+## else: the whole training part holds it.
+fail_without_row_one <- function(setup, cause = "boom on one fold") {
+
+  real_glmnet <- glmnet::glmnet
+  value       <- rsample::training(setup$split)$SOC[1]
+
+  function(x, y, ...) {
+    if (length(y) > 15 && !any(y == value)) stop(cause)
+    real_glmnet(x, y, ...)
+  }
 
 }
 
 ## A tripwire inside a step: a horizons bug, which no unit contains
-tripwire_recipe <- function(config_row, train_data, role_map, ...) {
+tripwire_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
 
-  recipes::recipe(SOC ~ ., data = train_data) |>
-    recipes::update_role("sample_id", new_role = "id") |>
+  mock_recipe(train_data, role_map, transformed) |>
     recipes::step_mutate(boom = horizons:::abort_horizons("Rows misaligned.", kind = "internal"))
+
+}
+
+## The same tripwire, set off only on more rows than a cross-validation
+## analysis set holds, as fail_on_full_training() fails: the folds' preps
+## pass, and only last_fit()'s prep of the whole recipe inside tune raises it
+trip_on_full_training <- function(x) {
+
+  if (length(x) > 25) horizons:::abort_horizons("Rows misaligned.", kind = "internal")
+
+  x
+
+}
+
+full_training_tripwire_recipe <- function(config_row, train_data, role_map, ..., transformed = FALSE) {
+
+  mock_recipe(train_data, role_map, transformed) |>
+    recipes::step_mutate(boom = trip_on_full_training(SOC))
 
 }
 
@@ -486,42 +525,39 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
   })
 
-  it("reproduces a step's failure inside tune by prepping the recipe, so it fails with its class", {
+  it("fails with the step's class when the step fails as a fold's recipe is prepped", {
 
-    ## elastic_net has no mtry, so its recipe is prepped only inside tune;
-    ## tune's notes show the step failed, and the prep outside tune raises
-    ## the step's own error
+    ## elastic_net has no mtry, so its recipe is first prepped on the folds,
+    ## once each, before tuning, and the step's own error ends the
+    ## configuration there
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
     result <- run_evaluate("elastic_net", setup)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
-                     "Recipe preparation failed: boom from step (in `step_mutate()`)")
+                     "Fold preparation failed: boom from step (in `step_mutate()`)")
     expect_identical(result$class, "simpleError")
 
   })
 
-  it("names the cause from tune's notes when every model failed during CV on a failure the prep does not reproduce (#96)", {
+  it("fails with the step's class and words when the step fails only on a fold's rows", {
 
+    ## rf's recipe is prepped on the whole training part to bound mtry,
+    ## where the step passes, and then on each fold's analysis rows, where
+    ## it fails: the first fold's prep ends the configuration
     local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("rf", setup)
 
     expect_identical(result$status, "failed")
-    expect_match(result$error_message,
-                 "^Grid search failed: all models failed during CV \u2014 ")
-    expect_match(result$error_message,
-                 "boom on a fold (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
-
-    ## tune keeps only the text, so the failure is a run failure; and its
-    ## own "All models failed" warning is not repeated as a warning
-    expect_identical(result$class, "horizons_error_run")
-    expect_false(any(grepl("All models failed", result$warnings[[1]], fixed = TRUE)))
+    expect_identical(result$error_message,
+                     "Fold preparation failed: boom on a fold (in `step_mutate()`)")
+    expect_identical(result$class, "simpleError")
 
   })
 
-  it("keeps the location and fold count of a long cause, since horizons composed the failure around it", {
+  it("keeps the location of a long cause from a fold's prep", {
 
     local_mocked_bindings(build_recipe = long_fold_failing_recipe, .package = "horizons")
 
@@ -529,20 +565,50 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
     expect_identical(result$status, "failed")
     expect_gt(nchar(result$error_message), 300)
-    expect_match(result$error_message, "a long cause (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
+    expect_match(result$error_message, "^Fold preparation failed: boom on a fold: a long cause")
+    expect_match(result$error_message, "a long cause (in `step_mutate()`)", fixed = TRUE)
+    expect_identical(result$class, "simpleError")
+
+  })
+
+  it("fails at the one fold whose prep fails, with the step's class and words, and stops there under debug", {
+
+    ## The step fails on one fold's analysis rows only, and that fold's prep
+    ## raises the step's own error, in the unit
+    local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
+
+    result <- run_evaluate("elastic_net", setup)
+
+    expect_identical(result$status, "failed")
+    expect_identical(result$error_message,
+                     "Fold preparation failed: boom on one fold (in `step_mutate()`)")
+    expect_identical(result$class, "simpleError")
+
+    expect_error(run_evaluate("elastic_net", setup, debug = TRUE), "boom on one fold", fixed = TRUE,
+                 class = "recipes_error_step")
 
   })
 
   it("lets a tripwire in a step through, whether the recipe is prepped before tuning or inside it", {
 
-    local_mocked_bindings(build_recipe = tripwire_recipe, .package = "horizons")
+    ## Before tuning: rf's bounds prep, elastic_net's first fold prep
+    local({
+      local_mocked_bindings(build_recipe = tripwire_recipe, .package = "horizons")
 
-    for (model in c("rf", "elastic_net")) {
+      for (model in c("rf", "elastic_net")) {
 
-      err <- expect_error(run_evaluate(model, setup), "Rows misaligned.", fixed = TRUE)
-      expect_true(rlang::cnd_inherits(err, "horizons_error_internal"), label = model)
+        err <- expect_error(run_evaluate(model, setup), "Rows misaligned.", fixed = TRUE)
+        expect_true(rlang::cnd_inherits(err, "horizons_error_internal"), label = model)
 
-    }
+      }
+    })
+
+    ## Inside tuning: last_fit() preps the whole recipe, where tune keeps the
+    ## failure as text, so it is reproduced outside tune and propagates
+    local_mocked_bindings(build_recipe = full_training_tripwire_recipe, .package = "horizons")
+
+    err <- expect_error(run_evaluate("elastic_net", setup), "Rows misaligned.", fixed = TRUE)
+    expect_true(rlang::cnd_inherits(err, "horizons_error_internal"))
 
   })
 
@@ -630,6 +696,30 @@ describe("evaluate_single_config() records the warnings tune kept in .notes", {
 
   })
 
+  it("puts a step's warning on the row with the folds that raised it, when it warned on some folds only", {
+
+    ## Two indicator columns, each constant on one fold's analysis rows:
+    ## step_corr() warns of the correlation it cannot compute on those two
+    ## folds' preps, and on neither the whole training part nor the third
+    ids_of <- function(i) setup$folds$splits[[1]]$data$sample_id[rsample::complement(setup$folds$splits[[i]])]
+
+    local_mocked_bindings(build_recipe = function(config_row, train_data, role_map, ..., transformed = FALSE) {
+      mock_recipe(train_data, role_map, transformed) |>
+        recipes::step_mutate(z1 = as.numeric(sample_id %in% !!ids_of(1)),
+                             z2 = as.numeric(sample_id %in% !!ids_of(2))) |>
+        recipes::step_corr(recipes::all_predictors())
+    }, .package = "horizons")
+
+    result <- run_evaluate("elastic_net", setup)
+    shown  <- grep("The correlation matrix has missing values", result$warnings[[1]],
+                   fixed = TRUE, value = TRUE)
+
+    expect_identical(result$status, "success")
+    expect_length(shown, 1L)
+    expect_match(shown, "2 of 3 folds)", fixed = TRUE)
+
+  })
+
 })
 
 describe("evaluate_single_config() fails a configuration whose final fit fails (#102)", {
@@ -677,15 +767,19 @@ describe("evaluate_single_config() chooses only among candidates scored on every
 
   it("fails a configuration whose every candidate failed on a fold, rather than ranking it on the rest", {
 
-    local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
+    ## The engine fails on the one fold whose analysis rows lack the first
+    ## training row, for every candidate, and nowhere else: each fold's
+    ## recipe is prepped once before tuning, so a failure tune keeps on a
+    ## fold is the model's
+    local_mocked_bindings(glmnet = fail_without_row_one(setup), .package = "glmnet")
 
     result <- run_evaluate("elastic_net", setup)
 
     expect_identical(result$status, "failed")
     expect_match(result$error_message,
                  "^Grid search failed: no grid candidate was scored on every fold \u2014 ")
-    expect_match(result$error_message, "boom on one fold (in `step_mutate()`; 1 of 3 folds)",
-                 fixed = TRUE)
+    expect_match(result$error_message, "boom on one fold", fixed = TRUE)
+    expect_match(result$error_message, "1 of 3 folds)", fixed = TRUE)
     expect_identical(result$class, "horizons_error_run")
     expect_true(is.na(result$cv_rmse))
 
@@ -786,46 +880,42 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
   })
 
-  it("reproduces a step's failure inside the re-tune by prepping the recipe, so it fails with its class", {
+  it("fails with the step's class when the step fails as a fold's recipe is prepped", {
 
-    ## elastic_net has no mtry, so its recipe is prepped only inside tune;
-    ## tune's notes show the step failed, and the prep outside tune raises
-    ## the step's own error
+    ## elastic_net has no mtry, so its recipe is first prepped on the folds,
+    ## once each, before the re-tune, and the step's own error ends the
+    ## member there
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
     result <- run_fit("elastic_net", setup)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
-                     "Recipe preparation failed: boom from step (in `step_mutate()`)")
+                     "Fold preparation failed: boom from step (in `step_mutate()`)")
     expect_identical(result$class, "simpleError")
 
-    ## The re-tune started before it failed, so how it started is recorded.
-    expect_false(result$warm_start)
-    expect_false(is.na(result$start_grid_size))
+    ## It failed before the re-tune started, so there is no start to record
+    expect_true(is.na(result$warm_start))
+    expect_true(is.na(result$start_grid_size))
 
   })
 
-  it("names the cause from tune's notes when every warm-start model failed on a failure the prep does not reproduce (#96)", {
+  it("fails with the step's class and words when the step fails only on a fold's rows", {
 
+    ## As in evaluate_single_config(): the bounds prep on the whole training
+    ## part passes, and the first fold's prep fails
     local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
 
-    result <- run_fit("elastic_net", setup)
+    result <- run_fit("rf", setup)
 
     expect_identical(result$status, "failed")
-    expect_match(result$error_message,
-                 "^Warm-start grid search failed: all models failed during CV \u2014 ")
-    expect_match(result$error_message,
-                 "boom on a fold (in `step_mutate()`; 3 of 3 folds)", fixed = TRUE)
-
-    ## tune keeps only the text, so the failure is a run failure; and its
-    ## own "All models failed" warning is not repeated as a warning
-    expect_identical(result$class, "horizons_error_run")
-    expect_false(any(grepl("All models failed", result$warnings, fixed = TRUE)))
+    expect_identical(result$error_message,
+                     "Fold preparation failed: boom on a fold (in `step_mutate()`)")
+    expect_identical(result$class, "simpleError")
 
   })
 
-  it("lets a tripwire in a step through, whether the recipe is prepped before tuning or inside it", {
+  it("lets a tripwire in a step through, whether the bounds or a fold's prep raises it", {
 
     local_mocked_bindings(build_recipe = tripwire_recipe, .package = "horizons")
 
@@ -891,15 +981,16 @@ describe("fit_single_config() chooses only among candidates scored on every fold
 
   it("fails a member whose every warm-start candidate failed on a fold, rather than choosing on the rest", {
 
-    local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
+    ## The engine fails on one fold for every candidate (fail_without_row_one())
+    local_mocked_bindings(glmnet = fail_without_row_one(setup), .package = "glmnet")
 
     result <- run_fit("elastic_net", setup)
 
     expect_identical(result$status, "failed")
     expect_match(result$error_message,
                  "^Warm-start grid search failed: no grid candidate was scored on every fold \u2014 ")
-    expect_match(result$error_message, "boom on one fold (in `step_mutate()`; 1 of 3 folds)",
-                 fixed = TRUE)
+    expect_match(result$error_message, "boom on one fold", fixed = TRUE)
+    expect_match(result$error_message, "1 of 3 folds)", fixed = TRUE)
     expect_identical(result$class, "horizons_error_run")
 
   })
@@ -990,22 +1081,16 @@ describe("fit_single_config() chooses only among candidates scored on every fold
 
   it("fails a member whose out-of-fold fits missed a fold, rather than keeping predictions without it", {
 
-    ## The step fails on one fold, and only while the out-of-fold predictions
-    ## are made, so the re-tune chose its candidate on every fold
-    oof <- new.env()
+    ## The engine fails on one fold, and only while the out-of-fold
+    ## predictions are made, so the re-tune chose its candidate on every fold
+    oof    <- new.env()
     oof$on <- FALSE
 
-    fail_without_in_oof <- function(x, value) {
-      if (oof$on && length(x) > 15 && !any(x == value)) stop("boom on one out-of-fold fit")
-      x
-    }
-
-    local_mocked_bindings(build_recipe = function(config_row, train_data, role_map, ...) {
-      value <- train_data$wn_4000[1]
-      recipes::recipe(SOC ~ ., data = train_data) |>
-        recipes::update_role("sample_id", new_role = "id") |>
-        recipes::step_mutate(boom = fail_without_in_oof(wn_4000, !!value))
-    }, .package = "horizons")
+    fails_on_a_fold <- fail_without_row_one(setup, "boom on one out-of-fold fit")
+    real_glmnet     <- glmnet::glmnet
+    local_mocked_bindings(glmnet = function(x, y, ...) {
+      if (oof$on) fails_on_a_fold(x, y, ...) else real_glmnet(x, y, ...)
+    }, .package = "glmnet")
 
     real_resamples <- tune::fit_resamples
     local_mocked_bindings(fit_resamples = function(...) {
@@ -1019,8 +1104,8 @@ describe("fit_single_config() chooses only among candidates scored on every fold
     expect_identical(result$status, "failed")
     expect_match(result$error_message,
                  "^OOF predictions failed: out-of-fold predictions are missing for a fold \u2014 ")
-    expect_match(result$error_message, "boom on one out-of-fold fit (in `step_mutate()`; 1 of 3 folds)",
-                 fixed = TRUE)
+    expect_match(result$error_message, "boom on one out-of-fold fit", fixed = TRUE)
+    expect_match(result$error_message, "1 of 3 folds)", fixed = TRUE)
     expect_null(result$cv_predictions)
 
   })

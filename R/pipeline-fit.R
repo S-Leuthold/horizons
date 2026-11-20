@@ -114,9 +114,10 @@
 #' Before a parallel run `fit()` refuses a session loaded with
 #' `devtools::load_all()`, and, asking every daemon connected one task each,
 #' daemons that load another version of horizons
-#' (`horizons_error_dependency`) or cannot load a package the members need
-#' (`horizons_error_missing_package`), since tune's tasks run horizons'
-#' recipe steps and the members' engines.
+#' (`horizons_error_dependency`), since tune's tasks fit the members'
+#' engines, horizons' own PLS engine among them, or cannot load a package
+#' the members need, their engines' or their feature selections'
+#' (`horizons_error_missing_package`).
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -492,10 +493,10 @@ fit <- function(x,
   ## session when isolation is turned off, which the log notes
   log_isolation_off(collector, member_configs$model, control$isolate)
 
-  ## tune's tasks on the daemons run horizons' recipe steps and the PLS
-  ## engine, and fit the members' engines, so every daemon must run this
-  ## session's horizons and load the members' packages: checked before
-  ## anything is drawn
+  ## tune's tasks on the daemons fit the members' engines, horizons' PLS
+  ## engine among them, so every daemon must run this session's horizons;
+  ## and it must load the members' packages, their engines' and their
+  ## feature selections': checked before anything is drawn
   ## The daemons on this machine against the memory it has, for this run's
   ## data, said once and on the tree's parallel line
   short_memory <- FALSE

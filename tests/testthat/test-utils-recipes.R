@@ -238,6 +238,28 @@ describe("build_recipe()", {
 
   })
 
+  it("leaves the transform step out over spectra already transformed: the response step, then the selection", {
+
+    td      <- make_test_data(meta = "batch", responses = "clay")
+    config  <- make_config_row(transformation = "log", preprocessing = "snv",
+                               feature_selection = "pca")
+    hoisted <- hoist_spectra(td$data, config, td$role_map)
+
+    rec <- build_recipe(config, hoisted, td$role_map, transformed = TRUE)
+
+    expect_identical(vapply(rec$steps, function(s) class(s)[1], character(1)),
+                     c("step_log", "step_pca"))
+
+    ## The generated spectra are the predictors, and every other column keeps
+    ## the role the whole recipe gives it
+    info <- summary(rec)
+    expect_setequal(info$variable[info$role == "predictor"],
+                    grep("^spec[0-9]+$", names(hoisted), value = TRUE))
+    expect_identical(info$role[match(c("sample_id", "SOC", "batch", "clay"), info$variable)],
+                     c("id", "outcome", "meta", "response_hold"))
+
+  })
+
   it("is not reached by an axis whose names are not wavenumbers: the object holding it is invalid (#121)", {
 
     ## build_recipe() reads the axis from the role map as given; every verb

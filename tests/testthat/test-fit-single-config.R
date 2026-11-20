@@ -521,15 +521,36 @@ describe("fit_single_config() - failure paths", {
 
   })
 
-  it("names the recipe preparation when the prepped recipe cannot be baked", {
+  it("names the fold preparation when the training rows' spectra cannot be baked", {
 
-    ## rf's mtry bounds are read from the prepped recipe's training frame.
-    ## That bake is the only one handed a whole recipe: prep() bakes its steps
-    ## one at a time.
+    ## The first bake handed a whole recipe is the one that transforms the
+    ## training rows' spectra once, before the folds are prepped: prep()
+    ## bakes its steps one at a time. (The bounds prep's own failure is named
+    ## "Recipe preparation", test-failure-messages.R.)
     setup     <- fsc()$setup
     real_bake <- recipes::bake
     local_mocked_bindings(bake = function(object, ...) {
       if (inherits(object, "recipe")) stop("the prepped recipe could not be baked")
+      real_bake(object, ...)
+    }, .package = "recipes")
+
+    expect_failed_at(run_on_shared(setup), "Fold preparation",
+                     "the prepped recipe could not be baked", warm_start = NA)
+
+  })
+
+  it("names the recipe preparation when the recipe prepped for the bounds cannot be baked", {
+
+    ## The second bake handed a whole recipe is the bounds prep's (rf's mtry),
+    ## after the training rows' spectra are transformed
+    setup     <- fsc()$setup
+    real_bake <- recipes::bake
+    bakes     <- 0L
+    local_mocked_bindings(bake = function(object, ...) {
+      if (inherits(object, "recipe")) {
+        bakes <<- bakes + 1L
+        if (bakes == 2L) stop("the prepped recipe could not be baked")
+      }
       real_bake(object, ...)
     }, .package = "recipes")
 
@@ -1511,6 +1532,101 @@ describe("fit_single_config() - the stages' units", {
 
     engine <- workflows::extract_spec_parsnip(result$fitted_workflow)$eng_args
     expect_identical(rlang::eval_tidy(engine$seed), unit_seed(42L, c("fit", config$config_id, "final-fit")))
+
+  })
+
+  it("preps each fold, and the bounds, from its own unit's seed, named by what is prepped", {
+
+    ## rf bounds mtry, so the fold recipe is prepped on the whole training
+    ## part too. Every recipe prep is recorded with the stream it starts
+    ## from; each unit's must be among them.
+    shared    <- fsc()
+    real_prep <- recipes::prep
+    starts    <- list()
+
+    local_mocked_bindings(prep = function(x, ...) {
+      starts[[length(starts) + 1L]] <<- get0(".Random.seed", envir = globalenv())
+      real_prep(x, ...)
+    }, .package = "recipes")
+
+    result <- fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = shared$setup$split_F,
+      cv_resamples        = shared$setup$folds,
+      calib_data          = NULL,
+      role_map            = shared$setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = FALSE,
+      allow_par           = FALSE,
+      seed                = 42L
+    )
+
+    pinned <- function(name) {
+      withr::with_seed(unit_seed(42L, name), .rng_kind = "Mersenne-Twister",
+                       .rng_normal_kind = "Inversion", .rng_sample_kind = "Rejection",
+                       get(".Random.seed", envir = globalenv()))
+    }
+    started <- function(name) any(vapply(starts, identical, logical(1), pinned(name)))
+
+    expect_identical(result$status, "success")
+
+    for (unit in c(shared$setup$folds$id, "training")) {
+      expect_true(started(c("fit", "prep", "raw", "none", unit)), label = unit)
+    }
+
+  })
+
+})
+
+
+## =========================================================================
+## Out-of-fold predictions keep their samples
+## =========================================================================
+
+describe("fit_single_config() - out-of-fold predictions on prepped folds", {
+
+  it("numbers .row by the rows the folds were cut from, each once, with each sample, its outcome, and UQ's features", {
+
+    ## PCA, whose scores the folds place by position. The quantile forest
+    ## is recorded as UQ trains it: each out-of-fold residual is paired with
+    ## the features of the row .row names, which must be its own sample's.
+    setup       <- make_fit_setup(n_wn = 30)
+    train       <- setup$folds$splits[[1]]$data
+    real_forest <- fit_quantile_forest
+    features    <- NULL
+
+    local_mocked_bindings(fit_quantile_forest = function(oof_features, ...) {
+      features <<- oof_features
+      real_forest(oof_features, ...)
+    })
+
+    result <- fit_single_config(
+      config_row          = make_fit_config(model = "elastic_net", feature_selection = "pca"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      calib_data          = rsample::testing(setup$split_F),
+      role_map            = setup$role_map,
+      best_params_eval    = NULL,
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      compute_uq          = TRUE,
+      min_calib_rows      = 5L,
+      seed                = 42L
+    )
+
+    cv <- result$cv_predictions
+
+    expect_identical(result$status, "success")
+    expect_identical(sort(cv$.row), seq_len(nrow(train)))
+    expect_identical(cv$sample_id, train$sample_id[cv$.row])
+    expect_identical(cv$truth, train$SOC[cv$.row])
+
+    own <- recipes::bake(workflows::extract_recipe(result$fitted_workflow, estimated = TRUE),
+                         new_data = train[cv$.row, , drop = FALSE], recipes::all_predictors())
+    expect_false(is.null(features))
+    expect_equal(as.data.frame(features), as.data.frame(own), ignore_attr = TRUE)
 
   })
 

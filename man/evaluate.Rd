@@ -167,8 +167,9 @@ machine, a file system shared at that path), and a daemon that cannot
 read the file stops the run with \code{horizons_error_systemic}, the rows
 finished so far as its \code{results}. The mode for a large config grid on a
 many-core machine.
-\item \code{"resamples"}: configs run sequentially; inside each, tune runs the CV
-folds on the daemons. Useful width is capped at \code{cv_folds}. The mode
+\item \code{"resamples"}: configs run sequentially; inside each, each fold's
+recipe is prepped once in this session, and tune runs the CV folds'
+fits on the daemons. Useful width is capped at \code{cv_folds}. The mode
 for a few cores and a short grid.
 \item \code{"auto"} (default): \code{"configs"} when the number of configs is at least
 \code{cv_folds} and there is an \code{output_dir} to checkpoint into, otherwise
@@ -336,15 +337,18 @@ that configuration alone: its row has \code{status} \code{"failed"}, an
 \code{error_message} naming the step and the cause ("Grid search failed:
 ..."), the root \code{class} of the failure, and, with
 \code{control_horizons(keep_traces = TRUE)}, the backtrace as text in \code{trace}.
-A recipe step that fails inside tuning is reproduced by prepping the
-recipe once on the training part, so the step's own error is recorded with
-its class; a failure tune keeps only as text is \code{horizons_error_run}. A
-hyperparameter candidate scored on fewer cross-validation folds than were
-drawn takes no part in the prune gate or the choice of hyperparameters,
-and a configuration with no grid candidate scored on every fold fails; a
-\verb{cv_*} mean is kept only when it covers every fold, so every ranked value
-is on the same folds (#101). A configuration whose final fit on the
-training part fails is failed too (#102). An error that is not the
+Each fold's recipe is prepped once, in the configuration's unit, so a
+recipe step that fails while a fold is prepped fails the configuration
+with the step's own class; one that fails only inside the final fit is
+reproduced by prepping the recipe once on the training part. A failure
+tune keeps only as text (a model's fit failing inside tuning) is
+\code{horizons_error_run}. A hyperparameter candidate scored on fewer
+cross-validation folds than were drawn takes no part in the prune gate or
+the choice of hyperparameters, and a configuration with no grid candidate
+scored on every fold fails; a \verb{cv_*} mean is kept only when it covers
+every fold, so every ranked value is on the same folds (#101). A
+configuration whose final fit on the training part fails is failed too
+(#102). An error that is not the
 configuration's own (an input or dependency error, or a bug in horizons)
 stops the call. So does a failure every configuration would share: when
 the first configurations to run fail the same way across at least two

@@ -609,6 +609,7 @@ UNIT_STEPS <- c(
   model_spec          = "Model specification",
   workflow            = "Workflow creation",
   prep                = "Recipe preparation",
+  fold_prep           = "Fold preparation",
   finalize_parameters = "Parameter finalization",
   tune_grid           = "Grid search",
   prune               = "Prune check",

@@ -413,6 +413,34 @@ describe("evaluate() - success path", {
 })
 
 ## =========================================================================
+## The folds a configuration reads its training rows from (#116)
+## =========================================================================
+
+describe("evaluate() - the folds a configuration reads its training rows from (#116)", {
+
+  it("hands each configuration folds cut from the split's training part itself", {
+
+    ## evaluate_single_config() reads its training rows from the folds rather
+    ## than copying them out of the split again, so the two must be one frame
+    real <- evaluate_single_config
+    seen <- NULL
+
+    local_mocked_bindings(evaluate_single_config = function(config_row, split, cv_folds, ...) {
+      seen <<- list(split = split, cv_folds = cv_folds)
+      real(config_row, split, cv_folds, ...)
+    })
+
+    ev <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                                    control = control_horizons(verbose = FALSE)))
+
+    expect_identical(ev$evaluation$results$status, "success")
+    expect_identical(seen$cv_folds$splits[[1]]$data, rsample::training(seen$split))
+
+  })
+
+})
+
+## =========================================================================
 ## Metric ranking
 ## =========================================================================
 
@@ -3531,24 +3559,23 @@ describe("evaluate() - a worker's death", {
 
     local_test_daemons(2)
 
-    ## A recipe step that kills the daemon it runs on, on an analysis set,
-    ## once; never the parent, which preps the whole training part. The
-    ## function is written into the step, so the daemon needs nothing from
-    ## here. Once only: with every daemon gone, tune would wait for its
+    ## The model's fit kills the daemon it runs on, on an analysis set, once;
+    ## never the parent, which fits the whole training part. Each fold's
+    ## recipe is prepped in the parent, so the kill is planted in ranger on
+    ## the daemons. Once only: with every daemon gone, tune would wait for its
     ## queued folds for ever (a documented limit). The kill is claimed with
     ## dir.create(), which succeeds in one process only, so two daemons
     ## cannot both pass the check before either has claimed it.
     killed <- file.path(withr::local_tempdir(), "killed")
-    kill <- bquote((function(x) {
-      if (length(x) < 45 && Sys.getpid() != .(Sys.getpid()) && dir.create(.(killed), showWarnings = FALSE)) {
-        tools::pskill(Sys.getpid(), tools::SIGKILL)
-      }
-      x
-    })(sample_id))
-    real_recipe <- build_recipe
-    local_mocked_bindings(build_recipe = function(...) {
-      real_recipe(...) |> recipes::step_mutate(sample_id = !!kill)
-    })
+    with_deadline(mirai::everywhere({
+      real <- ranger::ranger
+      utils::assignInNamespace("ranger", function(..., x = NULL) {
+        if (NROW(x) < 45 && Sys.getpid() != parent && dir.create(killed, showWarnings = FALSE)) {
+          tools::pskill(Sys.getpid(), tools::SIGKILL)
+        }
+        real(..., x = x)
+      }, ns = "ranger")
+    }, killed = killed, parent = Sys.getpid())[], 30)
 
     err <- expect_error(
       with_deadline(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
@@ -3576,22 +3603,21 @@ describe("evaluate() - a worker's death", {
     ## prematurely") and returns what it had, so the death is read from the
     ## daemons connected, and the search it cut short is never kept. The kill
     ## is armed at the search's second Gaussian-process prediction, once an
-    ## iteration has run, and fires once, on a daemon, from a recipe step that
-    ## needs nothing from here. Once is claimed with dir.create(), which
-    ## succeeds in one process only: a pool left with no daemon would wait
-    ## inside tune.
+    ## iteration has run, and fires once, on a daemon, in the model's fit
+    ## (ranger, planted on the daemons: each fold's recipe is prepped in the
+    ## parent). Once is claimed with dir.create(), which succeeds in one
+    ## process only: a pool left with no daemon would wait inside tune.
     armed  <- withr::local_tempfile(pattern = "armed")
     killed <- file.path(withr::local_tempdir(), "killed")
-    kill <- bquote((function(x) {
-      if (file.exists(.(armed)) && Sys.getpid() != .(Sys.getpid()) && dir.create(.(killed), showWarnings = FALSE)) {
-        tools::pskill(Sys.getpid(), tools::SIGKILL)
-      }
-      x
-    })(sample_id))
-    real_recipe <- build_recipe
-    local_mocked_bindings(build_recipe = function(...) {
-      real_recipe(...) |> recipes::step_mutate(sample_id = !!kill)
-    })
+    with_deadline(mirai::everywhere({
+      real <- ranger::ranger
+      utils::assignInNamespace("ranger", function(...) {
+        if (file.exists(armed) && Sys.getpid() != parent && dir.create(killed, showWarnings = FALSE)) {
+          tools::pskill(Sys.getpid(), tools::SIGKILL)
+        }
+        real(...)
+      }, ns = "ranger")
+    }, armed = armed, killed = killed, parent = Sys.getpid())[], 30)
     real_pred_gp <- tune:::pred_gp
     n_pred       <- 0L
     local_mocked_bindings(pred_gp = function(...) {

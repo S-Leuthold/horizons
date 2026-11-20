@@ -215,6 +215,84 @@ text_records <- function(x, pinned = FALSE) {
 
 }
 
+#' Record the warnings a fold's prep raises, with the fold
+#'
+#' @description
+#' Each fold's recipe is prepped in the unit ([prep_folds()]), not inside
+#' tune, so the warnings another package raises there are recorded and
+#' muffled here, each with the fold it came from, and
+#' [fold_warning_records()] gives the row the folds that raised each, as
+#' "(3 of 10 folds)", the count tune's notes give. A horizons warning goes
+#' on to the unit, which records it with its class for the verb's log; the
+#' selection steps' are muffled before they reach here
+#' ([quiet_selection_warnings()]).
+#'
+#' @param expr The fold's prep and bakes.
+#' @param fold Character(1). The fold's id.
+#' @return List with `value` (the value of `expr`) and `arrivals` (tibble:
+#'   `cause`, `where` and `fold`, one row per warning recorded).
+#' @keywords internal
+#' @noRd
+capture_fold_warnings <- function(expr, fold) {
+
+  arrivals <- list()
+
+  value <- withCallingHandlers(
+    expr,
+    warning = function(w) {
+      if (inherits(w, "horizons_warning")) return(invisible(NULL))
+      ### A warning signalled without a muffle restart cannot be muffled,
+      ### so it goes on to the unit, which records it
+      if (is.null(findRestart("muffleWarning"))) return(invisible(NULL))
+      parts <- condition_parts(w)
+      arrivals[[length(arrivals) + 1L]] <<- tibble::tibble(cause = parts$cause,
+                                                           where = parts$where,
+                                                           fold  = fold)
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  list(value    = value,
+       arrivals = if (length(arrivals) == 0) {
+         tibble::tibble(cause = character(0), where = character(0), fold = character(0))
+       } else {
+         dplyr::bind_rows(arrivals)
+       })
+
+}
+
+#' Warning records from the warnings each fold's prep raised
+#'
+#' @param arrivals List of [capture_fold_warnings()]'s `arrivals`, one per
+#'   fold.
+#' @param n_folds Integer. The folds prepped.
+#' @return Records shaped like [new_warning_log()]'s, one per distinct text
+#'   and location: `scope` `"cv"`, `folds` the folds that raised it, `n` how
+#'   often it arrived.
+#' @keywords internal
+#' @noRd
+fold_warning_records <- function(arrivals, n_folds) {
+
+  arrivals <- dplyr::bind_rows(arrivals)
+
+  if (nrow(arrivals) == 0) return(new_warning_log())
+
+  key    <- paste0(arrivals$cause, "\r", ifelse(is.na(arrivals$where), "", arrivals$where))
+  keys   <- unique(key)
+  groups <- split(seq_len(nrow(arrivals)), factor(key, levels = keys))
+
+  tibble::tibble(
+    cause   = vapply(groups, function(i) arrivals$cause[i[1]], character(1), USE.NAMES = FALSE),
+    where   = vapply(groups, function(i) arrivals$where[i[1]], character(1), USE.NAMES = FALSE),
+    n       = vapply(groups, length, integer(1), USE.NAMES = FALSE),
+    scope   = "cv",
+    folds   = unname(lapply(groups, function(i) unique(arrivals$fold[i]))),
+    n_folds = as.integer(n_folds),
+    pinned  = FALSE
+  )
+
+}
+
 #' Warning records from what a unit recorded
 #'
 #' @description
@@ -619,8 +697,10 @@ render_warning_log <- function(records, max_shown = 5L) {
 #' tune catches the errors and warnings raised inside `tune_grid()`,
 #' `tune_bayes()`, `fit_resamples()` and `last_fit()` and stores them in the
 #' result's `.notes` column instead of signalling them, so a capture site
-#' that only watches for conditions never sees them. A recipe step that fails
-#' or warns during prep inside tuning leaves its only trace there. This
+#' that only watches for conditions never sees them. A model fit that fails
+#' or warns inside tuning, or a recipe step inside `last_fit()` (each fold's
+#' recipe is prepped in the unit, [prep_folds()]), leaves its only trace
+#' there. This
 #' reads the notes back through [condition_summary()] and returns one line
 #' per distinct message (see [summarise_warning_records()]), most frequent
 #' first, each saying how many folds raised it (`"3 of 5 folds"`) when the
@@ -682,9 +762,9 @@ tune_failure_cause <- function(tune_results) {
 #' * A recipe step that failed inside tune (an error note at a preprocessor
 #'   location) is reproduced outside it, when `recipe` is given, by prepping
 #'   the recipe once on the training part: the step's error then ends the
-#'   unit with its own class, or propagates for the kinds no unit contains. A
-#'   failure that does not reproduce there (one fold's rows only) is read
-#'   from the notes, as below. Prepping only on failure costs a run that
+#'   unit with its own class, or propagates for the kinds no unit contains.
+#'   Only `last_fit()` preps a recipe inside tune, each fold's being prepped
+#'   in the unit ([prep_folds()]). Prepping only on failure costs a run that
 #'   does not fail nothing, where a prep with feature selection can take
 #'   minutes.
 #' * An isolated fit whose process died, an error note starting with
@@ -803,8 +883,9 @@ abort_tune_failure <- function(results, what, call = rlang::caller_env()) {
 ## candidate that failed on one fold is compared with the others on the folds
 ## that survived, which is a different and easier test. A candidate missing a
 ## fold is left out instead, as scikit-learn leaves out one whose mean is NaN.
-## A recipe step that fails on a fold fails every candidate there, so its
-## configuration then has none to choose from and fails.
+## A model that fails on a fold for every candidate leaves its configuration
+## none to choose from, so it fails. (A recipe step that fails on a fold
+## fails the fold's prep, in the unit, before tune runs.)
 
 #' A metric's mean and standard error over the folds
 #'

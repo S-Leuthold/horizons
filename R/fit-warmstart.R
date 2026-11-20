@@ -301,15 +301,15 @@ point_matches <- function(point, grid) {
 #' 3. Choose the hyperparameters by RMSE among the candidates scored on every
 #'    fold (`select_complete()`).
 #'
-#' @param workflow A tidymodels workflow (recipe + model spec, not fitted).
-#' @param cv_resamples A `vfold_cv` object.
+#' @param workflow A tidymodels workflow, not fitted: the member's model
+#'   alone, as [fit_single_config()] gives it, over prepped folds.
+#' @param cv_resamples An `rset`: the member's folds, each recipe prepped
+#'   once.
 #' @param initial_grid The starting grid, from [build_warmstart_grid()].
 #' @param param_set Finalized `parameters` object.
 #' @param bayesian_iter Integer. Bayesian iterations after grid. 0 = grid only.
 #' @param metric_set A `yardstick::metric_set`.
 #' @param allow_par Logical. Passed to tune control functions.
-#' @param recipe The member's untrained recipe, to reproduce a step's failure
-#'   inside tune with its class; `NULL` when it was prepped before tuning.
 #' @param debug Logical. Stop at the first failure rather than fall back.
 #' @param seed Integer. The run's seed, from which each phase's is derived.
 #' @param config_id Character. The member's configuration id, which names
@@ -329,7 +329,6 @@ tune_warmstart_bayes <- function(workflow,
                                  bayesian_iter,
                                  metric_set,
                                  allow_par = FALSE,
-                                 recipe    = NULL,
                                  debug     = FALSE,
                                  seed,
                                  config_id) {
@@ -354,7 +353,7 @@ tune_warmstart_bayes <- function(workflow,
       )
     ))
 
-    check_tune_result(results, "all models failed during CV", recipe = recipe, debug = debug)
+    check_tune_result(results, "all models failed during CV", debug = debug)
 
     ## A candidate scored on fewer folds than were drawn takes no part in the
     ## choice (#101), so a grid with none scored on every fold has nothing to
