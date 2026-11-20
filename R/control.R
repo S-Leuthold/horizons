@@ -223,9 +223,11 @@ CONTROL_FIELDS <- list(
 #'   `getOption("horizons.verbose", TRUE)`, so a script can quiet the four
 #'   verbs, and [average()], at once. All four verbs.
 #' @param output_dir `character(1)`. A directory where [evaluate()] writes
-#'   each configuration's result as it finishes, and from which it resumes.
-#'   On the configs axis the daemons read the configurations' data from it
-#'   too, so they must reach it (see [evaluate()]). Default none.
+#'   each configuration's result as it finishes, and from which it resumes;
+#'   it keeps its fold preparations there too until the run completes. On
+#'   the configs axis the daemons read the configurations' data and their
+#'   fold preparations from it, so they must reach it (see [evaluate()]).
+#'   Default none.
 #' @param debug `logical(1)`. Stop at the first failure with its full
 #'   backtrace, instead of recording the failed unit and going on. Warnings
 #'   are still recorded. Default `FALSE`. All four verbs; each honours it as
