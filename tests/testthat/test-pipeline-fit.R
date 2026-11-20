@@ -1835,3 +1835,75 @@ describe("format_test_coverage()", {
   })
 
 })
+
+
+## ---------------------------------------------------------------------------
+## fit() - each fold's prep, built once for the call
+## ---------------------------------------------------------------------------
+
+## elastic_net and plsr on one correlation prep (plsr bounds num_comp, so the
+## training part's too), evaluated and ranked so both are members
+build_shared_prep_eval <- function() {
+  obj <- make_eval_object(n = 60, n_wn = 30, n_configs = 2)
+  obj$config$configs <- tibble::tibble(
+    config_id         = c("cfg_enet", "cfg_plsr"),
+    model             = c("elastic_net", "plsr"),
+    transformation    = "none",
+    preprocessing     = "snv",
+    feature_selection = "correlation"
+  )
+  obj$config$tuning$final_bayesian_iter <- 0L
+  suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(verbose = FALSE)))
+}
+shared_prep_eval <- function() memo_fixture("shared_prep_eval", build_shared_prep_eval)
+
+describe("fit() - each fold's prep built once for the call", {
+
+  it("builds each fold prep its members read once, and each member fits as it does alone", {
+
+    ev   <- shared_prep_eval()
+    real <- fit_single_config
+    args <- list()
+    kept <- list()
+
+    local_mocked_bindings(fit_single_config = function(...) {
+      call   <- list(...)
+      member <- real(...)
+      args[[call$config_row$config_id]] <<- call
+      kept[[call$config_row$config_id]] <<- member
+      member
+    })
+
+    real_prep <- prep_fold_entry
+    built     <- character(0)
+    local_mocked_bindings(prep_fold_entry = function(unit, ...) {
+      built <<- c(built, unit$name)
+      real_prep(unit, ...)
+    })
+
+    ft <- suppressWarnings(fit(ev, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                               control = control_horizons(verbose = FALSE)))
+
+    ## The correlation prep's three folds and its training part, once for
+    ## both members, named under fit()
+    expect_length(built, 4L)
+    expect_identical(anyDuplicated(built), 0L)
+    expect_setequal(names(args), c("cfg_enet", "cfg_plsr"))
+    expect_true(all(ft$models$results$status == "success"))
+
+    ## Each member, fitted on its own on the same folds, preps its own with
+    ## fit()'s code and fits the same
+    fields <- c("status", "best_params", "cv_predictions", "test_metrics", "cv_metrics", "warnings",
+                "error_message", "warm_start", "start_grid_size")
+    built  <- character(0)
+
+    for (id in names(args)) {
+      alone <- do.call(real, utils::modifyList(args[[id]], list(fold_entries = NULL)))
+      expect_identical(alone[fields], kept[[id]][fields], label = id)
+    }
+
+    expect_length(built, 7L)
+
+  })
+
+})

@@ -114,10 +114,12 @@
 #' Before a parallel run `fit()` refuses a session loaded with
 #' `devtools::load_all()`, and, asking every daemon connected one task each,
 #' daemons that load another version of horizons
-#' (`horizons_error_dependency`), since tune's tasks fit the members'
-#' engines, horizons' own PLS engine among them, or cannot load a package
-#' the members need, their engines' or their feature selections'
-#' (`horizons_error_missing_package`).
+#' (`horizons_error_dependency`), since the daemons prepare the members'
+#' folds and tune's tasks fit the members' engines, horizons' own PLS engine
+#' among them, or cannot load a package the members need, their engines' or
+#' their feature selections' (`horizons_error_missing_package`). A feature
+#' selection that fails while a fold is prepared fails every member that
+#' reads that preparation, with the step's own class and words.
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -189,9 +191,16 @@
 #'   `models$control`.
 #'
 #' @section Parallelism:
-#' With `control_horizons(allow_par = TRUE)`, tune runs the CV folds inside
-#' each member's re-tune and OOF pass on the [mirai](https://mirai.r-lib.org)
-#' daemons the caller has set (`mirai::daemons(4)` before the call); a
+#' Before any member is fitted, each fold's recipe is prepared once for the
+#' call, for every member that shares its preprocessing and feature
+#' selection (and, for a selection that reads the outcome, its response
+#' transformation), as [evaluate()] prepares its configurations' ("Parallelism"
+#' there); the preparations are held in this session and dropped when the
+#' call returns. With `control_horizons(allow_par = TRUE)` they are prepared
+#' on the daemons, one task each, longest first, each carrying its rows, and
+#' tune runs the CV folds inside each member's re-tune and OOF pass on the
+#' [mirai](https://mirai.r-lib.org) daemons the caller has set
+#' (`mirai::daemons(4)` before the call); a
 #' `future::plan()` is not used, and `fit()` never sets, resizes or resets
 #' the daemons. With fewer than two connected, `fit()` runs sequentially and
 #' warns, with class `horizons_warning_substitution`; the warning is also a
@@ -493,7 +502,8 @@ fit <- function(x,
   ## session when isolation is turned off, which the log notes
   log_isolation_off(collector, member_configs$model, control$isolate)
 
-  ## tune's tasks on the daemons fit the members' engines, horizons' PLS
+  ## The daemons prepare the members' folds (their feature selections'
+  ## steps) and tune's tasks on them fit the members' engines, horizons' PLS
   ## engine among them, so every daemon must run this session's horizons;
   ## and it must load the members' packages, their engines' and their
   ## feature selections': checked before anything is drawn
@@ -820,6 +830,48 @@ fit <- function(x,
   }
 
   ## -----------------------------------------------------------------------
+  ## Step 3b: Each fold prep the members need, built once for the call
+  ## -----------------------------------------------------------------------
+  ## As evaluate() builds its configurations' (fold_prep_units()): members of
+  ## one preprocessing and selection read one prep per fold. fit() has no
+  ## output_dir and resumes nothing, so they live in this call; on the
+  ## daemons with allow_par, each task carrying its rows.
+
+  member_rows <- all_configs[match(top_configs$config_id, all_configs$config_id), ]
+  fold_units  <- fold_prep_units(member_rows, cv_resamples, role_map, verb = "fit", data = NULL,
+                                 seed = seed, sg_window = recipe_cfg$sg_window,
+                                 pca_threshold = recipe_cfg$pca_threshold)
+  fold_store  <- NULL
+
+  if (length(fold_units) > 0) {
+
+    fold_store <- open_fold_store(NULL, member_results(list()))
+
+    fold_stage <- build_fold_stage(
+      fold_units, fold_store, cv_resamples$splits[[1]]$data, cv_resamples, role_map,
+      seed          = seed,
+      sg_window     = recipe_cfg$sg_window,
+      pca_threshold = recipe_cfg$pca_threshold,
+      debug         = debug,
+      keep_traces   = control$keep_traces,
+      collector     = collector,
+      output_dir    = NULL,
+      results       = member_results(list()),
+      daemons       = if (allow_par) list(payload = NULL, n_left = NULL, verb = "fit")
+    )
+
+    if (verbose) {
+
+      for (line in fold_stage_lines(fold_stage, if (allow_par) n_daemons)) {
+        cat(paste0("\u2502  ", line, "\n"))
+      }
+      cat("\u2502\n")
+
+    }
+
+  }
+
+  ## -----------------------------------------------------------------------
   ## Step 4: Config loop
   ## -----------------------------------------------------------------------
   ## Each member is one unit (fit_single_config()). The circuit breaker
@@ -860,6 +912,14 @@ fit <- function(x,
     ## re-tune starts from build_warmstart_grid()'s space-filling fallback.
     best_params_eval <- top_row$best_params[[1]]
 
+    ## The member's fold preps, from the call's stage
+    fold_entries <- if (!is.null(fold_store)) {
+      config_fold_entries(fold_store, cfg, cv_resamples, role_map, verb = "fit", data = NULL,
+                          seed = seed, sg_window = recipe_cfg$sg_window,
+                          pca_threshold = recipe_cfg$pca_threshold,
+                          results = member_results(results_list))
+    }
+
     ## Call capture layer
     config_result <- stop_on_worker_death(fit_single_config(
       config_row          = cfg,
@@ -884,7 +944,8 @@ fit <- function(x,
       min_degradation_rows = control$min_degradation_rows,
       debug                = debug,
       keep_traces          = control$keep_traces,
-      isolate              = control$isolate
+      isolate              = control$isolate,
+      fold_entries         = fold_entries
     ), member_results(results_list), verb = "fit", daemons = allow_par)
 
     results_list[[i]] <- config_result
