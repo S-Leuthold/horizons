@@ -27,7 +27,8 @@ fit_single_config(
   min_degradation_rows = DEGRADATION_MIN_N,
   debug = FALSE,
   keep_traces = FALSE,
-  isolate = TRUE
+  isolate = TRUE,
+  fold_entries = NULL
 )
 }
 \arguments{
@@ -103,6 +104,10 @@ member's \code{trace}.}
 \item{isolate}{Logical. Fit a model whose engine \code{MODEL_SPECS} marks
 \code{isolate} through its isolated twin, each fit in a process of its own
 (\code{model_engine()}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
+
+\item{fold_entries}{The entries of the member's fold preps, as \code{fit()}
+built them, shaped as \code{\link[=evaluate_single_config]{evaluate_single_config()}} takes them. \code{NULL}
+(default) builds them here, with the same code.}
 }
 \value{
 List with fields: config_id, status, degraded (\code{NA} when the
@@ -132,9 +137,11 @@ This function is the \strong{capture layer} — it runs silently and returns a
 structured list. All console output (tree rendering, progress messages) is
 the responsibility of the calling \code{fit()} function.
 
-Each fold's recipe is prepped once, as in \code{\link[=evaluate_single_config]{evaluate_single_config()}}: the
-warm-start re-tune, its Bayesian iterations and the out-of-fold
-predictions run a workflow of the model alone on those folds, which keep
+Each fold's recipe is prepped once, as in \code{\link[=evaluate_single_config]{evaluate_single_config()}},
+and members of one preprocessing and selection read one prep's entry
+(\code{prep_fold_entry()}): the warm-start re-tune, its Bayesian iterations
+and the out-of-fold predictions run a workflow of the model alone on the
+folds assembled from them (\code{assemble_folds()}), which keep
 the positions of the rows they were cut from, so each out-of-fold
 prediction's \code{.row} names its sample. The final fit runs the whole
 workflow on \code{train_data}, so the stored workflow, and with it \code{predict()},

@@ -204,6 +204,24 @@ VALID_FEATURE_SELECTION <- c(
 ### configurations that differ only in it select on different outcomes.
 OUTCOME_SELECTIONS <- c("correlation", "boruta", "cars")
 
+### The tuned parameters whose upper bound is read from the predictors a
+### recipe keeps (dials::finalize()), so a model that tunes one has its
+### configuration's recipe prepped on the whole training part as well as on
+### each fold (bounded_model(), R/fold-cache.R)
+BOUNDED_PARAMETERS <- c("mtry", "num_comp")
+
+### The seconds one fold's prep takes by its feature selection, the recipe
+### without the spectral transform on a fold of the coverage grid's training
+### part (835 rows, snv_deriv1; measured 2026-11-17). The fold preps start
+### longest first by it, as the configurations start by
+### CONFIG_COST_SECONDS; no selection has no prep.
+FOLD_PREP_COST_SECONDS <- c(
+  pca         = 0.57,
+  correlation = 0.26,
+  boruta      = 15.4,
+  cars        = 3.1
+)
+
 ## Metrics --------------------------------------------------------------------
 
 # Metrics evaluate() and fit() accept as `metric`, the ones configs are ranked

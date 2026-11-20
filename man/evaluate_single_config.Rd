@@ -22,7 +22,8 @@ evaluate_single_config(
   debug = FALSE,
   keep_traces = FALSE,
   isolate = TRUE,
-  outside_warnings = character(0)
+  outside_warnings = character(0),
+  fold_entries = NULL
 )
 }
 \arguments{
@@ -99,6 +100,13 @@ unit before it ran, as \code{condition_summary()} lines: the configs-axis
 worker's, from loading the configuration's packages and rebuilding its
 folds. They are rendered with the row's own, deduplicated and capped as
 one list (#96).}
+
+\item{fold_entries}{The entries of the configuration's fold preps, as
+\code{evaluate()} built them (\code{prep_fold_entry()}): a list with \code{training}
+(the whole training part's, for a model whose parameters are bounded by
+the predictors kept, or \code{NULL}) and \code{folds} (one per fold of \code{cv_folds},
+in order, or \code{NULL} with no feature selection). \code{NULL} (default) builds
+them here, with the same code.}
 }
 \value{
 Single-row tibble with columns: \code{config_id}, \code{status} (\code{"pruned"}
@@ -130,16 +138,18 @@ ends it, and the row records the step (\code{UNIT_STEPS}), the cause, its root
 class and, with \code{keep_traces}, its backtrace. A door, internal or
 dependency error is not the configuration's and propagates.
 
-Each fold's recipe is prepped once, inside the unit. The training rows'
-spectra are transformed once, with the transform step's own code
-(\code{hoist_spectra()}); each fold's recipe, the configuration's without that
-step, is prepped on the fold's analysis rows under a seed named by what
-is prepped (\code{fold_prep_scope()}); and tune scores every grid and Bayesian
-candidate on those folds with a workflow of the model alone
-(\code{prep_folds()}). A feature selection therefore selects once per fold,
-for every candidate. The final fit, \code{last_fit()} on the split, runs the
-whole workflow on the raw rows. A step that fails in a fold's prep ends
-the configuration with the step's own class, and another package's
+Each fold's recipe is prepped once. The training rows' spectra are
+transformed once, with the transform step's own code (\code{hoist_spectra()});
+each fold's recipe, the configuration's without that step, is prepped on
+the fold's analysis rows under a seed named by what is prepped
+(\code{fold_prep_scope()}), as a unit of its own whose entry every
+configuration of the same preprocessing and selection reads
+(\code{prep_fold_entry()}); and tune scores every grid and Bayesian candidate
+on the folds assembled from them with a workflow of the model alone
+(\code{assemble_folds()}). A feature selection therefore selects once per
+fold, for every candidate. The final fit, \code{last_fit()} on the split, runs
+the whole workflow on the raw rows. A step that fails in a fold's prep
+ends the configuration with the step's own class, and another package's
 warning there reaches the row with the folds that raised it.
 }
 \keyword{internal}

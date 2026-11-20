@@ -10,9 +10,11 @@
 #' structured list. All console output (tree rendering, progress messages) is
 #' the responsibility of the calling `fit()` function.
 #'
-#' Each fold's recipe is prepped once, as in [evaluate_single_config()]: the
-#' warm-start re-tune, its Bayesian iterations and the out-of-fold
-#' predictions run a workflow of the model alone on those folds, which keep
+#' Each fold's recipe is prepped once, as in [evaluate_single_config()],
+#' and members of one preprocessing and selection read one prep's entry
+#' (`prep_fold_entry()`): the warm-start re-tune, its Bayesian iterations
+#' and the out-of-fold predictions run a workflow of the model alone on the
+#' folds assembled from them (`assemble_folds()`), which keep
 #' the positions of the rows they were cut from, so each out-of-fold
 #' prediction's `.row` names its sample. The final fit runs the whole
 #' workflow on `train_data`, so the stored workflow, and with it `predict()`,
@@ -79,6 +81,9 @@
 #' @param isolate Logical. Fit a model whose engine `MODEL_SPECS` marks
 #'   `isolate` through its isolated twin, each fit in a process of its own
 #'   (`model_engine()`); `control_horizons(isolate = )`. Default `TRUE`.
+#' @param fold_entries The entries of the member's fold preps, as `fit()`
+#'   built them, shaped as [evaluate_single_config()] takes them. `NULL`
+#'   (default) builds them here, with the same code.
 #'
 #' @return List with fields: config_id, status, degraded (`NA` when the
 #'   check could not run), degraded_reason, fitted_workflow, best_params,
@@ -120,7 +125,8 @@ fit_single_config <- function(config_row,
                               min_degradation_rows = DEGRADATION_MIN_N,
                               debug                = FALSE,
                               keep_traces          = FALSE,
-                              isolate              = TRUE) {
+                              isolate              = TRUE,
+                              fold_entries         = NULL) {
 
   start_time <- Sys.time()
 
@@ -142,10 +148,6 @@ fit_single_config <- function(config_row,
   ## run's seed and the stage alone. "fit" in the name keeps them apart from
   ## the configuration's stages in evaluate().
   stage <- function(name) c("fit", config_id, name)
-
-  ## Each fold's prep is a unit of its own too, named by what is prepped, as
-  ## evaluate_single_config()'s are (fold_prep_scope())
-  prep_scope <- fold_prep_scope("fit", config_row)
 
   ## tune catches the warnings raised inside its resampling and keeps them in
   ## .notes, where run_unit() never sees them. Both the re-tune and the
@@ -196,15 +198,15 @@ fit_single_config <- function(config_row,
                          workflows::add_model(model_spec))
 
     ## -----------------------------------------------------------------------
-    ## Step 1b: The training rows' spectra transformed once, the recipe each
-    ## fold is prepped with, and the workflow tune searches
+    ## Step 1b: The training rows' spectra transformed once, the outcome the
+    ## folds train on, and the workflow tune searches
     ## -----------------------------------------------------------------------
     ## As in evaluate_single_config(), from the frame the folds were cut from,
-    ## whose positions the prepped folds keep: train_Fit in fit(), which is
+    ## whose positions the assembled folds keep: train_Fit in fit(), which is
     ## train_data too.
 
     fold_inputs <- fold_prep_inputs(config_row, cv_resamples$splits[[1]]$data, role_map,
-                                    sg_window = sg_window, pca_threshold = pca_threshold)
+                                    sg_window = sg_window)
 
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
@@ -213,47 +215,47 @@ fit_single_config <- function(config_row,
     ## also by the smallest fold's rows, #216)
     ## -----------------------------------------------------------------------
     ## The prep rule evaluate_single_config() follows: each fold's recipe is
-    ## prepped once, in this unit, and the re-tune and the out-of-fold
+    ## prepped once, before the re-tune, and the re-tune and the out-of-fold
     ## predictions are scored on it; the bounds are read from one more prep,
     ## of the fold recipe on the whole training part. A step's error in either
     ## ends the member with its class.
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
-    prepped_now <- any(c("mtry", "num_comp") %in% param_set$name)
+    prepped_now <- any(BOUNDED_PARAMETERS %in% param_set$name)
+
+    ## The member's fold preps: fit()'s entries, or, called on its own,
+    ## entries built here by fit()'s code as they are read
+    entry_at <- fold_entry_reader(
+      fold_entries,
+      config_fold_units("fit", config_row, cv_resamples, role_map, data = NULL, seed = seed,
+                        sg_window = sg_window, pca_threshold = pca_threshold, bounded = prepped_now),
+      function(unit, rows) prep_fold_entry(unit, fold_inputs$data, rows, role_map, seed,
+                                           sg_window, pca_threshold, debug = debug,
+                                           keep_traces = keep_traces),
+      cv_resamples
+    )
 
     if (prepped_now) {
 
-      ## This prep sets the bounds, and is not the model returned, so the
-      ## selection steps' warnings are not taken from it (the final fit's
-      ## record is read instead)
-      prepped <- unit_step("prep", with_unit_seed(seed, c(prep_scope, "training"),
-                                                  quiet_selection_warnings(recipes::prep(fold_inputs$recipe))))
-      baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
-
-      param_set <- unit_step("finalize_parameters", {
-        eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
-        finalized <- dials::finalize(param_set, eval_data)
-        cap_pls_components(finalized, ncol(eval_data), min_analysis_rows(cv_resamples))
-      })
-
-      rm(prepped, baked)
-      invisible(gc(verbose = FALSE))
+      ## The training part's prep sets the bounds, and is not the model
+      ## returned, so the selection steps' warnings are not taken from it
+      ## (the final fit's record is read instead)
+      bound     <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
+      param_set <- unit_step("finalize_parameters", finalize_bound(param_set, bound, cv_resamples))
 
     }
 
     ## -----------------------------------------------------------------------
-    ## Step 2b: Each fold's recipe, prepped once
+    ## Step 2b: The folds, from each fold's prep
     ## -----------------------------------------------------------------------
     ## Once for the member: the re-tune's grid, its Bayesian iterations and the
     ## out-of-fold predictions all run on these folds. The warnings another
     ## package raised in a fold's prep join the member's with their folds.
 
-    prepped_folds <- unit_step("fold_prep", prep_folds(fold_inputs$recipe, cv_resamples,
-                                                       fold_inputs$data, role_map,
-                                                       seed, prep_scope))
+    prepped_folds <- unit_step("fold_prep", assemble_folds(entry_at, cv_resamples, fold_inputs, role_map))
     warning_log   <- dplyr::bind_rows(warning_log, prepped_folds$warnings)
 
-    rm(fold_inputs)
+    rm(fold_inputs, entry_at)
 
     ## -----------------------------------------------------------------------
     ## Step 3: Define tuning metric set
