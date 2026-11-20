@@ -101,9 +101,10 @@ describe("evaluate() parallel worker footprint", {
 
     expect_no_condition(value <- horizons:::evaluate_config_worker(1L, path))
 
-    expect_s3_class(value, "horizons_payload_unread")
-    expect_named(unclass(value), c("path", "reason"))
+    expect_s3_class(value, "horizons_run_file_unread")
+    expect_named(unclass(value), c("path", "reason", "file"))
     expect_identical(value$path, path)
+    expect_identical(value$file, "the configurations' data")
 
     ### base R's words, which name the file: its warning, then its error
     expect_match(value$reason, "payload-gone.rds", fixed = TRUE)
@@ -917,6 +918,7 @@ describe("evaluate() - the configs axis on mirai", {
     local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
       payload <- readRDS(.args$payload_path)
       sent <<- list(expr = .expr, args = .args, compute = .compute, keys = names(payload),
+                    fold_cache_dir = payload$fold_cache_dir,
                     ## The worker aside: covr instruments it to about 1 MB
                     task_bytes    = length(serialize(.args[names(.args) != "worker"], NULL)),
                     payload_bytes = length(serialize(payload, NULL)))
@@ -943,6 +945,10 @@ describe("evaluate() - the configs axis on mirai", {
     ## In one separator: on Windows tempfile() joins with a backslash
     expect_false(grepl("\\", sent$args$payload_path, fixed = TRUE))
     expect_setequal(sent$keys, SHARED_ARG_NAMES)
+
+    ## The fold preparations' directory, absolute, as the checkpoints' is:
+    ## the run's tmp/, where the payload is
+    expect_identical(sent$fold_cache_dir, dirname(sent$args$payload_path))
 
     ## The task carries none of it
     expect_lt(sent$task_bytes, 1024)
@@ -1179,7 +1185,9 @@ describe("evaluate() - the configs axis on mirai", {
     skip_if_dev_package()
 
     ## The writes into the run's tmp/ in this session, and the path the
-    ## window is given; the daemons write only checkpoints
+    ## window is given; the daemons write only checkpoints. Two of the
+    ## configurations read one PCA prep per fold, which the stage's tasks
+    ## build from the same payload before any configuration runs
     local_test_daemons(2)
     real_write  <- write_output_file
     real_window <- dispatch_configs
@@ -1196,14 +1204,26 @@ describe("evaluate() - the configs axis on mirai", {
       }
     )
 
-    ev <- with_deadline(suppressWarnings(evaluate(plsr_object(4), seed = 42L,
+    obj <- plsr_object(4)
+    obj$config$configs$feature_selection[3:4] <- "pca"
+    obj$config$configs$model[4] <- "elastic_net"
+
+    ev <- with_deadline(suppressWarnings(evaluate(obj, seed = 42L,
                                                   control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
                                                                              output_dir = withr::local_tempdir(),
                                                                              verbose = FALSE))), 120)
 
     expect_identical(ev$evaluation$results$status, rep("success", 4L))
-    expect_length(written, 1L)
-    expect_identical(given, written)
+
+    payloads <- written[startsWith(basename(written), "payload-")]
+    expect_length(payloads, 1L)
+    expect_identical(given, payloads)
+
+    ## Written first, then the PCA prep's three folds and its training part
+    ## (plsr bounds num_comp), each once
+    expect_identical(written[1], payloads)
+    expect_length(written, 5L)
+    expect_true(all(grepl("^fold-[0-9a-f]+\\.rds$", basename(written[-1]))))
 
   })
 
@@ -1397,7 +1417,7 @@ describe("evaluate() - the configs axis on mirai", {
     expect_match(msg, "The mirai daemon running configuration \"cfg_003\" could not read the configurations' data from",
                  fixed = TRUE)
     expect_match(msg, file.path(normalizePath(dir, winslash = "/"), "tmp", "payload-"), fixed = TRUE)
-    expect_match(msg, "each daemon reads the configurations' data from `output_dir`, at the path this session gives it",
+    expect_match(msg, "each daemon reads the configurations' data and their fold preparations from `output_dir`, at the paths this session gives it",
                  fixed = TRUE)
     expect_match(msg, "`parallelize_over = \"resamples\"` runs without it.", fixed = TRUE)
     expect_match(msg, "resumes from them", fixed = TRUE)
@@ -2362,6 +2382,291 @@ describe("monitor_evaluate() - applies evaluate()'s checkpoint gates", {
 
     expect_length(polled, 2L)
     expect_gte(diff(polled), 0.2)
+
+  })
+
+})
+
+
+## =========================================================================
+## The fold preparations on the daemons
+## =========================================================================
+##
+## On a parallel run each fold preparation the run needs is built once, as a
+## task of the window's (dispatch_units(), fold_prep_worker()), before any
+## configuration runs: on the configs axis from the payload file, on the
+## resamples axis from the rows each task carries. This session writes each
+## entry as its task returns it; on the configs axis each configuration's
+## daemon reads its own from the run's tmp/.
+
+## Four configurations on two daemons: plsr with no selection, and three on
+## one PCA prep per fold (plsr bounds num_comp, so the training part's too)
+pca_object <- function() {
+  obj <- plsr_object(4)
+  obj$config$configs$feature_selection[2:4] <- "pca"
+  obj$config$configs$model[3:4]             <- c("elastic_net", "svm_rbf")
+  obj
+}
+
+describe("evaluate() - the fold preparations on the daemons", {
+
+  it("reads its configuration's fold preparations in the worker, and returns one it cannot read as what went wrong, raising nothing", {
+
+    ## In process: the worker body is an ordinary function. The payload's
+    ## configuration reads one PCA prep per fold; the stage's own code
+    ## writes them where the payload says
+    shared <- worker_payload()
+    shared$configs$feature_selection <- "pca"
+    shared$fold_cache_dir <- withr::local_tempdir()
+
+    rebuilt <- rebuild_resamples(shared$data, shared$resample_idx)
+    units   <- fold_prep_units(shared$configs, rebuilt$cv_folds, shared$role_map, "evaluate",
+                               shared$data_fp$data_fields, shared$seed, shared$sg_window, shared$pca_threshold)
+
+    ## Before the preps are there: the first is not, and nothing is raised
+    expect_no_condition(value <- evaluate_config_worker(1L, worker_payload_file(shared)))
+    expect_s3_class(value, "horizons_run_file_unread")
+    expect_identical(value$file, "a fold preparation")
+    expect_identical(dirname(value$path), shared$fold_cache_dir)
+    expect_true(basename(value$path) %in% fold_unit_files(units))
+
+    store <- list(dir = shared$fold_cache_dir, shown = shared$fold_cache_dir, memory = NULL)
+    build_fold_stage(units, store, rebuilt$cv_folds$splits[[1]]$data, rebuilt$cv_folds, shared$role_map,
+                     shared$seed, shared$sg_window, shared$pca_threshold, debug = FALSE, keep_traces = FALSE,
+                     collector = log_open("evaluate"), output_dir = shared$fold_cache_dir,
+                     results = results_so_far(list()))
+
+    seen <- NULL
+    testthat::local_mocked_bindings(
+      evaluate_single_config = function(..., fold_entries) {
+        seen <<- fold_entries
+        tibble::tibble(config_id = "cfg_001", status = "failed")
+      },
+      .package = "horizons"
+    )
+
+    evaluate_config_worker(1L, worker_payload_file(shared))
+
+    expect_length(seen$folds, nrow(rebuilt$cv_folds))
+    expect_identical(lapply(seen$folds, `[[`, "key"), lapply(units[vapply(units, `[[`, 1L, "fold_i") > 0L], `[[`, "key"))
+
+    ## One that holds another prep's record is not read as its own
+    names <- fold_unit_files(units)
+    file.copy(file.path(shared$fold_cache_dir, names[1]), file.path(shared$fold_cache_dir, names[2]), overwrite = TRUE)
+
+    value <- evaluate_config_worker(1L, worker_payload_file(shared))
+    expect_s3_class(value, "horizons_run_file_unread")
+    expect_identical(value$reason, "holds another fold preparation's record")
+
+  })
+
+  it("sends each fold preparation's task the worker function, its unit and the payload's path, the payload written before the first", {
+
+    ## Recorded and stopped at the first task sent, which is the stage's, as
+    ## the configs axis's task is recorded above
+    sent <- NULL
+    dir  <- withr::local_tempdir()
+
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      daemon_reports          = matching_daemons,
+      check_parallel_backend  = function(...) TRUE,
+      connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE
+    )
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      sent <<- list(expr = .expr, args = .args, compute = .compute,
+                    payload_there = file.exists(.args$payload),
+                    task_bytes    = length(serialize(.args[names(.args) != "worker"], NULL)),
+                    payload_bytes = file.size(.args$payload))
+      rlang::abort("stop", class = "dispatched")
+    }, .package = "mirai")
+
+    tryCatch(
+      suppressWarnings(evaluate(pca_object(), seed = 42L,
+                                control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                           output_dir = dir, verbose = FALSE))),
+      dispatched = function(e) NULL
+    )
+
+    expect_identical(sent$expr, quote(worker(unit, payload)))
+    expect_named(sent$args, c("worker", "unit", "payload"))
+    expect_identical(sent$args$worker, fold_prep_worker)
+    expect_true(isNamespace(environment(sent$args$worker)))
+    expect_null(sent$compute)
+
+    ## The payload's file, absolute, written before the first task
+    expect_true(sent$payload_there)
+    expect_match(sent$args$payload, "^/|^[A-Za-z]:/")
+    expect_match(basename(sent$args$payload), "^payload-.*\\.rds$")
+
+    ## The unit, the longest first (PCA's training part before its folds),
+    ## and none of the data
+    expect_identical(sent$args$unit$fold, "training")
+    expect_lt(sent$task_bytes, 2048)
+
+  })
+
+  it("writes every fold preparation in this session and none on a daemon, and leaves none once the run is complete (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## The session's writes counted here; each daemon's write_output_file()
+    ## replaced with one that notes the path it is given in a signals
+    ## directory, then writes as it did: the configurations' checkpoints are
+    ## written there, and no fold preparation is
+    local_test_daemons(2)
+    signals <- withr::local_tempdir()
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("write_output_file", envir = ns)
+      utils::assignInNamespace("write_output_file", function(value, path) {
+        writeLines(path, tempfile(tmpdir = signals))
+        real(value, path)
+      }, ns = "horizons")
+    }, signals = signals)[], 30)
+
+    real_write <- write_output_file
+    here       <- character(0)
+    local_mocked_bindings(write_output_file = function(value, path) {
+      here <<- c(here, path)
+      real_write(value, path)
+    })
+
+    dir <- withr::local_tempdir()
+    ev  <- with_deadline(suppressWarnings(evaluate(pca_object(), seed = 42L,
+                                                   control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                              output_dir = dir, verbose = FALSE))), 180)
+
+    there <- unlist(lapply(list.files(signals, full.names = TRUE), readLines))
+
+    expect_identical(ev$evaluation$results$status, rep("success", 4L))
+    expect_length(grep("^fold-", basename(here)), 4L)
+    expect_length(grep("^fold-", basename(there)), 0L)
+    expect_length(grep("\\.rds$", there), 4L)
+    expect_false(dir.exists(file.path(dir, "tmp")))
+
+  })
+
+  it("stops as systemic when a fold preparation's daemon dies, keeping the preparations written before it (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir <- withr::local_tempdir()
+    tmp <- file.path(dir, "tmp")
+
+    ## On the daemons, the last fold's prep kills its daemon once another
+    ## prep is written
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("prep_fold_entry", envir = ns)
+      utils::assignInNamespace("prep_fold_entry", function(unit, ...) {
+        if (identical(unit$fold, "Fold3")) {
+          until <- Sys.time() + 30
+          while (length(list.files(tmp, pattern = "^fold-")) == 0L && Sys.time() < until) Sys.sleep(0.05)
+          tools::pskill(Sys.getpid(), tools::SIGKILL)
+        }
+        real(unit, ...)
+      }, ns = "horizons")
+    }, tmp = tmp)[], 30)
+
+    err <- expect_error(
+      with_deadline(suppressWarnings(evaluate(pca_object(), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 120),
+      class = "horizons_error_systemic"
+    )
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "The mirai daemon running the fold preparation \"raw/pca/Fold3\" stopped while it ran",
+                 fixed = TRUE)
+    expect_identical(nrow(err$results), 0L)
+    expect_gt(length(list.files(tmp, pattern = "^fold-")), 0L)
+    expect_length(list.files(tmp, pattern = "^payload-"), 0L)
+
+  })
+
+  it("cancels the fold preparations in flight when it is interrupted, keeping those written, and none is written after it returns (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir <- withr::local_tempdir()
+    tmp <- file.path(dir, "tmp")
+
+    ## On the daemons every prep but the training part's waits three seconds
+    ## before it runs, in R code a cancellation interrupts
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("prep_fold_entry", envir = ns)
+      utils::assignInNamespace("prep_fold_entry", function(unit, ...) {
+        if (!identical(unit$fold, "training")) Sys.sleep(3)
+        real(unit, ...)
+      }, ns = "horizons")
+    })[], 30)
+
+    ## The interrupt arrives as the window's second wait ends: the training
+    ## part's prep was collected and written after the first, the first
+    ## fold's has just finished, uncollected, and the second's is running
+    rounds     <- 0L
+    real_round <- await_round
+    local_mocked_bindings(
+      daemon_reports = matching_daemons,
+      await_round    = function(tasks, no_daemons) {
+        real_round(tasks, no_daemons)
+        rounds <<- rounds + 1L
+        if (rounds == 2L) rlang::interrupt()
+      }
+    )
+
+    got <- tryCatch(
+      with_deadline(suppressWarnings(evaluate(pca_object(), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 60),
+      interrupt = function(i) "interrupted"
+    )
+
+    expect_identical(got, "interrupted")
+
+    returned <- list.files(tmp)
+
+    ## Once the daemons are idle again nothing more is there: the session
+    ## writes the preps, and a cancelled one returns nothing to write
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_identical(list.files(tmp), returned)
+    expect_length(returned, 1L)
+    expect_match(returned, "^fold-")
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
+  it("says once, on the log and the tree, that daemons without the dispatcher lose the order and the cancellation of a run's fold preparations on the resamples axis (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2, dispatcher = FALSE)
+
+    out <- utils::capture.output(got <- collect_warnings(with_deadline(
+      evaluate(pca_object(), seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "resamples",
+                                                                     verbose = TRUE)),
+      120
+    ), class = "horizons_warning_input"))
+
+    expect_length(got$warnings, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(got$warnings[[1]]))
+    expect_match(msg, "set with `dispatcher = FALSE`, so `evaluate()` cannot start the longest fold preparations first",
+                 fixed = TRUE)
+    expect_true(any(grepl("Parallel: over resamples on mirai (2 daemons, no dispatcher)", out, fixed = TRUE)))
+    expect_identical(got$value$evaluation$results$status, rep("success", 4L))
 
   })
 

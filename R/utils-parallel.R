@@ -204,6 +204,32 @@ daemons_dispatch <- function() {
 
 }
 
+#' Say that the daemons have no dispatcher, once, on the verb's log
+#'
+#' @description
+#' The window horizons runs its own tasks through ([dispatch_units()])
+#' starts the longest first and cancels those in flight when it stops, both
+#' through mirai's dispatcher: without it the work runs as asked, but loses
+#' both, which the run says once, as an `input` warning, and on the tree's
+#' parallel line. Said wherever the window runs: the configs axis's
+#' configurations, and a run's fold preparations on the resamples axis.
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param what Character(1). What the window runs, e.g. `"configurations"`.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+log_no_dispatcher <- function(collector, what) {
+
+  log_warning(collector, "input", c(
+    "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn evaluate} cannot start the longest {what} first or cancel the ones still running when it stops.",
+    "i" = "mirai keeps its dispatcher unless {.code dispatcher = FALSE} is set; set the daemons again without it."
+  ))
+
+  invisible(NULL)
+
+}
+
 #' Check that a parallel run has daemons to run on
 #'
 #' @description
@@ -921,80 +947,79 @@ isolated_deaths <- function(on_daemons) {
 }
 
 ## ---------------------------------------------------------------------------
-## The configs axis's dispatch
+## The window: units of work on the daemons, a window at a time
 ## ---------------------------------------------------------------------------
 
-#' Run configurations on the daemons, a window at a time
+#' Run units of work on the daemons, a window at a time
 #'
 #' @description
-#' The configurations start longest first ([dispatch_order()]): with mirai's
-#' dispatcher a task starts in the order it was submitted, so the short ones
-#' fill the daemons at the end. At most as many are in flight as there are
-#' daemons connected, read again each round, so the window narrows when a
-#' daemon leaves and widens when one joins. Each task carries its
-#' configuration's index and the path of the file `evaluate()` wrote the
-#' payload to, which its daemon reads, so this session holds the
-#' configurations and the path, and none of the data a running
-#' configuration was given. Each is collected as it finishes and the next
-#' submitted. Every wait goes through [await_round()], so a window left with
-#' no daemon stops the run rather than waiting for ever.
+#' The one window horizons runs its own tasks through: the configs axis's
+#' configurations ([dispatch_configs()]) and a run's fold preparations
+#' ([build_fold_stage()]). The units start in `order` (longest first, by a
+#' cost table): with mirai's dispatcher a task starts in the order it was
+#' submitted, so the short ones fill the daemons at the end. At most as many
+#' are in flight as there are daemons connected, read again each round, so
+#' the window narrows when a daemon leaves and widens when one joins. Each is
+#' collected as it finishes and the next submitted. Every wait goes through
+#' [await_round()], so a window left with no daemon stops the run rather
+#' than waiting for ever.
 #'
-#' What a task returns is read here ([task_value()]). A row is appended to
-#' `finished$rows`. A `miraiError` is the task's own error, raised again as
-#' the condition it was. Any other error value is the transport, and the
-#' window stops the run itself, as `horizons_error_systemic` with the rows
-#' so far: `errorValue` 19 is the daemon's death. A daemon that could not
-#' read the payload returns what went wrong instead of a row, and the
-#' window stops the run on it the same way ([abort_payload_unread()]).
-#' Every task that finished in a pass is collected before the first that
-#' ended in an error is raised, so a stop carries every row that came in
-#' with it. A pool left with no daemon stops the run here too
-#' ([abort_no_daemons()]).
+#' What a task returns is read here ([task_value()]). A value is handed to
+#' `collect()`. A `miraiError` is the task's own error, raised again as the
+#' condition it was. Any other error value is the transport, and the window
+#' stops the run itself, as `horizons_error_systemic` with the rows so far:
+#' `errorValue` 19 is the daemon's death ([abort_task_ended()]). A daemon
+#' that could not read a file the run wrote for it returns what went wrong
+#' instead of a value, and the window stops the run on it the same way
+#' ([abort_run_file_unread()]). Every task that finished in a pass is
+#' collected before the first that ended in an error is raised, so a stop
+#' carries every row that came in with it. A pool left with no daemon stops
+#' the run here too ([abort_no_daemons()]).
 #'
 #' When the window exits by an error, an interrupt or a stop of its own, it
-#' cancels every task still in flight (`mirai::stop_mirai()`), so a
-#' configuration still running stops before it writes its checkpoint. It is
-#' an `on.exit()`, not a calling handler, so it runs on all three. A
-#' configuration in an isolated fit stops at once, since its daemon waits on
-#' the fit's process in R, and the process is ended as the wait is left
-#' ([run_isolated()]). One inside another compiled fit stops only when that
-#' fit returns, and writes nothing, since the interrupt is raised once R
-#' checks for it, long before the checkpoint. Cancelling needs mirai's dispatcher: without it
-#' `stop_mirai()` does nothing and the task runs to its end, which
-#' `evaluate()` warns of ([daemons_dispatch()]).
+#' cancels every task still in flight (`mirai::stop_mirai()`), so a unit
+#' still running stops before it writes anything. It is an `on.exit()`, not
+#' a calling handler, so it runs on all three. A configuration in an
+#' isolated fit stops at once, since its daemon waits on the fit's process in
+#' R, and the process is ended as the wait is left ([run_isolated()]). One
+#' inside another compiled fit stops only when that fit returns, and writes
+#' nothing, since the interrupt is raised once R checks for it, long before
+#' the checkpoint. Cancelling needs mirai's dispatcher: without it
+#' `stop_mirai()` does nothing and the task runs to its end, which the verb
+#' warns of ([daemons_dispatch()]).
 #'
-#' Each task sends the worker function and its arguments, the
-#' configuration's row index and the payload's path, not a closure: the
+#' Each task sends a worker function and its arguments, not a closure: the
 #' function's environment is horizons' namespace, which a daemon resolves to
 #' its installed horizons, so nothing in this frame or the caller's travels.
 #'
-#' @param configs The configurations still to run, the payload's `configs`.
-#' @param payload_path Character(1). The absolute path of the file holding
-#'   the payload every task reads ([evaluate_config_worker()]).
-#' @param finished An environment whose `rows` the window appends each row
-#'   to, in the order they finish.
+#' @param n Integer(1). The units.
+#' @param order Integer. Their positions, in the order to start them.
+#' @param task A function of a unit's position giving its task: a list with
+#'   `call` (the call, quoted, naming the worker and its arguments) and
+#'   `args` (the worker as `worker`, and the arguments).
+#' @param collect A function of a unit's position and the value its task
+#'   returned.
+#' @param label A function of a unit's position giving it for a stop's
+#'   message: a list with `what` (e.g. `"configuration"`) and `id`.
 #' @param rows_so_far A function of no arguments returning the results table
-#'   a stop carries: the rows resumed and those in `finished$rows`.
+#'   a stop carries.
 #' @param output_dir The run's `output_dir`, for a stop's message.
+#' @param n_left Integer(1) or `NULL`. The configurations still to run, for
+#'   a stop's message; `NULL` counts the units not collected.
+#' @param verb Character(1). The verb, for a stop's message.
 #' @param call The frame a stop reports: the verb's.
-#' @return `NULL`, invisibly, once every configuration's row is in
-#'   `finished$rows`.
+#' @return `NULL`, invisibly, once every unit's value has been collected.
 #' @keywords internal
 #' @noRd
-dispatch_configs <- function(configs, payload_path, finished, rows_so_far, output_dir = NULL,
-                             call = rlang::caller_env()) {
+dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_dir = NULL,
+                           n_left = NULL, verb = "evaluate", call = rlang::caller_env()) {
 
-  n_configs <- nrow(configs)
-  start     <- dispatch_order(configs)
-
-  ### The task's call, quoted here: its names are the task's arguments
-  task_call <- quote(worker(config_i, payload_path))
-  tasks     <- list()
-  next_i    <- 1L
-  n_done    <- 0L
+  tasks  <- list()
+  next_i <- 1L
+  n_done <- 0L
 
   no_daemons <- function() {
-    abort_no_daemons(rows_so_far(), n_configs - n_done, output_dir, call = call)
+    abort_no_daemons(rows_so_far(), n_left %||% (n - n_done), output_dir, verb = verb, call = call)
   }
 
   ## On an error, an interrupt or a stop from the window itself; on its
@@ -1013,43 +1038,42 @@ dispatch_configs <- function(configs, payload_path, finished, rows_so_far, outpu
       value        <- tasks[[key]]$data
       tasks[[key]] <- NULL
 
-      ### A miraiError is an error value too; a payload the daemon could not
+      ### A miraiError is an error value too; a run file the daemon could not
       ### read is neither, and stops the run as they do
-      if (mirai::is_error_value(value) || inherits(value, "horizons_payload_unread")) {
-        if (is.null(ended)) ended <- list(value = value, config_id = configs$config_id[as.integer(key)])
+      if (mirai::is_error_value(value) || inherits(value, "horizons_run_file_unread")) {
+        if (is.null(ended)) ended <- list(value = value, i = as.integer(key))
         next
       }
 
-      finished$rows <- c(finished$rows, list(value))
-      n_done        <- n_done + 1L
+      collect(as.integer(key), value)
+      n_done <- n_done + 1L
 
     }
 
     if (!is.null(ended)) {
-      if (inherits(ended$value, "horizons_payload_unread")) {
-        abort_payload_unread(ended$value$path, ended$value$reason, ended$config_id, rows_so_far(),
-                             output_dir, call = call)
+      if (inherits(ended$value, "horizons_run_file_unread")) {
+        abort_run_file_unread(ended$value, label(ended$i), rows_so_far(), output_dir, verb = verb, call = call)
       }
       task_value(ended$value, function(value) {
-        abort_task_ended(value, ended$config_id, rows_so_far(), output_dir, call = call)
+        abort_task_ended(value, label(ended$i), rows_so_far(), output_dir, verb = verb, call = call)
       })
     }
 
-    if (n_done == n_configs) return(invisible(NULL))
+    if (n_done == n) return(invisible(NULL))
 
     ## Submit while there are daemons free
     width <- connected_daemons()
 
-    while (next_i <= n_configs && length(tasks) < width) {
+    while (next_i <= n && length(tasks) < width) {
 
-      i      <- start[next_i]
+      i      <- order[next_i]
       next_i <- next_i + 1L
+      spec   <- task(i)
 
-      tasks[[as.character(i)]] <- mirai::mirai(
-        task_call,
-        .args    = list(worker = evaluate_config_worker, config_i = i, payload_path = payload_path),
-        .compute = NULL
-      )
+      ### mirai() takes the call from a symbol bound to it; any other
+      ### expression it would send as written
+      task_call <- spec$call
+      tasks[[as.character(i)]] <- mirai::mirai(task_call, .args = spec$args, .compute = NULL)
 
     }
 
@@ -1061,18 +1085,63 @@ dispatch_configs <- function(configs, payload_path, finished, rows_so_far, outpu
 
 }
 
+#' Run configurations on the daemons, a window at a time
+#'
+#' @description
+#' The configs axis's configurations through the window ([dispatch_units()]),
+#' longest first ([dispatch_order()]). Each task carries its configuration's
+#' index and the path of the file `evaluate()` wrote the payload to, which
+#' its daemon reads, so this session holds the configurations and the path,
+#' and none of the data a running configuration was given. A row is appended
+#' to `finished$rows` as it finishes.
+#'
+#' @param configs The configurations still to run, the payload's `configs`.
+#' @param payload_path Character(1). The absolute path of the file holding
+#'   the payload every task reads ([evaluate_config_worker()]).
+#' @param finished An environment whose `rows` the window appends each row
+#'   to, in the order they finish.
+#' @param rows_so_far A function of no arguments returning the results table
+#'   a stop carries: the rows resumed and those in `finished$rows`.
+#' @param output_dir The run's `output_dir`, for a stop's message.
+#' @param call The frame a stop reports: the verb's.
+#' @return `NULL`, invisibly, once every configuration's row is in
+#'   `finished$rows`.
+#' @keywords internal
+#' @noRd
+dispatch_configs <- function(configs, payload_path, finished, rows_so_far, output_dir = NULL,
+                             call = rlang::caller_env()) {
+
+  ### The task's call, quoted here: its names are the task's arguments
+  task_call <- quote(worker(config_i, payload_path))
+
+  dispatch_units(
+    n       = nrow(configs),
+    order   = dispatch_order(configs),
+    task    = function(i) {
+      list(call = task_call,
+           args = list(worker = evaluate_config_worker, config_i = i, payload_path = payload_path))
+    },
+    collect = function(i, row) finished$rows <- c(finished$rows, list(row)),
+    label   = function(i) list(what = "configuration", id = configs$config_id[i]),
+    rows_so_far = rows_so_far,
+    output_dir  = output_dir,
+    call        = call
+  )
+
+}
+
 #' Stop the call because a task on the daemons ended without a result
 #'
 #' @description
 #' A task's transport failed: its daemon died (`errorValue` 19), or another
 #' error value came back in place of its result. Raised where the task is
-#' read, by the window ([dispatch_configs()]) and by the check of the
+#' read, by the window ([dispatch_units()]) and by the check of the
 #' daemons at the door ([daemon_reports()]), with the rows so far, as every
 #' other stop on the daemons is. Its message names the error value.
 #'
 #' @param value The task's error value.
-#' @param config_id Character(1), the configuration the task ran, or `NULL`
-#'   for the check at the door.
+#' @param unit The unit the task ran, a list with `what` and `id`
+#'   (`what` `"configuration"`, say), or `NULL` for the check at the door.
 #' @param results The rows finished so far, carried as `results`.
 #' @param output_dir The run's `output_dir`, or `NULL`.
 #' @param verb Character(1). The verb that stops.
@@ -1081,42 +1150,49 @@ dispatch_configs <- function(configs, payload_path, finished, rows_so_far, outpu
 #'   (kind `run`).
 #' @keywords internal
 #' @noRd
-abort_task_ended <- function(value, config_id, results, output_dir = NULL, verb = "evaluate",
+abort_task_ended <- function(value, unit, results, output_dir = NULL, verb = "evaluate",
                              call = rlang::caller_env()) {
 
   code <- as.integer(value)
   died <- identical(code, 19L)
+  what <- unit$what
+  What <- if (!is.null(what)) paste0(toupper(substr(what, 1, 1)), substring(what, 2))
+  id   <- unit$id
 
   abort_horizons(c(
-    if (is.null(config_id) && died) {
+    if (is.null(unit) && died) {
       "A mirai daemon stopped while {.fn {verb}} checked the daemons before the run ({.code errorValue} 19, Connection reset), so the run cannot go on."
-    } else if (is.null(config_id)) {
+    } else if (is.null(unit)) {
       "A task checking the daemons before the run ended in mirai's {.code errorValue} {code} rather than a result, so {.fn {verb}} cannot go on."
     } else if (died) {
-      "The mirai daemon running configuration {.val {config_id}} stopped while it ran ({.code errorValue} 19, Connection reset), so {.fn {verb}} cannot go on."
+      "The mirai daemon running {what} {.val {id}} stopped while it ran ({.code errorValue} 19, Connection reset), so {.fn {verb}} cannot go on."
     } else {
-      "Configuration {.val {config_id}}'s task ended in mirai's {.code errorValue} {code} rather than a result, so {.fn {verb}} cannot go on."
+      "{What} {.val {id}}'s task ended in mirai's {.code errorValue} {code} rather than a result, so {.fn {verb}} cannot go on."
     },
     resume_hint(results, output_dir)
   ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 
 }
 
-#' Stop the call because a daemon could not read the configurations' data
+#' Stop the call because a daemon could not read a file the run wrote for it
 #'
 #' @description
-#' On the configs axis each task reads the configurations' data from the file
-#' `evaluate()` wrote under `output_dir`, and a daemon that cannot read it
-#' returns what went wrong instead of a row ([evaluate_config_worker()]).
-#' Every configuration after it would fail the same way, so the window stops
-#' the run here, as systemic, with the rows so far, as it stops on a daemon's
-#' death ([abort_task_ended()]). The message says what the axis needs: each
-#' daemon reads the file at the path this session gives it, and no other run
-#' is started into the same `output_dir`, which would remove the file.
+#' On the configs axis each task reads the configurations' data from the
+#' file `evaluate()` wrote under `output_dir`, and each configuration's
+#' daemon its fold preparations from the same directory. A daemon that
+#' cannot read one returns what went wrong instead of a value
+#' ([evaluate_config_worker()], [fold_prep_worker()]). Every unit after it
+#' would fail the same way, so the window stops the run here, as systemic,
+#' with the rows so far, as it stops on a daemon's death
+#' ([abort_task_ended()]). The message says what the axis needs: each daemon
+#' reads the files at the paths this session gives it, and no other run is
+#' started into the same `output_dir`, which would remove them.
 #'
-#' @param path Character(1). The file the daemon was given.
-#' @param reason Character(1). What base R said when the daemon read it.
-#' @param config_id Character(1). The configuration the task ran.
+#' @param unread The daemon's value: a list of class
+#'   `horizons_run_file_unread` with `path` (the file it was given),
+#'   `reason` (what base R said when it read it) and `file` (what the file
+#'   holds, e.g. `"the configurations' data"`).
+#' @param unit The unit the task ran, a list with `what` and `id`.
 #' @param results The rows finished so far, carried as `results`.
 #' @param output_dir The run's `output_dir`.
 #' @param verb Character(1). The verb that stops.
@@ -1125,13 +1201,19 @@ abort_task_ended <- function(value, config_id, results, output_dir = NULL, verb 
 #'   (kind `run`).
 #' @keywords internal
 #' @noRd
-abort_payload_unread <- function(path, reason, config_id, results, output_dir = NULL, verb = "evaluate",
-                                 call = rlang::caller_env()) {
+abort_run_file_unread <- function(unread, unit, results, output_dir = NULL, verb = "evaluate",
+                                  call = rlang::caller_env()) {
+
+  path   <- unread$path
+  reason <- unread$reason
+  file   <- unread$file
+  what   <- unit$what
+  id     <- unit$id
 
   abort_horizons(c(
-    "The mirai daemon running configuration {.val {config_id}} could not read the configurations' data from {.path {path}}, so {.fn {verb}} cannot go on.",
+    "The mirai daemon running {what} {.val {id}} could not read {file} from {.path {path}}, so {.fn {verb}} cannot go on.",
     "x" = "{reason}",
-    "i" = "On the configs axis each daemon reads the configurations' data from {.arg output_dir}, at the path this session gives it, so daemons on another machine need {.arg output_dir} on a file system they share with it, at that path. {.code parallelize_over = \"resamples\"} runs without it. One {.arg output_dir} serves one run at a time, and a run started into it removes an earlier run's file.",
+    "i" = "On the configs axis each daemon reads the configurations' data and their fold preparations from {.arg output_dir}, at the paths this session gives it, so daemons on another machine need {.arg output_dir} on a file system they share with it, at that path. {.code parallelize_over = \"resamples\"} runs without it. One {.arg output_dir} serves one run at a time, and a run started into it removes an earlier run's files.",
     resume_hint(results, output_dir)
   ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 

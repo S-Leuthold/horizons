@@ -216,6 +216,7 @@ worker_payload <- function() {
     settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
                                                outcome_range = c(-Inf, Inf)),
     checkpoint_dir  = NULL,
+    fold_cache_dir  = NULL,
     keep_traces     = FALSE,
     isolate         = TRUE,
     pkg_version     = as.character(utils::packageVersion("horizons"))

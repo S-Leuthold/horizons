@@ -573,10 +573,11 @@ evaluate <- function(x,
   plan_label    <- if (axis$axis == "sequential") "sequential" else "mirai"
   plan_workers  <- if (axis$axis == "sequential") 1L else connected_daemons()
 
-  ## On either axis the daemons run horizons code (on the resamples axis,
-  ## tune's tasks fit the models' engines, the PLS engine among them), so
-  ## they must run this session's horizons: checked here, before anything is
-  ## drawn.
+  ## On either axis the daemons run horizons code (the fold preparations'
+  ## selection steps, and on the resamples axis tune's tasks fit the models'
+  ## engines, the PLS engine among them), so they must run this session's
+  ## horizons and load the configurations' packages: checked here, before
+  ## anything is drawn.
   ## The daemons on this machine against the memory it has, for this run's
   ## data, said once and on the tree's parallel line
   short_memory <- FALSE
@@ -595,14 +596,7 @@ evaluate <- function(x,
   ## tree's parallel line, which an interrupted run's console keeps
   no_dispatcher <- axis$axis == "configs" && !daemons_dispatch()
 
-  if (no_dispatcher) {
-
-    log_warning(collector, "input", c(
-      "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn evaluate} cannot start the longest configurations first or cancel the ones still running when it stops.",
-      "i" = "mirai keeps its dispatcher unless {.code dispatcher = FALSE} is set; set the daemons again without it."
-    ))
-
-  }
+  if (no_dispatcher) log_no_dispatcher(collector, "configurations")
 
   ## Fits a model's engine would otherwise carry state across run in this
   ## session when isolation is turned off, which the log notes
@@ -806,12 +800,17 @@ evaluate <- function(x,
   ## built once for every configuration that reads it (fold_prep_units()):
   ## listed before the manifest's clearing, which keeps their files.
 
-  fold_units <- if (!axis$dispatch_configs) {
-    fold_prep_units(pending_configs, cv_fold_obj, role_map, verb = "evaluate",
-                    data = data_fp$data_fields, seed = seed,
-                    sg_window = recipe_cfg$sg_window, pca_threshold = recipe_cfg$pca_threshold)
-  } else {
-    list()
+  fold_units <- fold_prep_units(pending_configs, cv_fold_obj, role_map, verb = "evaluate",
+                                data = data_fp$data_fields, seed = seed,
+                                sg_window = recipe_cfg$sg_window, pca_threshold = recipe_cfg$pca_threshold)
+
+  ## On the resamples axis the fold preps are the window's tasks, so without
+  ## mirai's dispatcher they lose the longest-first start and the cancel as
+  ## the configs axis's configurations do, and the run says so as that axis
+  ## does
+  if (axis$axis == "resamples" && length(fold_units) > 0 && !daemons_dispatch()) {
+    no_dispatcher <- TRUE
+    log_no_dispatcher(collector, "fold preparations")
   }
 
   ## -----------------------------------------------------------------------
@@ -954,7 +953,103 @@ evaluate <- function(x,
   }
 
   ## -----------------------------------------------------------------------
-  ## Step 7c: Each fold prep, built once, before any configuration
+  ## Step 7c: The configs axis's payload
+  ## -----------------------------------------------------------------------
+  ## Written before the fold preps, whose tasks read it as the
+  ## configurations' tasks do: one write a call.
+
+  payload_path <- NULL
+
+  if (axis$dispatch_configs) {
+
+    ## Assemble everything a worker needs into one value, the payload, which
+    ## is written to a file below and read by each task. Two serialization
+    ## traps are avoided here; R/utils-resamples.R's header has the mechanism
+    ## and the measurements.
+    ##
+    ## Do not inline the worker back into an anonymous function. A closure
+    ## defined in this frame is serialized together with it, so every local —
+    ## `split` and `cv_fold_obj` included — would ship with every task no
+    ## matter what is passed explicitly.
+
+    ## The daemons resolve the horizons namespace by NAME, which finds the
+    ## INSTALLED library; check_parallel_workers() refused a session they
+    ## could not match before anything ran.
+    ##
+    ## A daemon resolves a relative path against the directory it was started
+    ## in, not this session's, so the directories it is sent, the
+    ## checkpoints' and the run files' (where the payload and the fold preps
+    ## are), are absolute, as the payload's path is below. This session's own
+    ## paths, and the messages about its writes, keep the directory as given.
+
+    ## The rows resumed and those finished in this call, which any stop
+    ## carries; the window appends each as it finishes.
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- lapply(completed_ids, function(id) checkpoint_results[[id]])
+
+    rows_so_far <- function() results_so_far(in_config_order(finished$rows, configs$config_id))
+
+    run_dir     <- run_files_dir(output_dir)
+    not_created <- create_output_dir(run_dir)
+
+    if (!is.null(not_created)) abort_output_write(run_dir, not_created, rows_so_far())
+
+    abs_run_dir <- normalizePath(run_dir, winslash = "/", mustWork = TRUE)
+
+    shared_args <- list(
+      data            = split$data,
+      resample_idx    = resample_indices(split, cv_fold_obj),
+      configs         = pending_configs,
+      role_map        = role_map,
+      grid_size       = tuning$grid_size,
+      bayesian_iter   = tuning$bayesian_iter,
+      prune           = prune,
+      prune_threshold = prune_threshold,
+      seed            = seed,
+      sg_window       = recipe_cfg$sg_window,
+      pca_threshold   = recipe_cfg$pca_threshold,
+      outcome_range   = outcome_range,
+      data_fp         = data_fp,
+      settings        = settings,
+      checkpoint_dir  = normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE),
+      fold_cache_dir  = abs_run_dir,
+      keep_traces     = control$keep_traces,
+      isolate         = control$isolate,
+      pkg_version     = as.character(utils::packageVersion("horizons"))
+    )
+
+    if (!setequal(names(shared_args), SHARED_ARG_NAMES)) {
+
+      abort_horizons("The worker payload's fields do not match {.code SHARED_ARG_NAMES}.", kind = "internal")
+
+    }
+
+    ## The payload is written once, to a file of its own under output_dir,
+    ## which each fold prep's and each configuration's daemon reads: a task
+    ## carries only its unit and the file's path, so this session holds no
+    ## copy of the data while a unit runs (mirai keeps each task's message
+    ## until the task is collected). The path is absolute, since a daemon
+    ## resolves a relative one against the directory it was started in, and
+    ## named by tempfile(), which no other call draws and which leaves the
+    ## random stream alone. tempfile() checks the name is unused in the
+    ## directory; only its name is kept, joined to the directory with
+    ## file.path(), since on Windows tempfile() joins them with a backslash.
+    ## The removal is registered before the write, so the file goes however
+    ## evaluate() exits; the window's own exit handler, which cancels the
+    ## tasks in flight, runs before it.
+    payload_path <- file.path(abs_run_dir, basename(tempfile("payload-", tmpdir = abs_run_dir, fileext = ".rds")))
+    on.exit(remove_run_file(payload_path), add = TRUE)
+
+    not_written <- write_output_file(shared_args, payload_path)
+
+    if (!is.null(not_written)) {
+      abort_output_write(file.path(run_dir, basename(payload_path)), not_written, rows_so_far())
+    }
+
+  }
+
+  ## -----------------------------------------------------------------------
+  ## Step 7d: Each fold prep, built once, before any configuration
   ## -----------------------------------------------------------------------
   ## With an output_dir the entries are run files in tmp/, kept through an
   ## interruption, so a resumed run reuses them, and removed once every
@@ -982,12 +1077,18 @@ evaluate <- function(x,
       keep_traces   = control$keep_traces,
       collector     = collector,
       output_dir    = output_dir,
-      results       = results_so_far(unname(checkpoint_results))
+      results       = results_so_far(unname(checkpoint_results)),
+      ## On a parallel run the preps are built on the daemons, one task each
+      daemons       = if (axis$axis != "sequential") {
+        list(payload = payload_path, n_left = n_pending, verb = "evaluate")
+      }
     )
 
     if (verbose) {
 
-      for (line in fold_stage_lines(fold_stage)) cat(paste0("\u2502  ", line, "\n"))
+      for (line in fold_stage_lines(fold_stage, if (axis$axis != "sequential") plan_workers)) {
+        cat(paste0("\u2502  ", line, "\n"))
+      }
       cat("\u2502\n")
 
     }
@@ -1207,87 +1308,6 @@ evaluate <- function(x,
       ))
       cat("\u2502\n")
 
-    }
-
-    ## Assemble everything a worker needs into one value, the payload, which
-    ## is written to a file below and read by each task. Two serialization
-    ## traps are avoided here; R/utils-resamples.R's header has the mechanism
-    ## and the measurements.
-    ##
-    ## Do not inline the worker back into an anonymous function. A closure
-    ## defined in this frame is serialized together with it, so every local —
-    ## `split` and `cv_fold_obj` included — would ship with every task no
-    ## matter what is passed explicitly.
-
-    ## The daemons resolve the horizons namespace by NAME, which finds the
-    ## INSTALLED library; check_parallel_workers() refused a session they
-    ## could not match before anything ran.
-    ##
-    ## A daemon resolves a relative path against the directory it was started
-    ## in, not this session's, so the checkpoint directory it is sent is
-    ## absolute, as the payload's path is below. This session's own paths,
-    ## and the messages about its writes, keep the directory as given.
-
-    shared_args <- list(
-      data            = split$data,
-      resample_idx    = resample_indices(split, cv_fold_obj),
-      configs         = pending_configs,
-      role_map        = role_map,
-      grid_size       = tuning$grid_size,
-      bayesian_iter   = tuning$bayesian_iter,
-      prune           = prune,
-      prune_threshold = prune_threshold,
-      seed            = seed,
-      sg_window       = recipe_cfg$sg_window,
-      pca_threshold   = recipe_cfg$pca_threshold,
-      outcome_range   = outcome_range,
-      data_fp         = data_fp,
-      settings        = settings,
-      checkpoint_dir  = normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE),
-      keep_traces     = control$keep_traces,
-      isolate         = control$isolate,
-      pkg_version     = as.character(utils::packageVersion("horizons"))
-    )
-
-    if (!setequal(names(shared_args), SHARED_ARG_NAMES)) {
-
-      abort_horizons("The worker payload's fields do not match {.code SHARED_ARG_NAMES}.", kind = "internal")
-
-    }
-
-    ## The rows resumed and those finished in this call, which any stop
-    ## carries; the window appends each as it finishes.
-    finished      <- new.env(parent = emptyenv())
-    finished$rows <- lapply(completed_ids, function(id) checkpoint_results[[id]])
-
-    rows_so_far <- function() results_so_far(in_config_order(finished$rows, configs$config_id))
-
-    ## The payload is written once, to a file of its own under output_dir,
-    ## which each configuration's daemon reads: a task carries only its
-    ## configuration's index and the file's path, so this session holds no
-    ## copy of the data while a configuration runs (mirai keeps each task's
-    ## message until the task is collected). The path is absolute, since a
-    ## daemon resolves a relative one against the directory it was started
-    ## in, and named by tempfile(), which no other call draws and which
-    ## leaves the random stream alone. tempfile() checks the name is unused
-    ## in the directory; only its name is kept, joined to the directory with
-    ## file.path(), since on Windows tempfile() joins them with a backslash.
-    ## The removal is registered before the write, so the file goes however
-    ## evaluate() exits; the window's own exit handler, which cancels the
-    ## tasks in flight, runs before it.
-    run_dir     <- run_files_dir(output_dir)
-    not_created <- create_output_dir(run_dir)
-
-    if (!is.null(not_created)) abort_output_write(run_dir, not_created, rows_so_far())
-
-    abs_run_dir  <- normalizePath(run_dir, winslash = "/", mustWork = TRUE)
-    payload_path <- file.path(abs_run_dir, basename(tempfile("payload-", tmpdir = abs_run_dir, fileext = ".rds")))
-    on.exit(remove_run_file(payload_path), add = TRUE)
-
-    not_written <- write_output_file(shared_args, payload_path)
-
-    if (!is.null(not_written)) {
-      abort_output_write(file.path(run_dir, basename(payload_path)), not_written, rows_so_far())
     }
 
     ## A daemon that dies, a pool left with none, or a daemon that cannot
@@ -3582,7 +3602,8 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' Refuse a parallel run whose daemons cannot run this session's horizons
 #'
 #' @description
-#' On either parallel axis the daemons run horizons code: the configs-axis
+#' On either parallel axis the daemons run horizons code: the fold
+#' preparations' selection steps ([fold_prep_worker()]), the configs-axis
 #' worker body, and on the resamples axis the engines of horizons' own (the
 #' PLS engine among them) that tune's tasks call. They load horizons by name,
 #' so they run the installed copy. Under `devtools::load_all()` that copy is not this source
@@ -3803,8 +3824,11 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #' version, which the version check exists to catch, may lack one. A file it
 #' cannot read is said on what it returns, not raised, so the window stops
 #' the run in the session, where the rows finished so far are
-#' ([abort_payload_unread()]). Then the version is checked, then the
-#' payload's keys.
+#' ([abort_run_file_unread()]). Then the version is checked, then the
+#' payload's keys. Its configuration's fold preparations, which the run
+#' built before any configuration and keeps in `fold_cache_dir`, are read
+#' once its folds are rebuilt, each held to its key ([read_fold_entry()]);
+#' one it cannot read is said on what it returns in the same way.
 #'
 #' @param config_i Integer row index into `shared$configs`. Named to avoid
 #'   colliding with `shared$resample_idx`.
@@ -3817,7 +3841,9 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
-#'   `keep_traces`, `isolate` and `pkg_version`. There is no `allow_par`: on
+#'   `fold_cache_dir` (the run files' directory, absolute, where the fold
+#'   preparations are), `keep_traces`, `isolate` and `pkg_version`. There is
+#'   no `allow_par`: on
 #'   the configs axis tune always runs sequentially inside the worker. There
 #'   is no `debug` either, since a debug run never dispatches.
 #'
@@ -3825,10 +3851,11 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #'   records still on it for the parent to lift, any warning raised in the
 #'   worker's own steps before the unit rendered in its `warnings` with the
 #'   unit's, and, when its checkpoint could not be written, why, as the
-#'   attribute `"checkpoint_failed"`. When the file at `payload_path` cannot
-#'   be read, instead, a list of class `horizons_payload_unread` holding the
-#'   `path` and the `reason` (what base R said, any warning before the
-#'   error).
+#'   attribute `"checkpoint_failed"`. When the file at `payload_path`, or one
+#'   of its fold preparations, cannot be read, instead, a list of class
+#'   `horizons_run_file_unread` holding the `path`, the `reason` (what base R
+#'   said, any warning before the error, or that the file holds another
+#'   preparation) and what the `file` holds.
 #' @keywords internal
 #' @noRd
 
@@ -3862,7 +3889,8 @@ evaluate_config_worker <- function(config_i, payload_path) {
   )
 
   if (!is.null(unread)) {
-    return(structure(list(path = payload_path, reason = unread), class = "horizons_payload_unread"))
+    return(structure(list(path = payload_path, reason = unread, file = "the configurations' data"),
+                     class = "horizons_run_file_unread"))
   }
 
   ## -------------------------------------------------------------------------
@@ -3938,12 +3966,19 @@ evaluate_config_worker <- function(config_i, payload_path) {
 
     ## Reconstruct the split and folds from indices. Fold membership is
     ## reproduced by construction, not by replaying the RNG.
-    rebuild_resamples(shared$data, shared$resample_idx)
+    rebuilt <- rebuild_resamples(shared$data, shared$resample_idx)
+
+    ## The configuration's fold preparations, which the run built once
+    rebuilt$fold_entries <- worker_fold_entries(cfg, rebuilt$cv_folds, shared)
+
+    rebuilt
 
   }, warning = function(w) {
     outside <<- c(outside, condition_summary(w))
     rlang::cnd_muffle(w)
   })
+
+  if (inherits(resamples$fold_entries, "horizons_run_file_unread")) return(resamples$fold_entries)
 
   result_row <- evaluate_single_config(
     config_row       = cfg,
@@ -3961,7 +3996,8 @@ evaluate_config_worker <- function(config_i, payload_path) {
     outcome_range    = shared$outcome_range,
     keep_traces      = shared$keep_traces,
     isolate          = shared$isolate,
-    outside_warnings = outside
+    outside_warnings = outside,
+    fold_entries     = resamples$fold_entries
   )
 
   ## Both provenance records are sent rather than rebuilt. The data
@@ -3983,5 +4019,47 @@ evaluate_config_worker <- function(config_i, payload_path) {
   }
 
   result_row
+
+}
+
+#' A configuration's fold preparations, read on its daemon
+#'
+#' @description
+#' The units [config_fold_units()] gives the configuration under the
+#' payload's settings and the rebuilt folds, the keys the session's stage
+#' built them under, each read from `fold_cache_dir` and held to its key
+#' ([read_fold_entry()]).
+#'
+#' @param config_row The configuration's row.
+#' @param folds The rebuilt folds.
+#' @param shared The payload.
+#' @return `NULL` with no feature selection; a list with `training` and
+#'   `folds`; or, for the first that cannot be read, a list of class
+#'   `horizons_run_file_unread`.
+#' @keywords internal
+#' @noRd
+worker_fold_entries <- function(config_row, folds, shared) {
+
+  units <- config_fold_units("evaluate", config_row, folds, shared$role_map, shared$data_fp$data_fields,
+                             shared$seed, shared$sg_window, shared$pca_threshold,
+                             bounded = bounded_model(config_row$model))
+
+  if (is.null(units$folds)) return(NULL)
+
+  read <- function(unit) {
+    if (is.null(unit)) return(NULL)
+    path <- file.path(shared$fold_cache_dir, unit$name)
+    got  <- read_fold_entry(path, unit$key)
+    if (!is.null(got$error)) {
+      return(structure(list(path = path, reason = got$error, file = "a fold preparation"),
+                       class = "horizons_run_file_unread"))
+    }
+    got$entry
+  }
+
+  entries <- list(training = read(units$training), folds = lapply(units$folds, read))
+  unread  <- Filter(function(e) inherits(e, "horizons_run_file_unread"), c(list(entries$training), entries$folds))
+
+  if (length(unread) > 0) unread[[1]] else entries
 
 }

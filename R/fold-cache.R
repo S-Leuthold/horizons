@@ -1014,7 +1014,7 @@ failed_fold_entry <- function(unit, records) {
 
 }
 
-#' Build each fold prep a run needs, once, in this session
+#' Build each fold prep a run needs, once
 #'
 #' @description
 #' The stage before any configuration runs. An entry the store already holds
@@ -1023,8 +1023,10 @@ failed_fold_entry <- function(unit, records) {
 #' that failed is built again, so a run after a fix prepares that fold
 #' again, and one that cannot be read or records another key is built again
 #' with one note on the log. The rest are built in this session, one
-#' transform of the spectra per preprocessing, each entry kept in the store
-#' as it is built.
+#' transform of the spectra per preprocessing, or, on a parallel run, on the
+#' daemons through the window ([dispatch_units()]), one task each, longest
+#' first ([fold_prep_worker()]). This session keeps each entry in the store
+#' as it is built or its task returns it, so no daemon writes one.
 #'
 #' @param units From [fold_prep_units()].
 #' @param store From [open_fold_store()].
@@ -1035,18 +1037,70 @@ failed_fold_entry <- function(unit, records) {
 #' @param collector The verb's collector, for the note.
 #' @param output_dir The run's `output_dir`, for the note.
 #' @param results The rows so far, carried by a stop.
+#' @param daemons `NULL` to build in this session; on a parallel run a list
+#'   with `payload` (the configs axis's payload file, absolute, or `NULL`,
+#'   when each task carries its rows), `n_left` (the configurations still to
+#'   run, for a stop's message) and `verb`.
 #' @param call The frame a stop reports.
 #' @return [fold_stage_record()]'s table.
 #' @keywords internal
 #' @noRd
 build_fold_stage <- function(units, store, data, folds, role_map, seed, sg_window, pca_threshold,
-                             debug, keep_traces, collector, output_dir, results,
+                             debug, keep_traces, collector, output_dir, results, daemons = NULL,
                              call = rlang::caller_env()) {
 
   start_time <- Sys.time()
   reused     <- reuse_fold_entries(units, store, collector, output_dir)
   entries    <- reused$entries
   todo       <- which(vapply(entries, is.null, logical(1)))
+
+  if (!is.null(daemons) && length(todo) > 0) {
+
+    ## On the configs axis each task reads the payload file the
+    ## configurations read; elsewhere it carries the training part and its
+    ## fold's rows, as tune's fold tasks carry their rsplit, so that axis
+    ## needs no shared file system
+    payload_of <- function(unit) {
+      daemons$payload %||% list(
+        data          = data,
+        rows          = if (unit$fold_i > 0L) fold_rows(folds$splits[[unit$fold_i]]),
+        role_map      = role_map,
+        sg_window     = sg_window,
+        pca_threshold = pca_threshold,
+        seed          = seed,
+        keep_traces   = keep_traces,
+        pkg_version   = as.character(utils::packageVersion("horizons"))
+      )
+    }
+
+    ### The task's call, quoted here: its names are the task's arguments
+    task_call <- quote(worker(unit, payload))
+
+    ## A package missing on a daemon comes back as the worker's error, and
+    ## is systemic here, as on the configs axis
+    stop_on_worker_death(dispatch_units(
+      n       = length(todo),
+      order   = seq_along(todo),
+      task    = function(k) {
+        list(call = task_call,
+             args = list(worker = fold_prep_worker, unit = units[[todo[k]]],
+                         payload = payload_of(units[[todo[k]]])))
+      },
+      collect = function(k, entry) {
+        put_fold_entry(store, units[[todo[k]]], entry, results, call = call)
+        entries[[todo[k]]] <<- entry
+      },
+      label       = function(k) list(what = "the fold preparation", id = units[[todo[k]]]$label),
+      rows_so_far = function() results,
+      output_dir  = output_dir,
+      n_left      = daemons$n_left,
+      verb        = daemons$verb,
+      call        = call
+    ), results, output_dir, verb = daemons$verb, call = call)
+
+    todo <- integer(0)
+
+  }
 
   ### One transform per preprocessing, held only while its units are built
   pp <- vapply(units, function(u) tolower(u$row$preprocessing), character(1))
@@ -1139,6 +1193,124 @@ log_unusable_fold_entries <- function(collector, unusable, output_dir) {
   ), ids = names(unusable))
 
   invisible(NULL)
+
+}
+
+#' Build one fold prep on a daemon
+#'
+#' @description
+#' The task the stage sends each daemon ([build_fold_stage()]), kept at top
+#' level, as [evaluate_config_worker()] is, so a task carries the function's
+#' code, the unit and the payload, and nothing of the session's frame. On
+#' the configs axis `payload` is the payload file's path, read first with
+#' base R alone, as [evaluate_config_worker()] reads it, so a daemon on
+#' another version gets as far as saying so: a file it cannot read is said
+#' on what it returns, not raised. Then the version is checked, then the
+#' payload's keys, and the unit's fold is read from the folds rebuilt from
+#' it ([rebuild_resamples()]). On the resamples axis and in `fit()`
+#' `payload` is what the task carries (`FOLD_PREP_ARG_NAMES`): the training
+#' part and the fold's rows. The spectra are transformed for the unit's
+#' preprocessing ([hoist_for_units()]) and the fold prepped
+#' ([prep_fold_entry()]). A warning raised outside the unit (a package's
+#' while it loads) is not kept, since each configuration that reads the
+#' entry loads the same packages where it runs.
+#'
+#' @param unit A unit from [fold_prep_units()].
+#' @param payload Character(1), the payload file's absolute path, or a list
+#'   with the keys `FOLD_PREP_ARG_NAMES`.
+#' @return The entry ([prep_fold_entry()]), or, when the payload file cannot
+#'   be read, a list of class `horizons_run_file_unread` holding its `path`,
+#'   the `reason` and what the `file` holds.
+#' @keywords internal
+#' @noRd
+fold_prep_worker <- function(unit, payload) {
+
+  ## -------------------------------------------------------------------------
+  ## The payload, read with base R alone before anything of horizons'
+  ## -------------------------------------------------------------------------
+
+  shared <- payload
+
+  if (is.character(payload)) {
+
+    said   <- character(0)
+    unread <- NULL
+
+    shared <- tryCatch(
+      withCallingHandlers(
+        readRDS(payload),
+        warning = function(w) {
+          said <<- c(said, conditionMessage(w))
+          invokeRestart("muffleWarning")
+        }
+      ),
+      error = function(e) {
+        unread <<- paste(unique(c(said, conditionMessage(e))), collapse = "; ")
+        NULL
+      }
+    )
+
+    if (!is.null(unread)) {
+      return(structure(list(path = payload, reason = unread, file = "the configurations' data"),
+                       class = "horizons_run_file_unread"))
+    }
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## The worker's horizons, then the cross-process contract
+  ## -------------------------------------------------------------------------
+
+  worker_version <- as.character(utils::packageVersion("horizons"))
+
+  if (rlang::is_string(shared$pkg_version) && !identical(worker_version, shared$pkg_version)) {
+    abort_worker_version(worker_version, shared$pkg_version)
+  }
+
+  keys <- if (is.character(payload)) SHARED_ARG_NAMES else FOLD_PREP_ARG_NAMES
+
+  if (!setequal(names(shared), keys)) {
+
+    missing    <- setdiff(keys, names(shared))
+    unexpected <- setdiff(names(shared), keys)
+
+    abort_horizons(c(
+      "Malformed worker payload.",
+      "x" = "Missing: {if (length(missing)) paste(missing, collapse = ', ') else '-'}; unexpected: {if (length(unexpected)) paste(unexpected, collapse = ', ') else '-'}."
+    ), kind = "internal")
+
+  }
+
+  ## -------------------------------------------------------------------------
+  ## The training part and the fold, then the prep
+  ## -------------------------------------------------------------------------
+
+  inputs <- withCallingHandlers({
+
+    ## As the configuration's worker sets them (evaluate_config_worker())
+    if (requireNamespace("data.table", quietly = TRUE)) data.table::setDTthreads(1L)
+    options(engine_thread_options())
+
+    for (pkg in names(needed_packages(character(0), tolower(unit$row$feature_selection)))) {
+      requireNamespace(pkg, quietly = TRUE)
+    }
+
+    if (is.character(payload)) {
+      folds <- rebuild_resamples(shared$data, shared$resample_idx)$cv_folds
+      list(data = folds$splits[[1]]$data,
+           rows = if (unit$fold_i > 0L) fold_rows(folds$splits[[unit$fold_i]]))
+    } else {
+      list(data = shared$data, rows = shared$rows)
+    }
+
+  }, warning = function(w) rlang::cnd_muffle(w))
+
+  hoist <- hoist_for_units(inputs$data, unit$row, shared$role_map, shared$sg_window)
+
+  if (hoist$failed) return(failed_fold_entry(unit, hoist$records))
+
+  prep_fold_entry(unit, hoist$value, inputs$rows, shared$role_map, shared$seed, shared$sg_window,
+                  shared$pca_threshold, keep_traces = shared$keep_traces)
 
 }
 
