@@ -301,6 +301,12 @@ fold_prep_scope <- function(verb, config_row) {
 #' @noRd
 fold_workflow <- function(model_spec, outcome_col) {
 
+  ## Forced here, as tuning_metric_set() forces what its metrics close over:
+  ## the variables' selectors keep this frame, and tune serializes the
+  ## workflow to a worker with every task, so an unforced promise would carry
+  ## the caller's frame, its folds and training rows, along with it.
+  force(outcome_col)
+
   workflows::workflow() |>
     workflows::add_variables(outcomes = dplyr::all_of(outcome_col), predictors = dplyr::everything()) |>
     workflows::add_model(model_spec)

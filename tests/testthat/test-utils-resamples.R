@@ -1143,4 +1143,20 @@ describe("fold_workflow()", {
 
   })
 
+  it("carries nothing of its caller's frame, so a tune task stays small", {
+
+    ## tune serializes the workflow to a worker with every task. Its
+    ## variables' selectors keep fold_workflow()'s frame, so an outcome name
+    ## left unforced there would carry the caller's frame with it: here
+    ## 40 MB, in the verbs the folds and the training rows.
+    in_a_heavy_frame <- function() {
+      heavy       <- numeric(5e6)
+      outcome_col <- "SOC"
+      fold_workflow(define_model_spec("rf"), outcome_col)
+    }
+
+    expect_lt(length(serialize(in_a_heavy_frame(), NULL)), 1e6)
+
+  })
+
 })
