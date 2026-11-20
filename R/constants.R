@@ -465,7 +465,7 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      name (SEED_RULE 1), so the split, the folds and each stage move.
 #   7  2026-11-18: every engine with a thread argument is given one thread
 #      (MODEL_SPECS' `threads`); lightgbm had used every core.
-#   8  2026-11-?: each fold's recipe prepped once inside its configuration,
+#   8  2026-11-20: each fold's recipe prepped once inside its configuration,
 #      so CARS's and Boruta's bands are selected once per fold under their
 #      own unit's seed and shared by every candidate (SEED_RULE 2).
 SCORING_SCHEMA <- 8L
