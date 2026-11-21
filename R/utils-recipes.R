@@ -76,26 +76,7 @@ build_recipe <- function(config_row,
   ## Step 2: Response transformation
   ## -----------------------------------------------------------------------
 
-  transformation <- tolower(as.character(config_row$transformation))
-
-  if (transformation == "log") {
-
-    rec <- rec |>
-      recipes::step_log(recipes::all_outcomes(), offset = 1, skip = TRUE)
-
-  } else if (transformation == "log10") {
-
-    rec <- rec |>
-      recipes::step_log(recipes::all_outcomes(), offset = 1, base = 10, skip = TRUE)
-
-  } else if (transformation == "sqrt") {
-
-    rec <- rec |>
-      recipes::step_sqrt(recipes::all_outcomes(), skip = TRUE)
-
-  }
-
-  ## "none" → no step added
+  rec <- add_response_step(rec, config_row$transformation)
 
   ## -----------------------------------------------------------------------
   ## Step 3: Spectral preprocessing
@@ -174,6 +155,48 @@ build_recipe <- function(config_row,
   ## worker. Passing environment() explicitly keeps that dependency visible.
 
   strip_selector_envs(rec, environment())
+
+}
+
+
+#' Add the response transformation to a recipe
+#'
+#' @description
+#' Step 2 of [build_recipe()], which a configuration's folds also prep alone
+#' for their outcome ([fold_response()]), so both transform it the same
+#' way: `step_log()` with offset 1 (base 10 for `"log10"`) or `step_sqrt()`,
+#' each `skip = TRUE`, so it applies when the recipe is prepped and to
+#' `bake(new_data = NULL)`, and never to new data. `"none"` adds no step.
+#'
+#' @param rec A `recipes::recipe`.
+#' @param transformation Character(1). One of `VALID_TRANSFORMATIONS`.
+#' @return `rec`, with the step added.
+#' @keywords internal
+#' @noRd
+add_response_step <- function(rec, transformation) {
+
+  transformation <- tolower(as.character(transformation))
+
+  if (transformation == "log") {
+
+    rec <- rec |>
+      recipes::step_log(recipes::all_outcomes(), offset = 1, skip = TRUE)
+
+  } else if (transformation == "log10") {
+
+    rec <- rec |>
+      recipes::step_log(recipes::all_outcomes(), offset = 1, base = 10, skip = TRUE)
+
+  } else if (transformation == "sqrt") {
+
+    rec <- rec |>
+      recipes::step_sqrt(recipes::all_outcomes(), skip = TRUE)
+
+  }
+
+  ## "none" → no step added
+
+  rec
 
 }
 

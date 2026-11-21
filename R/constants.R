@@ -204,6 +204,24 @@ VALID_FEATURE_SELECTION <- c(
 ### configurations that differ only in it select on different outcomes.
 OUTCOME_SELECTIONS <- c("correlation", "boruta", "cars")
 
+### The tuned parameters whose upper bound is read from the predictors a
+### recipe keeps (dials::finalize()), so a model that tunes one has its
+### configuration's recipe prepped on the whole training part as well as on
+### each fold (bounded_model(), R/fold-cache.R)
+BOUNDED_PARAMETERS <- c("mtry", "num_comp")
+
+### The seconds one fold's prep takes by its feature selection, the recipe
+### without the spectral transform on a fold of the coverage grid's training
+### part (835 rows, snv_deriv1; measured 2026-11-17). The fold preps start
+### longest first by it, as the configurations start by
+### CONFIG_COST_SECONDS; no selection has no prep.
+FOLD_PREP_COST_SECONDS <- c(
+  pca         = 0.57,
+  correlation = 0.26,
+  boruta      = 15.4,
+  cars        = 3.1
+)
+
 ## Metrics --------------------------------------------------------------------
 
 # Metrics evaluate() and fit() accept as `metric`, the ones configs are ranked
@@ -340,10 +358,11 @@ DEFAULT_OUTCOME_RANGE <- c(0, Inf)
 
 ## Parallel Worker Contract ----------------------------------------------------
 
-# The keys evaluate()'s parallel branch sends to evaluate_config_worker().
-# Assembled in one place and asserted in the worker, because a mis-keyed entry
-# arrives as NULL and one fails SILENTLY rather than erroring: a NULL
-# `grid_size` makes tune_grid() invent its own grid.
+# The keys evaluate()'s parallel branch sends to evaluate_config_worker(), and
+# to fold_prep_worker() on the configs axis. Assembled in one place and
+# asserted in the worker, because a mis-keyed entry arrives as NULL and one
+# fails SILENTLY rather than erroring: a NULL `grid_size` makes tune_grid()
+# invent its own grid.
 
 SHARED_ARG_NAMES <- c(
   "data",
@@ -361,8 +380,25 @@ SHARED_ARG_NAMES <- c(
   "data_fp",
   "settings",
   "checkpoint_dir",
+  "fold_cache_dir",
   "keep_traces",
   "isolate",
+  "pkg_version"
+)
+
+# The keys of what a fold preparation's task carries on the resamples axis and
+# in fit(), which have no payload file (fold_prep_worker()): the training
+# part, the fold's rows, and what its prep is built from. Asserted in the
+# worker as SHARED_ARG_NAMES is.
+
+FOLD_PREP_ARG_NAMES <- c(
+  "data",
+  "rows",
+  "role_map",
+  "sg_window",
+  "pca_threshold",
+  "seed",
+  "keep_traces",
   "pkg_version"
 )
 

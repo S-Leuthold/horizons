@@ -6,6 +6,7 @@
 ^R/fit-(single-config|uq|warmstart)\.R$
 ^R/pipeline-evaluate\.R$
 ^R/evaluate-single-config\.R$
+^R/fold-cache\.R$
 ^R/monitor-evaluate\.R$
 ^R/utils-(parallel|resamples|recipes|errors|log|tune|backtransform|rng)\.R$
 ^R/class-core\.R$

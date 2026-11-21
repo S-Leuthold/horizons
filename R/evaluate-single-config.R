@@ -15,16 +15,18 @@
 #' class and, with `keep_traces`, its backtrace. A door, internal or
 #' dependency error is not the configuration's and propagates.
 #'
-#' Each fold's recipe is prepped once, inside the unit. The training rows'
-#' spectra are transformed once, with the transform step's own code
-#' (`hoist_spectra()`); each fold's recipe, the configuration's without that
-#' step, is prepped on the fold's analysis rows under a seed named by what
-#' is prepped (`fold_prep_scope()`); and tune scores every grid and Bayesian
-#' candidate on those folds with a workflow of the model alone
-#' (`prep_folds()`). A feature selection therefore selects once per fold,
-#' for every candidate. The final fit, `last_fit()` on the split, runs the
-#' whole workflow on the raw rows. A step that fails in a fold's prep ends
-#' the configuration with the step's own class, and another package's
+#' Each fold's recipe is prepped once. The training rows' spectra are
+#' transformed once, with the transform step's own code (`hoist_spectra()`);
+#' each fold's recipe, the configuration's without that step, is prepped on
+#' the fold's analysis rows under a seed named by what is prepped
+#' (`fold_prep_scope()`), as a unit of its own whose entry every
+#' configuration of the same preprocessing and selection reads
+#' (`prep_fold_entry()`); and tune scores every grid and Bayesian candidate
+#' on the folds assembled from them with a workflow of the model alone
+#' (`assemble_folds()`). A feature selection therefore selects once per
+#' fold, for every candidate. The final fit, `last_fit()` on the split, runs
+#' the whole workflow on the raw rows. A step that fails in a fold's prep
+#' ends the configuration with the step's own class, and another package's
 #' warning there reaches the row with the folds that raised it.
 #'
 #' @param config_row Single-row tibble from `config$configs`. Must contain:
@@ -84,6 +86,12 @@
 #'   worker's, from loading the configuration's packages and rebuilding its
 #'   folds. They are rendered with the row's own, deduplicated and capped as
 #'   one list (#96).
+#' @param fold_entries The entries of the configuration's fold preps, as
+#'   `evaluate()` built them (`prep_fold_entry()`): a list with `training`
+#'   (the whole training part's, for a model whose parameters are bounded by
+#'   the predictors kept, or `NULL`) and `folds` (one per fold of `cv_folds`,
+#'   in order, or `NULL` with no feature selection). `NULL` (default) builds
+#'   them here, with the same code.
 #'
 #' @return Single-row tibble with columns: `config_id`, `status` (`"pruned"`
 #'   means Bayesian refinement was skipped), `below_prune_threshold` (logical;
@@ -117,7 +125,8 @@ evaluate_single_config <- function(config_row,
                                    debug           = FALSE,
                                    keep_traces     = FALSE,
                                    isolate         = TRUE,
-                                   outside_warnings = character(0)) {
+                                   outside_warnings = character(0),
+                                   fold_entries     = NULL) {
 
   start_time <- Sys.time()
 
@@ -148,11 +157,6 @@ evaluate_single_config <- function(config_row,
   ## seed get the stage's (seed_engine()).
   stage <- function(name) c("evaluate", config_id, name)
 
-  ## Each fold's prep is a unit of its own too, named by what is prepped
-  ## rather than by the configuration (fold_prep_scope()), so configurations
-  ## that prep the same recipe draw the same seeds for it.
-  prep_scope <- fold_prep_scope("evaluate", config_row)
-
   ## tune catches the warnings raised inside its resampling (an engine's
   ## warning during a fit, say) and keeps them in .notes, where run_unit()
   ## never sees them.
@@ -179,17 +183,15 @@ evaluate_single_config <- function(config_row,
                          workflows::add_model(model_spec))
 
     ## -----------------------------------------------------------------------
-    ## Step 1b: The training rows' spectra transformed once, the recipe each
-    ## fold is prepped with, and the workflow tune searches
+    ## Step 1b: The training rows' spectra transformed once, the outcome the
+    ## folds train on, and the workflow tune searches
     ## -----------------------------------------------------------------------
-    ## The fold recipe is the configuration's recipe without the transform
-    ## step, over the transformed rows (fold_prep_inputs()). tune searches a
-    ## workflow of the model alone, its outcome and predictors the columns
-    ## each prepped fold holds (prep_folds()); `wflow` stays for the
-    ## parameter set and the final fit.
+    ## The folds are assembled over the transformed rows from each fold's
+    ## prep (fold_prep_inputs(), assemble_folds()). tune searches a workflow
+    ## of the model alone, its outcome and predictors the columns each fold
+    ## holds; `wflow` stays for the parameter set and the final fit.
 
-    fold_inputs <- fold_prep_inputs(config_row, train_data, role_map,
-                                    sg_window = sg_window, pca_threshold = pca_threshold)
+    fold_inputs <- fold_prep_inputs(config_row, train_data, role_map, sg_window = sg_window)
 
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
@@ -202,47 +204,47 @@ evaluate_single_config <- function(config_row,
     ## plsr's num_comp is capped by the same count and by the smallest fold's
     ## rows (#216).
     ##
-    ## The prep rule: each fold's recipe is prepped once, in this unit, and
+    ## The prep rule: each fold's recipe is prepped once, before tuning, and
     ## every candidate the grid and the Bayesian search try is scored on it.
     ## The bounds are read from one more prep, of the fold recipe on the whole
     ## training part. A step's error in either ends the configuration with its
     ## class; tune preps only inside the final fit (last_fit()).
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
-    prepped_now <- any(c("mtry", "num_comp") %in% param_set$name)
+    prepped_now <- bounded_model(config_row$model)
+
+    ## The configuration's fold preps: the run's entries, or, called on its
+    ## own, entries built here by the run's code as they are read
+    entry_at <- fold_entry_reader(
+      fold_entries,
+      config_fold_units("evaluate", config_row, cv_folds, role_map, data = NULL, seed = seed,
+                        sg_window = sg_window, pca_threshold = pca_threshold, bounded = prepped_now),
+      function(unit, rows) prep_fold_entry(unit, fold_inputs$data, rows, role_map, seed,
+                                           sg_window, pca_threshold, debug = debug,
+                                           keep_traces = keep_traces),
+      cv_folds
+    )
 
     if (prepped_now) {
 
-      ## This prep sets the bounds, and is not the model returned, so the
-      ## selection steps' warnings are not taken from it (the final fit's
-      ## record is read instead, below)
-      prepped <- unit_step("prep", with_unit_seed(seed, c(prep_scope, "training"),
-                                                  quiet_selection_warnings(recipes::prep(fold_inputs$recipe))))
-      baked   <- unit_step("prep", recipes::bake(prepped, new_data = NULL))
-
-      param_set <- unit_step("finalize_parameters", {
-        eval_data <- baked[, prepped_predictors(prepped, baked), drop = FALSE]
-        finalized <- dials::finalize(param_set, eval_data)
-        cap_pls_components(finalized, ncol(eval_data), min_analysis_rows(cv_folds))
-      })
-
-      rm(prepped, baked)
-      invisible(gc(verbose = FALSE))
+      ## The training part's prep sets the bounds, and is not the model
+      ## returned, so the selection steps' warnings are not taken from it
+      ## (the final fit's record is read instead, below)
+      bound     <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
+      param_set <- unit_step("finalize_parameters", finalize_bound(param_set, bound, cv_folds))
 
     }
 
     ## -----------------------------------------------------------------------
-    ## Step 2b: Each fold's recipe, prepped once
+    ## Step 2b: The folds, from each fold's prep
     ## -----------------------------------------------------------------------
     ## The warnings another package raised in a fold's prep join the row with
     ## the folds that raised them, as tune's notes did.
 
-    prepped_folds <- unit_step("fold_prep", prep_folds(fold_inputs$recipe, cv_folds,
-                                                       fold_inputs$data, role_map,
-                                                       seed, prep_scope))
+    prepped_folds <- unit_step("fold_prep", assemble_folds(entry_at, cv_folds, fold_inputs, role_map))
     warning_log   <- dplyr::bind_rows(warning_log, prepped_folds$warnings)
 
-    rm(fold_inputs)
+    rm(fold_inputs, entry_at)
 
     ## -----------------------------------------------------------------------
     ## Step 3: Define tuning metric set

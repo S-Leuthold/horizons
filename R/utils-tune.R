@@ -218,8 +218,8 @@ text_records <- function(x, pinned = FALSE) {
 #' Record the warnings a fold's prep raises, with the fold
 #'
 #' @description
-#' Each fold's recipe is prepped in the unit ([prep_folds()]), not inside
-#' tune, so the warnings another package raises there are recorded and
+#' Each fold's recipe is prepped in a unit of its own ([prep_fold_entry()]),
+#' not inside tune, so the warnings another package raises there are recorded and
 #' muffled here, each with the fold it came from, and
 #' [fold_warning_records()] gives the row the folds that raised each, as
 #' "(3 of 10 folds)", the count tune's notes give. A horizons warning goes
@@ -699,7 +699,7 @@ render_warning_log <- function(records, max_shown = 5L) {
 #' result's `.notes` column instead of signalling them, so a capture site
 #' that only watches for conditions never sees them. A model fit that fails
 #' or warns inside tuning, or a recipe step inside `last_fit()` (each fold's
-#' recipe is prepped in the unit, [prep_folds()]), leaves its only trace
+#' recipe is prepped before tuning, [prep_fold_entry()]), leaves its only trace
 #' there. This
 #' reads the notes back through [condition_summary()] and returns one line
 #' per distinct message (see [summarise_warning_records()]), most frequent
@@ -764,7 +764,7 @@ tune_failure_cause <- function(tune_results) {
 #'   the recipe once on the training part: the step's error then ends the
 #'   unit with its own class, or propagates for the kinds no unit contains.
 #'   Only `last_fit()` preps a recipe inside tune, each fold's being prepped
-#'   in the unit ([prep_folds()]). Prepping only on failure costs a run that
+#'   before tuning ([prep_fold_entry()]). Prepping only on failure costs a run that
 #'   does not fail nothing, where a prep with feature selection can take
 #'   minutes.
 #' * An isolated fit whose process died, an error note starting with

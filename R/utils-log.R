@@ -723,6 +723,10 @@ new_unit_records <- function() {
 #'   way ([abort_missing_mid_run()]).
 #' * Any other error is a run failure: it is recorded with the step it arose
 #'   in and its root cause's class, and the unit's value is `NULL`.
+#' * A record another unit made, raised again inside this one
+#'   ([replay_unit_records()]), is recorded as that unit made it, under this
+#'   unit's name and id: a warning or note goes on, and a failure ends this
+#'   unit as it ended that one.
 #'
 #' The condition itself is never kept, since its backtrace can hold the data
 #' (one failed fit on 500 by 1,700 data carried a 13.4 MB trace). With
@@ -795,6 +799,14 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
     )
   }
 
+  ### A record another unit made, raised again here (replay_unit_records()),
+  ### is this unit's as it was made, under this unit's name and id
+  take <- function(made) {
+    made$unit <- unit
+    made$id   <- id
+    records[[length(records) + 1L]] <<- made
+  }
+
   ### unit_step() pops its own label; this restores the stack whatever the
   ### unit's code did to it.
   on.exit(unit_steps$stack <- utils::head(unit_steps$stack, depth), add = TRUE)
@@ -811,6 +823,10 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
       },
       horizons_note = function(cnd) {
         record(cnd, "note")
+        rlang::cnd_muffle(cnd)
+      },
+      horizons_replayed_record = function(cnd) {
+        take(cnd$record)
         rlang::cnd_muffle(cnd)
       }
     )
@@ -837,7 +853,18 @@ run_unit <- function(expr, unit, id, debug = FALSE, keep_traces = FALSE) {
       rlang::cnd_muffle(cnd)
       rlang::zap()
     },
+    horizons_replayed_record = function(cnd) {
+      take(cnd$record)
+      rlang::cnd_muffle(cnd)
+      rlang::zap()
+    },
     error = function(e) {
+      ### Another unit's failure, raised again here, ends this unit with that
+      ### unit's record
+      if (inherits(e, "horizons_replayed_failure")) {
+        take(e$record)
+        return(structure(list(), class = "horizons_unit_failed"))
+      }
       ### Raised again as it is, class, chain and trace intact. Declining with
       ### zap() is not enough: try_fetch() then offers the condition's parent
       ### to the same handler, and an upstream parent would be contained.
@@ -882,6 +909,42 @@ unit_records <- function(records) {
     n       = vapply(records, `[[`, integer(1), "n"),
     trace   = lapply(records, `[[`, "trace")
   )
+
+}
+
+#' Raise another unit's records inside the unit running now
+#'
+#' @description
+#' A fold's prep is a unit of its own ([prep_fold_entry()]), built once for
+#' every configuration that needs it, and what it recorded (the warnings and
+#' notes it raised, or its failure) is each of those configurations' too.
+#' Raised in order inside the configuration's unit, where it reads the
+#' prep's entry, each is recorded by [run_unit()] as the prep recorded it,
+#' with its step, class, message and backtrace, under the configuration's
+#' unit and id: a warning or note goes on, and a failure ends the unit
+#' there. Outside a unit a failure is an error and the rest pass unseen.
+#'
+#' @param records Records shaped like [new_unit_records()]'s.
+#' @return `NULL`, invisibly, when none of `records` is a failure.
+#' @keywords internal
+#' @noRd
+replay_unit_records <- function(records) {
+
+  for (i in seq_len(nrow(records))) {
+
+    made       <- as.list(records[i, setdiff(names(records), "trace")])
+    made$trace <- records$trace[[i]]
+
+    if (identical(made$type, "failure")) {
+      stop(structure(class = c("horizons_replayed_failure", "error", "condition"),
+                     list(message = made$message, call = NULL, record = made)))
+    }
+
+    rlang::signal(made$message, class = "horizons_replayed_record", record = made)
+
+  }
+
+  invisible(NULL)
 
 }
 

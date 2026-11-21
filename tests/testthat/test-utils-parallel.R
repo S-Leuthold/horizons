@@ -267,8 +267,9 @@ describe("dispatch_configs()", {
 
     ## The second configuration's daemon could not read the payload, and the
     ## first's row came in in the same pass
-    unread <- structure(list(path = "/runs/out/tmp/payload-1a2b.rds", reason = "the file system is gone"),
-                        class = "horizons_payload_unread")
+    unread <- structure(list(path = "/runs/out/tmp/payload-1a2b.rds", reason = "the file system is gone",
+                             file = "the configurations' data"),
+                        class = "horizons_run_file_unread")
     values <- list(row("cfg_001"), unread, row("cfg_003"))
 
     local_mocked_bindings(connected_daemons = function() 2L)
@@ -293,7 +294,7 @@ describe("dispatch_configs()", {
     ## Both ways the file goes: daemons that cannot reach output_dir, and
     ## another run started into it
     expect_match(msg, "daemons on another machine need `output_dir` on a file system they share with it", fixed = TRUE)
-    expect_match(msg, "One `output_dir` serves one run at a time, and a run started into it removes an earlier run's file.",
+    expect_match(msg, "One `output_dir` serves one run at a time, and a run started into it removes an earlier run's files.",
                  fixed = TRUE)
     expect_identical(err$results$config_id, "cfg_001")
     expect_null(err$parent)

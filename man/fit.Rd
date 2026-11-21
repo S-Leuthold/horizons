@@ -203,10 +203,12 @@ first failure, inside tuning included, stops the call with its backtrace.
 Before a parallel run \code{fit()} refuses a session loaded with
 \code{devtools::load_all()}, and, asking every daemon connected one task each,
 daemons that load another version of horizons
-(\code{horizons_error_dependency}), since tune's tasks fit the members'
-engines, horizons' own PLS engine among them, or cannot load a package
-the members need, their engines' or their feature selections'
-(\code{horizons_error_missing_package}).
+(\code{horizons_error_dependency}), since the daemons prepare the members'
+folds and tune's tasks fit the members' engines, horizons' own PLS engine
+among them, or cannot load a package the members need, their engines' or
+their feature selections' (\code{horizons_error_missing_package}). A feature
+selection that fails while a fold is prepared fails every member that
+reads that preparation, with the step's own class and words.
 }
 
 \section{Cold start from one configuration}{
@@ -243,9 +245,22 @@ choosing among them is what \code{evaluate()} is for.
 
 \section{Parallelism}{
 
-With \code{control_horizons(allow_par = TRUE)}, tune runs the CV folds inside
-each member's re-tune and OOF pass on the \href{https://mirai.r-lib.org}{mirai}
-daemons the caller has set (\code{mirai::daemons(4)} before the call); a
+Before any member is fitted, each fold's recipe is prepared once for the
+call, for every member that shares its preprocessing and feature
+selection (and, for a selection that reads the outcome, its response
+transformation), as \code{\link[=evaluate]{evaluate()}} prepares its configurations' ("Parallelism"
+there); the preparations are held in this session and dropped when the
+call returns. With \code{control_horizons(allow_par = TRUE)} they are prepared
+on the daemons, one task each, longest first, each carrying its rows, and
+those still running are cancelled when the call stops; both need mirai's
+dispatcher, so on daemons set with \code{dispatcher = FALSE} \code{fit()} warns of
+it once, with class \code{horizons_warning_input}, as \code{\link[=evaluate]{evaluate()}} does, the
+warning a row of the object's \code{log} and "no dispatcher" on the progress
+tree's parallel line. A pool left with no daemon while they run stops the
+call with \code{horizons_error_no_daemons}, every member still to fit. Then
+tune runs the CV folds inside each member's re-tune and OOF pass on the
+\href{https://mirai.r-lib.org}{mirai} daemons the caller has set
+(\code{mirai::daemons(4)} before the call); a
 \code{future::plan()} is not used, and \code{fit()} never sets, resizes or resets
 the daemons. With fewer than two connected, \code{fit()} runs sequentially and
 warns, with class \code{horizons_warning_substitution}; the warning is also a

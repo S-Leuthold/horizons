@@ -209,22 +209,29 @@ make_failure_setup <- function(n = 40, n_wn = 10) {
 
 }
 
-make_failure_config <- function(model) {
+make_failure_config <- function(model, selection = "none") {
 
   tibble::tibble(
     config_id         = paste0("cfg_", model),
     model             = model,
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none"
+    feature_selection = selection
   )
 
 }
 
-run_evaluate <- function(model, setup, ...) {
+## The recipes above stand in for a feature selection's step (Boruta, say),
+## so a configuration whose folds they fail or warn on has one: with no
+## selection a fold's prep trains nothing, and no fold's recipe is prepped.
+## Under a mocked build_recipe() the selection names the configuration's
+## fold preps and changes nothing in its recipe.
+step_selection <- "pca"
+
+run_evaluate <- function(model, setup, ..., selection = "none") {
 
   evaluate_single_config(
-    config_row    = make_failure_config(model),
+    config_row    = make_failure_config(model, selection),
     split         = setup$split,
     cv_folds      = setup$folds,
     role_map      = setup$role_map,
@@ -236,10 +243,10 @@ run_evaluate <- function(model, setup, ...) {
 
 }
 
-run_fit <- function(model, setup, ...) {
+run_fit <- function(model, setup, ..., selection = "none") {
 
   fit_single_config(
-    config_row          = make_failure_config(model),
+    config_row          = make_failure_config(model, selection),
     split_F             = setup$split,
     cv_resamples        = setup$folds,
     role_map            = setup$role_map,
@@ -516,7 +523,7 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("rf", setup)
+    result <- run_evaluate("rf", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
@@ -532,7 +539,7 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
     ## configuration there
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("elastic_net", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
@@ -548,7 +555,7 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
     ## it fails: the first fold's prep ends the configuration
     local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("rf", setup)
+    result <- run_evaluate("rf", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
@@ -561,7 +568,7 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
     local_mocked_bindings(build_recipe = long_fold_failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("elastic_net", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_gt(nchar(result$error_message), 300)
@@ -577,14 +584,14 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
     ## raises the step's own error, in the unit
     local_mocked_bindings(build_recipe = one_fold_failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("elastic_net", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
                      "Fold preparation failed: boom on one fold (in `step_mutate()`)")
     expect_identical(result$class, "simpleError")
 
-    expect_error(run_evaluate("elastic_net", setup, debug = TRUE), "boom on one fold", fixed = TRUE,
+    expect_error(run_evaluate("elastic_net", setup, selection = step_selection, debug = TRUE), "boom on one fold", fixed = TRUE,
                  class = "recipes_error_step")
 
   })
@@ -597,7 +604,7 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
       for (model in c("rf", "elastic_net")) {
 
-        err <- expect_error(run_evaluate(model, setup), "Rows misaligned.", fixed = TRUE)
+        err <- expect_error(run_evaluate(model, setup, selection = step_selection), "Rows misaligned.", fixed = TRUE)
         expect_true(rlang::cnd_inherits(err, "horizons_error_internal"), label = model)
 
       }
@@ -607,7 +614,7 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
     ## failure as text, so it is reproduced outside tune and propagates
     local_mocked_bindings(build_recipe = full_training_tripwire_recipe, .package = "horizons")
 
-    err <- expect_error(run_evaluate("elastic_net", setup), "Rows misaligned.", fixed = TRUE)
+    err <- expect_error(run_evaluate("elastic_net", setup, selection = step_selection), "Rows misaligned.", fixed = TRUE)
     expect_true(rlang::cnd_inherits(err, "horizons_error_internal"))
 
   })
@@ -616,11 +623,11 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    kept <- run_evaluate("rf", setup, keep_traces = TRUE)
+    kept <- run_evaluate("rf", setup, selection = step_selection, keep_traces = TRUE)
     expect_type(kept$trace[[1]], "character")
     expect_gt(length(kept$trace[[1]]), 0L)
 
-    expect_null(run_evaluate("rf", setup)$trace[[1]])
+    expect_null(run_evaluate("rf", setup, selection = step_selection)$trace[[1]])
 
   })
 
@@ -652,7 +659,7 @@ describe("evaluate_single_config() records the cause of a recipe step error", {
 
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    expect_error(run_evaluate("rf", setup, debug = TRUE), "boom from step", fixed = TRUE,
+    expect_error(run_evaluate("rf", setup, selection = step_selection, debug = TRUE), "boom from step", fixed = TRUE,
                  class = "recipes_error_step")
 
   })
@@ -667,7 +674,7 @@ describe("evaluate_single_config() records the warnings tune kept in .notes", {
 
     local_mocked_bindings(build_recipe = warning_recipe, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("elastic_net", setup, selection = step_selection)
     warns  <- result$warnings[[1]]
 
     expect_identical(result$status, "success")
@@ -682,7 +689,7 @@ describe("evaluate_single_config() records the warnings tune kept in .notes", {
     ## rf preps the recipe outside tune to finalize mtry, so the same warning
     ## arrives captured in full, as a note from every fold, and as a note
     ## from the final fit on the test set.
-    warns <- run_evaluate("rf", setup)$warnings[[1]]
+    warns <- run_evaluate("rf", setup, selection = step_selection)$warnings[[1]]
 
     non_positive <- grep("Non-positive values in selected variable", warns, fixed = TRUE)
     no_box_cox   <- grep("No Box-Cox transformation could be estimated", warns, fixed = TRUE)
@@ -710,7 +717,7 @@ describe("evaluate_single_config() records the warnings tune kept in .notes", {
         recipes::step_corr(recipes::all_predictors())
     }, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("elastic_net", setup, selection = step_selection)
     shown  <- grep("The correlation matrix has missing values", result$warnings[[1]],
                    fixed = TRUE, value = TRUE)
 
@@ -732,7 +739,7 @@ describe("evaluate_single_config() fails a configuration whose final fit fails (
     ## training part fails, and the prep outside tune reproduces it
     local_mocked_bindings(build_recipe = test_set_failing_recipe, .package = "horizons")
 
-    result <- run_evaluate("elastic_net", setup)
+    result <- run_evaluate("elastic_net", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
@@ -871,7 +878,7 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    result <- run_fit("rf", setup)
+    result <- run_fit("rf", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
@@ -887,7 +894,7 @@ describe("fit_single_config() records the cause of a recipe step error", {
     ## member there
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    result <- run_fit("elastic_net", setup)
+    result <- run_fit("elastic_net", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
@@ -906,7 +913,7 @@ describe("fit_single_config() records the cause of a recipe step error", {
     ## part passes, and the first fold's prep fails
     local_mocked_bindings(build_recipe = fold_failing_recipe, .package = "horizons")
 
-    result <- run_fit("rf", setup)
+    result <- run_fit("rf", setup, selection = step_selection)
 
     expect_identical(result$status, "failed")
     expect_identical(result$error_message,
@@ -921,7 +928,7 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
     for (model in c("rf", "elastic_net")) {
 
-      err <- expect_error(run_fit(model, setup), "Rows misaligned.", fixed = TRUE)
+      err <- expect_error(run_fit(model, setup, selection = step_selection), "Rows misaligned.", fixed = TRUE)
       expect_true(rlang::cnd_inherits(err, "horizons_error_internal"), label = model)
 
     }
@@ -932,11 +939,11 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    kept <- run_fit("rf", setup, keep_traces = TRUE)
+    kept <- run_fit("rf", setup, selection = step_selection, keep_traces = TRUE)
     expect_type(kept$trace, "character")
     expect_gt(length(kept$trace), 0L)
 
-    expect_null(run_fit("rf", setup)$trace)
+    expect_null(run_fit("rf", setup, selection = step_selection)$trace)
 
   })
 
@@ -968,7 +975,7 @@ describe("fit_single_config() records the cause of a recipe step error", {
 
     local_mocked_bindings(build_recipe = failing_recipe, .package = "horizons")
 
-    expect_error(run_fit("rf", setup, debug = TRUE), "boom from step", fixed = TRUE,
+    expect_error(run_fit("rf", setup, selection = step_selection, debug = TRUE), "boom from step", fixed = TRUE,
                  class = "recipes_error_step")
 
   })
@@ -1122,7 +1129,7 @@ describe("fit_single_config() records the warnings tune kept in .notes", {
 
     ## Every warning of the member is recorded on it, the fold metrics' too
     ## (#102): none reaches the caller
-    expect_no_warning(result <- run_fit("rf", setup))
+    expect_no_warning(result <- run_fit("rf", setup, selection = step_selection))
     warns <- result$warnings
 
     expect_identical(result$status, "success")
@@ -1379,6 +1386,110 @@ describe("render_warning_log()", {
 
     expect_identical(render_warning_log(log),
                      c("Kept the grid's choice.", "careful: 3 columns (2 of 2 folds)"))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
+## A fold prep that fails in the run's stage
+## ---------------------------------------------------------------------------
+## evaluate() builds each fold prep once, before any configuration runs, and
+## each configuration of that prep reads it: a prep that fails fails each of
+## them with its own record, and one of a kind no unit contains stops the
+## call from the stage.
+
+describe("evaluate() - a fold prep that fails in the run's stage", {
+
+  ## Three configurations on one correlation prep, across three models, and
+  ## one on a PCA prep
+  stage_object <- function() {
+    obj <- make_eval_object(n = 60, n_wn = 30, n_configs = 4)
+    obj$config$configs <- tibble::tibble(
+      config_id         = c("cfg_rf", "cfg_enet", "cfg_plsr", "cfg_pca"),
+      model             = c("rf", "elastic_net", "plsr", "elastic_net"),
+      transformation    = "none",
+      preprocessing     = "snv",
+      feature_selection = c("correlation", "correlation", "correlation", "pca")
+    )
+    obj
+  }
+
+  ## The correlation prep's recipe with a step that fails on the one fold
+  ## whose analysis rows lack a training row, and passes on the training
+  ## part and on every bake (those sets are smaller)
+  fail_lacking <- function(x, id) {
+    if (length(x) > 20 && !id %in% x) stop("boom on one fold")
+    rep(0, length(x))
+  }
+
+  local_failing_prep <- function(obj, step = function(target) rlang::expr(fail_lacking(sample_id, !!target)),
+                                 .env = parent.frame()) {
+    drawn  <- draw_eval_split(obj$data$analysis, "SOC", 42L)
+    target <- rsample::training(drawn$split)$sample_id[1]
+    real   <- build_recipe
+    testthat::local_mocked_bindings(build_recipe = function(config_row, train_data, role_map, ..., transformed = FALSE) {
+      rec <- real(config_row, train_data, role_map, ..., transformed = transformed)
+      if (isTRUE(transformed) && identical(config_row$feature_selection, "correlation")) {
+        rec <- recipes::step_mutate(rec, boom = !!step(target))
+      }
+      rec
+    }, .env = .env)
+  }
+
+  it("fails each configuration of a prep that failed on one fold, with the step's class and words, and no other", {
+
+    skip_unless_slow_tier()
+
+    obj <- stage_object()
+    local_failing_prep(obj)
+
+    ev   <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                      control = control_horizons(verbose = FALSE, breaker = FALSE)))
+    rows <- ev$evaluation$results
+
+    corr <- rows[rows$config_id != "cfg_pca", ]
+    expect_true(all(corr$status == "failed"))
+    expect_identical(corr$error_message, rep("Fold preparation failed: boom on one fold (in `step_mutate()`)", 3L))
+    expect_identical(corr$class, rep("simpleError", 3L))
+    expect_identical(rows$status[rows$config_id == "cfg_pca"], "success")
+
+  })
+
+  it("trips the breaker on three of its configurations across two models, keeping the run's fold preps", {
+
+    obj <- stage_object()
+    local_failing_prep(obj)
+    dir <- withr::local_tempdir()
+
+    err <- expect_error(suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                                  control = control_horizons(verbose = FALSE, output_dir = dir))),
+                        class = "horizons_error_systemic")
+
+    expect_identical(err$results$config_id, c("cfg_rf", "cfg_enet", "cfg_plsr"))
+    expect_match(conditionMessage(err), "The first 3 configurations to run all failed the same way", fixed = TRUE)
+    expect_length(list.files(file.path(dir, "tmp"), pattern = "^fold-"), 7L)
+
+  })
+
+  it("stops the call from the stage, before any configuration runs, on an error of a kind no unit contains", {
+
+    obj <- stage_object()
+    local_failing_prep(obj, step = function(target) {
+      rlang::expr(horizons:::abort_horizons("Rows misaligned.", kind = "internal"))
+    })
+    ran <- 0L
+    local_mocked_bindings(evaluate_single_config = function(...) {
+      ran <<- ran + 1L
+      rlang::abort("ran")
+    })
+
+    err <- expect_error(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(verbose = FALSE))),
+                        "Rows misaligned.", fixed = TRUE)
+
+    expect_true(rlang::cnd_inherits(err, "horizons_error_internal"))
+    expect_identical(ran, 0L)
 
   })
 

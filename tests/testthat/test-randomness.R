@@ -212,7 +212,8 @@ rng_object <- function(configs = c("rf", "plsr_cars"), bayesian_iter = 2L, final
 
   spec <- list(rf        = c("rf", "none"),
                plsr_cars = c("plsr", "cars"),
-               enet_pca  = c("elastic_net", "pca"))[configs]
+               enet_pca  = c("elastic_net", "pca"),
+               enet_cars = c("elastic_net", "cars"))[configs]
   model <- unname(vapply(spec, `[[`, "", 1))
   fs    <- unname(vapply(spec, `[[`, "", 2))
 
@@ -346,6 +347,14 @@ describe("the configurations present", {
 
     expect_identical(fit_rows(rng_fit(alone)), fit_rows(base$ft, kept))
     expect_identical(fit_rows(rng_fit(three), both), fit_rows(base$ft))
+
+    ## Nor when the one added reads plsr_cars's fold preps, listed before
+    ## it: one CARS prep per fold, built once for both, draws what
+    ## plsr_cars's drew alone
+    shared <- rng_evaluate(rng_object(c("rf", "enet_cars", "plsr_cars")))
+
+    expect_identical(eval_rows(shared, both), eval_rows(base$ev))
+    expect_identical(fit_rows(rng_fit(shared), both), fit_rows(base$ft))
 
   })
 

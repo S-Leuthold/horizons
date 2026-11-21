@@ -1509,9 +1509,9 @@ describe("evaluate_single_config() - the stages' units", {
 
   it("preps each fold, and the bounds, from its own unit's seed, named by what is prepped", {
 
-    ## rf bounds mtry, so the fold recipe is prepped on the whole training
-    ## part too. Every recipe prep is recorded with the stream it starts from;
-    ## each unit's must be among them.
+    ## rf bounds mtry, so the fold recipe of its trained selection is prepped
+    ## on the whole training part too. Every recipe prep is recorded with the
+    ## stream it starts from; each unit's must be among them.
     setup     <- make_eval_setup()
     real_prep <- recipes::prep
     starts    <- list()
@@ -1522,7 +1522,7 @@ describe("evaluate_single_config() - the stages' units", {
     }, .package = "recipes")
 
     result <- evaluate_single_config(
-      config_row    = make_eval_config(),
+      config_row    = make_eval_config(feature_selection = "pca"),
       split         = setup$split,
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
@@ -1541,7 +1541,7 @@ describe("evaluate_single_config() - the stages' units", {
     expect_identical(result$status, "success")
 
     for (unit in c(setup$folds$id, "training")) {
-      expect_true(started(c("evaluate", "prep", "raw", "none", unit)), label = unit)
+      expect_true(started(c("evaluate", "prep", "raw", "pca", unit)), label = unit)
     }
 
   })
@@ -2067,10 +2067,10 @@ describe("evaluate_single_config() - each fold's recipe prepped once", {
     ## their fold preps are one unit each, by what is prepped, not by the
     ## configuration, so CARS draws the same on each fold for both
     setup      <- make_eval_setup(n = 60, n_wn = 30)
-    real_folds <- prep_folds
+    real_folds <- assemble_folds
     bands      <- list()
 
-    local_mocked_bindings(prep_folds = function(...) {
+    local_mocked_bindings(assemble_folds = function(...) {
       out <- real_folds(...)
       bands[[length(bands) + 1L]] <<- lapply(out$folds$splits, function(s) names(s$data))
       out

@@ -97,6 +97,7 @@ Collate:
     'utils-recipes.R'
     'utils-rng.R'
     'utils-resamples.R'
+    'fold-cache.R'
     'utils-parallel.R'
     'utils-subset.R'
     'step-transform-spectra.R'

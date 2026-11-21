@@ -562,6 +562,63 @@ describe("run_unit()", {
 
 })
 
+describe("replay_unit_records()", {
+
+  ## What a fold's prep recorded, as its unit recorded it: a horizons
+  ## warning, another package's, a note, and a failure with its trace
+  made <- run_unit(unit_step("fold_prep", {
+    warn_in_unit("substitution", "A step did something else.")
+    warning("an upstream warning")
+    note_in_unit("A note.")
+    stop("the prep failed")
+  }), "fold preparation", "snv/pca/Fold1", keep_traces = TRUE)
+
+  it("records another unit's warnings and notes in the unit running now, as they were recorded, under its name", {
+
+    kept <- made$records[made$records$type != "failure", ]
+    out  <- run_unit(unit_step("other", { replay_unit_records(kept); "done" }), "configuration", "cfg_1")
+
+    expect_identical(out$value, "done")
+    expect_false(out$failed)
+    expect_identical(out$records$unit, rep("configuration", 3L))
+    expect_identical(out$records$id, rep("cfg_1", 3L))
+
+    ### Every other field as the prep's unit recorded it, its step included
+    cols <- setdiff(names(kept), c("unit", "id"))
+    expect_identical(out$records[cols], kept[cols])
+    expect_identical(out$records$step, rep("fold_prep", 3L))
+
+    ## And so lifted to the log naming the configuration
+    collector <- log_open("evaluate")
+    log_unit_records(collector, out$records)
+    rows <- log_rows(collector)
+    expect_identical(rows$topic[rows$type == "warning"], "substitution")
+
+  })
+
+  it("ends the unit running now with another unit's failure, as that unit recorded it", {
+
+    out <- run_unit({ replay_unit_records(made$records); "not reached" }, "configuration", "cfg_1")
+
+    expect_true(out$failed)
+    expect_null(out$value)
+    expect_identical(unit_failure_message(out$records, "Evaluation"), "Fold preparation failed: the prep failed")
+
+    failure <- out$records[out$records$type == "failure", ]
+    expect_identical(failure$class, "simpleError")
+    expect_identical(failure$trace, made$records$trace[made$records$type == "failure"])
+    expect_type(failure$trace[[1]], "character")
+
+    ### The records before it are kept, in order
+    expect_identical(out$records$type, made$records$type)
+
+    ## Outside a unit, or where nothing contains it, the failure is an error
+    expect_error(replay_unit_records(made$records), "the prep failed", class = "horizons_replayed_failure")
+
+  })
+
+})
+
 describe("warn_in_unit() and log_unit_records()", {
 
   it("raises a horizons warning that a unit records under its topic's class", {

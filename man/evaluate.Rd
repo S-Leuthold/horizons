@@ -121,9 +121,20 @@ response with \code{add_response()} or a \code{meta} column resumes. Keep one
 axis a run keeps the configs' data in \verb{<output_dir>/tmp/} while it runs
 and removes them as it exits, and a run removes any an earlier one left
 there (one killed outright leaves its own, and on Windows so can one
-stopped while a daemon was still reading them). A write to
-\code{output_dir} that fails (the directory, the manifest, a checkpoint or
-the configs' data) stops the run with
+stopped while a daemon was still reading them). A run also keeps there
+each fold's preparation for each feature selection its configurations
+need (see "Parallelism"), under a name keyed on the training data, the
+recipe settings and the seed: kept when the run stops before every
+configuration has its row (an interrupt, the circuit breaker, a failed
+write, a daemon's death), so a resumed run reuses them rather than
+preparing them again, and removed once every configuration has its row.
+A run removes those an earlier one left that it cannot use (another
+run's data, settings or seed), and prepares again one whose preparation
+failed, and one that cannot be read or holds another preparation, the
+last two with a note in the \code{log} and a line in the progress tree. A
+write to
+\code{output_dir} that fails (the directory, the manifest, a checkpoint, the
+configs' data or a fold's preparation) stops the run with
 \code{horizons_error_systemic}, naming the directory, the rows finished so
 far as its \code{results}. On the configs axis a checkpoint a worker could
 not write is known only once every configuration has run, so the
@@ -152,6 +163,21 @@ daemons. It never sets, resizes or resets them.
 
 The user owns the daemons; \code{evaluate()} owns only which axis they are
 applied to, through \code{control_horizons(parallelize_over = )}.
+
+Before any configuration runs, each fold's recipe is prepared once for
+every configuration that shares its preprocessing and feature selection
+(and, for a selection that reads the outcome, its response
+transformation), with the training part's when a model's tuning
+parameters are bounded by the predictors kept: a stage of its own, whose
+line in the progress tree says how many preparations it built and how
+many it reused. A configuration with no feature selection trains nothing
+on a fold and has none. On a parallel run the preparations are tasks on
+the daemons, one each, longest first, this session writing each as it
+returns: on the configs axis each reads the configs' data from the file
+below and each configuration's daemon reads its own preparations from
+\verb{<output_dir>/tmp/}, and on the resamples axis each preparation's task
+carries its rows. Without an \code{output_dir} they are held in this session
+for the call.
 \itemize{
 \item \code{"configs"}: one task per config on the daemons, with tune running
 sequentially inside each. The configs start longest first, by a table
@@ -167,10 +193,10 @@ machine, a file system shared at that path), and a daemon that cannot
 read the file stops the run with \code{horizons_error_systemic}, the rows
 finished so far as its \code{results}. The mode for a large config grid on a
 many-core machine.
-\item \code{"resamples"}: configs run sequentially; inside each, each fold's
-recipe is prepped once in this session, and tune runs the CV folds'
-fits on the daemons. Useful width is capped at \code{cv_folds}. The mode
-for a few cores and a short grid.
+\item \code{"resamples"}: configs run sequentially, once the fold preparations have
+run on the daemons; inside each, tune runs the CV folds' fits on the
+daemons. Useful width is capped at \code{cv_folds}. The mode for a few cores
+and a short grid.
 \item \code{"auto"} (default): \code{"configs"} when the number of configs is at least
 \code{cv_folds} and there is an \code{output_dir} to checkpoint into, otherwise
 \code{"resamples"}. Derived from the measured cost model: configs wins
@@ -242,7 +268,9 @@ When the configs axis stops, by an error, an interrupt or a stop of its
 own, it cancels the configurations still running on the daemons, so a
 configuration still running stops before it writes its checkpoint; a
 checkpoint is written whole or not at all, so one the cancel reaches
-mid-write is either complete or absent. A configuration in an isolated
+mid-write is either complete or absent. A run stopped while its fold
+preparations run cancels those still running the same way, on either
+axis; a cancelled one writes nothing, since this session writes each. A configuration in an isolated
 fit (each \code{cubist} fit; see "Isolated fits") stops at once, its fit's
 process ended with it. One inside another compiled fit (an xgboost fit,
 say) stops only when that fit returns, its daemon busy until then, and
@@ -258,7 +286,8 @@ the configs' data are gone. \code{evaluate()} warns of it once, with class
 \code{horizons_warning_input}; the warning is also a row of the object's
 \code{log}, and under \code{verbose} the progress tree's parallel line says "no
 dispatcher" before any configuration runs, so a run that is stopped
-shows it too.
+shows it too. On the resamples axis a run with fold preparations, which
+run as tasks of the same kind, is warned of the same way.
 
 mirai relays no warning, message or output from a task. On the configs
 axis what a configuration's unit records reaches the \code{log} as on the
@@ -337,9 +366,11 @@ that configuration alone: its row has \code{status} \code{"failed"}, an
 \code{error_message} naming the step and the cause ("Grid search failed:
 ..."), the root \code{class} of the failure, and, with
 \code{control_horizons(keep_traces = TRUE)}, the backtrace as text in \code{trace}.
-Each fold's recipe is prepped once, in the configuration's unit, so a
-recipe step that fails while a fold is prepped fails the configuration
-with the step's own class; one that fails only inside the final fit is
+Each fold's recipe is prepped once, before any configuration runs, for
+every configuration that reads it, so a recipe step (a feature
+selection's, say) that fails while a fold is prepped fails every
+configuration that reads that preparation, with the step's own class and
+words; one that fails only inside the final fit is
 reproduced by prepping the recipe once on the training part. A failure
 tune keeps only as text (a model's fit failing inside tuning) is
 \code{horizons_error_run}. A hyperparameter candidate scored on fewer

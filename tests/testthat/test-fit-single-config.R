@@ -541,21 +541,22 @@ describe("fit_single_config() - failure paths", {
 
   it("names the recipe preparation when the recipe prepped for the bounds cannot be baked", {
 
-    ## The second bake handed a whole recipe is the bounds prep's (rf's mtry),
-    ## after the training rows' spectra are transformed
+    ## With a trained selection the third bake handed a whole recipe is the
+    ## bounds prep's (rf's mtry): after the training rows' spectra are
+    ## transformed, and the outcome the folds train on is baked
     setup     <- fsc()$setup
     real_bake <- recipes::bake
     bakes     <- 0L
     local_mocked_bindings(bake = function(object, ...) {
       if (inherits(object, "recipe")) {
         bakes <<- bakes + 1L
-        if (bakes == 2L) stop("the prepped recipe could not be baked")
+        if (bakes == 3L) stop("the prepped recipe could not be baked")
       }
       real_bake(object, ...)
     }, .package = "recipes")
 
-    expect_failed_at(run_on_shared(setup), "Recipe preparation",
-                     "the prepped recipe could not be baked", warm_start = NA)
+    expect_failed_at(run_on_shared(setup, config_row = make_fit_config(feature_selection = "pca")),
+                     "Recipe preparation", "the prepped recipe could not be baked", warm_start = NA)
 
   })
 
@@ -1537,9 +1538,9 @@ describe("fit_single_config() - the stages' units", {
 
   it("preps each fold, and the bounds, from its own unit's seed, named by what is prepped", {
 
-    ## rf bounds mtry, so the fold recipe is prepped on the whole training
-    ## part too. Every recipe prep is recorded with the stream it starts
-    ## from; each unit's must be among them.
+    ## rf bounds mtry, so the fold recipe of its trained selection is
+    ## prepped on the whole training part too. Every recipe prep is recorded
+    ## with the stream it starts from; each unit's must be among them.
     shared    <- fsc()
     real_prep <- recipes::prep
     starts    <- list()
@@ -1550,7 +1551,7 @@ describe("fit_single_config() - the stages' units", {
     }, .package = "recipes")
 
     result <- fit_single_config(
-      config_row          = make_fit_config(),
+      config_row          = make_fit_config(feature_selection = "pca"),
       split_F             = shared$setup$split_F,
       cv_resamples        = shared$setup$folds,
       calib_data          = NULL,
@@ -1573,7 +1574,7 @@ describe("fit_single_config() - the stages' units", {
     expect_identical(result$status, "success")
 
     for (unit in c(shared$setup$folds$id, "training")) {
-      expect_true(started(c("fit", "prep", "raw", "none", unit)), label = unit)
+      expect_true(started(c("fit", "prep", "raw", "pca", unit)), label = unit)
     }
 
   })
