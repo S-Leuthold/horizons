@@ -110,7 +110,8 @@
 #'   `NA` when `prune = FALSE`), `prune_threshold` (the threshold that reading
 #'   was taken against; `NA` when `prune = FALSE`), `bayes_iter` and
 #'   `bayes_stop` (the iterations the Bayesian search began, and why it
-#'   ended: `"no_improve"`, `"budget"` or `"failed"`; both `NA` when no
+#'   ended: `"no_improve"`, `"budget"` or `"failed"`; kept on a
+#'   configuration that failed after its search, and both `NA` when no
 #'   search ran), the six
 #'   test-set metrics `rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`, the six
 #'   cross-validated means at the selected hyperparameters `cv_rmse`,
@@ -182,6 +183,11 @@ evaluate_single_config <- function(config_row,
                                candidate = candidate)
     warning_log <<- dplyr::bind_rows(warning_log, notes)
   }
+
+  ## How far the Bayesian search went, once it has run, kept on the row of
+  ## a configuration that fails after it, as fit() keeps it on a member
+  bayes_iter <- NA_integer_
+  bayes_stop <- NA_character_
 
   unit <- run_unit({
 
@@ -389,8 +395,6 @@ evaluate_single_config <- function(config_row,
 
     final_tune_results <- grid_results
     n_dropped          <- 0L
-    bayes_iter         <- NA_integer_
-    bayes_stop         <- NA_character_
 
     if (!skip_bayesian && search_iter > 0) {
 
@@ -578,8 +582,10 @@ evaluate_single_config <- function(config_row,
     failure <- unit$records[unit$records$type == "failure", , drop = FALSE]
 
     failed <- create_failed_result(config_id, unit_failure_message(unit$records, "Evaluation"))
-    failed$class <- failure$class[1]
-    failed$trace <- failure$trace[1]
+    failed$class      <- failure$class[1]
+    failed$trace      <- failure$trace[1]
+    failed$bayes_iter <- as.integer(bayes_iter)
+    failed$bayes_stop <- bayes_stop
     failed
 
   } else {

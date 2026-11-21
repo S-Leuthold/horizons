@@ -1174,6 +1174,26 @@ describe("evaluate_single_config() - the Bayesian search's stopping rule", {
 
   })
 
+  it("keeps how far its search went on the row, failed or not, as fit() keeps it on a member", {
+
+    ## The search stops by the rule at its fourth iteration, and the choice
+    ## after it fails, reading a result that is not there
+    local_mocked_bindings(bayes_search = function(...) {
+      list(results = NULL, n_dropped = 0L, n_iter = 4L, stop = "no_improve")
+    })
+
+    setup <- make_eval_setup(n = 40, n_wn = 12)
+    row   <- suppressWarnings(evaluate_single_config(
+      config_row = make_eval_config(), split = setup$split, cv_folds = setup$folds,
+      role_map = setup$role_map, grid_size = 2, bayesian_iter = 20, seed = 42L
+    ))
+
+    expect_identical(row$status, "failed")
+    expect_identical(row$bayes_iter, 4L)
+    expect_identical(row$bayes_stop, "no_improve")
+
+  })
+
 })
 
 ## =========================================================================
