@@ -449,7 +449,9 @@ tune_warmstart_bayes <- function(workflow,
 #' best (tune's own rule), and the log says so ("No improvement for ..."),
 #' which is read too, with each iteration's header: the result does not
 #' show it, since an iteration whose candidate tune dropped binds no row.
-#' The verbs say how many searches stopped early from what this returns.
+#' tune checks its rule on the last iteration too, so a search the rule
+#' stops there ran every iteration asked for, and is recorded as such. The
+#' verbs say how many searches stopped early from what this returns.
 #'
 #' An isolated fit whose process dies ([run_isolated()]) fails the unit
 #' with `horizons_error_process_died`, whether tune kept it as a note or
@@ -491,8 +493,9 @@ tune_warmstart_bayes <- function(workflow,
 #'   search's when it ran an iteration, else `initial`), `n_dropped` (the
 #'   candidates it proposed that tune dropped, scored on no fold), `n_iter`
 #'   (the iterations it began; 0 when it failed before its first) and `stop`
-#'   (why it ended: `"no_improve"`, the stopping rule; `"failed"`, an error
-#'   it kept what it finished from; or `"budget"`, every iteration asked for).
+#'   (why it ended: `"no_improve"`, the stopping rule, before the last
+#'   iteration asked for; `"failed"`, an error it kept what it finished from;
+#'   or `"budget"`, every iteration asked for).
 #' @keywords internal
 #' @noRd
 bayes_search <- function(workflow,
@@ -613,8 +616,16 @@ bayes_search <- function(workflow,
   n_kept <- if (is.null(bayes_results)) 0L else max(bayes_results$.iter)
 
   ## Why the search ended, which the verbs count: an error first, since an
-  ## error's search may also have gone without improvement
-  ended <- if (!is.null(cause)) "failed" else if (no_better) "no_improve" else "budget"
+  ## error's search may also have gone without improvement. tune checks its
+  ## rule after every iteration, the last included, so the rule ended the
+  ## search only when it stopped short of the iterations asked for
+  ended <- if (!is.null(cause)) {
+    "failed"
+  } else if (no_better && n_entered < iter) {
+    "no_improve"
+  } else {
+    "budget"
+  }
 
   if (n_kept > 0) {
 

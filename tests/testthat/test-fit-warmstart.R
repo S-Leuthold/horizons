@@ -1036,6 +1036,30 @@ describe("bayes_search()", {
 
   })
 
+  it("records a search the rule stopped on its last iteration as one that ran its budget, which no early-stop line counts", {
+
+    ## tune checks its rule after every iteration, the last included: at
+    ## no_improve = 2, two iterations asked for that both fail to improve end
+    ## with tune's line, on a search that was ending anyway
+    ts      <- make_tune_setup()
+    initial <- tune::tune_grid(ts$wf, ts$folds, grid = 2, metrics = ts$metric_set)
+    local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) {
+      message("\u2500\u2500 Iteration 1 \u2500\u2500")
+      message("\u2500\u2500 Iteration 2 \u2500\u2500")
+      message("! No improvement for 2 iterations; returning current results.")
+      out <- initial
+      out$.iter <- c(0L, rep(2L, nrow(out) - 1L))
+      out
+    }, .package = "tune")
+
+    got <- bayes_search(workflow = ts$wf, resamples = ts$folds, initial = initial, iter = 2L,
+                        param_info = ts$param_set, metrics = ts$metric_set, seed = 1L, no_improve = 2L)
+
+    expect_identical(got[c("n_iter", "stop")], list(n_iter = 2L, stop = "budget"))
+    expect_null(early_stop_line(got$stop, 2L, "The Bayesian search", "configuration"))
+
+  })
+
   it("stops by tune's rule and says so, and with FALSE runs every iteration (the canary for tune's line)", {
 
     ## A real search on a smooth surface: at no_improve = 1 it stops at the
