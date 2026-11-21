@@ -510,6 +510,10 @@ fit <- function(x,
 
   check_config_packages(member_configs, "fit")
 
+  ## The recorded ranges on the parameters of the members' models, now that
+  ## their engines are known to be installed, as evaluate() types them
+  check_range_types(tuning$ranges, member_configs$model)
+
   ## Fits a model's engine would otherwise carry state across run in this
   ## session when isolation is turned off, which the log notes
   log_isolation_off(collector, member_configs$model, control$isolate)

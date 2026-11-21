@@ -3406,7 +3406,7 @@ describe("config_findings() at every verb's door", {
 
   })
 
-  it("refuses a ranges record that is not a set of ranges, or holds a range of the wrong type", {
+  it("refuses a ranges record that is not a set of ranges, and leaves each range's type to the verbs that search it", {
 
     cases <- list(
       list(record = NULL,                                         finding = "must be a named list of ranges, not NULL"),
@@ -3414,8 +3414,7 @@ describe("config_findings() at every verb's door", {
       list(record = list(c(1, 25)),                               finding = "must be named by the parameter it sets"),
       list(record = list(committees = c(25, 1)),                  finding = "committees must be two finite numbers, the lower below the upper, not `c(25, 1)`"),
       list(record = list(committees = c(1, 25), committees = c(2, 9)), finding = "names committees more than once"),
-      list(record = list(mtry = c(0, 200)),                      finding = "mtry must start at 1 or more, not 0"),
-      list(record = list(num_comp = c(1.5, 30)),                  finding = "num_comp is not a range of plsr's num_comp")
+      list(record = list(mtry = c(0, 200)),                      finding = "mtry must start at 1 or more, not 0")
     )
 
     for (case in cases) {
@@ -3430,6 +3429,12 @@ describe("config_findings() at every verb's door", {
     ## The record at its defaults, and one the models do not all tune, pass
     obj <- configured_object()
     obj$config$tuning$ranges <- merge_ranges(list(mtry = c(1, 200)))
+    expect_identical(validate_horizons_data(obj), obj)
+
+    ## So does a fractional bound on a whole-number parameter: typing it
+    ## builds the model's engine, which evaluate() and fit() do at their
+    ## doors once they have checked it is installed (check_range_types())
+    obj$config$tuning$ranges <- merge_ranges(list(num_comp = c(1.5, 30)))
     expect_identical(validate_horizons_data(obj), obj)
 
   })

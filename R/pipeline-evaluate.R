@@ -517,6 +517,11 @@ evaluate <- function(x,
   ## it, one by one.
   check_config_packages(configs, "evaluate")
 
+  ## The recorded ranges on the parameters of the models they search, now
+  ## that every engine is known to be installed: configure() typed only
+  ## those whose engine it found
+  check_range_types(x$config$tuning$ranges, configs$model)
+
   role_map    <- x$data$role_map
   outcome_col <- role_map$variable[role_map$role == "outcome"]
   analysis    <- x$data$analysis

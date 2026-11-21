@@ -1051,10 +1051,11 @@ config_findings <- function(x) {
   }
 
   ### The ranges the models are searched over, which configure() writes:
-  ### their shape, and each one's type where the model's engine is installed
-  ### (tune_range_findings())
-  range_findings <- tune_range_findings(tuning$ranges, as.character(configs$model),
-                                        arg = "config$tuning$ranges", check_names = FALSE)
+  ### their shape (tune_range_findings()). Their types need the models'
+  ### engines, which evaluate() and fit() check at their doors before typing
+  ### them (check_range_types()), so validating an object loads no engine
+  range_findings <- tune_range_findings(tuning$ranges, arg = "config$tuning$ranges",
+                                        check_names = FALSE)
   findings       <- c(findings, sub("\\.$", "", range_findings))
 
   recipe        <- x$config$recipe

@@ -141,8 +141,9 @@
 #' upper, an `mtry` or `num_comp` range starting below 1 (each counts the
 #' predictors or components a fit uses, so 0 is no model), and a fractional
 #' bound on a whole-number
-#' parameter (typed where the model's engine is installed, and by
-#' `evaluate()` and `fit()` otherwise). An engine's own limits are not
+#' parameter (typed where the model's engine is installed, and again by
+#' `evaluate()` and `fit()` once they have checked the engines of the models
+#' they fit). An engine's own limits are not
 #' checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
 #' range past them fails those candidates' fits, which the row reports. The
 #' ranges are recorded as `config$tuning$ranges`,
@@ -402,21 +403,25 @@ configure <- function(x,
 
   ## 1.4b Validate tune_ranges ------------------------------------------------
   ## Each name must be a parameter a configured model tunes, so a misspelt
-  ## one is refused rather than ignored; each range is typed on its
-  ## parameter where the model's engine is installed, and every verb's
-  ## validator types it again when it runs (tune_range_findings()).
+  ## one is refused rather than ignored (tune_range_findings()); each range
+  ## is typed on its parameter where the model's engine is installed, and
+  ## evaluate() and fit() type it again after their package checks
+  ## (range_type_findings()). The findings are rendered text, so they go
+  ## into the refusal as values (abort_findings()).
 
   if (!is.null(tune_ranges)) {
 
-    range_findings <- tune_range_findings(tune_ranges, models)
+    range_findings <- c(tune_range_findings(tune_ranges, models),
+                        range_type_findings(tune_ranges, models))
 
     if (length(range_findings) > 0) {
 
-      abort_horizons(c(
+      abort_findings(
+        range_findings,
         "{.arg tune_ranges} must be a named list of ranges of parameters the configured models tune.",
-        stats::setNames(range_findings, rep("x", length(range_findings))),
-        "i" = "Each range is {.code c(lower, upper)} in dials' units, e.g. {.code tune_ranges = list(committees = c(1, 50))}."
-      ), kind = "input")
+        kind   = "input",
+        remedy = "Each range is {.code c(lower, upper)} in dials' units, e.g. {.code tune_ranges = list(committees = c(1, 50))}."
+      )
 
     }
 
@@ -974,29 +979,25 @@ format_ranges <- function(ranges) {
 #' What is wrong with a set of tuning ranges
 #'
 #' @description
-#' The one check of a set of ranges, at `configure()`'s door and in every
-#' verb's validator ([config_findings()]): a named list, its names unique,
-#' each element two finite numbers with the lower below the upper, and an
-#' `mtry` or `num_comp` range starting at 1 or more (`BOUNDED_PARAMETERS`,
-#' which count what a fit uses). With
-#' `check_names`, each name must be a parameter a model in `models` tunes
-#' (their ids in `MODEL_SPECS`), so a misspelt one is refused rather than
-#' ignored. Then each range is set on the parameter of every model in
-#' `models` that tunes it, wherever the model's engine is installed to build
-#' its parameter set, so a range of the wrong type (a fractional bound on a
-#' whole-number parameter) is refused in dials' words; where it is not, the
-#' validator types it when a verb runs. An engine's own limits are not
-#' checked: a range past them fails those candidates' fits, which the row
-#' reports.
+#' The one check of a set of ranges' shape, at `configure()`'s door and in
+#' every verb's validator ([config_findings()]): a named list, its names
+#' unique, each element two finite numbers with the lower below the upper,
+#' and an `mtry` or `num_comp` range starting at 1 or more
+#' (`BOUNDED_PARAMETERS`, which count what a fit uses). With `check_names`,
+#' each name must be a parameter a model in `models` tunes (their ids in
+#' `MODEL_SPECS`), so a misspelt one is refused rather than ignored. It
+#' needs no package: whether a range is of its parameter's type is
+#' [range_type_findings()]'s.
 #'
 #' @param ranges The ranges, as given.
-#' @param models Character. The configured models.
+#' @param models Character. The configured models, read only with
+#'   `check_names`.
 #' @param arg Character(1). How the messages name the ranges.
 #' @param check_names Logical(1). Refuse a name no model in `models` tunes.
 #' @return Character: one finding per problem, empty when there are none.
 #' @keywords internal
 #' @noRd
-tune_range_findings <- function(ranges, models, arg = "tune_ranges", check_names = TRUE) {
+tune_range_findings <- function(ranges, models = character(0), arg = "tune_ranges", check_names = TRUE) {
 
   if (!is.list(ranges) || is.data.frame(ranges)) {
     return(cli::format_inline("{.arg {arg}} must be a named list of ranges, not {.obj_type_friendly {ranges}}."))
@@ -1017,9 +1018,7 @@ tune_range_findings <- function(ranges, models, arg = "tune_ranges", check_names
     findings <- c(findings, cli::format_inline("{.arg {arg}} names {.field {repeated}} more than once."))
   }
 
-  shaped <- vapply(ranges, function(r) {
-    is.numeric(r) && length(r) == 2 && all(is.finite(r)) && r[1] < r[2]
-  }, logical(1))
+  shaped <- vapply(ranges, is_range_pair, logical(1))
 
   for (id in ids[!shaped]) {
     got      <- paste(deparse(ranges[[id]]), collapse = " ")
@@ -1041,11 +1040,9 @@ tune_range_findings <- function(ranges, models, arg = "tune_ranges", check_names
     }
   }
 
-  tuned <- tuned_by(models)
-
   if (check_names) {
 
-    unknown <- setdiff(ids, names(tuned))
+    unknown <- setdiff(ids, names(tuned_by(models)))
 
     if (length(unknown) > 0) {
       listed   <- paste0(vapply(unique(models), function(m) {
@@ -1058,23 +1055,69 @@ tune_range_findings <- function(ranges, models, arg = "tune_ranges", check_names
 
   }
 
-  ## Each well-shaped range on the parameter of each model tuning it, where
-  ## the model's parameter set can be built
-  for (id in intersect(ids[shaped & !duplicated(ids)], names(tuned))) {
+  findings
 
-    for (m in tuned[[id]]) {
+}
 
-      packages <- MODEL_SPECS[[m]]$packages
-      if (!all(vapply(packages, requireNamespace, logical(1), quietly = TRUE))) next
+#' Whether a range is two finite numbers, the lower below the upper
+#'
+#' @param r A range, as given.
+#' @return Logical(1).
+#' @keywords internal
+#' @noRd
+is_range_pair <- function(r) {
 
-      ### A parameter set that cannot be built here types nothing: the
-      ### verbs' doors check the model's packages, and its runs the rest
-      param_set <- tryCatch(hardhat::extract_parameter_set_dials(define_model_spec(m, isolate = FALSE)),
-                            error = function(e) NULL)
-      if (is.null(param_set)) next
+  is.numeric(r) && length(r) == 2 && all(is.finite(r)) && r[1] < r[2]
 
-      param     <- param_set$object[[which(param_set$id == id)]]
-      refused   <- tryCatch({
+}
+
+#' Which ranges are not of their parameters' types
+#'
+#' @description
+#' Each well-shaped range ([tune_range_findings()]) is set on the parameter
+#' of every model in `models` that tunes it ([dials::range_set()]), so a
+#' range of the wrong type, a fractional bound on a whole-number parameter,
+#' is refused in dials' words. Building a model's parameter set needs its
+#' engine, so a model whose packages are not installed is skipped:
+#' `configure()`, which checks no packages, types what it can, and
+#' [evaluate()] and [fit()] type every range of the models they fit at
+#' their doors, right after their package checks
+#' ([check_config_packages()]), where nothing is skipped
+#' ([check_range_types()]). The validators check the ranges' shape alone,
+#' so a fitted object is validated without loading the engines of models
+#' it holds no member of.
+#'
+#' @param ranges The ranges, as given or recorded.
+#' @param models Character. The models whose parameters the ranges are set
+#'   on.
+#' @param arg Character(1). How the messages name the ranges.
+#' @return Character: one finding per range a model's parameter refused,
+#'   empty when there are none.
+#' @keywords internal
+#' @noRd
+range_type_findings <- function(ranges, models, arg = "tune_ranges") {
+
+  if (!is.list(ranges) || is.data.frame(ranges) || is.null(names(ranges))) return(character(0))
+
+  ids    <- names(ranges)
+  usable <- !is.na(ids) & nzchar(ids) & !duplicated(ids) & vapply(ranges, is_range_pair, logical(1))
+  ranges <- ranges[usable]
+
+  findings <- character(0)
+
+  for (m in unique(models)) {
+
+    ids_m <- intersect(names(ranges), MODEL_SPECS[[m]]$tuned)
+    if (length(ids_m) == 0) next
+
+    if (!all(vapply(MODEL_SPECS[[m]]$packages, requireNamespace, logical(1), quietly = TRUE))) next
+
+    param_set <- hardhat::extract_parameter_set_dials(define_model_spec(m, isolate = FALSE))
+
+    for (id in ids_m) {
+
+      param   <- param_set$object[[which(param_set$id == id)]]
+      refused <- tryCatch({
         dials::range_set(param, as.double(ranges[[id]]))
         NULL
       }, error = function(e) condition_summary(e))
@@ -1090,6 +1133,39 @@ tune_range_findings <- function(ranges, models, arg = "tune_ranges", check_names
   }
 
   findings
+
+}
+
+#' Refuse recorded ranges the models a verb fits cannot take
+#'
+#' @description
+#' The door check of [evaluate()] and [fit()], straight after their package
+#' checks, so every engine it builds a parameter set for is installed: each
+#' recorded range typed on the parameters of `models`
+#' ([range_type_findings()]). `configure()` types a range only where the
+#' model's engine is installed, so one it could not type, or one edited by
+#' hand, is refused here before any work.
+#'
+#' @param ranges `config$tuning$ranges`.
+#' @param models Character. The models the verb fits.
+#' @param call The frame the refusal reports: the verb's.
+#' @return Invisibly `NULL`; aborts with `horizons_error_validation`, its
+#'   findings as `findings`.
+#' @keywords internal
+#' @noRd
+check_range_types <- function(ranges, models, call = rlang::caller_env()) {
+
+  findings <- range_type_findings(ranges, models, arg = "config$tuning$ranges")
+
+  if (length(findings) > 0) {
+
+    abort_validation(findings,
+                     remedy = "Re-run {.fn configure} with {.arg tune_ranges} the models' parameters can take.",
+                     call   = call)
+
+  }
+
+  invisible(NULL)
 
 }
 

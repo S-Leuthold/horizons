@@ -283,6 +283,32 @@ describe("evaluate() - gate checks", {
 
   })
 
+  it("refuses, before anything is drawn, a recorded range a configured model's parameter cannot take, once the engines are found", {
+
+    skip_if_not_installed("Cubist")
+
+    local_mocked_bindings(
+      draw_eval_split        = function(...) stop("a split was drawn"),
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    ## A range configure() could not type had rules not been installed then,
+    ## which the validator, checking shape alone, lets through
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$tuning$ranges$committees <- c(1.5, 25)
+    expect_identical(validate_horizons_data(obj), obj)
+
+    err <- expect_error(evaluate(obj), class = "horizons_error_validation")
+
+    expect_identical(rlang::call_name(err$call), "evaluate")
+    expect_match(err$findings, "committees.* is not a range of cubist's .*committees")
+
+    ## An engine that is not installed is refused as missing, not typed
+    local_model_specs(list(cubist = list(packages = c("rules", "horizonsFakePkgXYZ123"))))
+    expect_error(evaluate(obj), class = "horizons_error_missing_package")
+
+  })
+
   it("refuses an axis whose names are not wavenumbers at its door, before anything is drawn (#121)", {
 
     ## Names the door validator cannot read as wavenumbers, so it cannot
@@ -3897,9 +3923,11 @@ describe("evaluate() - a package missing where a configuration ran", {
     real_spec <- define_model_spec
 
     ## cubist's engine cannot be loaded where its configuration runs, though
-    ## the door found it in this session
+    ## the door found it in this session, and typed the ranges on its
+    ## parameters there (check_range_types())
     local_mocked_bindings(define_model_spec = function(model, ...) {
-      if (model == "cubist") loadNamespace("horizonsFakePkgXYZ123")
+      at_door <- any(vapply(sys.calls(), function(cl) identical(cl[[1]], quote(range_type_findings)), logical(1)))
+      if (model == "cubist" && !at_door) loadNamespace("horizonsFakePkgXYZ123")
       real_spec(model, ...)
     })
 
