@@ -698,28 +698,6 @@ describe("read_fold_entry()", {
 
 })
 
-describe("bounded_model()", {
-
-  it("agrees with the parameter set the single-config runners read, for every model", {
-
-    for (model in VALID_MODELS) {
-
-      packages <- names(needed_packages(model, "none"))
-      if (!all(vapply(packages, requireNamespace, logical(1), quietly = TRUE))) next
-
-      pset <- workflows::extract_parameter_set_dials(
-        workflows::workflow() |>
-          workflows::add_formula(y ~ x) |>
-          workflows::add_model(define_model_spec(model))
-      )
-
-      expect_identical(bounded_model(model), any(BOUNDED_PARAMETERS %in% pset$name), label = model)
-
-    }
-
-  })
-
-})
 
 describe("finalize_bound()", {
 

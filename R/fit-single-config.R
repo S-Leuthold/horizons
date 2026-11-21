@@ -221,7 +221,7 @@ fit_single_config <- function(config_row,
     ## ends the member with its class.
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
-    prepped_now <- any(BOUNDED_PARAMETERS %in% param_set$name)
+    prepped_now <- bounded_model(config_row$model)
 
     ## The member's fold preps: fit()'s entries, or, called on its own,
     ## entries built here by fit()'s code as they are read

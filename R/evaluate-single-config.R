@@ -211,7 +211,7 @@ evaluate_single_config <- function(config_row,
     ## class; tune preps only inside the final fit (last_fit()).
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
-    prepped_now <- any(BOUNDED_PARAMETERS %in% param_set$name)
+    prepped_now <- bounded_model(config_row$model)
 
     ## The configuration's fold preps: the run's entries, or, called on its
     ## own, entries built here by the run's code as they are read

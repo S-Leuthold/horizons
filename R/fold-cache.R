@@ -210,8 +210,8 @@ fold_unit_recipe <- function(unit_row, hoisted, role_map, sg_window, pca_thresho
 #' @description
 #' Whether it tunes one of `BOUNDED_PARAMETERS` (`MODEL_SPECS`' `tuned`), so
 #' its configuration's recipe is prepped on the whole training part for the
-#' bound, as well as on each fold. The single-config runners read the same
-#' from the configuration's parameter set.
+#' bound, as well as on each fold: the one rule the stage, the readers of a
+#' configuration's entries and the single-config runners all read.
 #'
 #' @param model Character(1). A name in `MODEL_SPECS`.
 #' @return Logical(1).
