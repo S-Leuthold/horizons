@@ -1085,8 +1085,11 @@ evaluate <- function(x,
   ## With an output_dir the entries are run files in tmp/, kept through an
   ## interruption, so a resumed run reuses them, and removed once every
   ## configuration has its row: the removal is registered before the first
-  ## is written, and acts only once Step 8 has returned. Without one they
-  ## live in this call.
+  ## is written, and acts only once Step 8 has returned. It is the clearing
+  ## of Step 7b keeping nothing, registered after the payload's own
+  ## removal, so it runs after it: on a completed run it finds the preps
+  ## alone, every one this call's, and every task collected, so no daemon
+  ## has one open. Without an output_dir the entries live in this call.
 
   run_completed <- FALSE
   fold_store    <- NULL
@@ -1096,7 +1099,7 @@ evaluate <- function(x,
     fold_store <- open_fold_store(output_dir, results_so_far(unname(checkpoint_results)))
 
     if (!is.null(fold_store$dir)) {
-      on.exit(if (isTRUE(run_completed)) remove_fold_entries(fold_store$dir), add = TRUE)
+      on.exit(if (isTRUE(run_completed)) clear_run_files(output_dir), add = TRUE)
     }
 
     fold_stage <- build_fold_stage(
@@ -2022,10 +2025,10 @@ remove_run_file <- function(path) {
 #' file from a write that was cut off, and every fold preparation it does
 #' not need (another run's data, settings or seed are under other names). A
 #' call removes its own payload as it exits, and its fold preparations once
-#' every configuration has its row, so these are left by a call that was
-#' interrupted or killed, or on Windows by one whose daemon still had the
-#' file open. Any other file in `tmp/` is left alone; the directory goes
-#' when it is left empty.
+#' every configuration has its row, by this clearing keeping nothing, so
+#' these are left by a call that was interrupted or killed, or on Windows by
+#' one whose daemon still had the file open. Any other file in `tmp/` is
+#' left alone; the directory goes when it is left empty.
 #'
 #' @param output_dir The run's `output_dir`.
 #' @param keep Character. The fold preparations' files this call needs

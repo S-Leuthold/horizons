@@ -2513,7 +2513,7 @@ describe("evaluate() - the fold preparations on the daemons", {
 
   })
 
-  it("writes every fold preparation in this session and none on a daemon, and leaves none once the run is complete (installed build)", {
+  it("writes every fold preparation in this session and none on a daemon, and leaves none once the run is complete, its payload removed before its preparations (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -2541,6 +2541,21 @@ describe("evaluate() - the fold preparations on the daemons", {
       real_write(value, path)
     })
 
+    ## What the session's removals find in tmp/, in the order they run
+    real_clear  <- clear_run_files
+    real_remove <- remove_run_file
+    removals    <- character(0)
+    local_mocked_bindings(
+      clear_run_files = function(output_dir, keep = character(0)) {
+        removals <<- c(removals, paste("clear:", paste(sort(list.files(file.path(output_dir, "tmp"))), collapse = " ")))
+        real_clear(output_dir, keep)
+      },
+      remove_run_file = function(path) {
+        removals <<- c(removals, paste("remove:", basename(path)))
+        real_remove(path)
+      }
+    )
+
     dir <- withr::local_tempdir()
     ev  <- with_deadline(suppressWarnings(evaluate(pca_object(), seed = 42L,
                                                    control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
@@ -2553,6 +2568,12 @@ describe("evaluate() - the fold preparations on the daemons", {
     expect_length(grep("^fold-", basename(there)), 0L)
     expect_length(grep("\\.rds$", there), 4L)
     expect_false(dir.exists(file.path(dir, "tmp")))
+
+    ## The payload goes first, by its own removal; the clearing of a
+    ## completed run then finds the four preparations alone
+    n <- length(removals)
+    expect_match(removals[n - 1L], "^remove: payload-.*\\.rds$")
+    expect_match(removals[n], "^clear: fold-[0-9a-f]+\\.rds( fold-[0-9a-f]+\\.rds){3}$")
 
   })
 

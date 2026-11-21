@@ -993,27 +993,6 @@ abort_fold_entry_unread <- function(path, reason, results, verb = "evaluate", ca
 
 }
 
-#' Remove a run's fold preparations once every configuration has its row
-#'
-#' @description
-#' Every `fold-*.rds` in the run's `tmp/` (after the clearing at the start of
-#' the call, every one there is this call's), then the directory when it is
-#' left empty, quietly, as [remove_run_file()] removes the payload: on
-#' Windows a file a daemon still had open stays until the next call clears
-#' it ([clear_run_files()]). Called once every task has been collected, so
-#' none does.
-#'
-#' @param dir The run's `tmp/` directory.
-#' @return `NULL`, invisibly.
-#' @keywords internal
-#' @noRd
-remove_fold_entries <- function(dir) {
-
-  unlink(list.files(dir, pattern = "^fold-.*\\.rds$", full.names = TRUE))
-  remove_empty_dir(dir)
-
-}
-
 ## ---------------------------------------------------------------------------
 ## The stage: each fold prep the run needs, built once
 ## ---------------------------------------------------------------------------
