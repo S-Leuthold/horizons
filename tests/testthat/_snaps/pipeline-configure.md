@@ -48,6 +48,14 @@
       x `tune_ranges`'s committees must be two finite numbers, the lower below the upper, not `c(8, 8)`.
       i Each range is `c(lower, upper)` in dials' units, e.g. `tune_ranges = list(committees = c(1, 50))`.
       
+      `tune_ranges` must be a named list of ranges of parameters the configured models tune.
+      x `tune_ranges`'s num_comp must start at 1 or more, not 0: it counts the predictors or components a fit uses, at least one.
+      i Each range is `c(lower, upper)` in dials' units, e.g. `tune_ranges = list(committees = c(1, 50))`.
+      
+      `tune_ranges` must be a named list of ranges of parameters the configured models tune.
+      x `tune_ranges`'s mtry must start at 1 or more, not -1: it counts the predictors or components a fit uses, at least one.
+      i Each range is `c(lower, upper)` in dials' units, e.g. `tune_ranges = list(committees = c(1, 50))`.
+      
 
 # configure() CLI output / prints the outcome, models, tuning, recipe settings and config count, with the PCA threshold only when PCA runs
 

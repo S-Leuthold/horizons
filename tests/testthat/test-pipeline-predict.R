@@ -1984,13 +1984,14 @@ describe("predict.horizons_fit() - fresh-process round trip", {
 ## The validators check the recorded tuning ranges' shape alone; typing them
 ## builds each model's engine, which evaluate() and fit() do at their doors
 ## after their package checks. So predicting from a fit whose grid
-## configured cubist, with no cubist member, never loads rules or Cubist.
-## A fresh process shows it, since this one has loaded both already. Only
-## an installed build, as the round trip above.
+## configured cubist, with no cubist member, never loads Cubist (rules loads
+## with horizons, whose parsnip engines it registers). A fresh process shows
+## it, since this one has loaded Cubist already. Only an installed build, as
+## the round trip above.
 
 describe("predict.horizons_fit() - the engines a fresh process loads", {
 
-  it("predicts from a fit whose grid configured cubist without loading rules or Cubist, when no member is cubist", {
+  it("predicts from a fit whose grid configured cubist without loading Cubist, when no member is cubist", {
 
     testthat::skip_if_not_installed("callr")
     testthat::skip_on_cran()
@@ -2005,15 +2006,19 @@ describe("predict.horizons_fit() - the engines a fresh process loads", {
     got <- callr::r(
       func = function(fit_path, new_df) {
         library(horizons)
-        p <- predict(readRDS(fit_path), new_df, interval = FALSE)
-        list(n = nrow(p), loaded = c("rules", "Cubist") %in% loadedNamespaces())
+        attached <- loadedNamespaces()
+        p        <- predict(readRDS(fit_path), new_df, interval = FALSE)
+        list(n      = nrow(p),
+             added  = intersect(setdiff(loadedNamespaces(), attached), c("rules", "Cubist")),
+             cubist = "Cubist" %in% loadedNamespaces())
       },
       args = list(fit_path = normalizePath(testthat::test_path("fixtures", "ensemble_fit.rds")),
                   new_df   = ens_test_set())
     )
 
     expect_gt(got$n, 0L)
-    expect_identical(got$loaded, c(FALSE, FALSE))
+    expect_identical(got$added, character(0))
+    expect_false(got$cubist)
 
   })
 
