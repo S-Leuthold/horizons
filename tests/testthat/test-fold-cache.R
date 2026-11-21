@@ -725,8 +725,8 @@ describe("finalize_bound()", {
         workflows::workflow() |> workflows::add_recipe(recipe) |> workflows::add_model(define_model_spec(model))
       )
 
-      from_frame <- cap_pls_components(dials::finalize(pset, baked[, kept, drop = FALSE]), length(kept),
-                                       min_analysis_rows(case$folds))
+      from_frame <- cap_by_data(dials::finalize(pset, baked[, kept, drop = FALSE]), length(kept),
+                                min_analysis_rows(case$folds))
 
       expect_identical(finalize_bound(pset, kept, case$folds), from_frame, label = model)
 

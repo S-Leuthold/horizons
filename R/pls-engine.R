@@ -10,9 +10,10 @@
 #'
 #' @description
 #' Fits with [pls_fit()] and predicts with [pls_predict()], for regression.
-#' `num_comp` maps to the number of components and tunes over 1 to
-#' `PLS_MAX_COMP`; the runners cap that range further by the data
-#' ([cap_pls_components()]). It is a submodel, as `MODEL_SPECS$plsr` names
+#' `num_comp` maps to the number of components. Its range is not set here:
+#' the runners set it from `config$tuning$ranges` (`TUNE_RANGES` holds 1 to
+#' `PLS_MAX_COMP`) and cap it by the data ([cap_by_data()]), so the table is
+#' the one place it is kept. It is a submodel, as `MODEL_SPECS$plsr` names
 #' it: tune fits the counts of a grid once, at the largest, and the engine
 #' scores every count from that fit ([multi_predict._horizons_pls()]).
 #' Registering twice in one session is a no-op.
@@ -39,7 +40,7 @@ register_pls_engine <- function() {
     eng          = "pls",
     parsnip      = "num_comp",
     original     = "ncomp",
-    func         = list(pkg = "dials", fun = "num_comp", range = c(1L, PLS_MAX_COMP)),
+    func         = list(pkg = "dials", fun = "num_comp"),
     has_submodel = identical(engine_spec("pls")$submodel, "num_comp")
   )
 
@@ -321,33 +322,6 @@ pls_predict <- function(object, new_data) {
   newdata$x <- as.matrix(new_data)
 
   as.numeric(stats::predict(object, newdata = newdata, ncomp = object$horizons_ncomp))
-
-}
-
-
-#' Cap the plsr model's component range by the data
-#'
-#' @description
-#' Sets `num_comp`'s upper bound to the smallest of `PLS_MAX_COMP`, the number
-#' of predictors the recipe hands the model, and the smallest analysis set's
-#' rows less one, so a grid or a Bayesian search proposes no component count
-#' a fold cannot fit (#216). A parameter set without `num_comp` is returned
-#' unchanged.
-#'
-#' @param param_set A `parameters` object, after [dials::finalize()].
-#' @param n_predictors Integer. Predictors after the recipe.
-#' @param n_rows Integer. Rows in the smallest analysis set.
-#'
-#' @return The parameter set.
-#' @keywords internal
-#' @noRd
-cap_pls_components <- function(param_set, n_predictors, n_rows) {
-
-  if (!"num_comp" %in% param_set$name) return(param_set)
-
-  upper <- as.integer(max(1L, min(PLS_MAX_COMP, n_predictors, n_rows - 1L)))
-
-  stats::update(param_set, num_comp = dials::num_comp(c(1L, upper)))
 
 }
 

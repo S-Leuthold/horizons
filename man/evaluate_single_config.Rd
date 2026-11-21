@@ -11,6 +11,7 @@ evaluate_single_config(
   role_map,
   grid_size = DEFAULT_GRID_SIZE,
   bayesian_iter = DEFAULT_BAYES_ITER,
+  tune_ranges = TUNE_RANGES,
   prune = FALSE,
   prune_threshold = 1,
   allow_par = FALSE,
@@ -43,6 +44,11 @@ evaluate_single_config(
 skip Bayesian optimization entirely. When every tuned parameter is a
 whole number and the space has no more points than \code{grid_size + bayesian_iter}, the grid is every point and the Bayesian stage does not
 run (\code{exhaustive_grid()}).}
+
+\item{tune_ranges}{Named list of \code{c(lower, upper)} by parameter id, in
+dials' units: the ranges the model's parameters are searched over, set
+before the data cap them (\code{apply_tune_ranges()}). \code{evaluate()} reads
+them from \code{configure()}'s \code{config$tuning$ranges}. Default \code{TUNE_RANGES}.}
 
 \item{prune}{Logical. If TRUE, record whether the best grid-search RPD
 falls below \code{prune_threshold} (\code{below_prune_threshold}), and when it

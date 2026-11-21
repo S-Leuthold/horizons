@@ -205,6 +205,7 @@ worker_payload <- function() {
     role_map        = obj$data$role_map,
     grid_size       = 2L,
     bayesian_iter   = 0L,
+    tune_ranges     = TUNE_RANGES,
     prune           = FALSE,
     prune_threshold = 1,
     seed            = 42L,

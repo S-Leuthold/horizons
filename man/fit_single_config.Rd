@@ -14,6 +14,7 @@ fit_single_config(
   best_params_eval,
   final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
   grid_size = DEFAULT_GRID_SIZE,
+  tune_ranges = TUNE_RANGES,
   compute_uq = FALSE,
   compute_ad = FALSE,
   allow_par = FALSE,
@@ -56,6 +57,12 @@ points than \code{grid_size + final_bayesian_iter}, the grid is every point
 and no Bayesian search runs (\code{exhaustive_grid()}).}
 
 \item{grid_size}{Integer. Grid size for warm-start exploration.}
+
+\item{tune_ranges}{Named list of \code{c(lower, upper)} by parameter id, in
+dials' units: the ranges the re-tune searches, set before the data cap
+them (\code{apply_tune_ranges()}). \code{fit()} reads them from \code{configure()}'s
+\code{config$tuning$ranges}, the ranges \code{evaluate()} searched. Default
+\code{TUNE_RANGES}.}
 
 \item{compute_uq}{Logical. Whether to train UQ components.}
 

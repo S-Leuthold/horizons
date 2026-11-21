@@ -599,9 +599,11 @@ fold_bound <- function(entry, inputs) {
 #' @description
 #' [dials::finalize()] reads only the width of the frame it is given for
 #' `mtry` and `num_comp`, so it is given a frame of no rows of those
-#' predictors; `num_comp` is capped as well ([cap_pls_components()]).
+#' predictors. It sets only an upper bound still `unknown()`, so a range
+#' `config$tuning$ranges` set first ([apply_tune_ranges()]) is kept, and the
+#' data then cap whatever range the parameter has ([cap_by_data()]).
 #'
-#' @param param_set A `parameters` object.
+#' @param param_set A `parameters` object, its ranges applied.
 #' @param predictors Character. The predictors the recipe keeps.
 #' @param folds The `rset` the configuration is tuned over.
 #' @return The finalized `parameters` object.
@@ -613,7 +615,60 @@ finalize_bound <- function(param_set, predictors, folds) {
                                   nrow = 0L)
   finalized <- dials::finalize(param_set, frame)
 
-  cap_pls_components(finalized, length(predictors), min_analysis_rows(folds))
+  cap_by_data(finalized, length(predictors), min_analysis_rows(folds))
+
+}
+
+#' Cap the bounded parameters' ranges by what the data hold
+#'
+#' @description
+#' `mtry`'s upper bound at the predictors the recipe keeps, and `num_comp`'s
+#' at those predictors and at the smallest analysis set's rows less one, so a
+#' grid or a Bayesian search proposes no value a fold cannot fit (#216). Each
+#' keeps its lower bound and any upper bound already below the cap, so a
+#' range set by `configure(tune_ranges = )` narrows to the data rather than
+#' being replaced, as `num_comp`'s default range always has. A range whose
+#' lower bound is above the cap holds no value the data can fit, and fails
+#' the configuration, naming the range and the cap. A parameter set holding
+#' neither is returned unchanged.
+#'
+#' @param param_set A `parameters` object, after [dials::finalize()].
+#' @param n_predictors Integer. Predictors after the recipe.
+#' @param n_rows Integer. Rows in the smallest analysis set.
+#' @return The parameter set.
+#' @keywords internal
+#' @noRd
+cap_by_data <- function(param_set, n_predictors, n_rows) {
+
+  caps <- c(mtry     = max(1L, n_predictors),
+            num_comp = pls_components(Inf, n_predictors, n_rows))
+
+  for (id in intersect(names(caps), param_set$id)) {
+
+    param <- param_set$object[[which(param_set$id == id)]]
+    lower <- param$range$lower
+    upper <- min(param$range$upper, caps[[id]])
+
+    if (lower > caps[[id]]) {
+
+      held <- if (id == "num_comp") {
+        cli::format_inline("{n_predictors} predictor{?s} and analysis sets of {n_rows} row{?s} at the smallest")
+      } else {
+        cli::format_inline("{n_predictors} predictor{?s}")
+      }
+
+      abort_horizons(c(
+        "The {.field {id}} range {lower} to {param$range$upper} holds no value the data can fit: at most {caps[[id]]}, for {held}.",
+        "i" = "Lower the range's lower bound in {.code configure(tune_ranges = )}."
+      ), kind = "run")
+
+    }
+
+    param_set <- update_parameter(param_set, id, dials::range_set(param, c(lower, upper)))
+
+  }
+
+  param_set
 
 }
 

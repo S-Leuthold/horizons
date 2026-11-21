@@ -3402,6 +3402,32 @@ describe("config_findings() at every verb's door", {
 
   })
 
+  it("refuses a ranges record that is not a set of ranges, or holds a range of the wrong type", {
+
+    cases <- list(
+      list(record = c(1, 25),                                     finding = "must be a named list of ranges"),
+      list(record = list(c(1, 25)),                               finding = "must be named by the parameter it sets"),
+      list(record = list(committees = c(25, 1)),                  finding = "committees must be two finite numbers, the lower below the upper, not `c(25, 1)`"),
+      list(record = list(committees = c(1, 25), committees = c(2, 9)), finding = "names committees more than once"),
+      list(record = list(num_comp = c(1.5, 30)),                  finding = "num_comp is not a range of plsr's num_comp")
+    )
+
+    for (case in cases) {
+
+      obj <- configured_object()
+      obj$config$tuning["ranges"] <- list(case$record)
+      expect_true(any(grepl(case$finding, finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                  label = deparse1(case$record))
+
+    }
+
+    ## The record at its defaults, and one the models do not all tune, pass
+    obj <- configured_object()
+    obj$config$tuning$ranges <- merge_ranges(list(mtry = c(1, 200)))
+    expect_identical(validate_horizons_data(obj), obj)
+
+  })
+
   it("refuses an evaluated object without its configuration grid, which would leave the configuration unchecked (#212)", {
 
     ## The stored fit, as a verb wrote it. Without the grid the base

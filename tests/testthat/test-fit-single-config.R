@@ -563,7 +563,7 @@ describe("fit_single_config() - failure paths", {
   it("names the parameter finalization when the bounds cannot be set", {
 
     setup <- fsc()$setup
-    local_mocked_bindings(cap_pls_components = function(...) stop("the bounds could not be set"))
+    local_mocked_bindings(cap_by_data = function(...) stop("the bounds could not be set"))
 
     expect_failed_at(run_on_shared(setup), "Parameter finalization",
                      "the bounds could not be set", warm_start = NA)
@@ -1183,6 +1183,50 @@ describe("fit_single_config() - a search space that fits the budget", {
     expect_identical(got$result$status, "success")
     expect_true(got$searched)
     expect_identical(got$result$start_grid_size, 2L)
+
+  })
+
+})
+
+
+## =========================================================================
+## The ranges searched (tune_ranges)
+## =========================================================================
+
+describe("fit_single_config() - the ranges searched (tune_ranges)", {
+
+  it("keeps the warm-start grid and every re-tune candidate within a committees range, evaluate()'s choice outside it clamped", {
+
+    skip_if_not_installed("Cubist")
+
+    seen        <- new.env()
+    real_retune <- tune_warmstart_bayes
+    local_mocked_bindings(tune_warmstart_bayes = function(...) {
+      seen$grid <- list(...)$initial_grid
+      out       <- real_retune(...)
+      seen$results <- out$tune_results
+      out
+    })
+
+    setup  <- make_fit_setup(n = 40, n_wn = 12)
+    result <- suppressWarnings(fit_single_config(
+      config_row          = make_fit_config(model = "cubist"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = tibble::tibble(committees = 20L, neighbors = 3L, max_rules = 20L),
+      final_bayesian_iter = 3L,
+      grid_size           = 3L,
+      tune_ranges         = list(committees = c(1, 8)),
+      seed                = 42L,
+      isolate             = FALSE
+    ))
+
+    expect_identical(result$status, "success")
+    expect_true(result$warm_start)
+    expect_true(all(seen$grid$committees >= 1 & seen$grid$committees <= 8))
+    expect_true(8L %in% seen$grid$committees)
+    expect_true(all(tune::collect_metrics(seen$results)$committees <= 8))
 
   })
 

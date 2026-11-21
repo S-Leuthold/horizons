@@ -616,6 +616,54 @@ bayes_search <- function(workflow,
 }
 
 ## ---------------------------------------------------------------------------
+## apply_tune_ranges — the configured ranges on a model's parameter set
+## ---------------------------------------------------------------------------
+
+#' Set the configured ranges on a model's parameter set
+#'
+#' @description
+#' Each range of `config$tuning$ranges` (`configure(tune_ranges = )`, merged
+#' over `TUNE_RANGES`) the parameter set holds is set on its parameter, by
+#' id, in dials' units ([dials::range_set()]). Both single-config runners
+#' call it on the set they read from the workflow, before the bounds
+#' ([finalize_bound()]): [dials::finalize()] then fills only an upper bound
+#' still unknown, and the data cap narrows a range to what the folds hold.
+#' The grid, the Bayesian search, [exhaustive_grid()] and the warm start
+#' ([build_warmstart_grid()]) all read the set, so each searches the range.
+#'
+#' @param param_set A `parameters` object.
+#' @param ranges Named list of `c(lower, upper)` by parameter id.
+#' @return The parameter set.
+#' @keywords internal
+#' @noRd
+apply_tune_ranges <- function(param_set, ranges) {
+
+  for (id in intersect(names(ranges), param_set$id)) {
+
+    param     <- param_set$object[[which(param_set$id == id)]]
+    param_set <- update_parameter(param_set, id, dials::range_set(param, ranges[[id]]))
+
+  }
+
+  param_set
+
+}
+
+#' Replace one parameter of a parameter set
+#'
+#' @param param_set A `parameters` object.
+#' @param id Character(1). The parameter's id.
+#' @param param The `param` object to put in its place.
+#' @return The parameter set.
+#' @keywords internal
+#' @noRd
+update_parameter <- function(param_set, id, param) {
+
+  do.call(stats::update, c(list(param_set), stats::setNames(list(param), id)))
+
+}
+
+## ---------------------------------------------------------------------------
 ## exhaustive_grid — a search space small enough to try whole
 ## ---------------------------------------------------------------------------
 

@@ -200,12 +200,15 @@ describe("the pls engine", {
       workflows::add_formula(y ~ .) |>
       workflows::add_model(define_model_spec("plsr"))
 
-    range <- workflows::extract_parameter_set_dials(wf)$object[[1]]$range
+    ## The range is the default ranges' (TUNE_RANGES), as the runners set it
+    ## before the bounds, not the registration's
+    params <- apply_tune_ranges(workflows::extract_parameter_set_dials(wf), TUNE_RANGES)
+    range  <- params$object[[1]]$range
     expect_equal(c(range$lower, range$upper), c(1, PLS_MAX_COMP))
+    expect_true(dials::has_unknowns(workflows::extract_parameter_set_dials(wf)$object[[1]]))
 
     ## A cap that binds, as the runners apply it: 8 predictors' worth
-    params <- cap_pls_components(workflows::extract_parameter_set_dials(wf), 8L,
-                                 min_analysis_rows(folds))
+    params <- cap_by_data(params, 8L, min_analysis_rows(folds))
 
     grid  <- withr::with_seed(5, tune::tune_grid(wf, folds, grid = 3, param_info = params))
     bayes <- withr::with_seed(5, suppressMessages(
@@ -308,34 +311,69 @@ describe("pls_cap_records()", {
 })
 
 
-describe("cap_pls_components()", {
+describe("cap_by_data()", {
 
-  pls_params <- function() {
+  ## num_comp's range as the runners set it, from the default ranges, or
+  ## from another range given
+  pls_params <- function(ranges = TUNE_RANGES) {
     workflows::workflow() |>
       workflows::add_formula(y ~ .) |>
       workflows::add_model(define_model_spec("plsr")) |>
-      workflows::extract_parameter_set_dials()
+      workflows::extract_parameter_set_dials() |>
+      apply_tune_ranges(ranges)
   }
 
-  upper <- function(params) params$object[[which(params$name == "num_comp")]]$range$upper
+  range_of <- function(params, id) {
+    r <- params$object[[which(params$id == id)]]$range
+    c(r$lower, r$upper)
+  }
 
-  it("caps num_comp at PLS_MAX_COMP, the predictors and the rows less one, whichever is least", {
+  it("caps num_comp's own range at the predictors and the rows less one, whichever is least", {
 
-    expect_equal(upper(cap_pls_components(pls_params(), 500L, 200L)), 30)
-    expect_equal(upper(cap_pls_components(pls_params(), 12L, 200L)), 12)
-    expect_equal(upper(cap_pls_components(pls_params(), 500L, 20L)), 19)
-    expect_equal(upper(cap_pls_components(pls_params(), 500L, 1L)), 1)
+    expect_equal(range_of(cap_by_data(pls_params(), 500L, 200L), "num_comp"), c(1, 30))
+    expect_equal(range_of(cap_by_data(pls_params(), 12L, 200L), "num_comp"), c(1, 12))
+    expect_equal(range_of(cap_by_data(pls_params(), 500L, 20L), "num_comp"), c(1, 19))
+    expect_equal(range_of(cap_by_data(pls_params(), 500L, 1L), "num_comp"), c(1, 1))
+
+    ## A range given keeps its own bounds where the data hold them, and its
+    ## lower bound where they cap its upper
+    expect_equal(range_of(cap_by_data(pls_params(list(num_comp = c(5, 50))), 500L, 200L), "num_comp"),
+                 c(5, 50))
+    expect_equal(range_of(cap_by_data(pls_params(list(num_comp = c(5, 50))), 12L, 200L), "num_comp"),
+                 c(5, 12))
 
   })
 
-  it("leaves a parameter set without num_comp alone", {
+  it("caps a ranged mtry at the predictors, and leaves one the data hold alone", {
 
     rf <- workflows::workflow() |>
       workflows::add_formula(y ~ .) |>
       workflows::add_model(define_model_spec("rf")) |>
+      workflows::extract_parameter_set_dials() |>
+      apply_tune_ranges(list(mtry = c(1, 200)))
+
+    expect_equal(range_of(cap_by_data(rf, 150L, 40L), "mtry"), c(1, 150))
+    expect_equal(range_of(cap_by_data(rf, 500L, 40L), "mtry"), c(1, 200))
+    expect_equal(range_of(cap_by_data(rf, 150L, 40L), "min_n"), range_of(rf, "min_n"))
+
+  })
+
+  it("fails a range the data cannot hold at all, naming the range and the cap", {
+
+    expect_error(cap_by_data(pls_params(list(num_comp = c(20, 30))), 12L, 200L),
+                 "num_comp.* range 20 to 30 holds no value the data can fit: at most 12, for 12 predictors",
+                 class = "horizons_error_run")
+
+  })
+
+  it("leaves a parameter set without num_comp or mtry alone", {
+
+    mars <- workflows::workflow() |>
+      workflows::add_formula(y ~ .) |>
+      workflows::add_model(define_model_spec("mars")) |>
       workflows::extract_parameter_set_dials()
 
-    expect_identical(cap_pls_components(rf, 3L, 3L), rf)
+    expect_identical(cap_by_data(mars, 3L, 3L), mars)
 
   })
 

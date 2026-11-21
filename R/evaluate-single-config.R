@@ -41,6 +41,10 @@
 #'   whole number and the space has no more points than `grid_size +
 #'   bayesian_iter`, the grid is every point and the Bayesian stage does not
 #'   run (`exhaustive_grid()`).
+#' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
+#'   dials' units: the ranges the model's parameters are searched over, set
+#'   before the data cap them (`apply_tune_ranges()`). `evaluate()` reads
+#'   them from `configure()`'s `config$tuning$ranges`. Default `TUNE_RANGES`.
 #' @param prune Logical. If TRUE, record whether the best grid-search RPD
 #'   falls below `prune_threshold` (`below_prune_threshold`), and when it
 #'   does, skip Bayesian optimization and label the config `"pruned"`. With
@@ -114,6 +118,7 @@ evaluate_single_config <- function(config_row,
                                    role_map,
                                    grid_size       = DEFAULT_GRID_SIZE,
                                    bayesian_iter   = DEFAULT_BAYES_ITER,
+                                   tune_ranges     = TUNE_RANGES,
                                    prune           = FALSE,
                                    prune_threshold = 1.0,
                                    allow_par       = FALSE,
@@ -196,13 +201,16 @@ evaluate_single_config <- function(config_row,
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
     ## -----------------------------------------------------------------------
-    ## Step 2: Finalize parameter set (mtry and num_comp upper bounds)
+    ## Step 2: Finalize parameter set (the ranges, then the mtry and num_comp
+    ## upper bounds)
     ## -----------------------------------------------------------------------
-    ## Models with mtry (rf, xgboost, lightgbm) need the upper bound set from
-    ## the actual predictor count after recipe preprocessing. Without this,
-    ## tune_grid() may sample mtry values larger than the number of predictors.
-    ## plsr's num_comp is capped by the same count and by the smallest fold's
-    ## rows (#216).
+    ## The configured ranges come first (configure(tune_ranges = )), so the
+    ## bounds fill only an upper bound still unknown and the data cap narrows
+    ## a range rather than replacing it. Models with mtry (rf, xgboost,
+    ## lightgbm) need the upper bound set from the actual predictor count
+    ## after recipe preprocessing. Without this, tune_grid() may sample mtry
+    ## values larger than the number of predictors. plsr's num_comp is capped
+    ## by the same count and by the smallest fold's rows (#216).
     ##
     ## The prep rule: each fold's recipe is prepped once, before tuning, and
     ## every candidate the grid and the Bayesian search try is scored on it.
@@ -211,6 +219,7 @@ evaluate_single_config <- function(config_row,
     ## class; tune preps only inside the final fit (last_fit()).
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
+    param_set   <- unit_step("finalize_parameters", apply_tune_ranges(param_set, tune_ranges))
     prepped_now <- bounded_model(config_row$model)
 
     ## The configuration's fold preps: the run's entries, or, called on its

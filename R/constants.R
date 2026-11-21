@@ -169,13 +169,24 @@ SELECTION_PACKAGES <- list(
   cars        = "pls"
 )
 
-# The most components the plsr model tunes over (#216). The runners cap it
-# further at the predictors the recipe keeps and the smallest fold's rows less
-# one (cap_pls_components(), R/pls-engine.R). MIR models often want more than
-# the handful a default range allows, and 30 keeps a grid's points where
-# models land. Not a field of MODEL_SPECS: CARS caps its components with it
-# too (R/step-select-cars.R).
+# The most components the plsr model tunes over (#216), its default range's
+# upper bound in TUNE_RANGES. The runners cap it further at the predictors the
+# recipe keeps and the smallest fold's rows less one (cap_by_data(),
+# R/fold-cache.R). MIR models often want more than the handful a default
+# range allows, and 30 keeps a grid's points where models land. Not a field
+# of MODEL_SPECS: CARS caps its components with it too (R/step-select-cars.R).
 PLS_MAX_COMP <- 30L
+
+# horizons' default ranges of tuned parameters, keyed by the dials parameter
+# id, in dials' units (a log-scale parameter's in log10): configure()'s
+# `tune_ranges` is merged over them and recorded as config$tuning$ranges,
+# which evaluate() and fit() apply to every model that tunes the parameter
+# (apply_tune_ranges(), R/fit-warmstart.R). Another parameter keeps its
+# engine's range. Cubist's fit time grows linearly with its committees, and
+# on the profiled grids the best cross-validated RMSE at 25 committees or
+# fewer was within about a third of a standard error of the best over 1 to
+# 100.
+TUNE_RANGES <- list(committees = c(1, 25), num_comp = c(1, PLS_MAX_COMP))
 
 ## Transformations ------------------------------------------------------------
 
@@ -382,6 +393,7 @@ SHARED_ARG_NAMES <- c(
   "role_map",
   "grid_size",
   "bayesian_iter",
+  "tune_ranges",
   "prune",
   "prune_threshold",
   "seed",

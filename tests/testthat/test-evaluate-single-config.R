@@ -603,8 +603,9 @@ describe("evaluate_single_config() - a Bayesian search that repeats a grid point
     prepped <- recipes::prep(rec)
     baked   <- recipes::bake(prepped, NULL)
     preds   <- baked[, prepped_predictors(prepped, baked)]
-    ps <- cap_pls_components(dials::finalize(workflows::extract_parameter_set_dials(wf), preds),
-                             ncol(preds), min_analysis_rows(folds))
+    ps <- cap_by_data(dials::finalize(apply_tune_ranges(workflows::extract_parameter_set_dials(wf), TUNE_RANGES),
+                                      preds),
+                      ncol(preds), min_analysis_rows(folds))
     tm <- tuning_metric_set("none", outcome_range = c(0, Inf))
 
     grid    <- tune::.check_grid(grid = 10L, workflow = wf, pset = ps)
@@ -1127,7 +1128,7 @@ describe("evaluate_single_config() - each stage's failure exit", {
   it("names the parameter finalization when the tuning bounds cannot be set", {
 
     ## rf's mtry bound is set from the prepped recipe's predictors
-    local_mocked_bindings(cap_pls_components = function(...) stop("the bounds broke"))
+    local_mocked_bindings(cap_by_data = function(...) stop("the bounds broke"))
 
     expect_failed_at(run_on_shared(), "Parameter finalization", "the bounds broke")
 
@@ -1879,6 +1880,98 @@ describe("evaluate_single_config() - a PLS config", {
     num_comp <- param_info$object[[which(param_info$name == "num_comp")]]
     expect_equal(c(num_comp$range$lower, num_comp$range$upper), c(1, 12))
     expect_gt(min_analysis_rows(setup$folds) - 1, 12)
+
+  })
+
+})
+
+describe("evaluate_single_config() - the ranges searched (tune_ranges)", {
+
+  ## Cubist on a few rows, its fits in this process (isolate = FALSE: the
+  ## ranges do not depend on where a fit runs). The grid and every candidate
+  ## the Bayesian search tried are read from the calls.
+  run_cubist <- function(tune_ranges) {
+
+    skip_if_not_installed("Cubist")
+
+    seen         <- new.env()
+    real_search  <- bayes_search
+    real_grid    <- tune::tune_grid
+    local_mocked_bindings(bayes_search = function(...) {
+      out <- real_search(...)
+      seen$searched <- out$results
+      out
+    })
+    local_mocked_bindings(tune_grid = function(..., grid) {
+      seen$grid <- grid
+      real_grid(..., grid = grid)
+    }, .package = "tune")
+
+    setup <- make_eval_setup(n = 40, n_wn = 12)
+
+    row <- suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(model = "cubist"),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 3,
+      bayesian_iter = 3,
+      tune_ranges   = tune_ranges,
+      seed          = 42L,
+      isolate       = FALSE
+    ))
+
+    list(row = row, grid = seen$grid$committees,
+         searched = tune::collect_metrics(seen$searched)$committees)
+
+  }
+
+  it("draws the grid and every Bayesian candidate within a committees range tune_ranges sets", {
+
+    got <- run_cubist(list(committees = c(1, 8)))
+
+    expect_identical(got$row$status, "success")
+    expect_true(all(got$grid >= 1 & got$grid <= 8))
+    expect_true(all(got$searched >= 1 & got$searched <= 8))
+    expect_lte(got$row$best_params[[1]]$committees, 8)
+
+  })
+
+  it("searches committees within 1 to 25 by default", {
+
+    got <- run_cubist(TUNE_RANGES)
+
+    expect_identical(got$row$status, "success")
+    expect_true(all(got$grid <= 25))
+    expect_true(all(got$searched <= 25))
+
+  })
+
+  it("clamps a ranged mtry above the predictors to them, and fails a num_comp range the data cannot hold", {
+
+    ## 12 wavenumbers keep 4 predictors past the raw step's edge trim
+    setup <- make_eval_setup(n = 40, n_wn = 12)
+    seen  <- new.env()
+    local_mocked_bindings(tune_grid = function(..., param_info) {
+      seen$param_info <- param_info
+      stop("stopped after the parameter set")
+    }, .package = "tune")
+
+    evaluate_single_config(config_row = make_eval_config(model = "rf"), split = setup$split,
+                           cv_folds = setup$folds, role_map = setup$role_map, grid_size = 2,
+                           bayesian_iter = 0, tune_ranges = list(mtry = c(2, 200)), seed = 42L)
+
+    mtry <- seen$param_info$object[[which(seen$param_info$id == "mtry")]]
+    expect_equal(c(mtry$range$lower, mtry$range$upper), c(2, 4))
+
+    row <- evaluate_single_config(config_row = make_eval_config(model = "plsr"), split = setup$split,
+                                  cv_folds = setup$folds, role_map = setup$role_map, grid_size = 2,
+                                  bayesian_iter = 0, tune_ranges = list(num_comp = c(10, 30)),
+                                  seed = 42L)
+
+    expect_identical(row$status, "failed")
+    expect_match(row$error_message, "Parameter finalization")
+    expect_match(row$error_message, "num_comp.* range 10 to 30 holds no value the data can fit: at most 4")
 
   })
 

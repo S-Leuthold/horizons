@@ -2243,7 +2243,11 @@ describe("evaluate() - checkpoint data provenance", {
 
     expect_identical(manifest$settings,
                      eval_settings(cv_folds = 3L, grid_size = 2L,
-                                   bayesian_iter = 0L, prune = FALSE,
+                                   bayesian_iter = 0L,
+                                   ## horizons' default ranges, in the
+                                   ## record's text
+                                   tune_ranges = "committees 1 to 25; num_comp 1 to 30",
+                                   prune = FALSE,
                                    prune_threshold = NA_real_, seed = 42L,
                                    seed_rule = SEED_RULE,
                                    ## configure()'s recipe settings (#62), at
@@ -2940,6 +2944,51 @@ describe("evaluate() - tuning-settings provenance", {
 
     expect_setequal(ran, obj$config$configs$config_id)
     expect_true(all(vapply(again$evaluation$results$settings, `[[`, logical(1), "isolate")))
+
+  })
+
+  it("refuses to resume checkpoints tuned over other ranges, naming them, and evaluates again a row that does not record them", {
+
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
+    first  <- ck$value$first
+
+    expect_identical(unique(vapply(first$evaluation$results$settings, `[[`, character(1), "tune_ranges")),
+                     "committees 1 to 25; num_comp 1 to 30")
+
+    changed <- obj
+    changed$config$tuning$ranges <- merge_ranges(list(committees = c(1, 8)))
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(changed, prune = FALSE, seed = 42L,
+                                control = control_horizons(output_dir = tmpdir))),
+      horizons_error_input = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_error_input")
+    expect_match(flat_message(err),
+                 "tune_ranges = committees 1 to 25; num_comp 1 to 30 (this run: committees 1 to 8; num_comp 1 to 30)",
+                 fixed = TRUE)
+
+    ## Rows written before the ranges were recorded are evaluated again, as
+    ## a row missing any setting is
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      row <- readRDS(f)
+      row$settings[[1]]$tune_ranges <- NULL
+      saveRDS(row, f)
+    }
+
+    template <- first$evaluation$results[1, ]
+    ran      <- character(0)
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      ran <<- c(ran, config_row$config_id)
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    again <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
+
+    expect_setequal(ran, obj$config$configs$config_id)
 
   })
 

@@ -126,7 +126,8 @@ new_horizons_data <- function(analysis = NULL,
                   tuning = list(cv_folds            = 5L,
                                 grid_size           = 10L,
                                 bayesian_iter       = 15L,
-                                final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER),
+                                final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
+                                ranges              = merge_ranges(NULL)),
 
                   ## Written by configure(): list(sg_window, pca_threshold),
                   ## the settings build_recipe() applies to every config.
@@ -1046,6 +1047,16 @@ config_findings <- function(x) {
     findings <- c(findings, cli::format_inline(
       "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
     ))
+
+  }
+
+  ### The ranges the models are searched over: their shape, and each one's
+  ### type where the model's engine is installed (tune_range_findings())
+  if (!is.null(tuning$ranges)) {
+
+    range_findings <- tune_range_findings(tuning$ranges, as.character(configs$model),
+                                          arg = "config$tuning$ranges", check_names = FALSE)
+    findings       <- c(findings, sub("\\.$", "", range_findings))
 
   }
 

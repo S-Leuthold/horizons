@@ -45,6 +45,11 @@
 #'   points than `grid_size + final_bayesian_iter`, the grid is every point
 #'   and no Bayesian search runs (`exhaustive_grid()`).
 #' @param grid_size Integer. Grid size for warm-start exploration.
+#' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
+#'   dials' units: the ranges the re-tune searches, set before the data cap
+#'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
+#'   `config$tuning$ranges`, the ranges `evaluate()` searched. Default
+#'   `TUNE_RANGES`.
 #' @param compute_uq Logical. Whether to train UQ components.
 #' @param compute_ad Logical. Whether to fit the applicability domain, on the
 #'   same calibration set as UQ.
@@ -112,6 +117,7 @@ fit_single_config <- function(config_row,
                               best_params_eval,
                               final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
                               grid_size           = DEFAULT_GRID_SIZE,
+                              tune_ranges         = TUNE_RANGES,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
                               allow_par           = FALSE,
@@ -211,16 +217,19 @@ fit_single_config <- function(config_row,
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
     ## -----------------------------------------------------------------------
-    ## Step 2: Finalize parameter set (mtry / num_comp upper bound; num_comp
-    ## also by the smallest fold's rows, #216)
+    ## Step 2: Finalize parameter set (the ranges, then the mtry / num_comp
+    ## upper bound; num_comp also by the smallest fold's rows, #216)
     ## -----------------------------------------------------------------------
-    ## The prep rule evaluate_single_config() follows: each fold's recipe is
+    ## The configured ranges first, as in evaluate_single_config(), so the
+    ## re-tune searches the space evaluate() did. The prep rule
+    ## evaluate_single_config() follows: each fold's recipe is
     ## prepped once, before the re-tune, and the re-tune and the out-of-fold
     ## predictions are scored on it; the bounds are read from one more prep,
     ## of the fold recipe on the whole training part. A step's error in either
     ## ends the member with its class.
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
+    param_set   <- unit_step("finalize_parameters", apply_tune_ranges(param_set, tune_ranges))
     prepped_now <- bounded_model(config_row$model)
 
     ## The member's fold preps: fit()'s entries, or, called on its own,

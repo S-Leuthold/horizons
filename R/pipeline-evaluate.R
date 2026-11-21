@@ -556,6 +556,10 @@ evaluate <- function(x,
   tuning   <- x$config$tuning
   cv_folds <- tuning$cv_folds
 
+  ## The ranges the models' parameters are searched over (configure()'s
+  ## tune_ranges, merged over TUNE_RANGES)
+  tune_ranges <- tuning$ranges %||% TUNE_RANGES
+
   ## -----------------------------------------------------------------------
   ## Step 3a: The window has to fit the spectrum
   ## -----------------------------------------------------------------------
@@ -747,6 +751,10 @@ evaluate <- function(x,
     cv_folds        = cv_folds,
     grid_size       = tuning$grid_size,
     bayesian_iter   = tuning$bayesian_iter,
+    ## The ranges searched, in one text (format_ranges()), recorded for every
+    ## row, as pca_threshold is: a row whose model tunes none of them re-runs
+    ## rather than resumes when only a range changed
+    tune_ranges     = format_ranges(tune_ranges),
     prune           = prune,
     ## Read only when pruning, so it cannot have changed a row otherwise.
     prune_threshold = if (isTRUE(prune)) prune_threshold else NA_real_,
@@ -1034,6 +1042,7 @@ evaluate <- function(x,
       role_map        = role_map,
       grid_size       = tuning$grid_size,
       bayesian_iter   = tuning$bayesian_iter,
+      tune_ranges     = tune_ranges,
       prune           = prune,
       prune_threshold = prune_threshold,
       seed            = seed,
@@ -1205,6 +1214,7 @@ evaluate <- function(x,
         role_map        = role_map,
         grid_size       = tuning$grid_size,
         bayesian_iter   = tuning$bayesian_iter,
+        tune_ranges     = tune_ranges,
         prune           = prune,
         prune_threshold = prune_threshold,
         allow_par       = axis$tune_allow_par,
@@ -3938,7 +3948,8 @@ prepare_worker <- function(models, selections) {
 #'   `shared`, the list of worker inputs assembled by `evaluate()`, whose keys are
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
-#'   `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`, `seed`,
+#'   `grid_size`, `bayesian_iter`, `tune_ranges` (the ranges searched),
+#'   `prune`, `prune_threshold`, `seed`,
 #'   `sg_window`, `pca_threshold` (the object's recipe settings),
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
@@ -4065,6 +4076,7 @@ evaluate_config_worker <- function(config_i, payload_path) {
     role_map         = shared$role_map,
     grid_size        = shared$grid_size,
     bayesian_iter    = shared$bayesian_iter,
+    tune_ranges      = shared$tune_ranges,
     prune            = shared$prune,
     prune_threshold  = shared$prune_threshold,
     allow_par        = FALSE,     # configs axis: tune runs sequentially inside

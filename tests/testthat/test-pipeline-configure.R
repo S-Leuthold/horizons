@@ -653,6 +653,65 @@ describe("configure() storage", {
 ## 5. Reconfiguration tests
 ## ===========================================================================
 
+describe("configure() tune_ranges", {
+
+  test_that("records horizons' default ranges with the given ones over them, sorted, and the constructor's default is the table", {
+
+    hd <- make_single_response_hd()
+
+    expect_identical(quiet_configure(hd)$config$tuning$ranges,
+                     list(committees = c(1, 25), num_comp = c(1, 30)))
+    expect_identical(new_horizons_data()$config$tuning$ranges, merge_ranges(NULL))
+
+    got <- quiet_configure(hd, tune_ranges = list(mtry = c(2L, 50L), committees = c(1, 8)))
+    expect_identical(got$config$tuning$ranges,
+                     list(committees = c(1, 8), mtry = c(2, 50), num_comp = c(1, 30)))
+
+    ## In dials' units: a log-scale parameter's range in log10
+    got <- quiet_configure(hd, models = "xgboost", tune_ranges = list(learn_rate = c(-3, -1)))
+    expect_identical(got$config$tuning$ranges$learn_rate, c(-3, -1))
+
+  })
+
+  test_that("refuses ranges it cannot search, naming each, as an input error", {
+
+    hd  <- make_single_response_hd()
+    bad <- list(
+      list(models = "cubist", tune_ranges = list(commitees = c(1, 8))),
+      list(models = "cubist", tune_ranges = list(mtry = c(1, 8))),
+      list(tune_ranges = c(committees = 8)),
+      list(tune_ranges = list(c(1, 8))),
+      list(tune_ranges = list(committees = c(1, 8), committees = c(2, 9))),
+      list(tune_ranges = list(committees = c(1, 8, 9))),
+      list(tune_ranges = list(committees = c(NA, 8))),
+      list(tune_ranges = list(num_comp = c(1, Inf))),
+      list(tune_ranges = list(committees = c(8, 8)))
+    )
+
+    said <- vapply(bad, function(args) {
+      err <- expect_error(do.call(configure, c(list(hd, verbose = FALSE), args)),
+                          class = "horizons_error_input")
+      conditionMessage(err)
+    }, character(1))
+
+    expect_snapshot(writeLines(said, sep = "\n\n"))
+
+  })
+
+  test_that("refuses a fractional bound on a whole-number parameter, in dials' words, where the engine is installed", {
+
+    skip_if_not_installed("Cubist")
+
+    err <- expect_error(configure(make_single_response_hd(), verbose = FALSE,
+                                  tune_ranges = list(committees = c(1.5, 25))),
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "committees.* is not a range of cubist's .*committees")
+
+  })
+
+})
+
+
 describe("configure() reconfiguration", {
 
   test_that("calling configure() twice overwrites cleanly", {
