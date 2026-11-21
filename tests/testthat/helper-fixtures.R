@@ -66,7 +66,7 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 ## ---------------------------------------------------------------------------
 
 make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
-                            n_na = 0L, models = c("rf", "cubist")) {
+                            n_na = 0L, models = c("rf", "cubist"), feature_selection = "none") {
 
   set.seed(seed)
 
@@ -90,13 +90,14 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
     role     = c("id", rep("predictor", n_wn), "outcome")
   )
 
-  ## Configs: rf + cubist by default (fast, tunable)
+  ## Configs: rf + cubist by default (fast, tunable), with no selection
+  ## unless one is given for each
   configs <- tibble::tibble(
     config_id         = paste0("cfg_", sprintf("%03d", seq_len(n_configs))),
     model             = models[seq_len(n_configs)],
     transformation    = "none",
     preprocessing     = "raw",
-    feature_selection = "none"
+    feature_selection = rep_len(feature_selection, n_configs)
   )
 
   ## Built from the constructor, so every key the contract declares (the log

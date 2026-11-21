@@ -1039,8 +1039,9 @@ failed_fold_entry <- function(unit, records) {
 #' @param results The rows so far, carried by a stop.
 #' @param daemons `NULL` to build in this session; on a parallel run a list
 #'   with `payload` (the configs axis's payload file, absolute, or `NULL`,
-#'   when each task carries its rows), `n_left` (the configurations still to
-#'   run, for a stop's message) and `verb`.
+#'   when each task carries its rows), `n_left` (what is still to run, for a
+#'   stop's message: `evaluate()`'s configurations or `fit()`'s members) and
+#'   `verb`.
 #' @param call The frame a stop reports.
 #' @return [fold_stage_record()]'s table.
 #' @keywords internal

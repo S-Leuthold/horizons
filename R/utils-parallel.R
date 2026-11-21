@@ -212,17 +212,19 @@ daemons_dispatch <- function() {
 #' through mirai's dispatcher: without it the work runs as asked, but loses
 #' both, which the run says once, as an `input` warning, and on the tree's
 #' parallel line. Said wherever the window runs: the configs axis's
-#' configurations, and a run's fold preparations on the resamples axis.
+#' configurations, `evaluate()`'s fold preparations on the resamples axis,
+#' and `fit()`'s.
 #'
 #' @param collector The verb's collector, from `log_open()`.
 #' @param what Character(1). What the window runs, e.g. `"configurations"`.
+#' @param verb Character(1). The verb that runs it.
 #' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
-log_no_dispatcher <- function(collector, what) {
+log_no_dispatcher <- function(collector, what, verb) {
 
   log_warning(collector, "input", c(
-    "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn evaluate} cannot start the longest {what} first or cancel the ones still running when it stops.",
+    "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn {verb}} cannot start the longest {what} first or cancel the ones still running when it stops.",
     "i" = "mirai keeps its dispatcher unless {.code dispatcher = FALSE} is set; set the daemons again without it."
   ))
 
@@ -304,8 +306,8 @@ await_round <- function(tasks, no_daemons) {
 #'
 #' @param results The rows finished so far, carried as `results`, or `NULL`
 #'   when the verb has none to carry.
-#' @param n_left Integer(1) or `NULL`. The configurations still to run, when
-#'   the caller knows them.
+#' @param n_left Integer(1) or `NULL`. What is still to run, when the caller
+#'   knows it: `evaluate()`'s configurations, or `fit()`'s members.
 #' @param output_dir The run's `output_dir`, or `NULL`.
 #' @param verb Character(1). The verb that stops.
 #' @param connected Integer(1). The daemons connected: 0, or 1 before a unit
@@ -323,6 +325,8 @@ abort_no_daemons <- function(results, n_left = NULL, output_dir = NULL, verb = "
       "Only one mirai daemon is connected, and {.fn {verb}} needs two to run its work in parallel, so it stopped before its work was done."
     } else if (is.null(n_left)) {
       "No mirai daemon is connected, so {.fn {verb}} stopped before its work was done."
+    } else if (identical(verb, "fit")) {
+      "No mirai daemon is connected, so {.fn {verb}} stopped with {n_left} member{?s} still to fit."
     } else {
       "No mirai daemon is connected, so {.fn {verb}} stopped with {n_left} configuration{?s} still to run."
     },
@@ -1004,8 +1008,9 @@ isolated_deaths <- function(on_daemons) {
 #' @param rows_so_far A function of no arguments returning the results table
 #'   a stop carries.
 #' @param output_dir The run's `output_dir`, for a stop's message.
-#' @param n_left Integer(1) or `NULL`. The configurations still to run, for
-#'   a stop's message; `NULL` counts the units not collected.
+#' @param n_left Integer(1) or `NULL`. What is still to run, for a stop's
+#'   message ([abort_no_daemons()]): `evaluate()`'s configurations, or
+#'   `fit()`'s members; `NULL` counts the units not collected.
 #' @param verb Character(1). The verb, for a stop's message.
 #' @param call The frame a stop reports: the verb's.
 #' @return `NULL`, invisibly, once every unit's value has been collected.

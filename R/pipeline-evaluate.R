@@ -626,7 +626,7 @@ evaluate <- function(x,
   ## tree's parallel line, which an interrupted run's console keeps
   no_dispatcher <- axis$axis == "configs" && !daemons_dispatch()
 
-  if (no_dispatcher) log_no_dispatcher(collector, "configurations")
+  if (no_dispatcher) log_no_dispatcher(collector, "configurations", verb = "evaluate")
 
   ## Fits a model's engine would otherwise carry state across run in this
   ## session when isolation is turned off, which the log notes
@@ -840,7 +840,7 @@ evaluate <- function(x,
   ## does
   if (axis$axis == "resamples" && length(fold_units) > 0 && !daemons_dispatch()) {
     no_dispatcher <- TRUE
-    log_no_dispatcher(collector, "fold preparations")
+    log_no_dispatcher(collector, "fold preparations", verb = "evaluate")
   }
 
   ## -----------------------------------------------------------------------

@@ -252,6 +252,12 @@ transformation), as \code{\link[=evaluate]{evaluate()}} prepares its configurati
 there); the preparations are held in this session and dropped when the
 call returns. With \code{control_horizons(allow_par = TRUE)} they are prepared
 on the daemons, one task each, longest first, each carrying its rows, and
+those still running are cancelled when the call stops; both need mirai's
+dispatcher, so on daemons set with \code{dispatcher = FALSE} \code{fit()} warns of
+it once, with class \code{horizons_warning_input}, as \code{\link[=evaluate]{evaluate()}} does, the
+warning a row of the object's \code{log} and "no dispatcher" on the progress
+tree's parallel line. A pool left with no daemon while they run stops the
+call with \code{horizons_error_no_daemons}, every member still to fit. Then
 tune runs the CV folds inside each member's re-tune and OOF pass on the
 \href{https://mirai.r-lib.org}{mirai} daemons the caller has set
 (\code{mirai::daemons(4)} before the call); a

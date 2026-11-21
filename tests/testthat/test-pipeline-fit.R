@@ -1907,3 +1907,60 @@ describe("fit() - each fold's prep built once for the call", {
   })
 
 })
+
+describe("fit() - its fold preparations on the daemons", {
+
+  it("says once, on the log and the tree, that daemons without the dispatcher lose the order and the cancellation of its fold preparations (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ev <- shared_prep_eval()
+    local_test_daemons(2, dispatcher = FALSE)
+
+    out <- utils::capture.output(got <- collect_warnings(with_deadline(
+      fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+          control = control_horizons(allow_par = TRUE, verbose = TRUE)),
+      120
+    ), class = "horizons_warning_input"))
+
+    expect_length(got$warnings, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(got$warnings[[1]]))
+    expect_match(msg, "set with `dispatcher = FALSE`, so `fit()` cannot start the longest fold preparations first",
+                 fixed = TRUE)
+    expect_true(any(grepl("Parallel: over resamples on mirai (2 daemons, no dispatcher)", out, fixed = TRUE)))
+    expect_identical(got$value$models$results$status, "success")
+
+  })
+
+  it("stops naming the members still to fit when no daemon is left for its fold preparations (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## Two members on seven fold preparations (rf on PCA, which bounds mtry,
+    ## and elastic_net on correlation), and two daemons that exit after two
+    ## tasks each: the check at the door takes one of each, two preparations
+    ## the others, and the five left have no daemon. Both members are still
+    ## to fit.
+    obj <- make_fit_object(n = 60, n_configs = 2, models = c("rf", "elastic_net"),
+                           feature_selection = c("pca", "correlation"))
+    local_test_daemons(2, maxtasks = 2)
+
+    err <- expect_error(
+      with_deadline(suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                                         control = control_horizons(allow_par = TRUE, verbose = FALSE))), 60),
+      class = "horizons_error_no_daemons"
+    )
+
+    expect_s3_class(err, "horizons_error_systemic")
+    expect_identical(nrow(err$results), 0L)
+
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "No mirai daemon is connected, so `fit()` stopped with 2 members still to fit.", fixed = TRUE)
+
+  })
+
+})

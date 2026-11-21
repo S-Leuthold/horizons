@@ -198,6 +198,12 @@
 #' there); the preparations are held in this session and dropped when the
 #' call returns. With `control_horizons(allow_par = TRUE)` they are prepared
 #' on the daemons, one task each, longest first, each carrying its rows, and
+#' those still running are cancelled when the call stops; both need mirai's
+#' dispatcher, so on daemons set with `dispatcher = FALSE` `fit()` warns of
+#' it once, with class `horizons_warning_input`, as [evaluate()] does, the
+#' warning a row of the object's `log` and "no dispatcher" on the progress
+#' tree's parallel line. A pool left with no daemon while they run stops the
+#' call with `horizons_error_no_daemons`, every member still to fit. Then
 #' tune runs the CV folds inside each member's re-tune and OOF pass on the
 #' [mirai](https://mirai.r-lib.org) daemons the caller has set
 #' (`mirai::daemons(4)` before the call); a
@@ -683,6 +689,25 @@ fit <- function(x,
   log_small_folds(collector, cv_resamples)
 
   ## -----------------------------------------------------------------------
+  ## Step 2b: The fold preps the members need
+  ## -----------------------------------------------------------------------
+  ## Each fold's prep is a unit of its own, named by what is prepped, and
+  ## built once for every member that reads it (fold_prep_units()): listed
+  ## before the tree's header, as evaluate() lists its configurations'.
+
+  member_rows <- all_configs[match(top_configs$config_id, all_configs$config_id), ]
+  fold_units  <- fold_prep_units(member_rows, cv_resamples, role_map, verb = "fit", data = NULL,
+                                 seed = seed, sg_window = recipe_cfg$sg_window,
+                                 pca_threshold = recipe_cfg$pca_threshold)
+
+  ## With allow_par the fold preps are the window's tasks, so without mirai's
+  ## dispatcher they lose the longest-first start and the cancel, and fit()
+  ## says so once, and on the tree's parallel line, as evaluate() does
+  no_dispatcher <- allow_par && length(fold_units) > 0 && !daemons_dispatch()
+
+  if (no_dispatcher) log_no_dispatcher(collector, "fold preparations", verb = "fit")
+
+  ## -----------------------------------------------------------------------
   ## Step 3: Tree header
   ## -----------------------------------------------------------------------
 
@@ -821,7 +846,8 @@ fit <- function(x,
     ## A parallel fit runs the members' folds on the daemons
     for (line in parallel_tree_lines(if (allow_par) "resamples" else "sequential", n_daemons,
                                      member_configs$model, control$isolate,
-                                     short_memory = short_memory, debug_off = par_by_user && debug)) {
+                                     no_dispatcher = no_dispatcher, short_memory = short_memory,
+                                     debug_off = par_by_user && debug)) {
       cat(paste0("\u2502  ", line, "\n"))
     }
 
@@ -832,16 +858,13 @@ fit <- function(x,
   ## -----------------------------------------------------------------------
   ## Step 3b: Each fold prep the members need, built once for the call
   ## -----------------------------------------------------------------------
-  ## As evaluate() builds its configurations' (fold_prep_units()): members of
-  ## one preprocessing and selection read one prep per fold. fit() has no
-  ## output_dir and resumes nothing, so they live in this call; on the
-  ## daemons with allow_par, each task carrying its rows.
+  ## As evaluate() builds its configurations': members of one preprocessing
+  ## and selection read one prep per fold. fit() has no output_dir and
+  ## resumes nothing, so they live in this call; on the daemons with
+  ## allow_par, each task carrying its rows. Every member is still to fit
+  ## while they are built, which a stop for want of daemons says.
 
-  member_rows <- all_configs[match(top_configs$config_id, all_configs$config_id), ]
-  fold_units  <- fold_prep_units(member_rows, cv_resamples, role_map, verb = "fit", data = NULL,
-                                 seed = seed, sg_window = recipe_cfg$sg_window,
-                                 pca_threshold = recipe_cfg$pca_threshold)
-  fold_store  <- NULL
+  fold_store <- NULL
 
   if (length(fold_units) > 0) {
 
@@ -857,7 +880,7 @@ fit <- function(x,
       collector     = collector,
       output_dir    = NULL,
       results       = member_results(list()),
-      daemons       = if (allow_par) list(payload = NULL, n_left = NULL, verb = "fit")
+      daemons       = if (allow_par) list(payload = NULL, n_left = nrow(member_rows), verb = "fit")
     )
 
     if (verbose) {
