@@ -406,7 +406,6 @@ fold_rows <- function(split) {
 #' @param seed The run's root.
 #' @param sg_window,pca_threshold The object's recipe settings.
 #' @param debug,keep_traces Passed to [run_unit()].
-#' @param recipe The recipe to prep, or `NULL` for the unit's own.
 #' @return The entry: a list with `key` (the unit's), `failed`, `records`
 #'   (the unit's, shaped like [new_unit_records()]'s), `kept` (the
 #'   predictors, in baked order, whose count is the prep's predictor count),
@@ -416,15 +415,14 @@ fold_rows <- function(split) {
 #' @keywords internal
 #' @noRd
 prep_fold_entry <- function(unit, hoisted, rows, role_map, seed, sg_window, pca_threshold,
-                            debug = FALSE, keep_traces = FALSE, recipe = NULL) {
+                            debug = FALSE, keep_traces = FALSE) {
 
   start_time <- Sys.time()
   scope      <- fold_prep_scope(unit$verb, unit$row)
 
   out <- run_unit({
 
-    recipe <- recipe %||% unit_step("recipe", fold_unit_recipe(unit$row, hoisted, role_map,
-                                                               sg_window, pca_threshold))
+    recipe <- unit_step("recipe", fold_unit_recipe(unit$row, hoisted, role_map, sg_window, pca_threshold))
 
     if (is.null(rows)) {
 

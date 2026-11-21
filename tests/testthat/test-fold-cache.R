@@ -14,7 +14,8 @@
 
 ## Helper: training rows with spectra, an id, a meta column and a sibling
 ## response; three folds; one configuration's fold preps, as entries, and
-## its folds assembled from them
+## its folds assembled from them. A `recipe` given is the one each prep
+## preps, in place of its unit's own (fold_unit_recipe() replaced).
 prep_fold_case <- function(selection, transformation = "none", n = 60, n_wn = 30,
                            recipe = NULL) {
 
@@ -43,9 +44,10 @@ prep_fold_case <- function(selection, transformation = "none", n = 60, n_wn = 30
                               sg_window = DEFAULT_SG_WINDOW, pca_threshold = DEFAULT_PCA_THRESHOLD,
                               bounded = TRUE)
 
+  if (!is.null(recipe)) testthat::local_mocked_bindings(fold_unit_recipe = function(...) recipe)
+
   entry_of <- function(unit, rows) {
-    prep_fold_entry(unit, inputs$data, rows, role_map, 8L,
-                    DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD, recipe = recipe)
+    prep_fold_entry(unit, inputs$data, rows, role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD)
   }
 
   entries  <- lapply(seq_along(units$folds), function(i) entry_of(units$folds[[i]], fold_rows(folds$splits[[i]])))
@@ -255,10 +257,13 @@ describe("assemble_folds()", {
     ## prep's failure as the prep recorded it, step, class and words, and
     ## reads no fold after it
     case   <- prep_fold_case("correlation")
-    failed <- prep_fold_entry(case$units$folds[[2]], case$inputs$data, fold_rows(case$folds$splits[[2]]),
-                              case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD,
-                              recipe = recipes::recipe(SOC ~ ., data = case$inputs$data) |>
-                                recipes::step_mutate(boom = stop("boom on a fold")))
+    boom   <- recipes::recipe(SOC ~ ., data = case$inputs$data) |>
+      recipes::step_mutate(boom = stop("boom on a fold"))
+    failed <- testthat::with_mocked_bindings(
+      prep_fold_entry(case$units$folds[[2]], case$inputs$data, fold_rows(case$folds$splits[[2]]),
+                      case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD),
+      fold_unit_recipe = function(...) boom
+    )
     read   <- integer(0)
 
     unit <- run_unit(
@@ -343,10 +348,16 @@ describe("prep_fold_entry()", {
     units  <- config_fold_units("evaluate", config_as(case$config, feature_selection = "pca"), case$folds,
                                 case$role_map, NULL, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD, bounded = TRUE)
 
-    on_fold     <- prep_fold_entry(units$folds[[1]], case$inputs$data, fold_rows(case$folds$splits[[1]]),
-                                   case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD, recipe = recipe)
-    on_training <- prep_fold_entry(units$training, case$inputs$data, NULL,
-                                   case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD, recipe = recipe)
+    ## Each prep given `recipe` in place of its unit's own
+    prep_with <- function(recipe, unit, rows) {
+      testthat::with_mocked_bindings(
+        prep_fold_entry(unit, case$inputs$data, rows, case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD),
+        fold_unit_recipe = function(...) recipe
+      )
+    }
+
+    on_fold     <- prep_with(recipe, units$folds[[1]], fold_rows(case$folds$splits[[1]]))
+    on_training <- prep_with(recipe, units$training, NULL)
 
     expect_true(on_fold$failed)
     expect_identical(unit_failure_message(on_fold$records, "x"), "Fold preparation failed: boom from step (in `step_mutate()`)")
@@ -358,9 +369,7 @@ describe("prep_fold_entry()", {
     tripwire <- recipes::recipe(SOC ~ ., data = case$inputs$data) |>
       recipes::step_mutate(boom = horizons:::abort_horizons("Rows misaligned.", kind = "internal"))
 
-    err <- expect_error(prep_fold_entry(units$folds[[1]], case$inputs$data, fold_rows(case$folds$splits[[1]]),
-                                        case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD,
-                                        recipe = tripwire),
+    err <- expect_error(prep_with(tripwire, units$folds[[1]], fold_rows(case$folds$splits[[1]])),
                         "Rows misaligned.", fixed = TRUE)
     expect_true(rlang::cnd_inherits(err, "horizons_error_internal"))
 
