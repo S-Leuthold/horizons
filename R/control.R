@@ -67,37 +67,28 @@ control_check_output_dir <- function(x, arg, call) {
 
 }
 
-control_check_breaker <- function(x, arg, call) {
+### A count that can be turned off: FALSE, or a whole number of at least
+### `floor`. The breaker's is the failures with one cause that stop a run,
+### at least two; the Bayesian search's stopping rule is tune's no_improve,
+### which counts the iterations since the best, so one is its least.
+control_check_off_or_count <- function(floor) {
 
-  if (isFALSE(x)) return(invisible(NULL))
+  force(floor)
 
-  if (!rlang::is_scalar_integerish(x) || is.na(x) || x < 2) {
+  function(x, arg, call) {
 
-    got <- if (is.atomic(x) && length(x) == 1) cli::format_inline("{.val {x}}") else cli::format_inline("{.obj_type_friendly {x}}")
+    if (isFALSE(x)) return(invisible(NULL))
 
-    abort_horizons(
-      "{.arg {arg}} must be {.code FALSE} or a whole number of at least 2, not {got}.",
-      kind = "input", call = call
-    )
+    if (!rlang::is_scalar_integerish(x) || is.na(x) || x < floor) {
 
-  }
+      got <- if (is.atomic(x) && length(x) == 1) cli::format_inline("{.val {x}}") else cli::format_inline("{.obj_type_friendly {x}}")
 
-}
+      abort_horizons(
+        "{.arg {arg}} must be {.code FALSE} or a whole number of at least {floor}, not {got}.",
+        kind = "input", call = call
+      )
 
-### The Bayesian search's stopping rule: tune's no_improve, which counts the
-### iterations since the best, so one is its least
-control_check_no_improve <- function(x, arg, call) {
-
-  if (isFALSE(x)) return(invisible(NULL))
-
-  if (!rlang::is_scalar_integerish(x) || is.na(x) || x < 1) {
-
-    got <- if (is.atomic(x) && length(x) == 1) cli::format_inline("{.val {x}}") else cli::format_inline("{.obj_type_friendly {x}}")
-
-    abort_horizons(
-      "{.arg {arg}} must be {.code FALSE} or a whole number of at least 1, not {got}.",
-      kind = "input", call = call
-    )
+    }
 
   }
 
@@ -149,7 +140,7 @@ CONTROL_FIELDS <- list(
 
   breaker = list(
     default = function() BREAKER_FAILURES,
-    check   = control_check_breaker,
+    check   = control_check_off_or_count(2),
     verbs   = c("evaluate", "fit")
   ),
 
@@ -204,7 +195,7 @@ CONTROL_FIELDS <- list(
   ### records it with a checkpoint's settings
   no_improve = list(
     default = function() BAYES_NO_IMPROVE_DEFAULT,
-    check   = control_check_no_improve,
+    check   = control_check_off_or_count(1),
     verbs   = c("evaluate", "fit")
   ),
 

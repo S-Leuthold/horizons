@@ -170,7 +170,7 @@ pls_fit <- function(x, y, ncomp = 2L) {
 #'   `new_data`: a tibble of `num_comp` (the counts asked for, in their order)
 #'   and `.pred`.
 #' @keywords internal
-#' @rawNamespace S3method(parsnip::multi_predict, "_horizons_pls")
+#' @exportS3Method parsnip::multi_predict "_horizons_pls"
 multi_predict._horizons_pls <- function(object, new_data, type = NULL, num_comp = NULL, ...) {
 
   fit    <- object$fit
@@ -259,32 +259,19 @@ pls_cap_records <- function(folds, best_params) {
 
   requested <- as.integer(best_params$num_comp[[1]])
 
-  texts <- vapply(folds$splits, function(split) {
+  ### Each capped fold's warning as it would arrive from the fit, grouped as
+  ### the fold preps' warnings are
+  arrivals <- Map(function(split, fold) {
     n_predictors <- ncol(split$data) - 1L
     n_rows       <- length(split$in_id)
     fitted       <- pls_components(requested, n_predictors, n_rows)
-    if (fitted < requested) pls_cap_message(fitted, requested, n_predictors, n_rows) else NA_character_
-  }, character(1))
+    if (fitted < requested) {
+      parts <- condition_parts(pls_cap_message(fitted, requested, n_predictors, n_rows), max_chars = Inf)
+      tibble::tibble(cause = parts$cause, where = parts$where, fold = fold)
+    }
+  }, folds$splits, resample_ids(folds))
 
-  capped <- !is.na(texts)
-
-  if (!any(capped)) return(new_warning_log())
-
-  n_folds  <- nrow(folds)
-  ids      <- resample_ids(folds)[capped]
-  texts    <- texts[capped]
-  distinct <- unique(texts)
-  parts    <- lapply(distinct, condition_parts, max_chars = Inf)
-
-  tibble::tibble(
-    cause   = vapply(parts, `[[`, character(1), "cause"),
-    where   = vapply(parts, `[[`, character(1), "where"),
-    n       = tabulate(match(texts, distinct), nbins = length(distinct)),
-    scope   = "cv",
-    folds   = lapply(distinct, function(text) ids[texts == text]),
-    n_folds = as.integer(n_folds),
-    pinned  = FALSE
-  )
+  fold_warning_records(arrivals, nrow(folds))
 
 }
 
