@@ -459,20 +459,47 @@ describe("config_fold_units()", {
 
     case  <- prep_fold_case("none")
     pca   <- config_as(case$config, feature_selection = "pca")
-    name  <- function(...) units_of(pca, ...)$folds[[1]]$name
-    plain <- name(case$folds, case$role_map)
+    first <- function(folds = case$folds, verb = "evaluate", data = NULL, seed = 8L,
+                      sg_window = DEFAULT_SG_WINDOW, pca_threshold = DEFAULT_PCA_THRESHOLD) {
+      config_fold_units(verb, pca, folds, case$role_map, data, seed, sg_window, pca_threshold,
+                        bounded = TRUE)$folds[[1]]
+    }
+    plain <- first()$name
 
-    expect_identical(name(case$folds, case$role_map), plain)
-    expect_false(identical(name(case$folds, case$role_map, seed = 9L), plain))
-    expect_false(identical(name(case$folds, case$role_map, data = list(predictors = "x")), plain))
+    expect_identical(first()$name, plain)
 
+    ## Each thing a prep is built from makes another prep: the verb, the
+    ## data, the seed, and the recipe settings a resume can change while the
+    ## data and the seed stay as they were
+    changed <- list(verb          = first(verb = "fit")$name,
+                    data          = first(data = list(predictors = "x"))$name,
+                    seed          = first(seed = 9L)$name,
+                    sg_window     = first(sg_window = DEFAULT_SG_WINDOW + 2L)$name,
+                    pca_threshold = first(pca_threshold = DEFAULT_PCA_THRESHOLD / 2)$name)
+
+    for (what in names(changed)) expect_false(identical(changed[[what]], plain), label = what)
+
+    ## The rows: the fold's analysis rows in another order
     other_rows <- case$folds
     other_rows$splits[[1]]$in_id <- rev(other_rows$splits[[1]]$in_id)
-    expect_false(identical(name(other_rows, case$role_map), plain))
+    expect_false(identical(first(other_rows)$name, plain))
 
-    key <- units_of(pca, case$folds, case$role_map)$folds[[1]]$key
-    expect_setequal(names(key), c("verb", "preprocessing", "sg_window", "feature_selection", "pca_threshold",
-                                  "transformation", "fold", "rows", "data", "seed", "seed_rule", "scoring_schema"))
+    ## And every position an entry fills: two of the first fold's
+    ## assessment rows swapped in the training part leave its analysis rows
+    ## as they were, shown first, while a PCA entry's scores for them would
+    ## sit at each other's rows
+    out     <- rsample::complement(case$folds$splits[[1]])[1:2]
+    swapped <- case$folds
+    rows    <- swapped$splits[[1]]$data
+    rows[out, ] <- rows[rev(out), ]
+    for (i in seq_len(nrow(swapped))) swapped$splits[[i]]$data <- rows
+
+    analysis_ids <- function(folds) fold_row_ids(folds$splits[[1]]$data, case$role_map)[folds$splits[[1]]$in_id]
+    expect_identical(analysis_ids(swapped), analysis_ids(case$folds))
+    expect_false(identical(first(swapped)$name, plain))
+
+    ## The rules a prep's draws and its scoring follow, as they are now
+    key <- first()$key
     expect_identical(key$seed_rule, as.double(SEED_RULE))
     expect_identical(key$scoring_schema, as.double(SCORING_SCHEMA))
     expect_identical(fold_entry_file(key), plain)

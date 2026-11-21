@@ -230,25 +230,29 @@ bounded_model <- function(model) {
 #' preprocessing and the window, the selection and `pca_threshold` (both
 #' settings enter every key, since every recipe is built from both), the
 #' transformation where the selection reads the outcome ([fold_unit_row()]),
-#' the fold and its analysis rows (their sample ids, in order), the training
-#' data ([eval_data_fingerprint()]'s fields, or `NULL` for a store that dies
-#' with its call), and the seed with the rule that turns it into the prep's
-#' draws (`SEED_RULE`) and the scoring schema. Two preps with one key are
-#' one prep; an entry is read only under its own key ([read_fold_entry()]).
+#' the fold and its rows (the training part's sample ids in order, every
+#' position an entry's columns fill, and the positions of the rows the prep
+#' is trained on), the training data ([eval_data_fingerprint()]'s fields,
+#' or `NULL` for a store that dies with its call), and the seed with the
+#' rule that turns it into the prep's draws (`SEED_RULE`) and the scoring
+#' schema. Two preps with one key are one prep; an entry is read only under
+#' its own key ([read_fold_entry()]).
 #'
 #' @param verb Character(1). `"evaluate"` or `"fit"`.
 #' @param unit_row Single-row tibble from [fold_unit_row()].
 #' @param fold Character(1). The fold's id, or `"training"` for the whole
 #'   training part.
-#' @param ids Character. The sample ids of the rows the prep is trained on,
-#'   in order.
+#' @param ids Character. The training part's sample ids, in order.
+#' @param in_id Integer. The positions in `ids` of the rows the prep is
+#'   trained on: the fold's analysis rows, or every row for the training
+#'   part.
 #' @param data Named list or `NULL`. The training data's fingerprint fields.
 #' @param seed The run's root.
 #' @param sg_window,pca_threshold The object's recipe settings.
 #' @return Named list.
 #' @keywords internal
 #' @noRd
-fold_prep_key <- function(verb, unit_row, fold, ids, data, seed, sg_window, pca_threshold) {
+fold_prep_key <- function(verb, unit_row, fold, ids, in_id, data, seed, sg_window, pca_threshold) {
 
   normalize_eval_settings(list(
     verb              = verb,
@@ -258,7 +262,7 @@ fold_prep_key <- function(verb, unit_row, fold, ids, data, seed, sg_window, pca_
     pca_threshold     = pca_threshold,
     transformation    = tolower(unit_row$transformation),
     fold              = fold,
-    rows              = digest::digest(as.character(ids), algo = "xxhash64"),
+    rows              = digest::digest(list(as.character(ids), as.integer(in_id)), algo = "xxhash64"),
     data              = data,
     seed              = seed,
     seed_rule         = SEED_RULE,
@@ -332,8 +336,8 @@ config_fold_units <- function(verb, config_row, folds, role_map, data, seed, sg_
   ids  <- fold_row_ids(folds$splits[[1]]$data, role_map)
   cost <- FOLD_PREP_COST_SECONDS[[tolower(unit_row$feature_selection)]]
 
-  unit_of <- function(fold, fold_i, trained_on) {
-    key <- fold_prep_key(verb, unit_row, fold, trained_on, data, seed, sg_window, pca_threshold)
+  unit_of <- function(fold, fold_i, in_id) {
+    key <- fold_prep_key(verb, unit_row, fold, ids, in_id, data, seed, sg_window, pca_threshold)
     list(verb   = verb,
          row    = unit_row,
          fold   = fold,
@@ -345,9 +349,9 @@ config_fold_units <- function(verb, config_row, folds, role_map, data, seed, sg_
   }
 
   list(
-    training = if (isTRUE(bounded)) unit_of("training", 0L, ids),
+    training = if (isTRUE(bounded)) unit_of("training", 0L, seq_along(ids)),
     folds    = lapply(seq_len(nrow(folds)), function(i) {
-      unit_of(folds$id[[i]], i, ids[folds$splits[[i]]$in_id])
+      unit_of(folds$id[[i]], i, folds$splits[[i]]$in_id)
     })
   )
 
