@@ -266,6 +266,15 @@ DEFAULT_CV_FOLDS <- 5
 # Each verb says how many of its searches stopped early, and how to change
 # it.
 BAYES_NO_IMPROVE_DEFAULT <- 5L
+
+# The points a search gives each tuned parameter, the grid and the Bayesian
+# iterations together: the iterations asked for are a floor, raised for a
+# model tuning d parameters to BAYES_POINTS_PER_PARAM * d less the grid when
+# that is more (search_budget(), R/fit-warmstart.R). Tools agree on about ten
+# a parameter: SMAC starts from ten configurations a parameter, and Loeppky,
+# Sacks and Welch (2009) justify ten points a dimension for a Gaussian
+# process design.
+BAYES_POINTS_PER_PARAM <- 10L
 DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 
 # Recipe settings configure() records and build_recipe() applies to every

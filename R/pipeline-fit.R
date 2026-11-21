@@ -843,9 +843,12 @@ fit <- function(x,
 
     }
 
+    raised <- raised_budgets(member_configs$model, final_bayesian_iter, tuning$grid_size)
+
     cat(paste0(
       "\u2502  Bayesian: ", final_bayesian_iter,
-      if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
+      if (cold_start) " iterations from a space-filling grid" else " iterations with warm-start",
+      if (!is.null(raised)) paste0(" (", raised, ")"), "\n"
     ))
 
     ## A parallel fit runs the members' folds on the daemons

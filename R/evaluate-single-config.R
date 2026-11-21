@@ -36,11 +36,13 @@
 #' @param cv_folds A `vfold_cv` object created from the training set.
 #' @param role_map Tibble with `variable` and `role` columns.
 #' @param grid_size Integer. Number of grid points for `tune_grid()`.
-#' @param bayesian_iter Integer. Iterations for `tune_bayes()`. Set to 0 to
-#'   skip Bayesian optimization entirely. When every tuned parameter is a
-#'   whole number and the space has no more points than `grid_size +
-#'   bayesian_iter`, the grid is every point and the Bayesian stage does not
-#'   run (`exhaustive_grid()`).
+#' @param bayesian_iter Integer. Iterations for `tune_bayes()`, at least:
+#'   raised for a model tuning several parameters so that the grid and the
+#'   search try `BAYES_POINTS_PER_PARAM` points a parameter
+#'   (`search_budget()`). Set to 0 to skip Bayesian optimization entirely.
+#'   When every tuned parameter is a whole number and the space has no more
+#'   points than the grid and those iterations together, the grid is every
+#'   point and the Bayesian stage does not run (`exhaustive_grid()`).
 #' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
 #'   dials' units: the ranges the model's parameters are searched over, set
 #'   before the data cap them (`apply_tune_ranges()`). `evaluate()` reads
@@ -285,8 +287,11 @@ evaluate_single_config <- function(config_row,
     ## of values to propose and errors inside its loop, which would read as a
     ## failed search although every value was tried.
 
-    whole_space <- exhaustive_grid(param_set, grid_size + bayesian_iter)
-    search_iter <- if (is.null(whole_space)) bayesian_iter else 0L
+    ## The iterations asked for are a floor, raised to the points a tuned
+    ## parameter a search gives (search_budget())
+    iters       <- search_budget(bayesian_iter, nrow(param_set), grid_size)
+    whole_space <- exhaustive_grid(param_set, grid_size + iters)
+    search_iter <- if (is.null(whole_space)) iters else 0L
 
     grid_results <- unit_step("tune_grid", {
 

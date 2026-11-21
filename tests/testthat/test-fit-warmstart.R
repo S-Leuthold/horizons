@@ -917,6 +917,43 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 })
 
 
+describe("search_budget()", {
+
+  it("raises the iterations asked for to ten points a tuned parameter, grid included, and never lowers them", {
+
+    cases <- tibble::tribble(
+      ~iter, ~n_params, ~grid, ~expected,
+      15L,   1L,        10L,   15L,     # plsr: 10 points less the grid is below what was asked
+      15L,   2L,        10L,   15L,     # rf, elastic_net, svm_rbf, mars
+      15L,   3L,        10L,   20L,     # cubist, mlp
+      15L,   4L,        10L,   30L,     # lightgbm
+      15L,   6L,        10L,   50L,     # xgboost
+      25L,   3L,        10L,   25L,     # fit()'s re-tune
+      25L,   6L,        10L,   50L,
+      2L,    2L,        2L,    18L,
+      60L,   6L,        10L,   60L,     # more than the rule asks: kept
+      0L,    6L,        10L,   0L       # turned off: stays off
+    )
+
+    for (i in seq_len(nrow(cases))) {
+      expect_identical(search_budget(cases$iter[i], cases$n_params[i], cases$grid[i]), cases$expected[i],
+                       label = paste(cases[i, 1:3], collapse = ", "))
+    }
+
+  })
+
+  it("names the models whose search it raises, for the trees, by their budget", {
+
+    expect_identical(raised_budgets(c("rf", "cubist", "xgboost", "cubist", "mlp"), 15L, 10L),
+                     "raised to 20 for cubist and mlp, 50 for xgboost: at least 10 points a tuned parameter")
+    expect_null(raised_budgets(c("rf", "plsr"), 15L, 10L))
+    expect_null(raised_budgets("xgboost", 0L, 10L))
+
+  })
+
+})
+
+
 describe("bayes_search()", {
 
   ## A model's workflow, which the search reads its engine from

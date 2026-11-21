@@ -649,6 +649,57 @@ bayes_search <- function(workflow,
 
 }
 
+#' The Bayesian iterations a model's search runs
+#'
+#' @description
+#' The iterations asked for (`configure()`'s `bayesian_iter`, or
+#' `final_bayesian_iter` for `fit()`'s re-tune) are a floor: a model tuning
+#' `n_params` parameters runs enough that its grid and its search together
+#' try `BAYES_POINTS_PER_PARAM` points a parameter, when that is more. No
+#' model searches less than asked, and the stopping rule
+#' (`control_horizons(no_improve = )`) ends each search where it stops
+#' improving. 0 stays 0: a search turned off stays off.
+#'
+#' @param iter Integer. The iterations asked for.
+#' @param n_params Integer. The parameters the model tunes.
+#' @param grid_size Integer. The grid's points.
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+search_budget <- function(iter, n_params, grid_size) {
+
+  if (iter == 0) return(0L)
+
+  as.integer(max(iter, BAYES_POINTS_PER_PARAM * n_params - grid_size))
+
+}
+
+#' The tree's words for the models whose search the budget raises
+#'
+#' @param models Character. The configured models, or the members'.
+#' @param iter,grid_size As [search_budget()] takes them.
+#' @return Character(1), e.g. `"raised to 20 for cubist, 50 for xgboost: at
+#'   least 10 points a tuned parameter"`, or `NULL` when no model's is.
+#' @keywords internal
+#' @noRd
+raised_budgets <- function(models, iter, grid_size) {
+
+  models  <- unique(models)
+  budgets <- vapply(models, function(m) search_budget(iter, length(MODEL_SPECS[[m]]$tuned), grid_size),
+                    integer(1))
+  raised  <- budgets > iter
+
+  if (!any(raised)) return(NULL)
+
+  by_budget <- split(models[raised], factor(budgets[raised], levels = sort(unique(budgets[raised]))))
+
+  paste0("raised to ",
+         paste(vapply(names(by_budget), function(b) paste(b, "for", paste(by_budget[[b]], collapse = " and ")),
+                      character(1)), collapse = ", "),
+         ": at least ", BAYES_POINTS_PER_PARAM, " points a tuned parameter")
+
+}
+
 #' What a verb says when its Bayesian searches stopped early
 #'
 #' @description

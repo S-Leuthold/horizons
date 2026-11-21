@@ -1234,6 +1234,40 @@ describe("fit_single_config() - the ranges searched (tune_ranges)", {
 
 
 ## =========================================================================
+## The Bayesian budget per tuned parameter
+## =========================================================================
+
+describe("fit_single_config() - the Bayesian budget per tuned parameter", {
+
+  it("gives the re-tune ten points a tuned parameter less the grid when that is more than asked", {
+
+    seen <- NULL
+    local_mocked_bindings(tune_warmstart_bayes = function(..., bayesian_iter) {
+      seen <<- bayesian_iter
+      stop("stopped after the budget")
+    })
+
+    setup <- make_fit_setup()
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 3L,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    ## rf tunes two: 20 points less the grid of 2
+    expect_identical(seen, 18L)
+
+  })
+
+})
+
+
+## =========================================================================
 ## The re-tune's stopping rule
 ## =========================================================================
 

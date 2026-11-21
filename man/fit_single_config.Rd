@@ -52,10 +52,11 @@ calibration leakage.}
 or NULL (\code{fit()}'s cold start), in which case the re-tune starts from a
 space-filling grid.}
 
-\item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning.
+\item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning, at
+least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}).
 When every tuned parameter is a whole number and the space has no more
-points than \code{grid_size + final_bayesian_iter}, the grid is every point
-and no Bayesian search runs (\code{exhaustive_grid()}).}
+points than the grid and those iterations together, the grid is every
+point and no Bayesian search runs (\code{exhaustive_grid()}).}
 
 \item{grid_size}{Integer. Grid size for warm-start exploration.}
 

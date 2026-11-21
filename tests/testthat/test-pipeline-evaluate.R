@@ -2248,6 +2248,7 @@ describe("evaluate() - checkpoint data provenance", {
                                    ## record's text, and the stopping rule
                                    tune_ranges = "committees 1 to 25; num_comp 1 to 30",
                                    no_improve = 5L,
+                                   bayes_points_per_param = BAYES_POINTS_PER_PARAM,
                                    prune = FALSE,
                                    prune_threshold = NA_real_, seed = 42L,
                                    seed_rule = SEED_RULE,
@@ -3055,6 +3056,36 @@ describe("evaluate() - tuning-settings provenance", {
     resumed <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
     expect_length(ran, 2L)
     expect_identical(resumed$evaluation$results$config_id, first$evaluation$results$config_id)
+
+  })
+
+})
+
+
+## =========================================================================
+## The Bayesian budget per tuned parameter
+## =========================================================================
+
+describe("evaluate() - the Bayesian budget per tuned parameter", {
+
+  it("says in the tree which models' searches the budget raises", {
+
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model        <- c("rf", "xgboost")
+    obj$config$tuning$bayesian_iter <- 3L
+
+    out <- utils::capture.output(
+      suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(verbose = TRUE)))
+    )
+
+    ## rf tunes two parameters and xgboost six, on a grid of 2
+    expect_true(any(grepl("bayesian = 3 (raised to 18 for rf, 58 for xgboost: at least 10 points a tuned parameter)",
+                          out, fixed = TRUE)))
 
   })
 

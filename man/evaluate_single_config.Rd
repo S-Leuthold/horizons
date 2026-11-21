@@ -41,10 +41,13 @@ evaluate_single_config(
 
 \item{grid_size}{Integer. Number of grid points for \code{tune_grid()}.}
 
-\item{bayesian_iter}{Integer. Iterations for \code{tune_bayes()}. Set to 0 to
-skip Bayesian optimization entirely. When every tuned parameter is a
-whole number and the space has no more points than \code{grid_size + bayesian_iter}, the grid is every point and the Bayesian stage does not
-run (\code{exhaustive_grid()}).}
+\item{bayesian_iter}{Integer. Iterations for \code{tune_bayes()}, at least:
+raised for a model tuning several parameters so that the grid and the
+search try \code{BAYES_POINTS_PER_PARAM} points a parameter
+(\code{search_budget()}). Set to 0 to skip Bayesian optimization entirely.
+When every tuned parameter is a whole number and the space has no more
+points than the grid and those iterations together, the grid is every
+point and the Bayesian stage does not run (\code{exhaustive_grid()}).}
 
 \item{tune_ranges}{Named list of \code{c(lower, upper)} by parameter id, in
 dials' units: the ranges the model's parameters are searched over, set

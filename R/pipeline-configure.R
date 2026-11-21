@@ -199,10 +199,20 @@
 #'   Default 10. Minimum 1, and at least 2 when `bayesian_iter` or
 #'   `final_bayesian_iter` is above 0, since both Bayesian searches start
 #'   from the grid.
-#' @param bayesian_iter `integer`. Bayesian optimization iterations.
-#'   Default 15. Minimum 0.
+#' @param bayesian_iter `integer`. Bayesian optimization iterations, at
+#'   least: a model tuning more parameters runs more, so that its grid and its
+#'   search together try at least ten points a tuned parameter (`10 * d -
+#'   grid_size` iterations for `d` parameters, when that is more). At the
+#'   defaults that is 15 for plsr and the two-parameter models, 20 for cubist
+#'   and mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
+#'   `control_horizons(no_improve = )` iterations in a row have not improved
+#'   on its best. A space with no more points than the grid and the search
+#'   together is gridded whole, with no search. Default 15. Minimum 0: 0
+#'   turns the search off for every model.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
-#'   the final fit on the selected configuration. Default 25. Minimum 0.
+#'   the final fit on the selected configuration, at least, raised as
+#'   `bayesian_iter` is (25 up to three tuned parameters at the defaults, 30
+#'   for lightgbm, 50 for xgboost). Default 25. Minimum 0.
 #' @param sg_window `integer`. Savitzky-Golay window in grid points, applied
 #'   to every configuration. Default 9. Must be odd, at least 5, and (checked
 #'   by `evaluate()`) smaller than the number of spectral columns. For

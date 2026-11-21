@@ -660,20 +660,22 @@ describe("evaluate_single_config() - tuning on the original scale", {
     rsample::vfold_cv(rsample::training(setup$split), v = 3, strata = "SOC")
   )
 
-  config <- make_eval_config(model = "plsr", transformation = "log")
+  config <- make_eval_config(model = "elastic_net", transformation = "log")
 
   ## bayesian_iter = 1: the prune gate only runs when there is a Bayesian
-  ## stage to skip (#38), and this test is about the gate.
+  ## stage to skip (#38), and this test is about the gate. The budget rule,
+  ## which would raise the stage to ten points a parameter, is held off, so
+  ## the stage is the one iteration.
   ##
   ## show_best() is wrapped, passing through, to record the results the
   ## hyperparameters are chosen from (its last call is the choice; the prune
   ## gate's is on the grid). The returned row cannot show whether the
-  ## Bayesian stage ran here: the grid already holds plsr's best num_comp,
-  ## so the stage's one candidate does not change the choice.
+  ## Bayesian stage ran here, since the stage's one candidate need not
+  ## change the choice.
   real_show_best <- tune::show_best
   selected_from  <- NULL
 
-  result <- with_mocked_bindings(
+  result <- with_mocked_bindings(with_mocked_bindings(
     evaluate_single_config(
       config_row      = config,
       split           = setup$split,
@@ -690,7 +692,7 @@ describe("evaluate_single_config() - tuning on the original scale", {
       real_show_best(x, ...)
     },
     .package = "tune"
-  )
+  ), BAYES_POINTS_PER_PARAM = 0L)
 
   it("does not prune a healthy log-transformed config at prune_threshold = 1.0", {
 
@@ -785,7 +787,10 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
   setup <- make_eval_setup()
 
+  ## The search's own size, which the budget rule would raise for rf's two
+  ## parameters: these tests need a Bayesian stage, not the rule
   run <- function(grid_size) {
+    local_mocked_bindings(BAYES_POINTS_PER_PARAM = 0L)
     suppressWarnings(evaluate_single_config(
       config_row    = make_eval_config(),
       split         = setup$split,
@@ -978,7 +983,9 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
   it("counts a candidate the search proposed that failed in every fold among the candidates left out", {
 
     ## As above: tune drops each Bayesian candidate, and its iteration log is
-    ## the only record of them, read outside debug too
+    ## the only record of them, read outside debug too. The search is the two
+    ## iterations asked for, the budget rule held off.
+    local_mocked_bindings(BAYES_POINTS_PER_PARAM = 0L)
     in_search   <- FALSE
     real_glmnet <- glmnet::glmnet
     real_bayes  <- tune::tune_bayes
@@ -1088,6 +1095,37 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
     ## Every iteration it was given began, and no error ended it
     expect_identical(result$bayes_stop, "budget")
     expect_identical(result$bayes_iter, 2L)
+
+  })
+
+})
+
+
+describe("evaluate_single_config() - the Bayesian budget per tuned parameter", {
+
+  it("gives a three-parameter model's search ten points a parameter less the grid, and a one-parameter model what was asked", {
+
+    skip_if_not_installed("Cubist")
+
+    asked <- list()
+    local_mocked_bindings(bayes_search = function(..., initial, iter) {
+      asked[[length(asked) + 1L]] <<- iter
+      list(results = initial, n_dropped = 0L, n_iter = 0L, stop = "budget")
+    })
+
+    setup <- make_eval_setup(n = 40, n_wn = 12)
+    run   <- function(model) {
+      suppressWarnings(evaluate_single_config(config_row = make_eval_config(model = model), split = setup$split,
+                                              cv_folds = setup$folds, role_map = setup$role_map, grid_size = 2,
+                                              bayesian_iter = 3, seed = 42L, isolate = FALSE))
+    }
+
+    expect_identical(run("cubist")$status, "success")
+    expect_identical(asked[[1]], 28L)
+
+    ## rf tunes two: 20 points less the grid
+    expect_identical(run("rf")$status, "success")
+    expect_identical(asked[[2]], 18L)
 
   })
 
