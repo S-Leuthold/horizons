@@ -40,8 +40,9 @@
 #'   between them repeat. A seed drawn from the session is printed in the
 #'   tree. The seed is recorded as `evaluation$seed`, and [fit()] and
 #'   [ensemble()] take it unless given one.
-#' @param control A [control_horizons()] object: how the run goes, not what
-#'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
+#' @param control A [control_horizons()] object: how the run goes, and,
+#'   through `isolate` and `no_improve`, part of what it computes (see
+#'   [control_horizons()]). `evaluate()` reads `allow_par`, `parallelize_over`,
 #'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces`, `isolate`
 #'   and `no_improve`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as

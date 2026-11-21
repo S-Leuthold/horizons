@@ -52,14 +52,15 @@ from the grid.}
 \item{bayesian_iter}{\code{integer}. Bayesian optimization iterations, at
 least: a model tuning more parameters runs more, so that its grid and its
 search together try at least ten points a tuned parameter (\code{10 * d - grid_size} iterations for \code{d} parameters, when that is more). At the
-defaults that is 15 for plsr and the two-parameter models, 20 for cubist
-and mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
+defaults that is 15 for rf, elastic_net and svm_rbf, 20 for cubist and
+mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
 \code{control_horizons(no_improve = )} iterations in a row have not improved
 on its best. A space that costs no more fits than the grid and the
 search together is gridded whole, with no search: a submodel's values
 share one fit, so plsr's components are gridded whole, every count
-scored from one fit a fold. Default 15. Minimum 0: 0 turns the search
-off for every model.}
+scored from one fit a fold, and at the defaults so is mars's space, two
+fits a fold. Default 15. Minimum 0: 0 turns the search off for every
+model.}
 
 \item{final_bayesian_iter}{\code{integer}. Bayesian optimization iterations for
 the final fit on the selected configuration, at least, raised as

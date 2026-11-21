@@ -695,7 +695,10 @@ search_budget <- function(iter, n_params, grid_size) {
 #' @noRd
 raised_budgets <- function(models, iter, grid_size) {
 
-  models  <- unique(models)
+  ### A model that tunes only its submodel is gridded whole, one fit a fold,
+  ### and never searches (exhaustive_grid()), so its budget is not said
+  models  <- Filter(function(m) length(setdiff(MODEL_SPECS[[m]]$tuned, MODEL_SPECS[[m]]$submodel)) > 0,
+                    unique(models))
   budgets <- vapply(models, function(m) search_budget(iter, length(MODEL_SPECS[[m]]$tuned), grid_size),
                     integer(1))
   raised  <- budgets > iter

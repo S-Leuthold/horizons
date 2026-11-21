@@ -189,8 +189,9 @@
 #'   from the session's random stream, which is left where it was and
 #'   printed in the tree. A seed given here overrides the object's and is
 #'   recorded as `models$seed`, which [ensemble()] takes.
-#' @param control A [control_horizons()] object: how the run goes, not what
-#'   it computes. `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
+#' @param control A [control_horizons()] object: how the run goes, and,
+#'   through `isolate` and `no_improve`, part of what it computes (see
+#'   [control_horizons()]). `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
 #'   `keep_traces`, `isolate`, `no_improve`, `min_calib_rows`, `min_ad_rows`
 #'   and `min_degradation_rows`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as

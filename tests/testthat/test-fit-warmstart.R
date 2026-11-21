@@ -942,12 +942,18 @@ describe("search_budget()", {
 
   })
 
-  it("names the models whose search it raises, for the trees, by their budget", {
+  it("names the models whose search it raises, for the trees, by their budget, and none that never searches", {
 
     expect_identical(raised_budgets(c("rf", "cubist", "xgboost", "cubist", "mlp"), 15L, 10L),
                      "raised to 20 for cubist and mlp, 50 for xgboost: at least 10 points a tuned parameter")
     expect_null(raised_budgets(c("rf", "plsr"), 15L, 10L))
     expect_null(raised_budgets("xgboost", 0L, 10L))
+
+    ## plsr tunes only its submodel, so it is gridded whole and never
+    ## searches, whatever its budget would be
+    expect_identical(raised_budgets(c("plsr", "rf"), 3L, 5L),
+                     "raised to 15 for rf: at least 10 points a tuned parameter")
+    expect_null(raised_budgets("plsr", 3L, 5L))
 
   })
 
