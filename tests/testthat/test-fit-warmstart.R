@@ -1085,10 +1085,18 @@ describe("bayes_search()", {
     expect_lt(stopped$n_iter, 20L)
     expect_identical(stopped$n_iter, max(stopped$results$.iter))
 
-    full <- bayes_search(workflow = wf, resamples = folds, initial = initial, iter = 3L,
-                         param_info = ps, metrics = ms, seed = 5L, no_improve = FALSE)
+    ## The limit used was 1: every iteration before the last improved on the
+    ## best, and the last did not
+    expect_identical(improved_each(stopped$results, stopped$n_iter),
+                     c(rep(TRUE, stopped$n_iter - 1L), FALSE))
 
-    expect_identical(full[c("n_iter", "stop")], list(n_iter = 3L, stop = "budget"))
+    ## FALSE runs past where the limit stopped, to every iteration asked for
+    asked <- stopped$n_iter + 2L
+    full  <- bayes_search(workflow = wf, resamples = folds, initial = initial, iter = asked,
+                          param_info = ps, metrics = ms, seed = 5L, no_improve = FALSE)
+
+    expect_identical(full[c("n_iter", "stop")], list(n_iter = asked, stop = "budget"))
+    expect_identical(max(full$results$.iter), asked)
 
   })
 

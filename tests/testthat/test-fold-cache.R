@@ -736,6 +736,74 @@ describe("finalize_bound()", {
 
 })
 
+describe("cap_by_data()", {
+
+  ## num_comp's range as the runners set it, from the default ranges, or
+  ## from another range given
+  pls_params <- function(ranges = TUNE_RANGES) {
+    workflows::workflow() |>
+      workflows::add_formula(y ~ .) |>
+      workflows::add_model(define_model_spec("plsr")) |>
+      workflows::extract_parameter_set_dials() |>
+      apply_tune_ranges(ranges)
+  }
+
+  range_of <- function(params, id) {
+    r <- params$object[[which(params$id == id)]]$range
+    c(r$lower, r$upper)
+  }
+
+  it("caps num_comp's own range at the predictors and the rows less one, whichever is least", {
+
+    expect_equal(range_of(cap_by_data(pls_params(), 500L, 200L), "num_comp"), c(1, 30))
+    expect_equal(range_of(cap_by_data(pls_params(), 12L, 200L), "num_comp"), c(1, 12))
+    expect_equal(range_of(cap_by_data(pls_params(), 500L, 20L), "num_comp"), c(1, 19))
+    expect_equal(range_of(cap_by_data(pls_params(), 500L, 1L), "num_comp"), c(1, 1))
+
+    ## A range given keeps its own bounds where the data hold them, and its
+    ## lower bound where they cap its upper
+    expect_equal(range_of(cap_by_data(pls_params(list(num_comp = c(5, 50))), 500L, 200L), "num_comp"),
+                 c(5, 50))
+    expect_equal(range_of(cap_by_data(pls_params(list(num_comp = c(5, 50))), 12L, 200L), "num_comp"),
+                 c(5, 12))
+
+  })
+
+  it("caps a ranged mtry at the predictors, and leaves one the data hold alone", {
+
+    rf <- workflows::workflow() |>
+      workflows::add_formula(y ~ .) |>
+      workflows::add_model(define_model_spec("rf")) |>
+      workflows::extract_parameter_set_dials() |>
+      apply_tune_ranges(list(mtry = c(1, 200)))
+
+    expect_equal(range_of(cap_by_data(rf, 150L, 40L), "mtry"), c(1, 150))
+    expect_equal(range_of(cap_by_data(rf, 500L, 40L), "mtry"), c(1, 200))
+    expect_equal(range_of(cap_by_data(rf, 150L, 40L), "min_n"), range_of(rf, "min_n"))
+
+  })
+
+  it("fails a range the data cannot hold at all, naming the range and the cap", {
+
+    expect_error(cap_by_data(pls_params(list(num_comp = c(20, 30))), 12L, 200L),
+                 "num_comp.* range 20 to 30 holds no value the data can fit: at most 12, for 12 predictors",
+                 class = "horizons_error_run")
+
+  })
+
+  it("leaves a parameter set without num_comp or mtry alone", {
+
+    mars <- workflows::workflow() |>
+      workflows::add_formula(y ~ .) |>
+      workflows::add_model(define_model_spec("mars")) |>
+      workflows::extract_parameter_set_dials()
+
+    expect_identical(cap_by_data(mars, 3L, 3L), mars)
+
+  })
+
+})
+
 describe("config_fold_entries()", {
 
   it("reads a configuration's preps from the run's directory, and stops as systemic, naming the file and why, when one the run wrote cannot be read", {

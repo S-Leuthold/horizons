@@ -1140,7 +1140,7 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
 describe("fit_single_config() - a search space that fits the budget", {
 
-  run_plsr <- function(final_bayesian_iter, model = "plsr") {
+  run_plsr <- function(final_bayesian_iter, model = "plsr", ...) {
 
     setup    <- make_fit_setup(n_wn = 20)
     searched <- FALSE
@@ -1158,7 +1158,8 @@ describe("fit_single_config() - a search space that fits the budget", {
       best_params_eval    = NULL,
       final_bayesian_iter = final_bayesian_iter,
       grid_size           = 2L,
-      seed                = 42L
+      seed                = 42L,
+      ...
     )
 
     list(result = result, searched = searched)
@@ -1194,6 +1195,18 @@ describe("fit_single_config() - a search space that fits the budget", {
     expect_identical(got$result$status, "success")
     expect_true(got$searched)
     expect_identical(got$result$start_grid_size, 2L)
+
+  })
+
+  it("grids whole a space that fits the raised budget, though not the iterations asked for", {
+
+    ## rf over 5 values of mtry by 3 of min_n: 15 fits against 2 + 3 asked
+    ## for, and 2 + 18 once the budget rule raises the two-parameter search
+    got <- run_plsr(3L, model = "rf", tune_ranges = list(mtry = c(1, 5), min_n = c(2, 4)))
+
+    expect_identical(got$result$status, "success")
+    expect_false(got$searched)
+    expect_identical(got$result$start_grid_size, 15L)
 
   })
 

@@ -1136,33 +1136,49 @@ describe("evaluate_single_config() - the Bayesian search's stopping rule", {
 
   ## rf on a few rows, with a search long enough that the rule ends it well
   ## before its budget: no_improve = 1 stops at the first iteration that
-  ## does not improve on the best
-  run_rf <- function(no_improve) {
+  ## does not improve on the best. The budget rule is held off, so the
+  ## search runs the iterations asked for, and the search's result is kept
+  ## to read each iteration from.
+  run_rf <- function(no_improve, bayesian_iter) {
+    local_mocked_bindings(BAYES_POINTS_PER_PARAM = 0L)
+    real_search <- bayes_search
+    seen        <- new.env()
+    local_mocked_bindings(bayes_search = function(...) {
+      seen$search <- real_search(...)
+      seen$search
+    })
     setup <- make_eval_setup(n = 40, n_wn = 12)
-    suppressWarnings(evaluate_single_config(
+    row   <- suppressWarnings(evaluate_single_config(
       config_row    = make_eval_config(),
       split         = setup$split,
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
       grid_size     = 2,
-      bayesian_iter = 20,
+      bayesian_iter = bayesian_iter,
       no_improve    = no_improve,
       seed          = 42L
     ))
+    list(row = row, results = seen$search$results)
   }
 
   it("stops by the rule and records the iterations it began, and with FALSE runs every one", {
 
-    stopped <- run_rf(1L)
-    expect_identical(stopped$status, "success")
-    expect_identical(stopped$bayes_stop, "no_improve")
-    expect_gte(stopped$bayes_iter, 1L)
-    expect_lt(stopped$bayes_iter, 20L)
+    stopped <- run_rf(1L, 20)
+    n_iter  <- stopped$row$bayes_iter
+    expect_identical(stopped$row$status, "success")
+    expect_identical(stopped$row$bayes_stop, "no_improve")
+    expect_gte(n_iter, 1L)
+    expect_lt(n_iter, 20L)
 
-    full <- run_rf(FALSE)
-    expect_identical(full$status, "success")
-    expect_identical(full$bayes_stop, "budget")
-    expect_identical(full$bayes_iter, 20L)
+    ## The limit used was 1: every iteration before the last improved on the
+    ## best, and the last did not
+    expect_identical(improved_each(stopped$results, n_iter), c(rep(TRUE, n_iter - 1L), FALSE))
+
+    ## FALSE runs past where the limit stopped, to every iteration asked for
+    full <- run_rf(FALSE, n_iter + 2L)
+    expect_identical(full$row$status, "success")
+    expect_identical(full$row$bayes_stop, "budget")
+    expect_identical(full$row$bayes_iter, n_iter + 2L)
 
   })
 
@@ -1920,7 +1936,7 @@ describe("exhaustive_grid()", {
 
 describe("evaluate_single_config() - a search space that fits the budget", {
 
-  run_plsr <- function(setup, model = "plsr", bayesian_iter = 3) {
+  run_plsr <- function(setup, model = "plsr", bayesian_iter = 3, ...) {
 
     real_grid  <- tune::tune_grid
     real_bayes <- tune::tune_bayes
@@ -1944,7 +1960,8 @@ describe("evaluate_single_config() - a search space that fits the budget", {
       role_map      = setup$role_map,
       grid_size     = 2,
       bayesian_iter = bayesian_iter,
-      seed          = 42L
+      seed          = 42L,
+      ...
     ))
 
     list(row = row, grid = seen$grid, bayes = isTRUE(seen$bayes))
@@ -1996,6 +2013,21 @@ describe("evaluate_single_config() - a search space that fits the budget", {
     expect_identical(got$row$status, "success")
     expect_identical(nrow(got$grid), 2L)
     expect_true(got$bayes)
+
+  })
+
+  it("grids whole a space that fits the raised budget, though not the iterations asked for", {
+
+    ## rf on the 4 predictors 12 wavenumbers keep, min_n ranged to 2 to 5: 16
+    ## fits against 2 + 3 asked for, and 2 + 18 once the budget rule raises
+    ## the two-parameter search
+    got <- run_plsr(make_eval_setup(n = 60, n_wn = 12), model = "rf", bayesian_iter = 3,
+                    tune_ranges = list(min_n = c(2, 5)))
+
+    expect_identical(got$row$status, "success")
+    expect_identical(nrow(got$grid), 16L)
+    expect_false(got$bayes)
+    expect_identical(got$row$bayes_iter, NA_integer_)
 
   })
 
