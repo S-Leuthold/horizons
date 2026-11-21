@@ -228,10 +228,11 @@ partition alone. With no parameters from
 \code{evaluate()} to warm-start from, the re-tune starts from a space-filling
 grid of \code{grid_size} points; the console tree says so, and
 \code{models$results$warm_start} is \code{FALSE}. On either path, a search space
-whose tuned parameters are all whole numbers, with no more points than
-\code{grid_size + final_bayesian_iter}, is gridded whole with no Bayesian
-search, as \code{evaluate()} grids it: at the defaults that is every plsr
-member, each \code{num_comp} up to its cap tried. The degradation check needs
+whose tuned parameters are all whole numbers, costing no more fits than
+the grid and the Bayesian iterations together, is gridded whole with no
+Bayesian search, as \code{evaluate()} grids it: a submodel's values share one
+fit, so that is every plsr member, each \code{num_comp} up to its cap tried
+from one fit a fold. The degradation check needs
 nothing from \code{evaluate()}, since it compares the test RPD with \code{fit()}'s
 own cross-validation.
 

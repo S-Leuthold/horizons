@@ -42,9 +42,10 @@
 #'   space-filling grid.
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning, at
 #'   least: raised as `evaluate_single_config()`'s are (`search_budget()`).
-#'   When every tuned parameter is a whole number and the space has no more
-#'   points than the grid and those iterations together, the grid is every
-#'   point and no Bayesian search runs (`exhaustive_grid()`).
+#'   When every tuned parameter is a whole number and the space costs no
+#'   more fits than the grid and those iterations together (a submodel's
+#'   values sharing one fit), the grid is every point and no Bayesian search
+#'   runs (`exhaustive_grid()`).
 #' @param grid_size Integer. Grid size for warm-start exploration.
 #' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
 #'   dials' units: the ranges the re-tune searches, set before the data cap
@@ -295,15 +296,16 @@ fit_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## The grid is centred on evaluate()'s parameters, or space-filling when
     ## there are none to use; how it started is recorded before it runs, so a
-    ## re-tune that fails still says. A search space with no more points than
-    ## the grid and the Bayesian search would try together (plsr's num_comp)
-    ## is gridded whole, with no Bayesian stage, as evaluate() grids it:
+    ## re-tune that fails still says. A search space that costs no more fits
+    ## than the grid and the Bayesian search would make together (plsr's
+    ## num_comp, one fit a fold) is gridded whole, with no Bayesian stage, as
+    ## evaluate() grids it:
     ## tune's search errors inside its loop once it has no value left to
     ## propose, which would read as a failed search although every value was
     ## tried.
 
     iters           <- search_budget(final_bayesian_iter, nrow(param_set), grid_size)
-    whole_space     <- exhaustive_grid(param_set, grid_size + iters)
+    whole_space     <- exhaustive_grid(param_set, grid_size + iters, MODEL_SPECS[[config_row$model]]$submodel)
     search_iter     <- if (is.null(whole_space)) iters else 0L
     initial_grid    <- unit_step("warm_start_tune", whole_space %||% with_unit_seed(
       seed, stage("warmstart-grid"),

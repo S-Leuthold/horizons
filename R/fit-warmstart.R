@@ -788,20 +788,25 @@ update_parameter <- function(param_set, id, param) {
 #'
 #' @description
 #' When every tuned parameter takes whole-number values over a known range
-#' and the space has no more points than `budget`, the whole space as a grid;
+#' and the space costs no more fits than `budget`, the whole space as a grid;
 #' otherwise `NULL`. A search whose budget covers the space is then
 #' exhaustive: the grid is every point and no Bayesian stage runs, since
 #' tune's search, once it has no value left to propose, errors inside its
-#' loop rather than stopping.
+#' loop rather than stopping. The fits are the points of every parameter but
+#' the model's submodel (`MODEL_SPECS`' `submodel`), whose values one fit
+#' scores, so plsr's whole component range is one fit a fold, and is
+#' gridded whole at any budget.
 #'
 #' @param param_set A finalized `dials` parameter set.
-#' @param budget Numeric(1). The points the search would try: the grid's
+#' @param budget Numeric(1). The fits the search would make: the grid's
 #'   size and the Bayesian iterations together.
+#' @param submodel Character(1) or `NULL`. The id of the parameter one fit
+#'   scores at every value.
 #' @return A tibble with one column per parameter (named by its id) and one
 #'   row per point, or `NULL`.
 #' @keywords internal
 #' @noRd
-exhaustive_grid <- function(param_set, budget) {
+exhaustive_grid <- function(param_set, budget, submodel = NULL) {
 
   if (nrow(param_set) == 0) return(NULL)
 
@@ -829,9 +834,11 @@ exhaustive_grid <- function(param_set, budget) {
   })
 
   if (any(vapply(values, is.null, logical(1)))) return(NULL)
-  if (prod(lengths(values)) > budget) return(NULL)
 
   names(values) <- param_set$id
+
+  ## A submodel's values share their fit
+  if (prod(lengths(values[setdiff(names(values), submodel)])) > budget) return(NULL)
 
   tibble::as_tibble(expand.grid(values, KEEP.OUT.ATTRS = FALSE))
 

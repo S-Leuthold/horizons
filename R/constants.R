@@ -53,7 +53,8 @@
 #   predicts the others from that fit (parsnip::multi_predict()). The
 #   contract test holds each row to its engine's registration, both ways;
 #   the PLS engine horizons registers takes its own from here
-#   (register_pls_engine()).
+#   (register_pls_engine()), and the whole-space rule counts its values as
+#   one fit (exhaustive_grid(), R/fit-warmstart.R).
 #
 # An engine's traits are read through engine_spec() (R/utils-models.R), which
 # finds the row of an isolated twin's engine too.

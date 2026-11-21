@@ -40,9 +40,11 @@
 #'   raised for a model tuning several parameters so that the grid and the
 #'   search try `BAYES_POINTS_PER_PARAM` points a parameter
 #'   (`search_budget()`). Set to 0 to skip Bayesian optimization entirely.
-#'   When every tuned parameter is a whole number and the space has no more
-#'   points than the grid and those iterations together, the grid is every
-#'   point and the Bayesian stage does not run (`exhaustive_grid()`).
+#'   When every tuned parameter is a whole number and the space costs no
+#'   more fits than the grid and those iterations together (a submodel's
+#'   values sharing one fit, so plsr's whole range at any budget), the grid
+#'   is every point and the Bayesian stage does not run
+#'   (`exhaustive_grid()`).
 #' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
 #'   dials' units: the ranges the model's parameters are searched over, set
 #'   before the data cap them (`apply_tune_ranges()`). `evaluate()` reads
@@ -281,16 +283,17 @@ evaluate_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## Step 4: Grid search
     ## -----------------------------------------------------------------------
-    ## A search space with no more points than the grid and the Bayesian
-    ## search would try together (plsr's num_comp on a short spectrum) is
-    ## gridded whole, and there is no Bayesian stage: tune's search runs out
-    ## of values to propose and errors inside its loop, which would read as a
-    ## failed search although every value was tried.
+    ## A search space that costs no more fits than the grid and the Bayesian
+    ## search would make together is gridded whole, and there is no Bayesian
+    ## stage: tune's search runs out of values to propose and errors inside
+    ## its loop, which would read as a failed search although every value
+    ## was tried. A submodel's values share one fit, so plsr's whole range of
+    ## components is one fit a fold (exhaustive_grid()).
 
     ## The iterations asked for are a floor, raised to the points a tuned
     ## parameter a search gives (search_budget())
     iters       <- search_budget(bayesian_iter, nrow(param_set), grid_size)
-    whole_space <- exhaustive_grid(param_set, grid_size + iters)
+    whole_space <- exhaustive_grid(param_set, grid_size + iters, MODEL_SPECS[[config_row$model]]$submodel)
     search_iter <- if (is.null(whole_space)) iters else 0L
 
     grid_results <- unit_step("tune_grid", {

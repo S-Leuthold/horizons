@@ -137,10 +137,11 @@
 #' `evaluate()` to warm-start from, the re-tune starts from a space-filling
 #' grid of `grid_size` points; the console tree says so, and
 #' `models$results$warm_start` is `FALSE`. On either path, a search space
-#' whose tuned parameters are all whole numbers, with no more points than
-#' `grid_size + final_bayesian_iter`, is gridded whole with no Bayesian
-#' search, as `evaluate()` grids it: at the defaults that is every plsr
-#' member, each `num_comp` up to its cap tried. The degradation check needs
+#' whose tuned parameters are all whole numbers, costing no more fits than
+#' the grid and the Bayesian iterations together, is gridded whole with no
+#' Bayesian search, as `evaluate()` grids it: a submodel's values share one
+#' fit, so that is every plsr member, each `num_comp` up to its cap tried
+#' from one fit a fold. The degradation check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
 #'

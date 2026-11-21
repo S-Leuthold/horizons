@@ -206,9 +206,11 @@
 #'   defaults that is 15 for plsr and the two-parameter models, 20 for cubist
 #'   and mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
 #'   `control_horizons(no_improve = )` iterations in a row have not improved
-#'   on its best. A space with no more points than the grid and the search
-#'   together is gridded whole, with no search. Default 15. Minimum 0: 0
-#'   turns the search off for every model.
+#'   on its best. A space that costs no more fits than the grid and the
+#'   search together is gridded whole, with no search: a submodel's values
+#'   share one fit, so plsr's components are gridded whole, every count
+#'   scored from one fit a fold. Default 15. Minimum 0: 0 turns the search
+#'   off for every model.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
 #'   the final fit on the selected configuration, at least, raised as
 #'   `bayesian_iter` is (25 up to three tuned parameters at the defaults, 30

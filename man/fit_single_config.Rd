@@ -54,9 +54,10 @@ space-filling grid.}
 
 \item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning, at
 least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}).
-When every tuned parameter is a whole number and the space has no more
-points than the grid and those iterations together, the grid is every
-point and no Bayesian search runs (\code{exhaustive_grid()}).}
+When every tuned parameter is a whole number and the space costs no
+more fits than the grid and those iterations together (a submodel's
+values sharing one fit), the grid is every point and no Bayesian search
+runs (\code{exhaustive_grid()}).}
 
 \item{grid_size}{Integer. Grid size for warm-start exploration.}
 

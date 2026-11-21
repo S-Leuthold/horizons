@@ -1883,11 +1883,24 @@ describe("exhaustive_grid()", {
 
   })
 
+  it("counts a submodel's values as one fit, so its whole range fits any budget the other parameters' points fit", {
+
+    pls <- dials::parameters(list(dials::num_comp(c(1L, 30L))))
+    expect_identical(exhaustive_grid(pls, 1, submodel = "num_comp")$num_comp, 1:30)
+    expect_null(exhaustive_grid(pls, 29))
+
+    ## mars's num_terms shares a fit for each prod_degree: 2 fits, 78 points
+    mars <- dials::parameters(list(dials::num_terms(c(2L, 40L)), dials::prod_degree()))
+    expect_identical(nrow(exhaustive_grid(mars, 2, submodel = "num_terms")), 78L)
+    expect_null(exhaustive_grid(mars, 1, submodel = "num_terms"))
+
+  })
+
 })
 
 describe("evaluate_single_config() - a search space that fits the budget", {
 
-  run_plsr <- function(setup) {
+  run_plsr <- function(setup, model = "plsr", bayesian_iter = 3) {
 
     real_grid  <- tune::tune_grid
     real_bayes <- tune::tune_bayes
@@ -1905,12 +1918,12 @@ describe("evaluate_single_config() - a search space that fits the budget", {
     )
 
     row <- suppressWarnings(evaluate_single_config(
-      config_row    = make_eval_config(model = "plsr"),
+      config_row    = make_eval_config(model = model),
       split         = setup$split,
       cv_folds      = setup$folds,
       role_map      = setup$role_map,
       grid_size     = 2,
-      bayesian_iter = 3,
+      bayesian_iter = bayesian_iter,
       seed          = 42L
     ))
 
@@ -1934,11 +1947,31 @@ describe("evaluate_single_config() - a search space that fits the budget", {
 
   })
 
-  it("still searches a space with more points than the budget", {
+  it("grids plsr's every count at the defaults, one fit a fold, with no Bayesian stage", {
 
     ## 40 wavenumbers keep 32 predictors and 100 rows make folds of 50: 30
-    ## values of num_comp against a budget of 5
-    got <- run_plsr(make_eval_setup(n = 100, n_wn = 40))
+    ## counts, which one fit scores, against the defaults' 10 and 15
+    local_mocked_bindings(bayes_search = function(...) stop("a Bayesian stage ran"))
+    setup <- make_eval_setup(n = 100, n_wn = 40)
+
+    row <- suppressWarnings(evaluate_single_config(
+      config_row = make_eval_config(model = "plsr"), split = setup$split, cv_folds = setup$folds,
+      role_map = setup$role_map, seed = 42L
+    ))
+
+    expect_identical(row$status, "success")
+    expect_identical(row$bayes_iter, NA_integer_)
+    expect_true(row$best_params[[1]]$num_comp %in% 1:30)
+
+  })
+
+  it("still searches a space whose fits outnumber the budget", {
+
+    ## rf on the 4 predictors 12 wavenumbers keep: 4 values of mtry by 39 of
+    ## min_n, one fit each, against a budget of 2 + 1 (the budget rule held
+    ## off, which would raise it to 2 + 18)
+    local_mocked_bindings(BAYES_POINTS_PER_PARAM = 0L)
+    got <- run_plsr(make_eval_setup(n = 60, n_wn = 12), model = "rf", bayesian_iter = 1)
 
     expect_identical(got$row$status, "success")
     expect_identical(nrow(got$grid), 2L)

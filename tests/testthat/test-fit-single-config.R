@@ -1140,7 +1140,7 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
 describe("fit_single_config() - a search space that fits the budget", {
 
-  run_plsr <- function(final_bayesian_iter) {
+  run_plsr <- function(final_bayesian_iter, model = "plsr") {
 
     setup    <- make_fit_setup(n_wn = 20)
     searched <- FALSE
@@ -1151,7 +1151,7 @@ describe("fit_single_config() - a search space that fits the budget", {
     })
 
     result <- fit_single_config(
-      config_row          = make_fit_config(model = "plsr"),
+      config_row          = make_fit_config(model = model),
       split_F             = setup$split_F,
       cv_resamples        = setup$folds,
       role_map            = setup$role_map,
@@ -1176,9 +1176,20 @@ describe("fit_single_config() - a search space that fits the budget", {
 
   })
 
-  it("still searches a space with more points than the budget", {
+  it("grids plsr's every count whatever the budget, one fit a fold", {
 
-    got <- run_plsr(5L)
+    got <- run_plsr(1L)
+
+    expect_identical(got$result$status, "success")
+    expect_false(got$searched)
+    expect_identical(got$result$start_grid_size, 12L)
+
+  })
+
+  it("still searches a space whose fits outnumber the budget", {
+
+    ## rf on 12 predictors: 12 values of mtry by 39 of min_n
+    got <- run_plsr(5L, model = "rf")
 
     expect_identical(got$result$status, "success")
     expect_true(got$searched)
