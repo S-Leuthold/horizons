@@ -98,7 +98,12 @@ register_pls_engine <- function() {
 #' fold whose recipe selects fewer predictors can still reach this cap.
 #'
 #' While tuning, tune calls it at a grid stage's largest count, and the fit
-#' predicts every count of the stage ([multi_predict._horizons_pls()]).
+#' predicts every count of the stage ([multi_predict._horizons_pls()]). Each
+#' count's coefficients are what a fit at that count gives, so a component
+#' [pls::plsr()] returns as `NaN` (its weight exactly zero, the components
+#' before it already fitting the outcome exactly) leaves the counts before it
+#' as a fit that stops short of it gives them, and the counts from it on
+#' `NaN`.
 #'
 #' @param x Numeric matrix or data frame of predictors.
 #' @param y Numeric vector, the outcome.
@@ -138,6 +143,22 @@ pls_fit <- function(x, y, ncomp = 2L) {
 
   fit <- pls::plsr(fml, data = data, ncomp = ncomp, scale = sds,
                    method = "oscorespls", model = FALSE)
+
+  ### A component whose weight is exactly zero (the components before it
+  ### already fit y, to the last bit) comes back NaN, and the projection
+  ### carries it into every count's coefficients, so one fit could no longer
+  ### stand for the counts before it. Those take the coefficients of a fit
+  ### that stops short of it, as fits of their own give them; from it on the
+  ### counts stay NaN, as theirs are.
+  first <- which(!is.finite(colSums(unclass(fit$loading.weights))))[1]
+
+  if (!is.na(first) && first > 1L) {
+
+    lead <- pls::plsr(fml, data = data, ncomp = first - 1L, scale = sds,
+                      method = "oscorespls", model = FALSE)
+    fit$coefficients[, , seq_len(first - 1L)] <- lead$coefficients
+
+  }
 
   fit$horizons_ncomp <- ncomp
 

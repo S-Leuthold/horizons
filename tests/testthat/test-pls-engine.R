@@ -254,6 +254,37 @@ describe("multi_predict() for a plsr fit", {
 
   })
 
+  it("predicts the counts before a component whose weight is exactly zero as fits of their own do, and NaN from it on", {
+
+    ## Two orthogonal predictors, each scaled to a sd of exactly 2, and an
+    ## outcome the first component fits exactly, in numbers every BLAS
+    ## sums exactly: the second component's weight is 0, which pls returns
+    ## as NaN, and through its projection NaN at every count of the fit
+    x <- cbind(a = c(2, -2, 2, -2, 0), b = c(2, 2, -2, -2, 0))
+    y <- 5 + x[, "a"]
+
+    two <- pls_fit(x, y, ncomp = 2L)
+    one <- pls_fit(x, y, ncomp = 1L)
+    expect_true(all(is.nan(unclass(two$loading.weights)[, 2])))
+
+    new <- as.data.frame(x)
+    expect_equal(pls_predict(one, new), y)
+    expect_identical(predict(two, newdata = data.frame(row = 1:5, x = I(x)), ncomp = 1)[, 1, 1],
+                     predict(one, newdata = data.frame(row = 1:5, x = I(x)), ncomp = 1)[, 1, 1])
+    expect_true(all(is.nan(predict(two, newdata = data.frame(row = 1:5, x = I(x)), ncomp = 2))))
+
+    ## So a grid stage's one fit scores count 1 as its own fit does
+    spec <- parsnip::pls(num_comp = 2) |>
+      parsnip::set_engine("pls") |>
+      parsnip::set_mode("regression")
+    pred <- parsnip::multi_predict(parsnip::fit_xy(spec, x = x, y = y), new, num_comp = 1:2)
+    at   <- function(k) vapply(pred$.pred, function(p) p$.pred[p$num_comp == k], numeric(1))
+
+    expect_equal(at(1L), y)
+    expect_true(all(is.nan(at(2L))))
+
+  })
+
 })
 
 

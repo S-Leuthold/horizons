@@ -29,6 +29,11 @@ warns, with class \code{horizons_warning_substitution}: the runners cap the tuni
 fold whose recipe selects fewer predictors can still reach this cap.
 
 While tuning, tune calls it at a grid stage's largest count, and the fit
-predicts every count of the stage (\code{\link[=multi_predict._horizons_pls]{multi_predict._horizons_pls()}}).
+predicts every count of the stage (\code{\link[=multi_predict._horizons_pls]{multi_predict._horizons_pls()}}). Each
+count's coefficients are what a fit at that count gives, so a component
+\code{\link[pls:plsr]{pls::plsr()}} returns as \code{NaN} (its weight exactly zero, the components
+before it already fitting the outcome exactly) leaves the counts before it
+as a fit that stops short of it gives them, and the counts from it on
+\code{NaN}.
 }
 \keyword{internal}
