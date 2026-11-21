@@ -274,7 +274,9 @@ BAYES_NO_IMPROVE_DEFAULT <- 5L
 # that is more (search_budget(), R/fit-warmstart.R). Tools agree on about ten
 # a parameter: SMAC starts from ten configurations a parameter, and Loeppky,
 # Sacks and Welch (2009) justify ten points a dimension for a Gaussian
-# process design.
+# process design. It is the package's rule, not a checkpoint setting: a
+# change to it, or to search_budget(), changes how rows are scored, and bumps
+# SCORING_SCHEMA.
 BAYES_POINTS_PER_PARAM <- 10L
 DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 

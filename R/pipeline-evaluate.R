@@ -768,10 +768,10 @@ evaluate <- function(x,
     ## rather than resumes when only a range changed
     tune_ranges     = format_ranges(tune_ranges),
     ## How far each Bayesian search goes (control_horizons(no_improve = )):
-    ## a row stopped under another limit is another row; and the points a
-    ## tuned parameter the budget rule gives (search_budget())
+    ## a row stopped under another limit is another row. The budget rule
+    ## (search_budget()) is the package's, not a setting: a change to it
+    ## bumps SCORING_SCHEMA, so older rows are re-evaluated
     no_improve      = control$no_improve,
-    bayes_points_per_param = BAYES_POINTS_PER_PARAM,
     prune           = prune,
     ## Read only when pruning, so it cannot have changed a row otherwise.
     prune_threshold = if (isTRUE(prune)) prune_threshold else NA_real_,

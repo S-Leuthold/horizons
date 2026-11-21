@@ -2248,7 +2248,6 @@ describe("evaluate() - checkpoint data provenance", {
                                    ## record's text, and the stopping rule
                                    tune_ranges = "committees 1 to 25; num_comp 1 to 30",
                                    no_improve = 5L,
-                                   bayes_points_per_param = BAYES_POINTS_PER_PARAM,
                                    prune = FALSE,
                                    prune_threshold = NA_real_, seed = 42L,
                                    seed_rule = SEED_RULE,
