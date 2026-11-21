@@ -226,7 +226,7 @@ rng_object <- function(configs = c("rf", "plsr_cars"), bayesian_iter = 2L, final
   )
   obj$config$n_configs     <- length(configs)
   obj$config$tuning        <- list(cv_folds = 3L, grid_size = 3L, bayesian_iter = bayesian_iter,
-                                   final_bayesian_iter = final_bayesian_iter)
+                                   final_bayesian_iter = final_bayesian_iter, ranges = merge_ranges(NULL))
   obj$config$recipe        <- list(sg_window = DEFAULT_SG_WINDOW, pca_threshold = DEFAULT_PCA_THRESHOLD)
   obj$config$outcome_range <- DEFAULT_OUTCOME_RANGE
   obj$validation$passed    <- TRUE

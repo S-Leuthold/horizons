@@ -1050,15 +1050,12 @@ config_findings <- function(x) {
 
   }
 
-  ### The ranges the models are searched over: their shape, and each one's
-  ### type where the model's engine is installed (tune_range_findings())
-  if (!is.null(tuning$ranges)) {
-
-    range_findings <- tune_range_findings(tuning$ranges, as.character(configs$model),
-                                          arg = "config$tuning$ranges", check_names = FALSE)
-    findings       <- c(findings, sub("\\.$", "", range_findings))
-
-  }
+  ### The ranges the models are searched over, which configure() writes:
+  ### their shape, and each one's type where the model's engine is installed
+  ### (tune_range_findings())
+  range_findings <- tune_range_findings(tuning$ranges, as.character(configs$model),
+                                        arg = "config$tuning$ranges", check_names = FALSE)
+  findings       <- c(findings, sub("\\.$", "", range_findings))
 
   recipe        <- x$config$recipe
   sg_window     <- if (is.list(recipe)) recipe$sg_window
@@ -2257,6 +2254,24 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
       errors <- c(errors, cli::format_inline(
         "{.field results} has no numeric {.field prune_threshold} column, the threshold the prune gate read"
+      ))
+
+    }
+
+    ## The Bayesian search's record, which every row writer records too (NA
+    ## when no search ran) and evaluate() counts its early stops from
+    if (!"bayes_iter" %in% names(res) || !is.integer(res$bayes_iter)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no integer {.field bayes_iter} column, the iterations each Bayesian search began"
+      ))
+
+    }
+
+    if (!"bayes_stop" %in% names(res) || !is.character(res$bayes_stop)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no character {.field bayes_stop} column, why each Bayesian search ended"
       ))
 
     }

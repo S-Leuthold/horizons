@@ -47,7 +47,8 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
   obj$config$configs       <- configs
   obj$config$n_configs     <- 1L
   obj$config$tuning        <- list(cv_folds = 3L, grid_size = 3L,
-                                   bayesian_iter = 0L, final_bayesian_iter = 0L)
+                                   bayesian_iter = 0L, final_bayesian_iter = 0L,
+                                   ranges = merge_ranges(NULL))
 
   ## What configure() writes beside the grid, at its defaults
   obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
@@ -60,6 +61,8 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
     results     = tibble::tibble(config_id = "cfg_001", status = "success",
                                  ## the prune gate's reading, as prune = FALSE writes it
                                  below_prune_threshold = NA, prune_threshold = NA_real_,
+                                 ## no Bayesian search ran
+                                 bayes_iter = NA_integer_, bayes_stop = NA_character_,
                                  rmse = 0.4, rrmse = 0.1, rsq = 0.8,
                                  ccc = 0.85, rpd = 1.5, mae = 0.3,
                                  ## fit() ranks on the CV panel (#50)

@@ -570,7 +570,7 @@ evaluate <- function(x,
 
   ## The ranges the models' parameters are searched over (configure()'s
   ## tune_ranges, merged over TUNE_RANGES)
-  tune_ranges <- tuning$ranges %||% TUNE_RANGES
+  tune_ranges <- tuning$ranges
 
   ## -----------------------------------------------------------------------
   ## Step 3a: The window has to fit the spectrum
