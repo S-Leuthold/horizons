@@ -138,11 +138,14 @@
 #' range given here; a range whose lower bound is above that cap fails the
 #' configuration, saying so. `configure()` refuses a name no configured model
 #' tunes, a range that is not two finite numbers with the lower below the
-#' upper, and a fractional bound on a whole-number parameter (typed where the
-#' model's engine is installed, and by `evaluate()` and `fit()` otherwise).
-#' An engine's own limits are not checked: Cubist takes 1 to 100 committees
-#' and 0 to 9 neighbors, and a range past them fails those candidates' fits,
-#' which the row reports. The ranges are recorded as `config$tuning$ranges`,
+#' upper, an `mtry` or `num_comp` range starting below 1 (each counts the
+#' predictors or components a fit uses, so 0 is no model), and a fractional
+#' bound on a whole-number
+#' parameter (typed where the model's engine is installed, and by
+#' `evaluate()` and `fit()` otherwise). An engine's own limits are not
+#' checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
+#' range past them fails those candidates' fits, which the row reports. The
+#' ranges are recorded as `config$tuning$ranges`,
 #' so `fit()` re-tunes over the space `evaluate()` searched, and a checkpoint
 #' tuned over other ranges is not resumed. `ensemble()`'s meta-learners keep
 #' their own grids.
@@ -973,7 +976,9 @@ format_ranges <- function(ranges) {
 #' @description
 #' The one check of a set of ranges, at `configure()`'s door and in every
 #' verb's validator ([config_findings()]): a named list, its names unique,
-#' each element two finite numbers with the lower below the upper. With
+#' each element two finite numbers with the lower below the upper, and an
+#' `mtry` or `num_comp` range starting at 1 or more (`BOUNDED_PARAMETERS`,
+#' which count what a fit uses). With
 #' `check_names`, each name must be a parameter a model in `models` tunes
 #' (their ids in `MODEL_SPECS`), so a misspelt one is refused rather than
 #' ignored. Then each range is set on the parameter of every model in
@@ -1021,6 +1026,19 @@ tune_range_findings <- function(ranges, models, arg = "tune_ranges", check_names
     findings <- c(findings, cli::format_inline(
       "{.arg {arg}}'s {.field {id}} must be two finite numbers, the lower below the upper, not {.code {got}}."
     ))
+  }
+
+  ## The parameters the data bound (BOUNDED_PARAMETERS) count the
+  ## predictors or components a fit uses, so a range below 1 holds values
+  ## that are no model: every plsr count fails at num_comp = 0, from the one
+  ## fit the counts share, and ranger reads mtry = 0 as its own default
+  for (id in intersect(ids[shaped], BOUNDED_PARAMETERS)) {
+    lower <- ranges[[id]][1]
+    if (lower < 1) {
+      findings <- c(findings, cli::format_inline(
+        "{.arg {arg}}'s {.field {id}} must start at 1 or more, not {lower}: it counts the predictors or components a fit uses, at least one."
+      ))
+    }
   }
 
   tuned <- tuned_by(models)

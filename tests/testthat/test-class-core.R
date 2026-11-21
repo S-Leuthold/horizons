@@ -3414,6 +3414,7 @@ describe("config_findings() at every verb's door", {
       list(record = list(c(1, 25)),                               finding = "must be named by the parameter it sets"),
       list(record = list(committees = c(25, 1)),                  finding = "committees must be two finite numbers, the lower below the upper, not `c(25, 1)`"),
       list(record = list(committees = c(1, 25), committees = c(2, 9)), finding = "names committees more than once"),
+      list(record = list(mtry = c(0, 200)),                      finding = "mtry must start at 1 or more, not 0"),
       list(record = list(num_comp = c(1.5, 30)),                  finding = "num_comp is not a range of plsr's num_comp")
     )
 

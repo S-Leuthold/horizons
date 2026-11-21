@@ -685,7 +685,11 @@ describe("configure() tune_ranges", {
       list(tune_ranges = list(committees = c(1, 8, 9))),
       list(tune_ranges = list(committees = c(NA, 8))),
       list(tune_ranges = list(num_comp = c(1, Inf))),
-      list(tune_ranges = list(committees = c(8, 8)))
+      list(tune_ranges = list(committees = c(8, 8))),
+      ## A count the data bound, starting below 1: every plsr count fails at
+      ## 0, and ranger reads mtry = 0 as its default
+      list(models = "plsr", tune_ranges = list(num_comp = c(0, 20))),
+      list(models = "rf", tune_ranges = list(mtry = c(-1, 50)))
     )
 
     said <- vapply(bad, function(args) {
