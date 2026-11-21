@@ -3857,8 +3857,9 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #' ([abort_run_file_unread()]). Then the version is checked, then the
 #' payload's keys. Its configuration's fold preparations, which the run
 #' built before any configuration and keeps in `fold_cache_dir`, are read
-#' once its folds are rebuilt, each held to its key ([read_fold_entry()]);
-#' one it cannot read is said on what it returns in the same way.
+#' once its folds are rebuilt, by the reader the session uses
+#' ([read_config_fold_entries()]), each held to its key; one it cannot read
+#' is said on what it returns in the same way.
 #'
 #' @param config_i Integer row index into `shared$configs`. Named to avoid
 #'   colliding with `shared$resample_idx`.
@@ -3998,8 +3999,13 @@ evaluate_config_worker <- function(config_i, payload_path) {
     ## reproduced by construction, not by replaying the RNG.
     rebuilt <- rebuild_resamples(shared$data, shared$resample_idx)
 
-    ## The configuration's fold preparations, which the run built once
-    rebuilt$fold_entries <- worker_fold_entries(cfg, rebuilt$cv_folds, shared)
+    ## The configuration's fold preparations, which the run built once, read
+    ## as the session reads them, under the payload's settings and the
+    ## rebuilt folds
+    rebuilt$fold_entries <- read_config_fold_entries(
+      list(dir = shared$fold_cache_dir), cfg, rebuilt$cv_folds, shared$role_map, "evaluate",
+      shared$data_fp$data_fields, shared$seed, shared$sg_window, shared$pca_threshold
+    )
 
     rebuilt
 
@@ -4049,47 +4055,5 @@ evaluate_config_worker <- function(config_i, payload_path) {
   }
 
   result_row
-
-}
-
-#' A configuration's fold preparations, read on its daemon
-#'
-#' @description
-#' The units [config_fold_units()] gives the configuration under the
-#' payload's settings and the rebuilt folds, the keys the session's stage
-#' built them under, each read from `fold_cache_dir` and held to its key
-#' ([read_fold_entry()]).
-#'
-#' @param config_row The configuration's row.
-#' @param folds The rebuilt folds.
-#' @param shared The payload.
-#' @return `NULL` with no feature selection; a list with `training` and
-#'   `folds`; or, for the first that cannot be read, a list of class
-#'   `horizons_run_file_unread`.
-#' @keywords internal
-#' @noRd
-worker_fold_entries <- function(config_row, folds, shared) {
-
-  units <- config_fold_units("evaluate", config_row, folds, shared$role_map, shared$data_fp$data_fields,
-                             shared$seed, shared$sg_window, shared$pca_threshold,
-                             bounded = bounded_model(config_row$model))
-
-  if (is.null(units$folds)) return(NULL)
-
-  read <- function(unit) {
-    if (is.null(unit)) return(NULL)
-    path <- file.path(shared$fold_cache_dir, unit$name)
-    got  <- read_fold_entry(path, unit$key)
-    if (!is.null(got$error)) {
-      return(structure(list(path = path, reason = got$error, file = "a fold preparation"),
-                       class = "horizons_run_file_unread"))
-    }
-    got$entry
-  }
-
-  entries <- list(training = read(units$training), folds = lapply(units$folds, read))
-  unread  <- Filter(function(e) inherits(e, "horizons_run_file_unread"), c(list(entries$training), entries$folds))
-
-  if (length(unread) > 0) unread[[1]] else entries
 
 }

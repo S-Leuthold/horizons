@@ -629,6 +629,39 @@ describe("finalize_bound()", {
 
 })
 
+describe("config_fold_entries()", {
+
+  it("reads a configuration's preps from the run's directory, and stops as systemic, naming the file and why, when one the run wrote cannot be read", {
+
+    ## The session's side of the one reader a configs-axis daemon uses too
+    ## (its side: test-evaluate-parallel.R)
+    case  <- prep_fold_case("pca")
+    dir   <- withr::local_tempdir()
+    store <- list(dir = normalizePath(dir, winslash = "/"), shown = dir, memory = NULL)
+    read  <- function() {
+      config_fold_entries(store, case$config, case$folds, case$role_map, "evaluate", NULL, 8L,
+                          DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD, results = results_so_far(list()))
+    }
+
+    for (i in seq_along(case$units$folds)) saveRDS(case$entries[[i]], file.path(dir, case$units$folds[[i]]$name))
+
+    expect_identical(read(), list(training = NULL, folds = case$entries))
+
+    ## The second fold's file gone, as when another run starts into the
+    ## same output_dir
+    unlink(file.path(dir, case$units$folds[[2]]$name))
+
+    err <- expect_error(read(), class = "horizons_error_systemic")
+    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err)))
+
+    expect_match(msg, "could not read a fold preparation it wrote to", fixed = TRUE)
+    expect_match(msg, paste0(case$units$folds[[2]]$name, ": "), fixed = TRUE)
+    expect_identical(nrow(err$results), 0L)
+
+  })
+
+})
+
 describe("fold_prep_scope()", {
 
   it("names a fold's prep by the response transformation only for a selection that reads the outcome", {

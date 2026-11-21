@@ -860,29 +860,33 @@ read_fold_entry <- function(path, key) {
 
 }
 
-#' A configuration's entries, from the run's store
+#' A configuration's entries, read from the run's store
 #'
 #' @description
-#' The entries [evaluate_single_config()] and [fit_single_config()] take as
-#' `fold_entries`, read from the store the run's stage wrote. The session
-#' wrote each, so one it cannot read stops the run as systemic, with the
-#' rows so far ([abort_fold_entry_unread()]).
+#' The units [config_fold_units()] gives the configuration, under the keys
+#' the stage built them with, each read from the store and, from a
+#' directory, held to its key ([read_fold_entry()]): the training part's
+#' first, then the folds' in order. The one reader of a configuration's
+#' entries, in this session ([config_fold_entries()]) and on a configs-axis
+#' daemon ([evaluate_config_worker()]), so the two cannot read them apart.
+#' A file it cannot read ends the reading and is returned, not raised, for
+#' each caller to stop on its own way.
 #'
-#' @param store From [open_fold_store()].
+#' @param store From [open_fold_store()], or on a daemon a list whose `dir`
+#'   is the payload's `fold_cache_dir`.
 #' @param config_row Single-row tibble from `config$configs`.
 #' @param folds The `rset` it is tuned over.
 #' @param role_map Tibble with `variable` and `role` columns.
 #' @param verb,data,seed,sg_window,pca_threshold As the stage's units were
 #'   listed with ([fold_prep_units()]).
-#' @param results The rows so far, carried by a stop.
-#' @param verb_label Character(1). The verb, for a stop's message.
-#' @param call The frame a stop reports.
-#' @return `NULL` with no feature selection; otherwise a list with
-#'   `training` and `folds`.
+#' @return `NULL` with no feature selection; a list with `training` and
+#'   `folds`; or, for the first file that cannot be read, a list of class
+#'   `horizons_run_file_unread` holding its `path`, the `reason` and what
+#'   the `file` holds.
 #' @keywords internal
 #' @noRd
-config_fold_entries <- function(store, config_row, folds, role_map, verb, data, seed, sg_window,
-                                pca_threshold, results, call = rlang::caller_env()) {
+read_config_fold_entries <- function(store, config_row, folds, role_map, verb, data, seed, sg_window,
+                                     pca_threshold) {
 
   units <- config_fold_units(verb, config_row, folds, role_map, data, seed, sg_window, pca_threshold,
                              bounded = bounded_model(config_row$model))
@@ -899,17 +903,58 @@ config_fold_entries <- function(store, config_row, folds, role_map, verb, data, 
       return(entry)
     }
 
-    got <- read_fold_entry(file.path(store$dir, unit$name), unit$key)
+    path <- file.path(store$dir, unit$name)
+    got  <- read_fold_entry(path, unit$key)
 
-    if (!is.null(got$error)) {
-      abort_fold_entry_unread(file.path(store$shown, unit$name), got$error, results, verb = verb, call = call)
-    }
+    if (is.null(got$error)) return(got$entry)
 
-    got$entry
+    structure(list(path = path, reason = got$error, file = "a fold preparation"),
+              class = "horizons_run_file_unread")
 
   }
 
-  list(training = read(units$training), folds = lapply(units$folds, read))
+  training <- read(units$training)
+
+  if (inherits(training, "horizons_run_file_unread")) return(training)
+
+  folds_read <- vector("list", length(units$folds))
+
+  for (i in seq_along(units$folds)) {
+    folds_read[i] <- list(read(units$folds[[i]]))
+    if (inherits(folds_read[[i]], "horizons_run_file_unread")) return(folds_read[[i]])
+  }
+
+  list(training = training, folds = folds_read)
+
+}
+
+#' A configuration's entries, from the run's store, in this session
+#'
+#' @description
+#' The entries [evaluate_single_config()] and [fit_single_config()] take as
+#' `fold_entries` ([read_config_fold_entries()]). The session wrote each, so
+#' one it cannot read stops the run as systemic, naming the file as given,
+#' with the rows so far ([abort_fold_entry_unread()]).
+#'
+#' @inheritParams read_config_fold_entries
+#' @param results The rows so far, carried by a stop.
+#' @param call The frame a stop reports.
+#' @return `NULL` with no feature selection; otherwise a list with
+#'   `training` and `folds`.
+#' @keywords internal
+#' @noRd
+config_fold_entries <- function(store, config_row, folds, role_map, verb, data, seed, sg_window,
+                                pca_threshold, results, call = rlang::caller_env()) {
+
+  got <- read_config_fold_entries(store, config_row, folds, role_map, verb, data, seed, sg_window,
+                                  pca_threshold)
+
+  if (inherits(got, "horizons_run_file_unread")) {
+    abort_fold_entry_unread(file.path(store$shown, basename(got$path)), got$reason, results,
+                            verb = verb, call = call)
+  }
+
+  got
 
 }
 
