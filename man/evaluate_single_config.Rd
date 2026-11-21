@@ -131,7 +131,8 @@ means Bayesian refinement was skipped), \code{below_prune_threshold} (logical;
 \code{NA} when \code{prune = FALSE}), \code{prune_threshold} (the threshold that reading
 was taken against; \code{NA} when \code{prune = FALSE}), \code{bayes_iter} and
 \code{bayes_stop} (the iterations the Bayesian search began, and why it
-ended: \code{"no_improve"}, \code{"budget"} or \code{"failed"}; both \code{NA} when no
+ended: \code{"no_improve"}, \code{"budget"} or \code{"failed"}; kept on a
+configuration that failed after its search, and both \code{NA} when no
 search ran), the six
 test-set metrics \code{rmse}, \code{rrmse}, \code{rsq}, \code{ccc}, \code{rpd}, \code{mae}, the six
 cross-validated means at the selected hyperparameters \code{cv_rmse},
