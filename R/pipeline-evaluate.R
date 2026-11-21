@@ -42,11 +42,11 @@
 #'   [ensemble()] take it unless given one.
 #' @param control A [control_horizons()] object: how the run goes, and,
 #'   through `isolate` and `no_improve`, part of what it computes (see
-#'   [control_horizons()]). `evaluate()` reads `allow_par`, `parallelize_over`,
-#'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces`, `isolate`
-#'   and `no_improve`, and refuses any other field that is set. The
-#'   control it ran with, defaults filled in, is recorded as
-#'   `evaluation$control`.
+#'   [control_horizons()]). `evaluate()` reads `allow_par`,
+#'   `parallelize_over`, `output_dir`, `verbose`, `debug`, `breaker`,
+#'   `keep_traces`, `isolate` and `no_improve`, and refuses any other field
+#'   that is set. The control it ran with, defaults filled in, is recorded
+#'   as `evaluation$control`.
 #'
 #' @section The Bayesian search's stopping rule:
 #' Each configuration's Bayesian search stops once `no_improve` iterations in

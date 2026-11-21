@@ -55,11 +55,11 @@ recorded as \code{models$seed}, which \code{\link[=ensemble]{ensemble()}} takes.
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, and,
 through \code{isolate} and \code{no_improve}, part of what it computes (see
-\code{\link[=control_horizons]{control_horizons()}}). \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug}, \code{breaker},
-\code{keep_traces}, \code{isolate}, \code{no_improve}, \code{min_calib_rows}, \code{min_ad_rows}
-and \code{min_degradation_rows}, and refuses any other field that is set. The
-control it ran with, defaults filled in, is recorded as
-\code{models$control}.}
+\code{\link[=control_horizons]{control_horizons()}}). \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug},
+\code{breaker}, \code{keep_traces}, \code{isolate}, \code{no_improve}, \code{min_calib_rows},
+\code{min_ad_rows} and \code{min_degradation_rows}, and refuses any other field
+that is set. The control it ran with, defaults filled in, is recorded
+as \code{models$control}.}
 }
 \value{
 A \code{horizons_fit} object (inherits from \code{horizons_eval},

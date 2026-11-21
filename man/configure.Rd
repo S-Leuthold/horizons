@@ -246,16 +246,14 @@ configuration, saying so. \code{configure()} refuses a name no configured model
 tunes, a range that is not two finite numbers with the lower below the
 upper, an \code{mtry} or \code{num_comp} range starting below 1 (each counts the
 predictors or components a fit uses, so 0 is no model), and a fractional
-bound on a whole-number
-parameter (typed where the model's engine is installed, and again by
-\code{evaluate()} and \code{fit()} once they have checked the engines of the models
-they fit). An engine's own limits are not
+bound on a whole-number parameter (typed where the model's engine is
+installed, and again by \code{evaluate()} and \code{fit()} once they have checked
+the engines of the models they fit). An engine's own limits are not
 checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
 range past them fails those candidates' fits, which the row reports. The
-ranges are recorded as \code{config$tuning$ranges},
-so \code{fit()} re-tunes over the space \code{evaluate()} searched, and a checkpoint
-tuned over other ranges is not resumed. \code{ensemble()}'s meta-learners keep
-their own grids.
+ranges are recorded as \code{config$tuning$ranges}, so \code{fit()} re-tunes over
+the space \code{evaluate()} searched, and a checkpoint tuned over other ranges
+is not resumed. \code{ensemble()}'s meta-learners keep their own grids.
 
 \strong{Outcome range:}
 

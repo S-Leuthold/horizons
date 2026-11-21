@@ -140,16 +140,14 @@
 #' tunes, a range that is not two finite numbers with the lower below the
 #' upper, an `mtry` or `num_comp` range starting below 1 (each counts the
 #' predictors or components a fit uses, so 0 is no model), and a fractional
-#' bound on a whole-number
-#' parameter (typed where the model's engine is installed, and again by
-#' `evaluate()` and `fit()` once they have checked the engines of the models
-#' they fit). An engine's own limits are not
+#' bound on a whole-number parameter (typed where the model's engine is
+#' installed, and again by `evaluate()` and `fit()` once they have checked
+#' the engines of the models they fit). An engine's own limits are not
 #' checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
 #' range past them fails those candidates' fits, which the row reports. The
-#' ranges are recorded as `config$tuning$ranges`,
-#' so `fit()` re-tunes over the space `evaluate()` searched, and a checkpoint
-#' tuned over other ranges is not resumed. `ensemble()`'s meta-learners keep
-#' their own grids.
+#' ranges are recorded as `config$tuning$ranges`, so `fit()` re-tunes over
+#' the space `evaluate()` searched, and a checkpoint tuned over other ranges
+#' is not resumed. `ensemble()`'s meta-learners keep their own grids.
 #'
 #' **Outcome range:**
 #'

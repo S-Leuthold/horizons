@@ -54,11 +54,11 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, and,
 through \code{isolate} and \code{no_improve}, part of what it computes (see
-\code{\link[=control_horizons]{control_horizons()}}). \code{evaluate()} reads \code{allow_par}, \code{parallelize_over},
-\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces}, \code{isolate}
-and \code{no_improve}, and refuses any other field that is set. The
-control it ran with, defaults filled in, is recorded as
-\code{evaluation$control}.}
+\code{\link[=control_horizons]{control_horizons()}}). \code{evaluate()} reads \code{allow_par},
+\code{parallelize_over}, \code{output_dir}, \code{verbose}, \code{debug}, \code{breaker},
+\code{keep_traces}, \code{isolate} and \code{no_improve}, and refuses any other field
+that is set. The control it ran with, defaults filled in, is recorded
+as \code{evaluation$control}.}
 }
 \value{
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with

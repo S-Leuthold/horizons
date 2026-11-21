@@ -191,11 +191,11 @@
 #'   recorded as `models$seed`, which [ensemble()] takes.
 #' @param control A [control_horizons()] object: how the run goes, and,
 #'   through `isolate` and `no_improve`, part of what it computes (see
-#'   [control_horizons()]). `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `isolate`, `no_improve`, `min_calib_rows`, `min_ad_rows`
-#'   and `min_degradation_rows`, and refuses any other field that is set. The
-#'   control it ran with, defaults filled in, is recorded as
-#'   `models$control`.
+#'   [control_horizons()]). `fit()` reads `allow_par`, `verbose`, `debug`,
+#'   `breaker`, `keep_traces`, `isolate`, `no_improve`, `min_calib_rows`,
+#'   `min_ad_rows` and `min_degradation_rows`, and refuses any other field
+#'   that is set. The control it ran with, defaults filled in, is recorded
+#'   as `models$control`.
 #'
 #' @section Parallelism:
 #' Before any member is fitted, each fold's recipe is prepared once for the
