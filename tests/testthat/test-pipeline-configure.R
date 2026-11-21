@@ -702,6 +702,18 @@ describe("configure() tune_ranges", {
 
   })
 
+  test_that("refuses a range written with braces as an input error, showing them as written", {
+
+    ## The findings are rendered text, so a brace in one is shown, not read
+    ## as a cli template
+    err <- expect_error(configure(make_single_response_hd(), verbose = FALSE,
+                                  tune_ranges = list(committees = "{1, 50}")),
+                        class = "horizons_error_input")
+    expect_match(conditionMessage(err), "{1, 50}", fixed = TRUE)
+    expect_match(err$findings, "committees must be two finite numbers", fixed = TRUE)
+
+  })
+
   test_that("refuses a fractional bound on a whole-number parameter, in dials' words, where the engine is installed", {
 
     skip_if_not_installed("Cubist")
