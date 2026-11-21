@@ -140,16 +140,27 @@ describe("assemble_folds()", {
 
   })
 
-  it("assembles every fold as the fold baked whole, for Boruta and CARS", {
+  it("assembles every fold as the fold baked whole, for Boruta and CARS, and for CARS under log", {
 
     skip_unless_slow_tier()
     skip_if_not_installed("Boruta")
 
-    for (selection in c("boruta", "cars")) {
+    cases <- list(boruta = prep_fold_case("boruta"), cars = prep_fold_case("cars"))
 
-      expect_folds_baked_whole(prep_fold_case(selection), selection)
+    for (selection in names(cases)) {
+
+      expect_folds_baked_whole(cases[[selection]], selection)
 
     }
+
+    ## CARS selects on the outcome its prep is given. On this outcome it
+    ## keeps other bands under log than under none, shown first, so the log
+    ## configuration's folds, held to its own recipe, hold its prep to the
+    ## transformed outcome and to the seed named by it
+    logged <- prep_fold_case("cars", transformation = "log")
+
+    expect_false(identical(lapply(logged$entries, `[[`, "kept"), lapply(cases$cars$entries, `[[`, "kept")))
+    expect_folds_baked_whole(logged, "cars, log")
 
   })
 
@@ -465,6 +476,45 @@ describe("config_fold_units()", {
     expect_identical(key$seed_rule, as.double(SEED_RULE))
     expect_identical(key$scoring_schema, as.double(SCORING_SCHEMA))
     expect_identical(fold_entry_file(key), plain)
+
+  })
+
+})
+
+describe("fold_unit_recipe()", {
+
+  it("builds a prep's recipe as the configuration's own for a selection that reads the outcome, and with no response step for PCA", {
+
+    ## A selection that reads the outcome selects on it as the configuration
+    ## transforms it, so its prep's recipe is the configuration's fold
+    ## recipe, response step and all; PCA reads the spectra alone, so its
+    ## prep's has no response step and serves every transformation. Ranks
+    ## are the same under every transformation, so correlation keeps the
+    ## same bands under each, and only the recipe shows the step is there.
+    case    <- prep_fold_case("none")
+    classes <- function(rec) vapply(rec$steps, function(s) class(s)[1], character(1))
+    unit_of <- function(cfg) fold_unit_recipe(fold_unit_row(cfg), case$inputs$data, case$role_map,
+                                              DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD)
+    own_of  <- function(cfg) build_recipe(cfg, case$inputs$data, case$role_map, transformed = TRUE)
+
+    ## The configuration's own recipe carries its response step
+    expect_true("step_log" %in% classes(own_of(config_as(case$config, feature_selection = "correlation",
+                                                         transformation = "log"))))
+    expect_true("step_sqrt" %in% classes(own_of(config_as(case$config, feature_selection = "cars",
+                                                          transformation = "sqrt"))))
+
+    for (transformation in VALID_TRANSFORMATIONS) {
+
+      for (selection in OUTCOME_SELECTIONS) {
+        cfg <- config_as(case$config, feature_selection = selection, transformation = transformation)
+        expect_identical(classes(unit_of(cfg)), classes(own_of(cfg)), label = paste(selection, transformation))
+      }
+
+      cfg <- config_as(case$config, feature_selection = "pca", transformation = transformation)
+      expect_identical(classes(unit_of(cfg)), classes(own_of(config_as(cfg, transformation = "none"))),
+                       label = paste("pca", transformation))
+
+    }
 
   })
 

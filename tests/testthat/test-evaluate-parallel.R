@@ -2422,7 +2422,8 @@ describe("evaluate() - the fold preparations on the daemons", {
     ## writes them where the payload says
     shared <- worker_payload()
     shared$configs$feature_selection <- "pca"
-    shared$fold_cache_dir <- withr::local_tempdir()
+    ## As evaluate() sends it: absolute, with forward slashes on Windows too
+    shared$fold_cache_dir <- normalizePath(withr::local_tempdir(), winslash = "/")
 
     rebuilt <- rebuild_resamples(shared$data, shared$resample_idx)
     units   <- fold_prep_units(shared$configs, rebuilt$cv_folds, shared$role_map, "evaluate",
@@ -2607,14 +2608,15 @@ describe("evaluate() - the fold preparations on the daemons", {
     tmp  <- file.path(dir, "tmp")
     done <- withr::local_tempdir()
 
-    ## On the daemons every prep but the training part's waits three seconds
-    ## before it runs, in R code a cancellation interrupts, and each says
-    ## when it has finished
+    ## On the daemons the first fold's prep waits three seconds before it
+    ## runs and each later fold's fifteen, in R code a cancellation
+    ## interrupts, so the cancel lands while the second fold's still waits
+    ## however loaded the machine; each says when it has finished
     with_deadline(mirai::everywhere({
       ns   <- asNamespace("horizons")
       real <- get("prep_fold_entry", envir = ns)
       utils::assignInNamespace("prep_fold_entry", function(unit, ...) {
-        if (!identical(unit$fold, "training")) Sys.sleep(3)
+        if (identical(unit$fold, "Fold1")) Sys.sleep(3) else if (!identical(unit$fold, "training")) Sys.sleep(15)
         entry <- real(unit, ...)
         file.create(file.path(done, unit$fold))
         entry
