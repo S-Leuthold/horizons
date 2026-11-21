@@ -1190,6 +1190,66 @@ describe("fit_single_config() - a search space that fits the budget", {
 
 
 ## =========================================================================
+## A PLS member's warnings when one fit serves every count (#109)
+## =========================================================================
+
+describe("fit_single_config() - a PLS member's warnings when one fit serves every count (#109)", {
+
+  ## Counts 1 to 12 gridded whole on folds of eight predictors (16
+  ## wavenumbers past the raw step's edge trim): the re-tune's one fit a
+  ## fold is at 12, capped at 8. The bound is widened past the data and the
+  ## choice fixed, as in evaluate_single_config()'s tests.
+  run_capped <- function(chosen) {
+
+    local_mocked_bindings(
+      finalize_bound  = function(param_set, predictors, folds) {
+        stats::update(param_set, num_comp = dials::num_comp(c(1L, 12L)))
+      },
+      select_complete = function(results, metric, n_folds, debug = FALSE) {
+        cm <- tune::collect_metrics(results)
+        unique(cm[cm$num_comp == chosen, c("num_comp", ".config")])
+      }
+    )
+
+    setup <- make_fit_setup(n = 60, n_wn = 16)
+
+    suppressWarnings(fit_single_config(
+      config_row          = make_fit_config(model = "plsr"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = NULL,
+      final_bayesian_iter = 0L,
+      grid_size           = 12L,
+      seed                = 42L
+    ))
+
+  }
+
+  it("leaves off the re-tune stage's cap when the chosen count fits every fold", {
+
+    result <- run_capped(2L)
+
+    expect_identical(result$status, "success")
+    expect_false(any(grepl("PLS fitted", result$warnings, fixed = TRUE)))
+
+  })
+
+  it("says a fold could not hold the chosen count from its out-of-fold fits", {
+
+    result <- run_capped(10L)
+    lines  <- result$warnings[grepl("PLS fitted", result$warnings, fixed = TRUE)]
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("PLS fitted 8 components, not the 10 asked for: .*3 of 3 folds", lines)))
+    expect_false(any(grepl("the 12 asked for", lines, fixed = TRUE)))
+
+  })
+
+})
+
+
+## =========================================================================
 ## The warnings of the chosen candidate (#109)
 ## =========================================================================
 ## The re-tune's grid is fixed, with mtry = 50 above the predictors: ranger

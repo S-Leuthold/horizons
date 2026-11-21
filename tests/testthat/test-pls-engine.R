@@ -151,6 +151,47 @@ describe("the pls engine", {
 
   })
 
+  it("registers num_comp as a submodel, as MODEL_SPECS names it", {
+
+    args <- parsnip::get_from_env("pls_args")
+    arg  <- args[args$engine == "pls" & args$parsnip == "num_comp", , drop = FALSE]
+
+    expect_identical(nrow(arg), 1L)
+    expect_true(arg$has_submodel)
+    expect_identical(MODEL_SPECS$plsr$submodel, "num_comp")
+
+  })
+
+  it("scores a grid of counts from one fit a fold, each count as a fit of its own scores it", {
+
+    ## 40 predictors, more than the largest count: each count is predicted
+    ## from a larger fit's matrices, so it equals a fit of its own to rounding
+    d     <- make_pls_data()
+    folds <- withr::with_seed(3, rsample::vfold_cv(d$df, v = 3))
+    wf    <- fold_workflow(define_model_spec("plsr"), "y")
+    grid  <- tibble::tibble(num_comp = c(1L, 2L, 4L, 7L, 10L))
+
+    real_fit <- pls_fit
+    n_fits   <- 0L
+    local_mocked_bindings(pls_fit = function(...) {
+      n_fits <<- n_fits + 1L
+      real_fit(...)
+    })
+
+    shared <- tune::collect_metrics(withr::with_seed(5, tune::tune_grid(wf, folds, grid = grid)))
+
+    expect_identical(n_fits, nrow(folds))
+
+    for (k in grid$num_comp) {
+      own <- tune::collect_metrics(withr::with_seed(5, tune::fit_resamples(
+        tune::finalize_workflow(wf, tibble::tibble(num_comp = k)), folds
+      )))
+      at  <- shared[shared$num_comp == k, , drop = FALSE]
+      expect_equal(at$mean[match(own$.metric, at$.metric)], own$mean, tolerance = 1e-10)
+    }
+
+  })
+
   it("tunes num_comp through tune_grid() and tune_bayes(), over 1 to 30 by default", {
 
     d     <- make_pls_data()
@@ -174,6 +215,93 @@ describe("the pls engine", {
     expect_true(all(tune::collect_metrics(bayes)$num_comp <= 8))
     expect_gt(max(tune::collect_metrics(bayes)$.iter), 0)
     expect_false(anyNA(tune::collect_metrics(bayes)$mean))
+
+  })
+
+})
+
+
+describe("multi_predict() for a plsr fit", {
+
+  it("predicts every count asked for from one fit, a count above the fit's own at the fit's", {
+
+    d    <- make_pls_data(n = 40, p = 6)
+    d$x  <- d$x[, 1:3]
+    spec <- parsnip::pls(num_comp = 5) |>
+      parsnip::set_engine("pls") |>
+      parsnip::set_mode("regression")
+
+    expect_warning(fit <- parsnip::fit_xy(spec, x = d$x, y = d$y),
+                   "3 components, not the 5", class = "horizons_warning_substitution")
+    expect_s3_class(fit, "_horizons_pls")
+
+    new  <- as.data.frame(d$x[1:4, ])
+    pred <- parsnip::multi_predict(fit, new, num_comp = c(4L, 1L, 5L))
+
+    expect_identical(nrow(pred), 4L)
+    expect_identical(pred$.pred[[1]]$num_comp, c(4L, 1L, 5L))
+
+    at <- function(k) vapply(pred$.pred, function(p) p$.pred[p$num_comp == k], numeric(1))
+
+    ## 4 and 5 at the three components the fit holds, as predict() gives
+    ## them; 1 as a fit of one component predicts
+    expect_equal(at(4L), predict(fit, new)$.pred)
+    expect_equal(at(5L), predict(fit, new)$.pred)
+    expect_equal(at(1L), pls_predict(pls_fit(d$x, d$y, ncomp = 1L), new))
+
+  })
+
+})
+
+
+describe("pls_cap_records()", {
+
+  ## Folds as assemble_folds() makes them, the outcome and each fold's
+  ## predictors, which a selection can make differ by fold
+  fold_of <- function(n_predictors, n_rows, n_out = 5L) {
+    data   <- as.data.frame(matrix(stats::rnorm((n_rows + n_out) * n_predictors), ncol = n_predictors))
+    data$y <- stats::rnorm(n_rows + n_out)
+    rsample::make_splits(list(analysis = seq_len(n_rows), assessment = n_rows + seq_len(n_out)),
+                         data = data)
+  }
+
+  folds <- withr::with_seed(7, rsample::manual_rset(
+    list(fold_of(4L, 30L), fold_of(10L, 30L), fold_of(4L, 30L), fold_of(10L, 5L)),
+    ids = paste0("Fold", 1:4)
+  ))
+
+  it("says, as the fits at the chosen count would, which folds cannot hold it", {
+
+    recs <- pls_cap_records(folds, tibble::tibble(num_comp = 6L, .config = "pre0_mod1_post0"))
+
+    expect_identical(recs$cause, c(
+      "PLS fitted 4 components, not the 6 asked for: the data have 4 predictors and 30 rows.",
+      "PLS fitted 4 components, not the 6 asked for: the data have 10 predictors and 5 rows."
+    ))
+    expect_identical(recs$folds, list(c("Fold1", "Fold3"), "Fold4"))
+    expect_identical(recs$scope, c("cv", "cv"))
+
+    ## The line a fit at that count on each fold reads, from tune's notes
+    oof <- withr::with_seed(5, suppressMessages(tune::fit_resamples(
+      tune::finalize_workflow(fold_workflow(define_model_spec("plsr"), "y"), tibble::tibble(num_comp = 6L)),
+      folds, control = tune::control_resamples(verbose = FALSE)
+    )))
+    expect_identical(render_warning_log(recs), render_warning_log(tune_note_records(oof)))
+
+  })
+
+  it("is empty when the count fits every fold, or no count was tuned", {
+
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(num_comp = 4L))), 0L)
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(mtry = 3L))), 0L)
+
+  })
+
+  it("leaves off pls_fit()'s warning, and nothing else, with drop_pls_caps()", {
+
+    recs <- text_records(c(pls_cap_message(4L, 6L, 4L, 30L), "PLS fitted the data: another warning"))
+
+    expect_identical(drop_pls_caps(recs)$cause, "PLS fitted the data: another warning")
 
   })
 

@@ -14,7 +14,9 @@ pls_fit(x, y, ncomp = 2L)
 \item{ncomp}{Integer. The number of components.}
 }
 \value{
-The \code{mvr} object from \code{\link[pls:plsr]{pls::plsr()}}, with the number of components
+The \code{mvr} object from \code{\link[pls:plsr]{pls::plsr()}}, of class \code{horizons_pls} as
+well (so parsnip's fit is \verb{_horizons_pls}, which
+\code{\link[=multi_predict._horizons_pls]{multi_predict._horizons_pls()}} serves), with the number of components
 used in \code{horizons_ncomp}.
 }
 \description{
@@ -25,5 +27,8 @@ scaled (a constant column is left unscaled, so it contributes nothing).
 most components the data can hold. A fit asked for more uses that many and
 warns, with class \code{horizons_warning_substitution}: the runners cap the tuning range from the whole training set, so a
 fold whose recipe selects fewer predictors can still reach this cap.
+
+While tuning, tune calls it at a grid stage's largest count, and the fit
+predicts every count of the stage (\code{\link[=multi_predict._horizons_pls]{multi_predict._horizons_pls()}}).
 }
 \keyword{internal}

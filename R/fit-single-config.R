@@ -310,7 +310,16 @@ fit_single_config <- function(config_row,
     ## Bayesian result carries that grid's notes as iteration 0
     candidate <- unit_step("select_best", candidate_of(retune$tune_results, best_params,
                                                        retune$grid, model_wflow))
-    collect_notes_from(retune$tune_results, candidate = candidate)
+
+    ## The PLS engine's cap is left off the re-tune's notes: one fit serves
+    ## every count of a grid stage, so they name the stage's largest count.
+    ## The out-of-fold fits below are at the chosen count, and their own
+    ## notes say where a fold capped it (pls_cap_records()).
+    warning_log <- dplyr::bind_rows(
+      warning_log,
+      drop_pls_caps(tune_note_records(retune$tune_results, type = "warning", scope = "cv",
+                                      candidate = candidate))
+    )
 
     unmapped <- unmapped_line(candidate)
 

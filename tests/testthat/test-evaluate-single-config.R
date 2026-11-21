@@ -1884,6 +1884,62 @@ describe("evaluate_single_config() - a PLS config", {
 
 })
 
+describe("evaluate_single_config() - a PLS row's warnings when one fit serves every count (#109)", {
+
+  ## Counts 1 to 12 gridded whole on folds of eight predictors: the grid's
+  ## one fit a fold is at 12, which pls_fit() caps at 8 and warns about. The
+  ## bound is widened past the data (finalize_bound() mocked), as a fold whose
+  ## selection kept fewer predictors than the training part's prep would
+  ## leave it, and the choice is mocked, so the row's count is the test's.
+  run_capped <- function(chosen) {
+
+    local_mocked_bindings(
+      finalize_bound  = function(param_set, predictors, folds) {
+        stats::update(param_set, num_comp = dials::num_comp(c(1L, 12L)))
+      },
+      select_complete = function(results, metric, n_folds, debug = FALSE) {
+        cm <- tune::collect_metrics(results)
+        unique(cm[cm$num_comp == chosen, c("num_comp", ".config")])
+      }
+    )
+
+    ## 16 wavenumbers keep 8 predictors past the raw step's edge trim
+    setup <- make_eval_setup(n = 60, n_wn = 16)
+
+    suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(model = "plsr"),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 12,
+      bayesian_iter = 0,
+      seed          = 42L
+    ))
+
+  }
+
+  it("leaves off the grid stage's cap when the chosen count fits every fold", {
+
+    row <- run_capped(2L)
+
+    expect_identical(row$status, "success")
+    expect_false(any(grepl("PLS fitted", row$warnings[[1]], fixed = TRUE)))
+
+  })
+
+  it("says once, for the chosen count, which folds could not hold it", {
+
+    row   <- run_capped(10L)
+    lines <- row$warnings[[1]][grepl("PLS fitted", row$warnings[[1]], fixed = TRUE)]
+
+    expect_identical(row$status, "success")
+    expect_true(any(grepl("PLS fitted 8 components, not the 10 asked for: .*3 of 3 folds", lines)))
+    expect_false(any(grepl("the 12 asked for", lines, fixed = TRUE)))
+
+  })
+
+})
+
 describe("evaluate_single_config() - a selection step's warning comes from the final fit's recipe", {
 
   it("raises Boruta keeping every band once, for every model, read from the final fit", {

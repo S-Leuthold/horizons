@@ -1326,6 +1326,33 @@ describe("the notes of the chosen candidate (#109)", {
 
   })
 
+  it("holds every count of a PLS grid in one model stage, num_comp being a submodel, so the stage's notes reach each count", {
+
+    ## The canary for the submodel's shape: one fit a fold, at the grid's
+    ## largest count, which pls_fit() caps at the eight predictors. Read for
+    ## any count the stage's note is there, which is why the runners leave
+    ## the PLS cap off and read it for the chosen count (pls_cap_records()).
+    set.seed(1)
+    d <- as.data.frame(matrix(stats::rnorm(40 * 8), 40, 8, dimnames = list(NULL, paste0("x", 1:8))))
+    d$y   <- d$x1 + stats::rnorm(40, sd = 0.5)
+    folds <- rsample::vfold_cv(d, v = 3)
+    wf    <- fold_workflow(define_model_spec("plsr"), "y")
+    grid  <- tibble::tibble(num_comp = c(2L, 12L, 5L))
+
+    expect_identical(nrow(tune::schedule_grid(grid, wf)$model_stage[[1]]), 1L)
+
+    res <- suppressMessages(tune::tune_grid(wf, folds, grid = grid,
+                                            control = tune::control_grid(verbose = FALSE)))
+    cm  <- tune::collect_metrics(res)
+    two <- unique(cm[cm$num_comp == 2L, c("num_comp", ".config")])
+
+    expect_identical(grid_model_stages(grid, wf, two), 1L)
+
+    lines <- render_warning_log(tune_note_records(res, candidate = candidate_of(res, two, grid, wf)))
+    expect_true(any(grepl("PLS fitted 8 components, not the 12 asked for", lines, fixed = TRUE)))
+
+  })
+
 })
 
 describe("render_warning_log()", {

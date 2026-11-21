@@ -47,6 +47,13 @@
 #   on an engine's name (parsnip's tunable() for lightgbm, tune's checks for
 #   glmnet) would see a twin as another engine; the contract test compares a
 #   twin's tunable() with its engine's.
+# - `submodel`: the tuned parameter one fit scores at every value, as the
+#   engine's registration marks it (`has_submodel`): tune fits the grid
+#   candidates that differ only in it once, at its largest value, and
+#   predicts the others from that fit (parsnip::multi_predict()). The
+#   contract test holds each row to its engine's registration, both ways;
+#   the PLS engine horizons registers takes its own from here
+#   (register_pls_engine()).
 #
 # An engine's traits are read through engine_spec() (R/utils-models.R), which
 # finds the row of an isolated twin's engine too.
@@ -70,6 +77,7 @@ MODEL_SPECS <- list(
     label    = "Cubist",
     packages = c("rules", "Cubist"),
     tuned    = c("committees", "neighbors", "max_rules"),
+    submodel = "neighbors",
     isolate  = c(repeats = "topepo/Cubist#6", memory = "topepo/Cubist#8")
   ),
 
@@ -89,7 +97,8 @@ MODEL_SPECS <- list(
     engine   = "pls",
     label    = "PLS",
     packages = "pls",
-    tuned    = "num_comp"
+    tuned    = "num_comp",
+    submodel = "num_comp"
   ),
 
   elastic_net = list(
@@ -97,7 +106,8 @@ MODEL_SPECS <- list(
     engine   = "glmnet",
     label    = "Elastic Net",
     packages = "glmnet",
-    tuned    = c("penalty", "mixture")
+    tuned    = c("penalty", "mixture"),
+    submodel = "penalty"
   ),
 
   svm_rbf = list(
@@ -133,7 +143,8 @@ MODEL_SPECS <- list(
     engine   = "earth",
     label    = "MARS",
     packages = "earth",
-    tuned    = c("prod_degree", "num_terms")
+    tuned    = c("prod_degree", "num_terms"),
+    submodel = "num_terms"
   )
 
 )
