@@ -2245,8 +2245,9 @@ describe("evaluate() - checkpoint data provenance", {
                      eval_settings(cv_folds = 3L, grid_size = 2L,
                                    bayesian_iter = 0L,
                                    ## horizons' default ranges, in the
-                                   ## record's text
+                                   ## record's text, and the stopping rule
                                    tune_ranges = "committees 1 to 25; num_comp 1 to 30",
+                                   no_improve = 5L,
                                    prune = FALSE,
                                    prune_threshold = NA_real_, seed = 42L,
                                    seed_rule = SEED_RULE,
@@ -2992,6 +2993,47 @@ describe("evaluate() - tuning-settings provenance", {
 
   })
 
+  it("refuses to resume checkpoints searched under another no_improve, naming it, and evaluates again a row that does not record it", {
+
+    ck     <- ck_a()
+    obj    <- ck$value$obj
+    tmpdir <- ck$dir
+    first  <- ck$value$first
+
+    expect_true(all(vapply(first$evaluation$results$settings, `[[`, numeric(1), "no_improve") == 5))
+
+    for (other in list(3L, FALSE)) {
+
+      err <- tryCatch(
+        suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                  control = control_horizons(output_dir = tmpdir, no_improve = other))),
+        horizons_error_input = function(e) e
+      )
+
+      expect_s3_class(err, "horizons_error_input")
+      expect_match(flat_message(err), paste0("no_improve = 5 (this run: ", other, ")"), fixed = TRUE)
+
+    }
+
+    for (f in list.files(file.path(tmpdir, "checkpoints"), full.names = TRUE)) {
+      row <- readRDS(f)
+      row$settings[[1]]$no_improve <- NULL
+      saveRDS(row, f)
+    }
+
+    template <- first$evaluation$results[1, ]
+    ran      <- character(0)
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      ran <<- c(ran, config_row$config_id)
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+
+    again <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
+
+    expect_setequal(ran, obj$config$configs$config_id)
+
+  })
+
   it("records no isolate setting for a grid that fits no isolated model, which resumes across a change of it", {
 
     template <- ev60()$evaluation$results[1, ]
@@ -3013,6 +3055,82 @@ describe("evaluate() - tuning-settings provenance", {
     resumed <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(output_dir = tmpdir)))
     expect_length(ran, 2L)
     expect_identical(resumed$evaluation$results$config_id, first$evaluation$results$config_id)
+
+  })
+
+})
+
+
+## =========================================================================
+## The Bayesian search's stopping rule
+## =========================================================================
+## Each row records its search's stop (bayes_stop); evaluate() counts them,
+## resumed rows included, into one line in the tree and one note on the log.
+
+describe("evaluate() - the Bayesian search's stopping rule", {
+
+  ## Rows as evaluate_single_config() returns them, each with the stop given
+  stopping_rows <- function(stops) {
+    template <- ev60()$evaluation$results[1, ]
+    function(config_row, ...) {
+      row <- mock_eval_row(template, config_row$config_id, "success")
+      row$bayes_stop <- unname(stops[config_row$config_id])
+      row$bayes_iter <- if (is.na(row$bayes_stop)) NA_integer_ else 3L
+      row
+    }
+  }
+
+  line <- paste0("The Bayesian search stopped early in 1 of the 2 configurations it ran in, after 5 iterations ",
+                 "without improvement; `control_horizons(no_improve = FALSE)` runs every iteration, and a larger ",
+                 "number waits longer.")
+
+  it("says how many searches the rule stopped, in the tree and once on the log, naming the override", {
+
+    stops <- c(cfg_001 = "no_improve", cfg_002 = "budget", cfg_003 = NA)
+    local_mocked_bindings(evaluate_single_config = stopping_rows(stops))
+
+    out <- utils::capture.output(
+      ev <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+                                      control = control_horizons(verbose = TRUE)))
+    )
+
+    expect_true(paste0("\u2502  ", line) %in% out)
+    expect_identical(ev$evaluation$results$bayes_stop, unname(stops))
+
+    notes <- ev$log[ev$log$verb == "evaluate" & ev$log$type == "note", ]
+    expect_identical(sum(grepl("stopped early", notes$message, fixed = TRUE)), 1L)
+    expect_true(line %in% notes$message)
+
+  })
+
+  it("says nothing when no search stopped by the rule", {
+
+    local_mocked_bindings(evaluate_single_config = stopping_rows(c(cfg_001 = "budget", cfg_002 = NA)))
+
+    out <- utils::capture.output(
+      ev <- suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
+                                      control = control_horizons(verbose = TRUE)))
+    )
+
+    expect_false(any(grepl("stopped early", out, fixed = TRUE)))
+    expect_false(any(grepl("stopped early", ev$log$message, fixed = TRUE)))
+
+  })
+
+  it("counts the stops of the rows it resumes from checkpoints", {
+
+    local_mocked_bindings(evaluate_single_config = stopping_rows(c(cfg_001 = "no_improve", cfg_002 = "budget")))
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    dir <- withr::local_tempdir()
+    suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    ## Every row resumed: nothing is evaluated again
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration was evaluated again"))
+    resumed <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    notes <- resumed$log[resumed$log$verb == "evaluate" & resumed$log$type == "note", ]
+    expect_true(line %in% notes$message)
 
   })
 

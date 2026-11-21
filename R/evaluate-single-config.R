@@ -45,6 +45,10 @@
 #'   dials' units: the ranges the model's parameters are searched over, set
 #'   before the data cap them (`apply_tune_ranges()`). `evaluate()` reads
 #'   them from `configure()`'s `config$tuning$ranges`. Default `TUNE_RANGES`.
+#' @param no_improve A whole number of at least 1, or `FALSE`: the Bayesian
+#'   iterations without improvement after which the search stops
+#'   (`control_horizons(no_improve = )`, which `evaluate()` reads). Default
+#'   `BAYES_NO_IMPROVE_DEFAULT`.
 #' @param prune Logical. If TRUE, record whether the best grid-search RPD
 #'   falls below `prune_threshold` (`below_prune_threshold`), and when it
 #'   does, skip Bayesian optimization and label the config `"pruned"`. With
@@ -100,7 +104,10 @@
 #' @return Single-row tibble with columns: `config_id`, `status` (`"pruned"`
 #'   means Bayesian refinement was skipped), `below_prune_threshold` (logical;
 #'   `NA` when `prune = FALSE`), `prune_threshold` (the threshold that reading
-#'   was taken against; `NA` when `prune = FALSE`), the six
+#'   was taken against; `NA` when `prune = FALSE`), `bayes_iter` and
+#'   `bayes_stop` (the iterations the Bayesian search began, and why it
+#'   ended: `"no_improve"`, `"budget"` or `"failed"`; both `NA` when no
+#'   search ran), the six
 #'   test-set metrics `rmse`, `rrmse`, `rsq`, `ccc`, `rpd`, `mae`, the six
 #'   cross-validated means at the selected hyperparameters `cv_rmse`,
 #'   `cv_rrmse`, `cv_rsq`, `cv_ccc`, `cv_rpd`, `cv_mae` (what `evaluate()` and
@@ -119,6 +126,7 @@ evaluate_single_config <- function(config_row,
                                    grid_size       = DEFAULT_GRID_SIZE,
                                    bayesian_iter   = DEFAULT_BAYES_ITER,
                                    tune_ranges     = TUNE_RANGES,
+                                   no_improve      = BAYES_NO_IMPROVE_DEFAULT,
                                    prune           = FALSE,
                                    prune_threshold = 1.0,
                                    allow_par       = FALSE,
@@ -373,6 +381,8 @@ evaluate_single_config <- function(config_row,
 
     final_tune_results <- grid_results
     n_dropped          <- 0L
+    bayes_iter         <- NA_integer_
+    bayes_stop         <- NA_character_
 
     if (!skip_bayesian && search_iter > 0) {
 
@@ -386,6 +396,7 @@ evaluate_single_config <- function(config_row,
         param_info    = param_set,
         metrics       = tune_metrics,
         seed          = bayes_seed,
+        no_improve    = no_improve,
         allow_par     = allow_par,
         parallel_over = parallel_over,
         debug         = debug
@@ -393,6 +404,8 @@ evaluate_single_config <- function(config_row,
 
       final_tune_results <- search$results
       n_dropped          <- search$n_dropped
+      bayes_iter         <- search$n_iter
+      bayes_stop         <- search$stop
 
       gc(verbose = FALSE)
 
@@ -517,6 +530,8 @@ evaluate_single_config <- function(config_row,
       status        = if (skip_bayesian) "pruned" else "success",
       below_prune_threshold = below_prune_threshold,
       prune_threshold       = if (prune) as.numeric(prune_threshold) else NA_real_,
+      bayes_iter            = as.integer(bayes_iter),
+      bayes_stop            = bayes_stop,
       rmse          = test_metrics$rmse,
       rrmse         = test_metrics$rrmse,
       rsq           = test_metrics$rsq,

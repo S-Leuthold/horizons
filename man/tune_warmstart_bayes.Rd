@@ -10,6 +10,7 @@ tune_warmstart_bayes(
   initial_grid,
   param_set,
   bayesian_iter,
+  no_improve = BAYES_NO_IMPROVE_DEFAULT,
   metric_set,
   allow_par = FALSE,
   debug = FALSE,
@@ -30,6 +31,9 @@ once.}
 
 \item{bayesian_iter}{Integer. Bayesian iterations after grid. 0 = grid only.}
 
+\item{no_improve}{A whole number, or \code{FALSE}: the Bayesian search's
+stopping rule (\code{bayes_search()}).}
+
 \item{metric_set}{A \code{yardstick::metric_set}.}
 
 \item{allow_par}{Logical. Passed to tune control functions.}
@@ -44,9 +48,11 @@ its phases' units.}
 \value{
 List with \code{tune_results} (the result the hyperparameters were
 chosen from), \code{best_params} (single-row tibble, with \code{.config}), \code{grid}
-(\code{initial_grid}, which the member reads its notes through, #109) and
+(\code{initial_grid}, which the member reads its notes through, #109),
 \code{n_dropped} (the candidates the Bayesian search proposed and tune
-dropped, scored on no fold).
+dropped, scored on no fold), and \code{bayes_iter} and \code{bayes_stop}, the
+iterations the search began and why it ended (\code{bayes_search()}'s
+\code{n_iter} and \code{stop}; \code{NA} with no Bayesian search).
 }
 \description{
 The re-tuning sequence of a \code{fit()} member, run inside its unit:

@@ -55,8 +55,8 @@ recorded as \code{models$seed}, which \code{\link[=ensemble]{ensemble()}} takes.
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug}, \code{breaker},
-\code{keep_traces}, \code{isolate}, \code{min_calib_rows}, \code{min_ad_rows} and
-\code{min_degradation_rows}, and refuses any other field that is set. The
+\code{keep_traces}, \code{isolate}, \code{no_improve}, \code{min_calib_rows}, \code{min_ad_rows}
+and \code{min_degradation_rows}, and refuses any other field that is set. The
 control it ran with, defaults filled in, is recorded as
 \code{models$control}.}
 }
@@ -174,7 +174,12 @@ members failed and the rest
 are returned (\code{horizons_warning_partial_failure}, naming them with each
 distinct cause). It records as notes on the log, without a warning, a
 member's fitted workflow stored whole because it could not be slimmed and
-in-sample interval diagnostics that could not be computed. The folds are
+in-sample interval diagnostics that could not be computed, and how many
+members' re-tunes the Bayesian search's stopping rule ended early
+(\code{control_horizons(no_improve = )}: a search stops once that many
+iterations in a row have not improved on its best, and \code{FALSE} runs every
+iteration), each member recording the iterations its search began
+(\code{bayes_iter}) and why it ended (\code{bayes_stop}). The folds are
 drawn from the rows the members are fitted on, which must outnumber the
 folds, or \code{fit()} refuses, as \code{evaluate()} does.
 }

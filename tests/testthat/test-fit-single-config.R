@@ -1147,7 +1147,7 @@ describe("fit_single_config() - a search space that fits the budget", {
 
     local_mocked_bindings(bayes_search = function(...) {
       searched <<- TRUE
-      list(results = list(...)$initial, n_dropped = 0L)
+      list(results = list(...)$initial, n_dropped = 0L, n_iter = 0L, stop = "budget")
     })
 
     result <- fit_single_config(
@@ -1227,6 +1227,46 @@ describe("fit_single_config() - the ranges searched (tune_ranges)", {
     expect_true(all(seen$grid$committees >= 1 & seen$grid$committees <= 8))
     expect_true(8L %in% seen$grid$committees)
     expect_true(all(tune::collect_metrics(seen$results)$committees <= 8))
+
+  })
+
+})
+
+
+## =========================================================================
+## The re-tune's stopping rule
+## =========================================================================
+
+describe("fit_single_config() - the re-tune's stopping rule", {
+
+  it("passes no_improve to the re-tune, and keeps how far its search went on the member, failed or not", {
+
+    setup <- make_fit_setup()
+    seen  <- NULL
+    local_mocked_bindings(tune_warmstart_bayes = function(..., no_improve) {
+      seen <<- no_improve
+      list(tune_results = NULL, best_params = NULL, grid = NULL, n_dropped = 0L,
+           bayes_iter = 4L, bayes_stop = "no_improve")
+    })
+
+    ## The member fails after its re-tune, reading the warnings of a result
+    ## that is not there, and still says how far the search went
+    member <- fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 30L,
+      grid_size           = 2L,
+      no_improve          = 2L,
+      seed                = 42L
+    )
+
+    expect_identical(seen, 2L)
+    expect_identical(member$status, "failed")
+    expect_identical(member$bayes_iter, 4L)
+    expect_identical(member$bayes_stop, "no_improve")
 
   })
 

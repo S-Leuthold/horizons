@@ -260,7 +260,12 @@ HIGHER_BETTER_METRICS <- c("rpd", "rsq", "ccc")
 DEFAULT_GRID_SIZE <- 10
 DEFAULT_BAYES_ITER <- 15
 DEFAULT_CV_FOLDS <- 5
-BAYES_NO_IMPROVE_LIMIT <- 10
+
+# The Bayesian iterations without improvement after which a search stops
+# (control_horizons(no_improve = )), in evaluate() and fit()'s re-tune alike.
+# Each verb says how many of its searches stopped early, and how to change
+# it.
+BAYES_NO_IMPROVE_DEFAULT <- 5L
 DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 
 # Recipe settings configure() records and build_recipe() applies to every
@@ -394,6 +399,7 @@ SHARED_ARG_NAMES <- c(
   "grid_size",
   "bayesian_iter",
   "tune_ranges",
+  "no_improve",
   "prune",
   "prune_threshold",
   "seed",

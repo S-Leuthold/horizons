@@ -87,7 +87,12 @@
 #' are returned (`horizons_warning_partial_failure`, naming them with each
 #' distinct cause). It records as notes on the log, without a warning, a
 #' member's fitted workflow stored whole because it could not be slimmed and
-#' in-sample interval diagnostics that could not be computed. The folds are
+#' in-sample interval diagnostics that could not be computed, and how many
+#' members' re-tunes the Bayesian search's stopping rule ended early
+#' (`control_horizons(no_improve = )`: a search stops once that many
+#' iterations in a row have not improved on its best, and `FALSE` runs every
+#' iteration), each member recording the iterations its search began
+#' (`bayes_iter`) and why it ended (`bayes_stop`). The folds are
 #' drawn from the rows the members are fitted on, which must outnumber the
 #' folds, or `fit()` refuses, as `evaluate()` does.
 #'
@@ -185,8 +190,8 @@
 #'   recorded as `models$seed`, which [ensemble()] takes.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `isolate`, `min_calib_rows`, `min_ad_rows` and
-#'   `min_degradation_rows`, and refuses any other field that is set. The
+#'   `keep_traces`, `isolate`, `no_improve`, `min_calib_rows`, `min_ad_rows`
+#'   and `min_degradation_rows`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as
 #'   `models$control`.
 #'
@@ -955,6 +960,7 @@ fit <- function(x,
       final_bayesian_iter = final_bayesian_iter,
       grid_size           = tuning$grid_size,
       tune_ranges         = tuning$ranges %||% TUNE_RANGES,
+      no_improve          = control$no_improve,
       compute_uq          = compute_uq,
       compute_ad          = compute_ad,
       allow_par           = allow_par,
@@ -1260,6 +1266,13 @@ fit <- function(x,
 
   class(x) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
+  ## How many of the re-tunes' Bayesian searches the stopping rule ended: a
+  ## note on the log, and a line in the summary below
+  stop_line <- early_stop_line(results_tibble$bayes_stop, control$no_improve,
+                               "The re-tune's Bayesian search", "member")
+
+  if (!is.null(stop_line)) log_note(collector, "{stop_line}")
+
   ## What the run reported goes on the object's log before it is certified
   x$log <- log_close(collector, x$log)
 
@@ -1284,6 +1297,8 @@ fit <- function(x,
     cat(paste0(
       "\u2502  \u251C\u2500 Successful: ", n_success, " / ", n_best, "\n"
     ))
+
+    if (!is.null(stop_line)) cat(paste0("\u2502  \u251C\u2500 ", stop_line, "\n"))
 
     if (n_degraded > 0) {
 
@@ -1411,6 +1426,8 @@ member_row <- function(res) {
     best_params     = list(res$best_params),
     warm_start      = res$warm_start %||% NA,
     start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
+    bayes_iter      = as.integer(res$bayes_iter %||% NA_integer_),
+    bayes_stop      = as.character(res$bayes_stop %||% NA_character_),
     error_message   = res$error_message %||% NA_character_,
     class           = res$class %||% NA_character_,
     trace           = list(res$trace),
@@ -1526,6 +1543,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
     status                = "not_evaluated",
     below_prune_threshold = NA,
     prune_threshold       = NA_real_,
+    bayes_iter            = NA_integer_,
+    bayes_stop            = NA_character_,
     rmse    = NA_real_, rrmse    = NA_real_, rsq    = NA_real_,
     ccc     = NA_real_, rpd      = NA_real_, mae    = NA_real_,
     cv_rmse = NA_real_, cv_rrmse = NA_real_, cv_rsq = NA_real_,

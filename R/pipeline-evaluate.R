@@ -42,10 +42,21 @@
 #'   [ensemble()] take it unless given one.
 #' @param control A [control_horizons()] object: how the run goes, not what
 #'   it computes. `evaluate()` reads `allow_par`, `parallelize_over`,
-#'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces` and
-#'   `isolate`, and refuses any other field that is set. The
+#'   `output_dir`, `verbose`, `debug`, `breaker`, `keep_traces`, `isolate`
+#'   and `no_improve`, and refuses any other field that is set. The
 #'   control it ran with, defaults filled in, is recorded as
 #'   `evaluation$control`.
+#'
+#' @section The Bayesian search's stopping rule:
+#' Each configuration's Bayesian search stops once `no_improve` iterations in
+#' a row have not improved on its best (`control_horizons(no_improve = )`,
+#' default 5), tune's own rule. `evaluate()` says how many searches stopped
+#' early, in its tree and as a note on the object's log, and each row records
+#' the iterations its search began (`bayes_iter`) and why it ended
+#' (`bayes_stop`: `"no_improve"`, `"budget"` for every iteration asked for,
+#' or `"failed"`; both `NA` when no search ran). `no_improve = FALSE` runs
+#' every iteration. The limit changes what a run computes, so a checkpoint
+#' searched under another is not resumed.
 #'
 #' @section Checkpoints:
 #' With `control_horizons(output_dir = )`, each config's result is
@@ -56,9 +67,10 @@
 #'   this run's training data (the outcome, the sample ids, which columns hold
 #'   the `id`, `outcome` and `predictor` roles, and the outcome and predictor
 #'   values) and tuned with this run's settings
-#'   (`cv_folds`, `grid_size`, `bayesian_iter`, `prune`, `prune_threshold`
-#'   when pruning, `seed`, and `configure()`'s `sg_window`, `pca_threshold`
-#'   and `outcome_range`), this run's response trim
+#'   (`cv_folds`, `grid_size`, `bayesian_iter`, the tuning ranges
+#'   `configure()` recorded, `prune`, `prune_threshold` when pruning, `seed`,
+#'   `control_horizons(no_improve = )`, and `configure()`'s `sg_window`,
+#'   `pca_threshold` and `outcome_range`), this run's response trim
 #'   (`response_threshold`, `NA` when none was requested) and, when the grid
 #'   has a `cubist` configuration, `control_horizons(isolate = )`, which
 #'   decides its scores (see "Isolated fits"); either mismatch aborts,
@@ -755,6 +767,9 @@ evaluate <- function(x,
     ## row, as pca_threshold is: a row whose model tunes none of them re-runs
     ## rather than resumes when only a range changed
     tune_ranges     = format_ranges(tune_ranges),
+    ## How far each Bayesian search goes (control_horizons(no_improve = )):
+    ## a row stopped under another limit is another row
+    no_improve      = control$no_improve,
     prune           = prune,
     ## Read only when pruning, so it cannot have changed a row otherwise.
     prune_threshold = if (isTRUE(prune)) prune_threshold else NA_real_,
@@ -1043,6 +1058,7 @@ evaluate <- function(x,
       grid_size       = tuning$grid_size,
       bayesian_iter   = tuning$bayesian_iter,
       tune_ranges     = tune_ranges,
+      no_improve      = control$no_improve,
       prune           = prune,
       prune_threshold = prune_threshold,
       seed            = seed,
@@ -1215,6 +1231,7 @@ evaluate <- function(x,
         grid_size       = tuning$grid_size,
         bayesian_iter   = tuning$bayesian_iter,
         tune_ranges     = tune_ranges,
+        no_improve      = control$no_improve,
         prune           = prune,
         prune_threshold = prune_threshold,
         allow_par       = axis$tune_allow_par,
@@ -1398,6 +1415,13 @@ evaluate <- function(x,
   results_list <- lift_unit_records(results_list, collector)
   all_results  <- dplyr::bind_rows(results_list)
 
+  ## How many Bayesian searches the stopping rule ended, resumed rows'
+  ## included: a note on the log here, and a line in the footer
+  stop_line <- early_stop_line(all_results$bayes_stop, control$no_improve,
+                               "The Bayesian search", "configuration")
+
+  if (!is.null(stop_line)) log_note(collector, "{stop_line}")
+
   ## -----------------------------------------------------------------------
   ## Step 10: Determine best config
   ## -----------------------------------------------------------------------
@@ -1529,6 +1553,8 @@ evaluate <- function(x,
       "\u2502  Results: ", n_success, " success, ",
       n_pruned, " pruned, ", n_failed, " failed\n"
     ))
+
+    if (!is.null(stop_line)) cat(paste0("\u2502  ", stop_line, "\n"))
 
     if (is.na(best_config_id)) {
 
@@ -3949,6 +3975,7 @@ prepare_worker <- function(models, selections) {
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `tune_ranges` (the ranges searched),
+#'   `no_improve` (the Bayesian searches' stopping rule),
 #'   `prune`, `prune_threshold`, `seed`,
 #'   `sg_window`, `pca_threshold` (the object's recipe settings),
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
@@ -4077,6 +4104,7 @@ evaluate_config_worker <- function(config_i, payload_path) {
     grid_size        = shared$grid_size,
     bayesian_iter    = shared$bayesian_iter,
     tune_ranges      = shared$tune_ranges,
+    no_improve       = shared$no_improve,
     prune            = shared$prune,
     prune_threshold  = shared$prune_threshold,
     allow_par        = FALSE,     # configs axis: tune runs sequentially inside

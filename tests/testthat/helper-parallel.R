@@ -206,6 +206,7 @@ worker_payload <- function() {
     grid_size       = 2L,
     bayesian_iter   = 0L,
     tune_ranges     = TUNE_RANGES,
+    no_improve      = BAYES_NO_IMPROVE_DEFAULT,
     prune           = FALSE,
     prune_threshold = 1,
     seed            = 42L,

@@ -820,6 +820,10 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
       result$warnings[[1]], fixed = TRUE
     )))
 
+    ## The row's record of the search: it failed before its first iteration
+    expect_identical(result$bayes_stop, "failed")
+    expect_identical(result$bayes_iter, 0L)
+
     ## A substitution warning of the unit's, which evaluate() lifts to its log
     records <- attr(result, "unit_records")
     expect_identical(records$class[records$type == "warning" &
@@ -871,6 +875,10 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
 
     expect_equal(result$status, "success")
     expect_identical(max(chosen_from$.iter), 1L)
+
+    ## It began a second iteration, which failed, and kept the first
+    expect_identical(result$bayes_stop, "failed")
+    expect_identical(result$bayes_iter, 2L)
     expect_true(any(grepl(
       "The Bayesian search stopped early, after 1 iteration, so the hyperparameters were chosen from those and the grid: the GP broke",
       result$warnings[[1]], fixed = TRUE
@@ -1076,6 +1084,55 @@ describe("evaluate_single_config() - a Bayesian search that fails (#209)", {
       "The Bayesian search produced no results, so the hyperparameters were chosen from the grid alone.",
       result$warnings[[1]], fixed = TRUE
     )))
+
+    ## Every iteration it was given began, and no error ended it
+    expect_identical(result$bayes_stop, "budget")
+    expect_identical(result$bayes_iter, 2L)
+
+  })
+
+})
+
+
+describe("evaluate_single_config() - the Bayesian search's stopping rule", {
+
+  ## rf on a few rows, with a search long enough that the rule ends it well
+  ## before its budget: no_improve = 1 stops at the first iteration that
+  ## does not improve on the best
+  run_rf <- function(no_improve) {
+    setup <- make_eval_setup(n = 40, n_wn = 12)
+    suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 20,
+      no_improve    = no_improve,
+      seed          = 42L
+    ))
+  }
+
+  it("stops by the rule and records the iterations it began, and with FALSE runs every one", {
+
+    stopped <- run_rf(1L)
+    expect_identical(stopped$status, "success")
+    expect_identical(stopped$bayes_stop, "no_improve")
+    expect_gte(stopped$bayes_iter, 1L)
+    expect_lt(stopped$bayes_iter, 20L)
+
+    full <- run_rf(FALSE)
+    expect_identical(full$status, "success")
+    expect_identical(full$bayes_stop, "budget")
+    expect_identical(full$bayes_iter, 20L)
+
+  })
+
+  it("records no search on a row that ran none", {
+
+    row <- esc()
+    expect_identical(row$bayes_iter, NA_integer_)
+    expect_identical(row$bayes_stop, NA_character_)
 
   })
 

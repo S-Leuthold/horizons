@@ -50,6 +50,10 @@
 #'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
 #'   `config$tuning$ranges`, the ranges `evaluate()` searched. Default
 #'   `TUNE_RANGES`.
+#' @param no_improve A whole number of at least 1, or `FALSE`: the re-tune's
+#'   Bayesian iterations without improvement after which it stops
+#'   (`control_horizons(no_improve = )`, which `fit()` reads). Default
+#'   `BAYES_NO_IMPROVE_DEFAULT`.
 #' @param compute_uq Logical. Whether to train UQ components.
 #' @param compute_ad Logical. Whether to fit the applicability domain, on the
 #'   same calibration set as UQ.
@@ -105,7 +109,10 @@
 #'   re-tune's grid is centred on it or is the whole space when that fits
 #'   the budget (`exhaustive_grid()`), `FALSE` when it fell back to a
 #'   space-filling grid, and `NA` (both) when the config failed before
-#'   tuning. `start_grid_size` is the starting grid's points.
+#'   tuning. `start_grid_size` is the starting grid's points. `bayes_iter`
+#'   and `bayes_stop` are the iterations the re-tune's Bayesian search began
+#'   and why it ended (`"no_improve"`, `"budget"` or `"failed"`), both `NA`
+#'   when no search ran.
 #'
 #' @keywords internal
 fit_single_config <- function(config_row,
@@ -118,6 +125,7 @@ fit_single_config <- function(config_row,
                               final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
                               grid_size           = DEFAULT_GRID_SIZE,
                               tune_ranges         = TUNE_RANGES,
+                              no_improve          = BAYES_NO_IMPROVE_DEFAULT,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
                               allow_par           = FALSE,
@@ -186,6 +194,10 @@ fit_single_config <- function(config_row,
   ## from a space-filling grid when there were none to use (#45)
   warm_start      <- NA
   start_grid_size <- NA_integer_
+
+  ## How far the re-tune's Bayesian search went, once it has run
+  bayes_iter <- NA_integer_
+  bayes_stop <- NA_character_
 
   unit <- run_unit({
 
@@ -304,6 +316,7 @@ fit_single_config <- function(config_row,
       initial_grid  = initial_grid,
       param_set     = param_set,
       bayesian_iter = search_iter,
+      no_improve    = no_improve,
       metric_set    = tune_metrics,
       allow_par     = allow_par,
       debug         = debug,
@@ -312,6 +325,8 @@ fit_single_config <- function(config_row,
     ))
 
     best_params <- retune$best_params
+    bayes_iter  <- as.integer(retune$bayes_iter)
+    bayes_stop  <- retune$bayes_stop
 
     ## The warnings tune kept for the chosen candidate (#109), as
     ## evaluate_single_config() reads them: the re-tune returns the grid
@@ -607,6 +622,8 @@ fit_single_config <- function(config_row,
       best_params      = best_params,
       warm_start       = warm_start,
       start_grid_size  = start_grid_size,
+      bayes_iter       = bayes_iter,
+      bayes_stop       = bayes_stop,
       cv_predictions   = cv_predictions,
       test_metrics     = test_metrics,
       cv_metrics       = cv_metrics,
@@ -643,6 +660,8 @@ fit_single_config <- function(config_row,
       best_params      = NULL,
       warm_start       = warm_start,
       start_grid_size  = start_grid_size,
+      bayes_iter       = bayes_iter,
+      bayes_stop       = bayes_stop,
       cv_predictions   = NULL,
       test_metrics     = NULL,
       cv_metrics       = NULL,

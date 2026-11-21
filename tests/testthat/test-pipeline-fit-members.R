@@ -426,6 +426,40 @@ describe("fit() - each member is one unit", {
 
   }
 
+  it("passes no_improve to every member's re-tune, keeps each member's search record, and says how many stopped early", {
+
+    obj  <- fit_obj(2L)
+    seen <- list()
+    out  <- utils::capture.output(
+      fitted <- testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(no_improve = 3L, verbose = TRUE))),
+        fit_single_config = function(config_row, ..., no_improve) {
+          seen[[config_row$config_id]] <<- no_improve
+          member <- fitted_member(config_row)
+          member$bayes_iter <- 3L
+          member$bayes_stop <- if (config_row$config_id == "cfg_001") "no_improve" else "budget"
+          member
+        },
+        .package = "horizons"
+      )
+    )
+
+    expect_identical(unname(unlist(seen)), c(3L, 3L))
+
+    res <- fitted$models$results
+    expect_identical(res$bayes_iter, c(3L, 3L))
+    expect_identical(res$bayes_stop[res$config_id == "cfg_001"], "no_improve")
+    expect_identical(res$bayes_stop[res$config_id == "cfg_002"], "budget")
+
+    line <- paste0("The re-tune's Bayesian search stopped early in 1 of the 2 members it ran in, after 3 ",
+                   "iterations without improvement; `control_horizons(no_improve = FALSE)` runs every ",
+                   "iteration, and a larger number waits longer.")
+    expect_true(paste0("\u2502  \u251C\u2500 ", line) %in% out)
+    expect_true(line %in% fitted$log$message[fitted$log$verb == "fit" & fitted$log$type == "note"])
+
+  })
+
   it("records each member's failure class, backtrace and warnings, and warns partial_failure once", {
 
     obj <- fit_obj(2L)

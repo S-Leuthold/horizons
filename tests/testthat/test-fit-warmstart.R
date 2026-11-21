@@ -610,8 +610,11 @@ describe("tune_warmstart_bayes() - return contract", {
     ## The grid comes back, for the member to read its notes through (#109)
     expect_identical(result$grid, grid)
 
-    ## No Bayesian stage, so no candidate it proposed was dropped
+    ## No Bayesian stage, so no candidate it proposed was dropped, and no
+    ## search to record
     expect_identical(result$n_dropped, 0L)
+    expect_identical(result$bayes_iter, NA_integer_)
+    expect_identical(result$bayes_stop, NA_character_)
 
   })
 
@@ -842,6 +845,11 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
     expect_true(".iter" %in% names(metrics))
     expect_equal(max(metrics$.iter), budget)
 
+    ## And the member's record of it: every iteration began, the budget
+    ## spent
+    expect_identical(result$bayes_iter, budget)
+    expect_identical(result$bayes_stop, "budget")
+
     ## The Bayesian stage started from the warm-start grid, which carries the
     ## best point, not from a starting design of its own
     tuned <- ts$param_set$name
@@ -950,6 +958,70 @@ describe("bayes_search()", {
     expect_match(msg, "tune keeps no record of why: All models failed for: penalty", fixed = TRUE)
     expect_match(msg, "...", fixed = TRUE)
     expect_lt(nchar(msg), 500)
+
+  })
+
+  it("counts the iterations it began from tune's log, a last one tune dropped included, and why it ended", {
+
+    ## tune binds no row for an iteration whose candidate failed in every
+    ## fold, so the result's last .iter is 1 while two iterations began
+    ts      <- make_tune_setup()
+    initial <- tune::tune_grid(ts$wf, ts$folds, grid = 2, metrics = ts$metric_set)
+    local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) {
+      message("\u2500\u2500 Iteration 1 \u2500\u2500")
+      message("\u2500\u2500 Iteration 2 \u2500\u2500")
+      message("x All models failed for: mtry=3, min_n=4")
+      out <- initial
+      out$.iter <- c(0L, rep(1L, nrow(out) - 1L))
+      out
+    }, .package = "tune")
+
+    got <- bayes_search(workflow = ts$wf, resamples = ts$folds, initial = initial, iter = 2L,
+                        param_info = ts$param_set, metrics = ts$metric_set, seed = 1L)
+
+    expect_identical(got$n_iter, 2L)
+    expect_identical(got$stop, "budget")
+    expect_identical(got$n_dropped, 1L)
+
+    ## tune's own line when its rule stops the search
+    local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) {
+      message("\u2500\u2500 Iteration 1 \u2500\u2500")
+      message("! No improvement for 1 iterations; returning current results.")
+      out <- initial
+      out$.iter <- c(0L, rep(1L, nrow(out) - 1L))
+      out
+    }, .package = "tune")
+
+    got <- bayes_search(workflow = ts$wf, resamples = ts$folds, initial = initial, iter = 8L,
+                        param_info = ts$param_set, metrics = ts$metric_set, seed = 1L, no_improve = 1L)
+
+    expect_identical(got[c("n_iter", "stop")], list(n_iter = 1L, stop = "no_improve"))
+
+  })
+
+  it("stops by tune's rule and says so, and with FALSE runs every iteration (the canary for tune's line)", {
+
+    ## A real search on a smooth surface: at no_improve = 1 it stops at the
+    ## first iteration that does not improve on the best, which tune says in
+    ## the line this reads; with FALSE it runs every iteration
+    wf <- workflows::workflow(mpg ~ ., parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+                                parsnip::set_engine("glmnet"))
+    ps      <- dials::parameters(list(dials::penalty(c(-3, 0)), dials::mixture(c(0, 1))))
+    folds   <- withr::with_seed(3, rsample::vfold_cv(mtcars, v = 3))
+    ms      <- tuning_metric_set("none", metrics = c("rmse", "rsq"))
+    initial <- withr::with_seed(4, tune::tune_grid(wf, folds, grid = 4, param_info = ps, metrics = ms))
+
+    stopped <- bayes_search(workflow = wf, resamples = folds, initial = initial, iter = 20L,
+                            param_info = ps, metrics = ms, seed = 5L, no_improve = 1L)
+
+    expect_identical(stopped$stop, "no_improve")
+    expect_lt(stopped$n_iter, 20L)
+    expect_identical(stopped$n_iter, max(stopped$results$.iter))
+
+    full <- bayes_search(workflow = wf, resamples = folds, initial = initial, iter = 3L,
+                         param_info = ps, metrics = ms, seed = 5L, no_improve = FALSE)
+
+    expect_identical(full[c("n_iter", "stop")], list(n_iter = 3L, stop = "budget"))
 
   })
 

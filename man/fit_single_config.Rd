@@ -15,6 +15,7 @@ fit_single_config(
   final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
   grid_size = DEFAULT_GRID_SIZE,
   tune_ranges = TUNE_RANGES,
+  no_improve = BAYES_NO_IMPROVE_DEFAULT,
   compute_uq = FALSE,
   compute_ad = FALSE,
   allow_par = FALSE,
@@ -63,6 +64,11 @@ dials' units: the ranges the re-tune searches, set before the data cap
 them (\code{apply_tune_ranges()}). \code{fit()} reads them from \code{configure()}'s
 \code{config$tuning$ranges}, the ranges \code{evaluate()} searched. Default
 \code{TUNE_RANGES}.}
+
+\item{no_improve}{A whole number of at least 1, or \code{FALSE}: the re-tune's
+Bayesian iterations without improvement after which it stops
+(\code{control_horizons(no_improve = )}, which \code{fit()} reads). Default
+\code{BAYES_NO_IMPROVE_DEFAULT}.}
 
 \item{compute_uq}{Logical. Whether to train UQ components.}
 
@@ -132,7 +138,10 @@ onto the log.
 re-tune's grid is centred on it or is the whole space when that fits
 the budget (\code{exhaustive_grid()}), \code{FALSE} when it fell back to a
 space-filling grid, and \code{NA} (both) when the config failed before
-tuning. \code{start_grid_size} is the starting grid's points.
+tuning. \code{start_grid_size} is the starting grid's points. \code{bayes_iter}
+and \code{bayes_stop} are the iterations the re-tune's Bayesian search began
+and why it ended (\code{"no_improve"}, \code{"budget"} or \code{"failed"}), both \code{NA}
+when no search ran.
 }
 \description{
 Inner-loop function for \code{fit()}. Takes a single config row from the

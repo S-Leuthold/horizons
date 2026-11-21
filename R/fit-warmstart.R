@@ -308,6 +308,8 @@ point_matches <- function(point, grid) {
 #' @param initial_grid The starting grid, from [build_warmstart_grid()].
 #' @param param_set Finalized `parameters` object.
 #' @param bayesian_iter Integer. Bayesian iterations after grid. 0 = grid only.
+#' @param no_improve A whole number, or `FALSE`: the Bayesian search's
+#'   stopping rule (`bayes_search()`).
 #' @param metric_set A `yardstick::metric_set`.
 #' @param allow_par Logical. Passed to tune control functions.
 #' @param debug Logical. Stop at the first failure rather than fall back.
@@ -317,9 +319,11 @@ point_matches <- function(point, grid) {
 #'
 #' @return List with `tune_results` (the result the hyperparameters were
 #'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
-#'   (`initial_grid`, which the member reads its notes through, #109) and
+#'   (`initial_grid`, which the member reads its notes through, #109),
 #'   `n_dropped` (the candidates the Bayesian search proposed and tune
-#'   dropped, scored on no fold).
+#'   dropped, scored on no fold), and `bayes_iter` and `bayes_stop`, the
+#'   iterations the search began and why it ended (`bayes_search()`'s
+#'   `n_iter` and `stop`; `NA` with no Bayesian search).
 #'
 #' @keywords internal
 tune_warmstart_bayes <- function(workflow,
@@ -327,6 +331,7 @@ tune_warmstart_bayes <- function(workflow,
                                  initial_grid,
                                  param_set,
                                  bayesian_iter,
+                                 no_improve = BAYES_NO_IMPROVE_DEFAULT,
                                  metric_set,
                                  allow_par = FALSE,
                                  debug     = FALSE,
@@ -372,6 +377,8 @@ tune_warmstart_bayes <- function(workflow,
 
   tune_results <- grid_results
   n_dropped    <- 0L
+  bayes_iter   <- NA_integer_
+  bayes_stop   <- NA_character_
 
   if (bayesian_iter > 0) {
 
@@ -383,6 +390,7 @@ tune_warmstart_bayes <- function(workflow,
       param_info    = param_set,
       metrics       = metric_set,
       seed          = bayes_seed,
+      no_improve    = no_improve,
       allow_par     = allow_par,
       parallel_over = "resamples",
       debug         = debug,
@@ -392,6 +400,8 @@ tune_warmstart_bayes <- function(workflow,
 
     tune_results <- search$results
     n_dropped    <- search$n_dropped
+    bayes_iter   <- search$n_iter
+    bayes_stop   <- search$stop
 
   }
 
@@ -401,7 +411,9 @@ tune_warmstart_bayes <- function(workflow,
     tune_results = tune_results,
     best_params  = unit_step("select_best", select_complete(tune_results, "rmse", n_folds, debug)),
     grid         = initial_grid,
-    n_dropped    = n_dropped
+    n_dropped    = n_dropped,
+    bayes_iter   = bayes_iter,
+    bayes_stop   = bayes_stop
   )
 
 }
@@ -433,6 +445,12 @@ tune_warmstart_bayes <- function(workflow,
 #' on candidates left out ([incomplete_note()]), and under `debug` the first
 #' stops the call.
 #'
+#' The search stops after `no_improve` iterations without improving on the
+#' best (tune's own rule), and the log says so ("No improvement for ..."),
+#' which is read too, with each iteration's header: the result does not
+#' show it, since an iteration whose candidate tune dropped binds no row.
+#' The verbs say how many searches stopped early from what this returns.
+#'
 #' An isolated fit whose process dies ([run_isolated()]) fails the unit
 #' with `horizons_error_process_died`, whether tune kept it as a note or
 #' dropped the candidate, so the search is not fallen back from. tune keeps
@@ -462,13 +480,19 @@ tune_warmstart_bayes <- function(workflow,
 #' @param workflow,resamples,initial,iter,param_info,metrics Passed to
 #'   [tune::tune_bayes()].
 #' @param seed Integer. The stage's seed, for [tune::control_bayes()].
+#' @param no_improve A whole number of at least 1, or `FALSE` to run every
+#'   iteration: the iterations without improvement after which the search
+#'   stops (`control_horizons(no_improve = )`).
 #' @param allow_par,parallel_over Passed to [tune::control_bayes()].
 #' @param debug Logical(1). Stop at the first failure rather than fall back.
 #' @param search,grid Character(1). How the messages name the search and the
 #'   grid it started from, e.g. `"the Bayesian search"` and `"the grid"`.
 #' @return List with `results` (the tune result to choose from: the
-#'   search's when it ran an iteration, else `initial`) and `n_dropped` (the
-#'   candidates it proposed that tune dropped, scored on no fold).
+#'   search's when it ran an iteration, else `initial`), `n_dropped` (the
+#'   candidates it proposed that tune dropped, scored on no fold), `n_iter`
+#'   (the iterations it began; 0 when it failed before its first) and `stop`
+#'   (why it ended: `"no_improve"`, the stopping rule; `"failed"`, an error
+#'   it kept what it finished from; or `"budget"`, every iteration asked for).
 #' @keywords internal
 #' @noRd
 bayes_search <- function(workflow,
@@ -478,6 +502,7 @@ bayes_search <- function(workflow,
                          param_info,
                          metrics,
                          seed,
+                         no_improve    = BAYES_NO_IMPROVE_DEFAULT,
                          allow_par     = FALSE,
                          parallel_over = "resamples",
                          debug         = FALSE,
@@ -488,6 +513,8 @@ bayes_search <- function(workflow,
   all_failed  <- NULL
   interrupted <- FALSE
   n_dropped   <- 0L
+  n_entered   <- 0L
+  no_better   <- FALSE
   search_cap  <- paste0(toupper(substr(search, 1, 1)), substring(search, 2))
 
   ## The deaths of isolated fits' processes, read where the fits ran: on the
@@ -500,6 +527,8 @@ bayes_search <- function(workflow,
 
   read_log <- function(m) {
     text <- cli::ansi_strip(conditionMessage(m))
+    if (grepl("Iteration [0-9]+", text)) n_entered <<- n_entered + 1L
+    if (grepl("No improvement for", text, fixed = TRUE)) no_better <<- TRUE
     if (grepl("All models failed for:", text, fixed = TRUE)) {
       n_dropped <<- n_dropped + 1L
       if (is.null(all_failed)) {
@@ -525,7 +554,8 @@ bayes_search <- function(workflow,
             save_workflow = FALSE,
             verbose       = FALSE,
             verbose_iter  = TRUE,
-            no_improve    = BAYES_NO_IMPROVE_LIMIT,
+            ### tune takes Inf for a search with no stopping rule
+            no_improve    = if (isFALSE(no_improve)) Inf else no_improve,
             seed          = seed,
             allow_par     = allow_par,
             parallel_over = parallel_over
@@ -580,20 +610,24 @@ bayes_search <- function(workflow,
   ## way the result holds only the initial grid, whose rows tune gives `.iter`
   ## 0, so a search that kept nothing has no iteration past it.
   cause  <- if (!is.null(stopped)) condition_summary(stopped)
-  n_iter <- if (is.null(bayes_results)) 0L else max(bayes_results$.iter)
+  n_kept <- if (is.null(bayes_results)) 0L else max(bayes_results$.iter)
 
-  if (n_iter > 0) {
+  ## Why the search ended, which the verbs count: an error first, since an
+  ## error's search may also have gone without improvement
+  ended <- if (!is.null(cause)) "failed" else if (no_better) "no_improve" else "budget"
+
+  if (n_kept > 0) {
 
     if (!is.null(cause)) {
 
       warn_in_unit("substitution",
-                   "{search_cap} stopped early, after {n_iter} iteration{?s}, so the hyperparameters were chosen from those and {grid}: {cause}")
+                   "{search_cap} stopped early, after {n_kept} iteration{?s}, so the hyperparameters were chosen from those and {grid}: {cause}")
 
     }
 
     ## Candidates that failed in some folds leave their reasons in .notes,
     ## which the caller reads
-    return(list(results = bayes_results, n_dropped = n_dropped))
+    return(list(results = bayes_results, n_dropped = n_dropped, n_iter = n_entered, stop = ended))
 
   }
 
@@ -611,7 +645,39 @@ bayes_search <- function(workflow,
 
   }
 
-  list(results = initial, n_dropped = n_dropped)
+  list(results = initial, n_dropped = n_dropped, n_iter = n_entered, stop = ended)
+
+}
+
+#' What a verb says when its Bayesian searches stopped early
+#'
+#' @description
+#' The stopping rule (`control_horizons(no_improve = )`) is the user's to
+#' see and to turn off, so a verb whose searches it stopped says how many
+#' and how: one note on its log and one line in its tree, counted from each
+#' configuration's or member's `bayes_stop`, rows resumed from a checkpoint
+#' included (their settings record held the same limit).
+#'
+#' @param stops Character: each configuration's or member's `bayes_stop`,
+#'   `NA` where no search ran.
+#' @param no_improve The limit the searches ran under.
+#' @param search Character(1). What the searches are, capitalized.
+#' @param unit Character(1). What they ran in, singular.
+#' @return Character(1), or `NULL` when no search stopped by the rule.
+#' @keywords internal
+#' @noRd
+early_stop_line <- function(stops, no_improve, search, unit) {
+
+  n_ran     <- sum(!is.na(stops))
+  n_stopped <- sum(stops %in% "no_improve")
+
+  if (n_stopped == 0) return(NULL)
+
+  units <- if (n_ran == 1) unit else paste0(unit, "s")
+
+  cli::format_inline(
+    "{search} stopped early in {n_stopped} of the {n_ran} {units} it ran in, after {no_improve} iteration{?s} without improvement; {.code control_horizons(no_improve = FALSE)} runs every iteration, and a larger number waits longer."
+  )
 
 }
 

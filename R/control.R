@@ -84,6 +84,25 @@ control_check_breaker <- function(x, arg, call) {
 
 }
 
+### The Bayesian search's stopping rule: tune's no_improve, which counts the
+### iterations since the best, so one is its least
+control_check_no_improve <- function(x, arg, call) {
+
+  if (isFALSE(x)) return(invisible(NULL))
+
+  if (!rlang::is_scalar_integerish(x) || is.na(x) || x < 1) {
+
+    got <- if (is.atomic(x) && length(x) == 1) cli::format_inline("{.val {x}}") else cli::format_inline("{.obj_type_friendly {x}}")
+
+    abort_horizons(
+      "{.arg {arg}} must be {.code FALSE} or a whole number of at least 1, not {got}.",
+      kind = "input", call = call
+    )
+
+  }
+
+}
+
 control_check_chunk_size <- function(x, arg, call) {
 
   check_arg(rlang::check_number_whole, x, min = 1, arg = arg, call = call)
@@ -181,6 +200,14 @@ CONTROL_FIELDS <- list(
     verbs   = c("evaluate", "fit", "select_training")
   ),
 
+  ### Changes what a run computes, as isolate does for cubist, so evaluate()
+  ### records it with a checkpoint's settings
+  no_improve = list(
+    default = function() BAYES_NO_IMPROVE_DEFAULT,
+    check   = control_check_no_improve,
+    verbs   = c("evaluate", "fit")
+  ),
+
   ### The reference is each row's distance to its nearest other row
   min_resemblance_rows = list(
     default = function() SELECT_RESEMBLANCE_MIN_ROWS,
@@ -199,9 +226,12 @@ CONTROL_FIELDS <- list(
 #'
 #' @description
 #' Arguments say what a verb computes; a control object says how it runs:
-#' parallelism, console output, checkpoints, how failures are handled, and the
-#' minimums below which part of a run is skipped or refused. None of these
-#' change what a successful run means.
+#' parallelism, console output, checkpoints, how failures are handled, the
+#' minimums below which part of a run is skipped or refused, and when a
+#' search stops. Most of these change only how a run goes. Two change what
+#' it computes: `isolate`, since a Cubist fit otherwise depends on the fits
+#' before it, and `no_improve`, how far the Bayesian searches go. [evaluate()]
+#' records both with a checkpoint's settings.
 #'
 #' Every field defaults to `NULL`, which leaves it to the verb's default. A
 #' verb refuses a field that is set but that it does not use, so one control
@@ -264,6 +294,11 @@ CONTROL_FIELDS <- list(
 #'   never holds the library. `FALSE` runs both in the process that calls
 #'   them, and the run says so. Default `getOption("horizons.isolate", TRUE)`.
 #'   [evaluate()], [fit()], [select_training()].
+#' @param no_improve A whole number of at least 1, or `FALSE`. The Bayesian
+#'   iterations without improvement on the best after which a search stops:
+#'   [evaluate()]'s, and [fit()]'s re-tune. Each verb says how many of its
+#'   searches stopped early, and how to change it. `FALSE` runs every
+#'   iteration asked for. Default 5. [evaluate()], [fit()].
 #' @param min_resemblance_rows A whole number of at least 2. The fewest library
 #'   rows [select_training()]'s resemblance check takes its reference
 #'   distribution from. Default 30.
@@ -292,6 +327,7 @@ control_horizons <- function(...,
                              min_ad_rows          = NULL,
                              min_degradation_rows = NULL,
                              isolate              = NULL,
+                             no_improve           = NULL,
                              min_resemblance_rows = NULL) {
 
   ### By name only, so a value never lands on a field by its position

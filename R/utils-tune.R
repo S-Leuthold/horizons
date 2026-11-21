@@ -21,7 +21,8 @@
 #'
 #' @return Single-row tibble with config_id, status, error_message, the
 #'   failure's root class (`NA` for an error given as text), `trace` (a list
-#'   holding `NULL`), metric columns (all NA), and runtime_secs (NA).
+#'   holding `NULL`), metric columns and the Bayesian search's record (all
+#'   NA), and runtime_secs (NA).
 #' @keywords internal
 create_failed_result <- function(config_id, error = NULL) {
 
@@ -52,6 +53,8 @@ create_failed_result <- function(config_id, error = NULL) {
     status        = "failed",
     below_prune_threshold = NA,
     prune_threshold       = NA_real_,
+    bayes_iter            = NA_integer_,
+    bayes_stop            = NA_character_,
     rmse          = NA_real_,
     rrmse         = NA_real_,
     rsq           = NA_real_,

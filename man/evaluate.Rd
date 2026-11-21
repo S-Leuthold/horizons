@@ -54,8 +54,8 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, not what
 it computes. \code{evaluate()} reads \code{allow_par}, \code{parallelize_over},
-\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces} and
-\code{isolate}, and refuses any other field that is set. The
+\code{output_dir}, \code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces}, \code{isolate}
+and \code{no_improve}, and refuses any other field that is set. The
 control it ran with, defaults filled in, is recorded as
 \code{evaluation$control}.}
 }
@@ -93,6 +93,19 @@ Bayesian optimization), evaluated on the test set, and ranked by the
 specified metric. The best configuration is stored for downstream use by
 \code{fit()}.
 }
+\section{The Bayesian search's stopping rule}{
+
+Each configuration's Bayesian search stops once \code{no_improve} iterations in
+a row have not improved on its best (\code{control_horizons(no_improve = )},
+default 5), tune's own rule. \code{evaluate()} says how many searches stopped
+early, in its tree and as a note on the object's log, and each row records
+the iterations its search began (\code{bayes_iter}) and why it ended
+(\code{bayes_stop}: \code{"no_improve"}, \code{"budget"} for every iteration asked for,
+or \code{"failed"}; both \code{NA} when no search ran). \code{no_improve = FALSE} runs
+every iteration. The limit changes what a run computes, so a checkpoint
+searched under another is not resumed.
+}
+
 \section{Checkpoints}{
 
 With \code{control_horizons(output_dir = )}, each config's result is
@@ -103,9 +116,10 @@ data from it (see "Parallelism"). A resumed row must have been scored on
 this run's training data (the outcome, the sample ids, which columns hold
 the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and predictor
 values) and tuned with this run's settings
-(\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, \code{prune}, \code{prune_threshold}
-when pruning, \code{seed}, and \code{configure()}'s \code{sg_window}, \code{pca_threshold}
-and \code{outcome_range}), this run's response trim
+(\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, the tuning ranges
+\code{configure()} recorded, \code{prune}, \code{prune_threshold} when pruning, \code{seed},
+\code{control_horizons(no_improve = )}, and \code{configure()}'s \code{sg_window},
+\code{pca_threshold} and \code{outcome_range}), this run's response trim
 (\code{response_threshold}, \code{NA} when none was requested) and, when the grid
 has a \code{cubist} configuration, \code{control_horizons(isolate = )}, which
 decides its scores (see "Isolated fits"); either mismatch aborts,
