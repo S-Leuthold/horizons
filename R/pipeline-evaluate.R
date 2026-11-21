@@ -84,7 +84,8 @@
 #'   A run removes those an earlier one left that it cannot use (another
 #'   run's data, settings or seed), and prepares again one whose preparation
 #'   failed, and one that cannot be read or holds another preparation, the
-#'   last two with a note in the `log`. A write to
+#'   last two with a note in the `log` and a line in the progress tree. A
+#'   write to
 #'   `output_dir` that fails (the directory, the manifest, a checkpoint, the
 #'   configs' data or a fold's preparation) stops the run with
 #'   `horizons_error_systemic`, naming the directory, the rows finished so

@@ -308,12 +308,20 @@ describe("prep_fold_entry()", {
 
   it("counts the predictors each prep kept: the assembled fold's, and on the training part the bound finalize() is given", {
 
-    ## N17: the count P1 reads before its dispatch is the assembled folds'
-    ## predictor columns, and the training part's is the bound
-    case <- prep_fold_case("correlation")
+    ## N17: the count P1 reads before its dispatch, the stage's record, is
+    ## the assembled folds' predictor columns, and the training part's is
+    ## the bound
+    case   <- prep_fold_case("correlation")
+    record <- build_fold_stage(c(list(case$units$training), case$units$folds),
+                               open_fold_store(NULL, results_so_far(list())), case$train, case$folds,
+                               case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD,
+                               debug = FALSE, keep_traces = FALSE, collector = log_open("evaluate"),
+                               output_dir = NULL, results = results_so_far(list()))
+
+    expect_identical(record$fold, c("training", case$folds$id))
 
     for (i in seq_along(case$entries)) {
-      expect_identical(case$entries[[i]]$n_predictors, ncol(case$prepped$folds$splits[[i]]$data) - 1L)
+      expect_identical(record$n_predictors[i + 1L], ncol(case$prepped$folds$splits[[i]]$data) - 1L)
     }
 
     recipe  <- build_recipe(case$config, case$inputs$data, case$role_map, transformed = TRUE)
@@ -322,7 +330,7 @@ describe("prep_fold_entry()", {
     baked   <- recipes::bake(prepped, new_data = NULL)
 
     expect_identical(case$training$kept, prepped_predictors(prepped, baked))
-    expect_identical(case$training$n_predictors, length(prepped_predictors(prepped, baked)))
+    expect_identical(record$n_predictors[1], length(prepped_predictors(prepped, baked)))
     expect_identical(fold_bound(case$training, case$inputs), case$training$kept)
 
   })
@@ -573,6 +581,91 @@ describe("fold_prep_units()", {
 
     ## The cost table covers every selection that has a prep, and only those
     expect_setequal(names(FOLD_PREP_COST_SECONDS), setdiff(VALID_FEATURE_SELECTION, "none"))
+
+  })
+
+})
+
+describe("build_fold_stage()", {
+
+  ## The case's three PCA preps through the stage, with the store in
+  ## `dir`'s tmp/
+  stage_of <- function(case, dir) {
+    build_fold_stage(case$units$folds, open_fold_store(dir, results_so_far(list())), case$train, case$folds,
+                     case$role_map, 8L, DEFAULT_SG_WINDOW, DEFAULT_PCA_THRESHOLD,
+                     debug = FALSE, keep_traces = FALSE, collector = log_open("evaluate"),
+                     output_dir = dir, results = results_so_far(list()))
+  }
+
+  it("holds no entry once it is written, or read and found usable, keeping only what its record needs", {
+
+    ## Each entry the stage is given, built or read, carries a tag whose
+    ## finalizer says when nothing holds the entry any more. Before each is
+    ## given, the entries given before it that something still holds are
+    ## counted: with the store on disk, none.
+    case <- prep_fold_case("pca")
+    dir  <- withr::local_tempdir()
+
+    given <- character(0)
+    freed <- character(0)
+    held  <- integer(0)
+
+    tag_entry <- function(entry, name) {
+      gc()
+      held  <<- c(held, length(setdiff(given, freed)))
+      tag   <- new.env()
+      reg.finalizer(tag, function(e) freed <<- c(freed, name))
+      given <<- c(given, name)
+      entry$tag <- tag
+      entry
+    }
+
+    real_prep <- prep_fold_entry
+    built <- testthat::with_mocked_bindings(
+      stage_of(case, dir),
+      prep_fold_entry = function(unit, ...) tag_entry(real_prep(unit, ...), paste("built", unit$name))
+    )
+
+    expect_identical(built$reused, rep(FALSE, 3L))
+    expect_identical(held, rep(0L, 3L))
+
+    ## The resumed run reads each, and uses all three
+    real_read <- read_fold_entry
+    held      <- integer(0)
+    reread <- testthat::with_mocked_bindings(
+      stage_of(case, dir),
+      read_fold_entry = function(path, key) {
+        got       <- real_read(path, key)
+        got$entry <- tag_entry(got$entry, paste("read", basename(path)))
+        got
+      }
+    )
+
+    expect_identical(reread$reused, rep(TRUE, 3L))
+    expect_identical(held, rep(0L, 3L))
+    expect_identical(reread$n_predictors, built$n_predictors)
+
+  })
+
+  it("says on the tree which preps in the run's store it could not use, and prepares them again", {
+
+    case <- prep_fold_case("pca")
+    dir  <- withr::local_tempdir()
+    tmp  <- file.path(dir, "tmp")
+
+    expect_length(fold_stage_lines(stage_of(case, dir)), 1L)
+
+    ## The first prep's file copied over the second's
+    names <- vapply(case$units$folds, `[[`, character(1), "name")
+    file.copy(file.path(tmp, names[1]), file.path(tmp, names[2]), overwrite = TRUE)
+
+    record <- stage_of(case, dir)
+    lines  <- cli::ansi_strip(fold_stage_lines(record))
+
+    expect_identical(record$reused, c(TRUE, FALSE, TRUE))
+    expect_length(lines, 2L)
+    expect_identical(lines[2], paste0("Could not use ", file.path("tmp", names[2]),
+                                      ": holds another fold preparation's record (prepared again)"))
 
   })
 

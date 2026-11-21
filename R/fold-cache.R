@@ -409,10 +409,10 @@ fold_rows <- function(split) {
 #' @param recipe The recipe to prep, or `NULL` for the unit's own.
 #' @return The entry: a list with `key` (the unit's), `failed`, `records`
 #'   (the unit's, shaped like [new_unit_records()]'s), `kept` (the
-#'   predictors, in baked order), `made` (named list of the columns the prep
-#'   made or changed, each at every row of `hoisted`), `n_predictors`,
-#'   `arrivals` (another package's warnings on the fold, with the fold) and
-#'   `runtime_secs`.
+#'   predictors, in baked order, whose count is the prep's predictor count),
+#'   `made` (named list of the columns the prep made or changed, each at
+#'   every row of `hoisted`), `arrivals` (another package's warnings on the
+#'   fold, with the fold) and `runtime_secs`.
 #' @keywords internal
 #' @noRd
 prep_fold_entry <- function(unit, hoisted, rows, role_map, seed, sg_window, pca_threshold,
@@ -452,7 +452,6 @@ prep_fold_entry <- function(unit, hoisted, rows, role_map, seed, sg_window, pca_
     records      = out$records,
     kept         = value$kept %||% character(0),
     made         = value$made %||% list(),
-    n_predictors = length(value$kept),
     arrivals     = value$arrivals %||% no_arrivals(),
     runtime_secs = as.numeric(difftime(Sys.time(), start_time, units = "secs"))
   )
@@ -1058,8 +1057,37 @@ failed_fold_entry <- function(unit, records) {
 
   list(key = unit$key, failed = TRUE,
        records = records[records$type == "failure", , drop = FALSE],
-       kept = character(0), made = list(), n_predictors = 0L,
+       kept = character(0), made = list(),
        arrivals = no_arrivals(), runtime_secs = 0)
+
+}
+
+#' What the stage keeps of an entry once it is in the store
+#'
+#' @description
+#' What the stage's record reads ([fold_stage_record()]), so the stage holds
+#' no entry once it is written or, on a resume, read and found usable: with
+#' the store on disk, a library-sized PCA entry is megabytes, and a run's
+#' are hundreds.
+#'
+#' @param entry From [prep_fold_entry()].
+#' @return List with `n_predictors` (the predictors the prep kept), `failed`
+#'   and `cause` (a failure's message, else `NA`).
+#' @keywords internal
+#' @noRd
+fold_entry_summary <- function(entry) {
+
+  failure <- entry$records[entry$records$type == "failure", , drop = FALSE]
+
+  list(
+    n_predictors = length(entry$kept),
+    failed       = isTRUE(entry$failed),
+    cause        = if (isTRUE(entry$failed) && nrow(failure) > 0) {
+      unit_failure_message(failure, "Fold preparation")
+    } else {
+      NA_character_
+    }
+  )
 
 }
 
@@ -1071,11 +1099,14 @@ failed_fold_entry <- function(unit, records) {
 #' it is this unit's ([read_fold_entry()]) and its prep did not fail; one
 #' that failed is built again, so a run after a fix prepares that fold
 #' again, and one that cannot be read or records another key is built again
-#' with one note on the log. The rest are built in this session, one
-#' transform of the spectra per preprocessing, or, on a parallel run, on the
-#' daemons through the window ([dispatch_units()]), one task each, longest
-#' first ([fold_prep_worker()]). This session keeps each entry in the store
-#' as it is built or its task returns it, so no daemon writes one.
+#' with one note on the log and one line under the stage's on the tree. The
+#' rest are built in this session, one transform of the spectra per
+#' preprocessing, or, on a parallel run, on the daemons through the window
+#' ([dispatch_units()]), one task each, longest first ([fold_prep_worker()]).
+#' This session keeps each entry in the store as it is built or its task
+#' returns it, so no daemon writes one, and then holds only what its record
+#' needs of it ([fold_entry_summary()]), so with the store on disk no entry
+#' stays in this session.
 #'
 #' @param units From [fold_prep_units()].
 #' @param store From [open_fold_store()].
@@ -1101,8 +1132,8 @@ build_fold_stage <- function(units, store, data, folds, role_map, seed, sg_windo
 
   start_time <- Sys.time()
   reused     <- reuse_fold_entries(units, store, collector, output_dir)
-  entries    <- reused$entries
-  todo       <- which(vapply(entries, is.null, logical(1)))
+  summaries  <- reused$summaries
+  todo       <- which(!reused$kept)
 
   if (!is.null(daemons) && length(todo) > 0) {
 
@@ -1138,7 +1169,7 @@ build_fold_stage <- function(units, store, data, folds, role_map, seed, sg_windo
       },
       collect = function(k, entry) {
         put_fold_entry(store, units[[todo[k]]], entry, results, call = call)
-        entries[[todo[k]]] <<- entry
+        summaries[[todo[k]]] <<- fold_entry_summary(entry)
       },
       label       = function(k) list(what = "the fold preparation", id = units[[todo[k]]]$label),
       rows_so_far = function() results,
@@ -1171,7 +1202,10 @@ build_fold_stage <- function(units, store, data, folds, role_map, seed, sg_windo
       }
 
       put_fold_entry(store, unit, entry, results, call = call)
-      entries[[i]] <- entry
+      summaries[[i]] <- fold_entry_summary(entry)
+
+      ### Not held while the next is built
+      rm(entry)
 
     }
 
@@ -1179,22 +1213,30 @@ build_fold_stage <- function(units, store, data, folds, role_map, seed, sg_windo
 
   }
 
-  fold_stage_record(units, entries, reused$kept,
-                    as.numeric(difftime(Sys.time(), start_time, units = "secs")))
+  fold_stage_record(units, summaries, reused$kept,
+                    as.numeric(difftime(Sys.time(), start_time, units = "secs")),
+                    unusable = reused$unusable)
 
 }
 
 #' The entries a store already holds that a run can use
 #'
+#' @description
+#' Each read and held to its unit's key ([read_fold_entry()]); of one that
+#' can be used only what the stage's record needs is kept
+#' ([fold_entry_summary()]).
+#'
 #' @inheritParams build_fold_stage
-#' @return List with `entries` (one per unit: the entry, or `NULL` where it
-#'   is to be built) and `kept` (logical, one per unit: reused).
+#' @return List with `summaries` (one per unit: the entry's summary, or
+#'   `NULL` where it is to be built), `kept` (logical, one per unit: reused)
+#'   and `unusable` (why each file that could not be used was not, named by
+#'   the file relative to `output_dir`).
 #' @keywords internal
 #' @noRd
 reuse_fold_entries <- function(units, store, collector, output_dir) {
 
-  entries  <- vector("list", length(units))
-  unusable <- character(0)
+  summaries <- vector("list", length(units))
+  unusable  <- character(0)
 
   if (!is.null(store$dir)) {
 
@@ -1209,8 +1251,11 @@ reuse_fold_entries <- function(units, store, collector, output_dir) {
       if (!is.null(got$error)) {
         unusable[file.path(basename(store$shown), units[[i]]$name)] <- got$error
       } else if (!isTRUE(got$entry$failed)) {
-        entries[i] <- list(got$entry)
+        summaries[i] <- list(fold_entry_summary(got$entry))
       }
+
+      ### Not held while the next is read
+      rm(got)
 
     }
 
@@ -1218,7 +1263,7 @@ reuse_fold_entries <- function(units, store, collector, output_dir) {
 
   if (length(unusable) > 0) log_unusable_fold_entries(collector, unusable, output_dir)
 
-  list(entries = entries, kept = !vapply(entries, is.null, logical(1)))
+  list(summaries = summaries, kept = !vapply(summaries, is.null, logical(1)), unusable = unusable)
 
 }
 
@@ -1373,33 +1418,34 @@ fold_prep_worker <- function(unit, payload) {
 #' from it.
 #'
 #' @param units The stage's units.
-#' @param entries Their entries, in the same order.
+#' @param summaries Their entries' summaries ([fold_entry_summary()]), in
+#'   the same order.
 #' @param reused Logical, one per unit.
 #' @param seconds Numeric(1). The stage's wall time.
+#' @param unusable Character. Why each file in the store that could not be
+#'   used was not, named by the file relative to `output_dir`
+#'   ([reuse_fold_entries()]).
 #' @return Tibble: `prep` (the preprocessing, selection and, where it reads
 #'   the outcome, transformation), `fold`, `feature_selection`,
 #'   `n_predictors`, `failed`, `reused`, `cause` (a failure's message, else
-#'   `NA`), with the stage's seconds as the attribute `"seconds"`.
+#'   `NA`), with the stage's seconds as the attribute `"seconds"` and
+#'   `unusable` as the attribute `"unusable"`.
 #' @keywords internal
 #' @noRd
-fold_stage_record <- function(units, entries, reused, seconds) {
-
-  cause <- vapply(entries, function(e) {
-    failure <- e$records[e$records$type == "failure", , drop = FALSE]
-    if (isTRUE(e$failed) && nrow(failure) > 0) unit_failure_message(failure, "Fold preparation") else NA_character_
-  }, character(1))
+fold_stage_record <- function(units, summaries, reused, seconds, unusable = character(0)) {
 
   record <- tibble::tibble(
     prep              = vapply(units, function(u) sub("/[^/]+$", "", u$label), character(1)),
     fold              = vapply(units, `[[`, character(1), "fold"),
     feature_selection = vapply(units, function(u) tolower(u$row$feature_selection), character(1)),
-    n_predictors      = vapply(entries, function(e) as.integer(e$n_predictors), integer(1)),
-    failed            = vapply(entries, function(e) isTRUE(e$failed), logical(1)),
+    n_predictors      = vapply(summaries, function(s) as.integer(s$n_predictors), integer(1)),
+    failed            = vapply(summaries, `[[`, logical(1), "failed"),
     reused            = as.logical(reused),
-    cause             = cause
+    cause             = vapply(summaries, `[[`, character(1), "cause")
   )
 
-  attr(record, "seconds") <- seconds
+  attr(record, "seconds")  <- seconds
+  attr(record, "unusable") <- unusable
 
   record
 
@@ -1407,9 +1453,14 @@ fold_stage_record <- function(units, entries, reused, seconds) {
 
 #' The progress tree's lines for the stage
 #'
+#' @description
+#' One line for the stage, then one for each file in the run's store that
+#' could not be used and was prepared again, as the tree says of a
+#' checkpoint it could not use, and one for each prep that failed.
+#'
 #' @param record From [fold_stage_record()].
 #' @param n_daemons Integer(1) or `NULL`. The daemons the preps ran on.
-#' @return Character: one line, then one per prep that failed.
+#' @return Character.
 #' @keywords internal
 #' @noRd
 fold_stage_lines <- function(record, n_daemons = NULL) {
@@ -1417,12 +1468,16 @@ fold_stage_lines <- function(record, n_daemons = NULL) {
   n_built  <- sum(!record$reused)
   n_reused <- sum(record$reused)
   n_preps  <- length(unique(record$prep))
+  unusable <- attr(record, "unusable") %||% character(0)
 
   c(
     paste0("Fold preps: ", nrow(record), " for ", n_preps, " selection", if (n_preps != 1) "s",
            if (n_reused > 0) paste0(", ", n_reused, " from the run's cache"),
            if (n_built > 0) paste0(", in ", round(attr(record, "seconds"), 1), " s"),
            if (!is.null(n_daemons) && n_built > 0) paste0(" on ", n_daemons, " daemons")),
+    vapply(names(unusable), function(file) {
+      cli::col_yellow(paste0("Could not use ", file, ": ", unusable[[file]], " (prepared again)"))
+    }, character(1), USE.NAMES = FALSE),
     vapply(which(record$failed), function(i) {
       cli::col_red(paste0("\u2717 ", record$prep[i], " ", record$fold[i], ": ", record$cause[i]))
     }, character(1))
