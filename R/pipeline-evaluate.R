@@ -3826,6 +3826,73 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 ## Parallel worker
 ## -------------------------------------------------------------------------
 
+#' Stop a worker whose payload lacks a key or holds one it should not
+#'
+#' @description
+#' Called by both workers once the daemon's horizons is known to be this
+#' session's version ([evaluate_config_worker()], [fold_prep_worker()]), so
+#' the helper is there: another version's payload keys may differ, and that
+#' is a version skew, said by the version check before this.
+#'
+#' @param shared The payload, read or carried.
+#' @param keys Character. The keys it must hold, no more and no fewer.
+#' @param call The frame the error reports: the worker's.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_internal`
+#'   when the keys differ.
+#' @keywords internal
+#' @noRd
+check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
+
+  if (setequal(names(shared), keys)) return(invisible(NULL))
+
+  missing    <- setdiff(keys, names(shared))
+  unexpected <- setdiff(names(shared), keys)
+
+  abort_horizons(c(
+    "Malformed worker payload.",
+    "x" = "Missing: {if (length(missing)) paste(missing, collapse = ', ') else '-'}; unexpected: {if (length(unexpected)) paste(unexpected, collapse = ', ') else '-'}."
+  ), kind = "internal", call = call)
+
+}
+
+#' Set a daemon up to run a unit: its threads, and the packages it needs
+#'
+#' @description
+#' Thread pinning that works happens in the session before dispatch
+#' (pin_parent_threads()): OpenBLAS reads its thread count when it loads, so
+#' setting OPENBLAS_NUM_THREADS on a daemon, after the library is loaded,
+#' changed nothing when measured (2026-09-15). What can be set at run time
+#' is set here: data.table's threads, and the thread options the model table
+#' declares for its engines (ranger's, which Boruta's forests read too). A
+#' daemon starts with the session's environment variables from when
+#' daemons() was called, not its in-process settings.
+#'
+#' Then the packages the unit needs are loaded, as the verb's door check
+#' loaded them in the session. A daemon is a fresh process, and some of them
+#' work only once loaded: bonsai registers lightgbm's engine with parsnip
+#' when it loads, so without this every lightgbm configuration failed at
+#' workflow creation on a daemon.
+#'
+#' Called by both workers once the daemon's horizons is known to be this
+#' session's version ([evaluate_config_worker()], [fold_prep_worker()]).
+#'
+#' @param models,selections The unit's models and feature selections
+#'   ([needed_packages()]).
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+prepare_worker <- function(models, selections) {
+
+  if (requireNamespace("data.table", quietly = TRUE)) data.table::setDTthreads(1L)
+
+  options(engine_thread_options())
+
+  for (pkg in names(needed_packages(models, selections))) requireNamespace(pkg, quietly = TRUE)
+
+  invisible(NULL)
+
+}
+
 #' Evaluate One Configuration Inside a Parallel Worker
 #'
 #' @description
@@ -3950,17 +4017,7 @@ evaluate_config_worker <- function(config_i, payload_path) {
   ## while tuned over the wrong space. The parent
   ## asserts the same keys before dispatch, so a mismatch here means the
   ## transport changed the payload.
-  if (!setequal(names(shared), SHARED_ARG_NAMES)) {
-
-    missing    <- setdiff(SHARED_ARG_NAMES, names(shared))
-    unexpected <- setdiff(names(shared), SHARED_ARG_NAMES)
-
-    abort_horizons(c(
-      "Malformed worker payload.",
-      "x" = "Missing: {if (length(missing)) paste(missing, collapse = ', ') else '-'}; unexpected: {if (length(unexpected)) paste(unexpected, collapse = ', ') else '-'}."
-    ), kind = "internal")
-
-  }
+  check_worker_payload(shared, SHARED_ARG_NAMES)
 
   ## mirai relays no condition from a task, so a warning raised in the
   ## worker's own steps before the configuration's unit runs (a package's
@@ -3972,29 +4029,10 @@ evaluate_config_worker <- function(config_i, payload_path) {
 
   resamples <- withCallingHandlers({
 
-    ## Thread pinning that works happens in the PARENT before dispatch
-    ## (pin_parent_threads()): OpenBLAS reads its thread count when it loads,
-    ## so setting OPENBLAS_NUM_THREADS here, after the library is loaded in
-    ## this worker, changed nothing when measured (2026-09-15). What can be
-    ## set at runtime in the worker is set here: data.table's threads, and
-    ## the thread options the model table declares for its engines. A daemon
-    ## starts with the session's environment variables from when daemons()
-    ## was called, not its in-process settings.
-    if (requireNamespace("data.table", quietly = TRUE)) {
-      data.table::setDTthreads(1L)
-    }
-    options(engine_thread_options())
-
     cfg <- shared$configs[config_i, ]
 
-    ## The packages the configuration needs, loaded here as evaluate()'s door
-    ## check loaded them in the parent (check_packages()). A worker is a fresh
-    ## process, and some of them work only once loaded: bonsai registers
-    ## lightgbm's engine with parsnip when it loads, so without this every
-    ## lightgbm configuration failed at workflow creation on a worker.
-    for (pkg in names(needed_packages(cfg$model, cfg$feature_selection))) {
-      requireNamespace(pkg, quietly = TRUE)
-    }
+    ## The daemon's threads pinned, and the configuration's packages loaded
+    prepare_worker(cfg$model, cfg$feature_selection)
 
     ## Reconstruct the split and folds from indices. Fold membership is
     ## reproduced by construction, not by replaying the RNG.

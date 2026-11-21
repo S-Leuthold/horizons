@@ -1300,9 +1300,12 @@ log_unusable_fold_entries <- function(collector, unusable, output_dir) {
 #' the configs axis `payload` is the payload file's path, read first with
 #' base R alone, as [evaluate_config_worker()] reads it, so a daemon on
 #' another version gets as far as saying so: a file it cannot read is said
-#' on what it returns, not raised. Then the version is checked, then the
-#' payload's keys, and the unit's fold is read from the folds rebuilt from
-#' it ([rebuild_resamples()]). On the resamples axis and in `fit()`
+#' on what it returns, not raised. Then the version is checked; past it the
+#' daemon runs this version, so the rest is the helpers both workers share:
+#' the payload's keys ([check_worker_payload()]) and the daemon's threads
+#' and packages ([prepare_worker()]). The unit's fold is read from the
+#' folds rebuilt from the payload ([rebuild_resamples()]). On the resamples
+#' axis and in `fit()`
 #' `payload` is what the task carries (`FOLD_PREP_ARG_NAMES`): the training
 #' part and the fold's rows. The spectra are transformed for the unit's
 #' preprocessing ([hoist_for_units()]) and the fold prepped
@@ -1362,19 +1365,7 @@ fold_prep_worker <- function(unit, payload) {
     abort_worker_version(worker_version, shared$pkg_version)
   }
 
-  keys <- if (is.character(payload)) SHARED_ARG_NAMES else FOLD_PREP_ARG_NAMES
-
-  if (!setequal(names(shared), keys)) {
-
-    missing    <- setdiff(keys, names(shared))
-    unexpected <- setdiff(names(shared), keys)
-
-    abort_horizons(c(
-      "Malformed worker payload.",
-      "x" = "Missing: {if (length(missing)) paste(missing, collapse = ', ') else '-'}; unexpected: {if (length(unexpected)) paste(unexpected, collapse = ', ') else '-'}."
-    ), kind = "internal")
-
-  }
+  check_worker_payload(shared, if (is.character(payload)) SHARED_ARG_NAMES else FOLD_PREP_ARG_NAMES)
 
   ## -------------------------------------------------------------------------
   ## The training part and the fold, then the prep
@@ -1382,13 +1373,8 @@ fold_prep_worker <- function(unit, payload) {
 
   inputs <- withCallingHandlers({
 
-    ## As the configuration's worker sets them (evaluate_config_worker())
-    if (requireNamespace("data.table", quietly = TRUE)) data.table::setDTthreads(1L)
-    options(engine_thread_options())
-
-    for (pkg in names(needed_packages(character(0), tolower(unit$row$feature_selection)))) {
-      requireNamespace(pkg, quietly = TRUE)
-    }
+    ## As the configuration's worker sets the daemon up
+    prepare_worker(character(0), tolower(unit$row$feature_selection))
 
     if (is.character(payload)) {
       folds <- rebuild_resamples(shared$data, shared$resample_idx)$cv_folds
