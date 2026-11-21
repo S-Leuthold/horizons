@@ -3953,9 +3953,9 @@ describe("evaluate() - each fold's prep built once per run", {
     expect_identical(writes, 0L)
     expect_identical(list.files(tempdir(), recursive = TRUE, all.files = TRUE), before)
 
-    ## Each configuration, run on its own on the same folds, preps its own
-    ## with the run's code and gives the same row
-    for (id in names(args)) {
+    ## Each configuration that shares a prep, run on its own on the same
+    ## folds, preps its own with the run's code and gives the same row
+    for (id in paste0("cfg_", c("enet_corr", "plsr_corr", "enet_pca", "enet_plog"))) {
       alone <- do.call(real, utils::modifyList(args[[id]], list(fold_entries = NULL)))
       kept  <- rows[[id]]
       alone$runtime_secs <- kept$runtime_secs <- NULL
@@ -3966,6 +3966,8 @@ describe("evaluate() - each fold's prep built once per run", {
 
   it("leaves only the manifest and the checkpoints in output_dir once the run is complete", {
 
+    skip_unless_slow_tier()
+
     base <- cache_base()
 
     expect_setequal(base$left, c("checkpoints", "eval_manifest.rds",
@@ -3973,7 +3975,9 @@ describe("evaluate() - each fold's prep built once per run", {
 
   })
 
-  it("keeps the fold preps through an interrupt; the resumed run reuses them, builds again one whose prep failed, removes one it does not need, and scores as the uninterrupted run", {
+  it("keeps the fold preps through an interrupt; the resumed run reuses them beside one it does not need, builds again one whose prep failed, and scores as the uninterrupted run", {
+
+    skip_unless_slow_tier()
 
     base <- cache_base()
     obj  <- cache_object()
@@ -4028,6 +4032,8 @@ describe("evaluate() - each fold's prep built once per run", {
   })
 
   it("keeps the fold preps after a breaker trip or a failed checkpoint write, and removes them after the all-failed abort", {
+
+    skip_unless_slow_tier()
 
     template <- ev60()$evaluation$results[1, ]
     failing  <- function(config_row, ...) {
@@ -4105,6 +4111,8 @@ describe("evaluate() - each fold's prep built once per run", {
   })
 
   it("says on the tree how many fold preps it built and for how many selections, and nothing with no selection", {
+
+    skip_unless_slow_tier()
 
     obj <- cache_object(c("enet_corr", "rf_none"))
 

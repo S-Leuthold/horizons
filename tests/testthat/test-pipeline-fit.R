@@ -1029,7 +1029,9 @@ describe("fit() - on two daemons", {
     skip_on_cran()
     skip_if_dev_package()
 
-    obj <- make_fit_object(n = 60, n_configs = 2)
+    ## rf on PCA, so its fold preparations, and the training part's that
+    ## bounds mtry, are built on the daemons too
+    obj <- make_fit_object(n = 60, n_configs = 2, feature_selection = c("pca", "none"))
     obj$config$tuning$final_bayesian_iter <- 2L
 
     seq_fit <- suppressWarnings(
@@ -1860,6 +1862,8 @@ shared_prep_eval <- function() memo_fixture("shared_prep_eval", build_shared_pre
 describe("fit() - each fold's prep built once for the call", {
 
   it("builds each fold prep its members read once, and each member fits as it does alone", {
+
+    skip_unless_slow_tier()
 
     ev   <- shared_prep_eval()
     real <- fit_single_config

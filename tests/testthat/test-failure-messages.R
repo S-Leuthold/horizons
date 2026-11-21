@@ -1440,6 +1440,8 @@ describe("evaluate() - a fold prep that fails in the run's stage", {
 
   it("fails each configuration of a prep that failed on one fold, with the step's class and words, and no other", {
 
+    skip_unless_slow_tier()
+
     obj <- stage_object()
     local_failing_prep(obj)
 
