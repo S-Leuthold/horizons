@@ -105,7 +105,7 @@ describe("ensemble() oof_predictions - correct row alignment", {
 ## =========================================================================
 ## TEETH — no double back-transform (§9 regression)
 ## =========================================================================
-## Members are fit under log / sqrt / none. If any stage back-transforms an
+## Members are fit under log and sqrt. If any stage back-transforms an
 ## already-back-transformed prediction, values explode out of physical range.
 ## Bulk_C (g/kg) is a small positive quantity; assert ensemble + OOF predictions
 ## stay in a sane range and are non-negative.
