@@ -189,8 +189,7 @@ collect_warnings <- function(expr, pattern = "", class = "warning") {
   list(value = value, warnings = warned)
 }
 
-## A worker's payload for one rf config on 40 rows, as evaluate() builds it,
-## with no checkpoint directory
+## A worker's payload for one rf config on 40 rows, as evaluate() builds it
 worker_payload <- function() {
 
   obj   <- make_eval_object(n = 40, n_wn = 20, n_configs = 1)
@@ -217,7 +216,6 @@ worker_payload <- function() {
                                                        obj$data$role_map),
     settings        = horizons:::eval_settings(sg_window = 13L, pca_threshold = 0.9,
                                                outcome_range = c(-Inf, Inf)),
-    checkpoint_dir  = NULL,
     fold_cache_dir  = NULL,
     keep_traces     = FALSE,
     isolate         = TRUE,

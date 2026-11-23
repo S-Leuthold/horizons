@@ -151,10 +151,9 @@ write to
 \code{output_dir} that fails (the directory, the manifest, a checkpoint, the
 configs' data or a fold's preparation) stops the run with
 \code{horizons_error_systemic}, naming the directory, the rows finished so
-far as its \code{results}. On the configs axis a checkpoint a worker could
-not write is known only once every configuration has run, so the
-evaluation is returned, with one \code{horizons_warning_skipped} naming the
-directory and the configurations a resumed run evaluates again. The
+far as its \code{results}, on either axis: this session writes every
+checkpoint, on the configs axis as each configuration's row comes back
+from its daemon. The
 ranking \code{metric} is not checked, since
 every row carries all six cross-validated metrics. A row scored under an
 earlier scoring schema, or recording less of the training data and
@@ -322,10 +321,12 @@ does not name the package (on the configs axis it stops the run as
 systemic).
 
 When the configs axis stops, by an error, an interrupt or a stop of its
-own, it cancels the configurations still running on the daemons, so a
-configuration still running stops before it writes its checkpoint; a
-checkpoint is written whole or not at all, so one the cancel reaches
-mid-write is either complete or absent. A run stopped while its fold
+own, it cancels the configurations still running on the daemons. Each
+configuration's checkpoint is written in this session as its row comes
+back, so one the stop cancels writes nothing, and one whose row had not
+come back yet is evaluated again by a resumed run; a checkpoint is
+written whole or not at all, so one an interrupt reaches mid-write is
+either complete or absent. A run stopped while its fold
 preparations run cancels those still running the same way, on either
 axis; a cancelled one writes nothing, since this session writes each. A
 configuration on inner daemons ends them as its task is cancelled. A

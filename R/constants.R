@@ -449,7 +449,6 @@ SHARED_ARG_NAMES <- c(
   "outcome_range",
   "data_fp",
   "settings",
-  "checkpoint_dir",
   "fold_cache_dir",
   "keep_traces",
   "isolate",

@@ -117,6 +117,12 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
+  it("does not carry a checkpoint directory in the payload: this session writes every checkpoint", {
+
+    expect_false("checkpoint_dir" %in% horizons:::SHARED_ARG_NAMES)
+
+  })
+
   it("carries the recipe settings, the outcome range, the ranges searched, the stopping rule, keep_traces and isolate in the payload and hands them to the config (#62, #76)", {
 
     ## Run in-process: the worker body is an ordinary function, and what is
@@ -197,24 +203,24 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("writes the checkpoint of the row it returns, stamped, and refuses a worker on another version", {
+  it("stamps the row it returns, writing nothing beside its payload, and refuses a worker on another version", {
 
     shared <- worker_payload()
-    shared$checkpoint_dir <- withr::local_tempdir()
+    path   <- worker_payload_file(shared)
 
     testthat::local_mocked_bindings(
       evaluate_single_config = function(...) tibble::tibble(config_id = "cfg_001", status = "failed"),
       .package = "horizons"
     )
 
-    row <- horizons:::evaluate_config_worker(1L, worker_payload_file(shared))
+    row <- horizons:::evaluate_config_worker(1L, path)
 
     expect_identical(row$data_hash, shared$data_fp$data_hash)
     expect_identical(row$settings[[1]], shared$settings)
-    ## What the row says of its inner daemons is the session's, not the
-    ## checkpoint's
+    ## What the row says of its inner daemons is the session's, which also
+    ## writes the row's checkpoint as it collects it
     expect_identical(attr(row, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
-    expect_identical(readRDS(file.path(shared$checkpoint_dir, "cfg_001.rds")), structure(row, inner_daemons = NULL))
+    expect_identical(list.files(dirname(path), all.files = TRUE, no.. = TRUE), "payload.rds")
 
     ## Another version's worker is a dependency error, which no unit
     ## contains, and it is checked before the payload's keys: another
@@ -227,24 +233,6 @@ describe("evaluate() parallel worker footprint", {
                         class = "horizons_error_dependency")
     expect_match(conditionMessage(err), "Reinstall the package so the daemons run matching code.",
                  fixed = TRUE)
-
-  })
-
-  it("says on the row it returns, raising nothing, when its checkpoint cannot be written", {
-
-    shared <- worker_payload()
-    shared$checkpoint_dir <- withr::local_tempdir()
-    dir.create(file.path(shared$checkpoint_dir, "cfg_001.rds"))   # the rename is refused
-
-    testthat::local_mocked_bindings(
-      evaluate_single_config = function(...) tibble::tibble(config_id = "cfg_001", status = "failed"),
-      .package = "horizons"
-    )
-
-    expect_no_error(row <- horizons:::evaluate_config_worker(1L, worker_payload_file(shared)))
-
-    expect_type(attr(row, "checkpoint_failed"), "character")
-    expect_identical(list.files(shared$checkpoint_dir, all.files = TRUE, no.. = TRUE), "cfg_001.rds")
 
   })
 
@@ -634,87 +622,6 @@ describe("evaluate() - the parallel axis's setup", {
 
 })
 
-## On the configs axis a checkpoint a worker could not write is reported once
-## every configuration has run: the evaluation is returned, with one warning.
-## The sequential path stops at the first failed write
-## (test-pipeline-evaluate.R).
-
-describe("evaluate() - a checkpoint a configs-axis worker could not write", {
-
-  it("returns the evaluation on the configs axis when a worker could not write its checkpoint, with one skipped warning naming it", {
-
-    ## A real result row to return, read before anything is mocked
-    ## (helper-memo.R)
-    template <- allow_par_run()$result$evaluation$results[1, ]
-
-    ## The dispatch runs each worker body in this session, so this runs
-    ## under load_all() too
-    local_mocked_bindings(
-      running_under_load_all  = function() FALSE,
-      daemon_reports          = matching_daemons,
-      check_parallel_backend  = function(...) TRUE,
-      connected_daemons       = function() 2L,
-      daemons_dispatch        = function() TRUE,
-      evaluate_single_config  = function(config_row, ...) {
-        row <- template
-        row$config_id <- config_row$config_id
-        row
-      },
-      ## The rows come in last configuration first, as the window's
-      ## would whenever later configurations finish first
-      dispatch_configs        = function(configs, payload_path, finished, ...) {
-        for (i in rev(seq_len(nrow(configs)))) {
-          finished$rows <- c(finished$rows, list(evaluate_config_worker(i, payload_path)))
-        }
-      }
-    )
-
-    tmpdir <- withr::local_tempdir()
-    store  <- file.path(tmpdir, "checkpoints")
-    dir.create(store)
-    dir.create(file.path(store, "cfg_002.rds"))   # the second worker's rename is refused
-
-    got <- collect_warnings(
-      evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
-               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
-                                          output_dir = tmpdir))
-    )
-
-    ## Every configuration's row is returned, in configuration order, and
-    ## none carries the reason
-    res <- got$value$evaluation$results
-    expect_identical(res$config_id, c("cfg_001", "cfg_002", "cfg_003"))
-    expect_identical(res$status, rep("success", 3L))
-    expect_null(attr(res, "checkpoint_failed"))
-
-    skipped <- Filter(function(w) inherits(w, "horizons_warning_skipped"), got$warnings)
-    expect_length(skipped, 1L)
-
-    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(skipped[[1]])))
-    expect_match(msg, "1 configuration was evaluated, but its checkpoint could not be written to", fixed = TRUE)
-    expect_match(msg, store, fixed = TRUE)
-    expect_match(msg, "cfg_002.rds: ", fixed = TRUE)
-    expect_match(msg, "a run resumed from", fixed = TRUE)
-
-    ## Recorded on the log first, naming the configuration
-    row <- got$value$log[got$value$log$topic %in% "skipped" & grepl("checkpoint", got$value$log$message), ]
-    expect_identical(nrow(row), 1L)
-    expect_identical(row$ids[[1]], "cfg_002")
-    expect_identical(skipped[[1]]$log, row)
-
-    ## The others' checkpoints were written, and no temporary file is left
-    expect_true(file.exists(file.path(store, "cfg_001.rds")) && !dir.exists(file.path(store, "cfg_001.rds")))
-    expect_true(file.exists(file.path(store, "cfg_003.rds")))
-    expect_false(any(grepl("\\.tmp$", list.files(store, all.files = TRUE))))
-
-    ## The payload the workers read is gone once evaluate() has returned,
-    ## with the directory it was written to
-    expect_false(dir.exists(file.path(tmpdir, "tmp")))
-
-  })
-
-})
-
 describe("evaluate() - the daemons' memory", {
 
   it("warns once at its end when this machine's daemons would need more memory than it has, and says so on the tree's parallel line", {
@@ -1036,6 +943,14 @@ describe("evaluate() - configs axis", {
     checkpoint_files <- list.files(file.path(tmpdir, "checkpoints"), pattern = "\\.rds$")
     expect_equal(length(checkpoint_files), 4)
 
+    ## This session wrote each as it collected the row: the row returned,
+    ## its unit's records aside
+    for (id in result$evaluation$results$config_id) {
+      stored <- readRDS(file.path(tmpdir, "checkpoints", paste0(id, ".rds")))
+      attr(stored, "unit_records") <- NULL
+      expect_identical(stored, result$evaluation$results[result$evaluation$results$config_id == id, ], label = id)
+    }
+
     ## The payload the daemons read was removed when the run returned
     expect_setequal(list.files(tmpdir, recursive = TRUE, all.files = TRUE, include.dirs = TRUE),
                     c("eval_manifest.rds", "checkpoints", file.path("checkpoints", sprintf("cfg_%03d.rds", 1:4))))
@@ -1062,6 +977,52 @@ plsr_object <- function(n) {
   obj <- make_eval_object(n = 60, n_configs = n)
   obj$config$configs$model <- "plsr"
   obj
+}
+
+## On the daemons every configuration but the first notes in `started` that
+## it has begun, then waits ten seconds before it runs, in R code a
+## cancellation interrupts, so the first comes back first however long a
+## fresh daemon takes to load its packages; each leaves a mark in `marks`
+## once it has run to its end
+local_slow_configs <- function(marks, started) {
+  with_deadline(mirai::everywhere({
+    ns   <- asNamespace("horizons")
+    real <- get("evaluate_single_config", envir = ns)
+    utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+      if (config_row$config_id != "cfg_001") {
+        file.create(file.path(started, config_row$config_id))
+        Sys.sleep(10)
+      }
+      row <- real(config_row, ...)
+      file.create(file.path(marks, config_row$config_id))
+      row
+    }, ns = "horizons")
+  }, marks = marks, started = started)[], 30)
+}
+
+## The window's waits, with `raise()` called as the first wait after the
+## first configuration's checkpoint is written begins: the first
+## configuration collected, the second running and the third sent. With
+## `started`, the file a daemon writes as the third begins, it waits for
+## that first (up to 30 s), since a cancel sent before a task has reached
+## its daemon can miss it, and the test is of the configurations running.
+## The check at the door is mocked, so its own wait is not among them.
+local_stop_after_first <- function(store, raise, started = NULL, .env = parent.frame()) {
+  fired      <- FALSE
+  real_round <- await_round
+  local_mocked_bindings(
+    daemon_reports = matching_daemons,
+    await_round    = function(tasks, no_daemons) {
+      if (!fired && file.exists(file.path(store, "cfg_001.rds"))) {
+        fired <<- TRUE
+        until <- Sys.time() + 30
+        while (!is.null(started) && !file.exists(started) && Sys.time() < until) Sys.sleep(0.05)
+        raise()
+      }
+      real_round(tasks, no_daemons)
+    },
+    .env = .env
+  )
 }
 
 describe("evaluate() - the configs axis on mirai", {
@@ -1113,9 +1074,10 @@ describe("evaluate() - the configs axis on mirai", {
     expect_false(grepl("\\", sent$args$payload_path, fixed = TRUE))
     expect_setequal(sent$keys, SHARED_ARG_NAMES)
 
-    ## The fold preparations' directory, absolute, as the checkpoints' is:
-    ## the run's tmp/, where the payload is
+    ## The fold preparations' directory, absolute: the run's tmp/, where the
+    ## payload is. No checkpoint directory: this session writes them
     expect_identical(sent$fold_cache_dir, dirname(sent$args$payload_path))
+    expect_false("checkpoint_dir" %in% sent$keys)
 
     ## The task carries none of it
     expect_lt(sent$task_bytes, 1024)
@@ -1601,7 +1563,7 @@ describe("evaluate() - the configs axis on mirai", {
 
   })
 
-  it("cancels the configurations in flight when it is interrupted, so none writes a checkpoint after it returns (installed build)", {
+  it("cancels the configurations in flight when it is interrupted, so none runs on and nothing is written after it returns (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -1610,33 +1572,12 @@ describe("evaluate() - the configs axis on mirai", {
     local_test_daemons(2)
     dir   <- withr::local_tempdir()
     store <- file.path(dir, "checkpoints")
+    marks <- withr::local_tempdir()
 
-    ## On the daemons every configuration but the first waits three seconds
-    ## before it runs, in R code a cancellation interrupts
-    with_deadline(mirai::everywhere({
-      ns   <- asNamespace("horizons")
-      real <- get("evaluate_single_config", envir = ns)
-      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
-        if (config_row$config_id != "cfg_001") Sys.sleep(3)
-        real(config_row, ...)
-      }, ns = "horizons")
-    })[], 30)
+    started <- withr::local_tempdir()
 
-    ## The interrupt arrives as the window's first wait ends, with the first
-    ## configuration done and the second running. The check at the door is
-    ## mocked, so its own wait is not the first.
-    fired      <- FALSE
-    real_round <- await_round
-    local_mocked_bindings(
-      daemon_reports = matching_daemons,
-      await_round    = function(tasks, no_daemons) {
-        real_round(tasks, no_daemons)
-        if (!fired) {
-          fired <<- TRUE
-          rlang::interrupt()
-        }
-      }
-    )
+    local_slow_configs(marks, started)
+    local_stop_after_first(store, rlang::interrupt, started = file.path(started, "cfg_003"))
 
     got <- tryCatch(
       with_deadline(suppressWarnings(evaluate(plsr_object(4), seed = 42L,
@@ -1647,10 +1588,10 @@ describe("evaluate() - the configs axis on mirai", {
 
     expect_identical(got, "interrupted")
 
-    ## Once the daemons are idle again, read the store: a configuration the
-    ## cancel missed has written its checkpoint before its task ends, so no
-    ## fixed sleep is needed
+    ## Once the daemons are idle again: a configuration the cancel missed
+    ## leaves its mark before its task ends, so no fixed sleep is needed
     with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_identical(list.files(marks), "cfg_001")
     expect_identical(list.files(store), "cfg_001.rds")
 
     ## The payload went when evaluate() stopped, the cancel first
@@ -1658,7 +1599,7 @@ describe("evaluate() - the configs axis on mirai", {
 
   })
 
-  it("cancels the configurations in flight when it stops on an error, so none writes a checkpoint after it returns (installed build)", {
+  it("cancels the configurations in flight when it stops on an error, so none runs on and nothing is written after it returns (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -1667,30 +1608,15 @@ describe("evaluate() - the configs axis on mirai", {
     local_test_daemons(2)
     dir   <- withr::local_tempdir()
     store <- file.path(dir, "checkpoints")
+    marks <- withr::local_tempdir()
 
-    ## As the interrupt's test above, with the window's first wait raising an
-    ## error instead: the cancel is an on.exit(), so an error reaches it too
-    with_deadline(mirai::everywhere({
-      ns   <- asNamespace("horizons")
-      real <- get("evaluate_single_config", envir = ns)
-      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
-        if (config_row$config_id != "cfg_001") Sys.sleep(3)
-        real(config_row, ...)
-      }, ns = "horizons")
-    })[], 30)
+    ## As the interrupt's test above, with an error instead: the cancel is an
+    ## on.exit(), so an error reaches it too
+    started <- withr::local_tempdir()
 
-    fired      <- FALSE
-    real_round <- await_round
-    local_mocked_bindings(
-      daemon_reports = matching_daemons,
-      await_round    = function(tasks, no_daemons) {
-        real_round(tasks, no_daemons)
-        if (!fired) {
-          fired <<- TRUE
-          rlang::abort("The window stopped.", class = "test_window_stop")
-        }
-      }
-    )
+    local_slow_configs(marks, started)
+    local_stop_after_first(store, function() rlang::abort("The window stopped.", class = "test_window_stop"),
+                           started = file.path(started, "cfg_003"))
 
     expect_error(
       with_deadline(suppressWarnings(evaluate(plsr_object(4), seed = 42L,
@@ -1700,6 +1626,7 @@ describe("evaluate() - the configs axis on mirai", {
     )
 
     with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_identical(list.files(marks), "cfg_001")
     expect_identical(list.files(store), "cfg_001.rds")
 
     ## The payload went when evaluate() stopped, the cancel first
@@ -1854,6 +1781,84 @@ describe("evaluate() - the configs axis on mirai", {
     expect_identical(nrow(row), 1L)
     expect_identical(row$topic, "substitution")
     expect_identical(row$ids[[1]], "cfg_002")
+
+  })
+
+})
+
+
+## On the configs axis this session writes each configuration's checkpoint as
+## the window collects its row, so a write that fails stops the run as it does
+## on the sequential path (test-pipeline-evaluate.R), the configurations in
+## flight cancelled.
+
+describe("evaluate() - a checkpoint the configs axis cannot write", {
+
+  it("stops as systemic at the first checkpoint it cannot write, with the rows so far, and cancels the configurations in flight (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    store   <- file.path(dir, "checkpoints")
+    marks   <- withr::local_tempdir()
+    started <- withr::local_tempdir()
+
+    ## cfg_002's checkpoint cannot be written: a directory holds its name, so
+    ## the rename is refused
+    dir.create(store)
+    dir.create(file.path(store, "cfg_002.rds"))
+
+    ## On the daemons, cfg_002 returns once the third configuration has begun,
+    ## which the window sends once cfg_001's checkpoint is written, so the
+    ## third is running when cfg_002's row comes back; the configurations
+    ## after cfg_002 note that they have begun and wait, in R code a
+    ## cancellation interrupts, and leave a mark only if they run to their end
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("evaluate_single_config", envir = ns)
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        id <- config_row$config_id
+        if (id == "cfg_002") {
+          until <- Sys.time() + 30
+          while (!file.exists(file.path(started, "cfg_003")) && Sys.time() < until) Sys.sleep(0.05)
+        }
+        if (id %in% c("cfg_003", "cfg_004")) {
+          file.create(file.path(started, id))
+          Sys.sleep(10)
+        }
+        row <- real(config_row, ...)
+        file.create(file.path(marks, id))
+        row
+      }, ns = "horizons")
+    }, started = started, marks = marks)[], 30)
+
+    err <- expect_error(
+      with_deadline(suppressWarnings(evaluate(plsr_object(4), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 120),
+      class = "horizons_error_systemic"
+    )
+
+    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err)))
+    expect_match(msg, "`evaluate()` could not write to", fixed = TRUE)
+    expect_match(msg, "cfg_002.rds: ", fixed = TRUE)
+
+    ## The rows so far, the one whose checkpoint failed among them
+    expect_identical(err$results$config_id, c("cfg_001", "cfg_002"))
+
+    ## The third was cancelled before it ended, and the fourth never sent
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_setequal(list.files(marks), c("cfg_001", "cfg_002"))
+
+    ## cfg_001's checkpoint was written, whole, and nothing else
+    expect_setequal(list.files(store, all.files = TRUE, no.. = TRUE), c("cfg_001.rds", "cfg_002.rds"))
+    expect_true(dir.exists(file.path(store, "cfg_002.rds")))
+
+    ## The payload went when evaluate() stopped
+    expect_false(dir.exists(file.path(dir, "tmp")))
 
   })
 
@@ -2141,7 +2146,7 @@ describe("evaluate() - inner daemons", {
 
   })
 
-  it("cancels a split configuration in flight when it is interrupted, ending its inner daemons, and writes no checkpoint after it returns (installed build)", {
+  it("cancels a split configuration in flight when it is interrupted, ending its inner daemons, and writes nothing after it returns (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -2155,8 +2160,8 @@ describe("evaluate() - inner daemons", {
     ## The second configuration is split onto two inner daemons and, once
     ## they are up, writes how many its daemon has connected and waits in R
     ## code a cancellation interrupts; the first runs once it is waiting, so
-    ## the interrupt, as the window's first wait ends, finds the split one in
-    ## flight
+    ## the interrupt, as the window's first wait after the first's checkpoint
+    ## begins, finds the split one in flight
     local_split(2L)
     with_deadline(mirai::everywhere({
       ns   <- asNamespace("horizons")
@@ -2174,18 +2179,7 @@ describe("evaluate() - inner daemons", {
       }, ns = "horizons")
     }, signals = signals)[], 30)
 
-    fired      <- FALSE
-    real_round <- await_round
-    local_mocked_bindings(
-      daemon_reports = matching_daemons,
-      await_round    = function(tasks, no_daemons) {
-        real_round(tasks, no_daemons)
-        if (!fired) {
-          fired <<- TRUE
-          rlang::interrupt()
-        }
-      }
-    )
+    local_stop_after_first(store, rlang::interrupt)
 
     got <- tryCatch(
       with_deadline(suppressWarnings(evaluate(plsr_object(3), seed = 42L,
@@ -3059,7 +3053,7 @@ describe("evaluate() - the fold preparations on the daemons", {
 
   })
 
-  it("writes every fold preparation in this session and none on a daemon, and leaves none once the run is complete, its payload removed before its preparations (installed build)", {
+  it("writes every fold preparation and every checkpoint in this session and nothing on a daemon, and leaves no preparation once the run is complete, its payload removed before its preparations (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -3067,8 +3061,9 @@ describe("evaluate() - the fold preparations on the daemons", {
 
     ## The session's writes counted here; each daemon's write_output_file()
     ## replaced with one that notes the path it is given in a signals
-    ## directory, then writes as it did: the configurations' checkpoints are
-    ## written there, and no fold preparation is
+    ## directory, then writes as it did: no daemon writes anything, since
+    ## this session writes the fold preparations and, as it collects each
+    ## row, the configurations' checkpoints
     local_test_daemons(2)
     signals <- withr::local_tempdir()
     with_deadline(mirai::everywhere({
@@ -3107,12 +3102,12 @@ describe("evaluate() - the fold preparations on the daemons", {
                                                    control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
                                                                               output_dir = dir, verbose = FALSE))), 180)
 
-    there <- unlist(lapply(list.files(signals, full.names = TRUE), readLines))
+    there <- as.character(unlist(lapply(list.files(signals, full.names = TRUE), readLines)))
 
     expect_identical(ev$evaluation$results$status, rep("success", 4L))
     expect_length(grep("^fold-", basename(here)), 4L)
-    expect_length(grep("^fold-", basename(there)), 0L)
-    expect_length(grep("\\.rds$", there), 4L)
+    expect_setequal(basename(here[basename(dirname(here)) == "checkpoints"]), sprintf("cfg_%03d.rds", 1:4))
+    expect_identical(there, character(0))
     expect_false(dir.exists(file.path(dir, "tmp")))
 
     ## The payload goes first, by its own removal; the clearing of a

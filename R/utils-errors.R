@@ -245,10 +245,8 @@ check_reserved_columns <- function(columns,
 #'     [ensemble()] stopped because a mirai daemon died or lacks a package
 #'     the run needs, or no mirai daemon was left to run its work
 #'     (`horizons_error_no_daemons`, below), or [evaluate()] could not write to its
-#'     `output_dir` (on the configs axis a checkpoint a daemon could not
-#'     write is a `skipped` warning instead, since every configuration has
-#'     run by then), or on the configs axis a daemon could not read the
-#'     configurations' data from its `output_dir`. The rows finished so far travel
+#'     `output_dir`, on either axis, or on the configs axis a daemon could
+#'     not read the configurations' data from its `output_dir`. The rows finished so far travel
 #'     as `results`; `NULL` from `ensemble()`, which has none before its
 #'     meta-learner is built.}
 #'   \item{`horizons_error_no_daemons`}{(run, and `horizons_error_systemic`)

@@ -1490,7 +1490,9 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #' configurations and the path, and none of the data a running configuration
 #' was given. A row is appended to `finished$rows` as it finishes, and what
 #' it says of its inner daemons ([evaluate_config_worker()]) to
-#' `finished$inner`, by configuration.
+#' `finished$inner`, by configuration; then it is handed to `finish`, which
+#' writes its checkpoint here, in this session, and may stop the run, the
+#' window cancelling what is in flight as it exits.
 #'
 #' @param configs The configurations still to run, the payload's `configs`.
 #' @param costs Numeric: each configuration's cost ([config_costs()]), in
@@ -1505,13 +1507,16 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #'   inner daemons, named by configuration.
 #' @param rows_so_far A function of no arguments returning the results table
 #'   a stop carries: the rows resumed and those in `finished$rows`.
+#' @param finish A function of a configuration's position in `configs` and
+#'   its row, called once the row is in `finished$rows`: `evaluate()`'s
+#'   [finish_row()].
 #' @param output_dir The run's `output_dir`, for a stop's message.
 #' @param call The frame a stop reports: the verb's.
 #' @return `NULL`, invisibly, once every configuration's row is in
 #'   `finished$rows`.
 #' @keywords internal
 #' @noRd
-dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far, output_dir = NULL,
+dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far, finish, output_dir = NULL,
                              inner = rep(1L, nrow(configs)), call = rlang::caller_env()) {
 
   ### The task's call, quoted here: its names are the task's arguments
@@ -1530,6 +1535,7 @@ dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far
       finished$inner <- c(finished$inner, stats::setNames(list(attr(row, "inner_daemons")), configs$config_id[i]))
       attr(row, "inner_daemons") <- NULL
       finished$rows <- c(finished$rows, list(row))
+      finish(i, row)
     },
     label   = function(i) list(what = "configuration", id = configs$config_id[i]),
     rows_so_far = rows_so_far,
