@@ -532,14 +532,41 @@ daemon_need <- function(processes, n_rows, n_predictors) {
 
 }
 
+#' The daemons on this machine and the memory they need of it
+#'
+#' @description
+#' The one rule both memory checks count by ([check_daemon_memory()],
+#' [check_split_memory()]): the daemons counted are those on this machine,
+#' by the host name and process id each reported; daemons elsewhere are not
+#' checked, since only this machine's memory can be read here.
+#'
+#' @param reports The daemons' reports, one per task ([daemon_reports()]).
+#' @param processes Named integer, from [daemon_processes()].
+#' @param n_rows,n_predictors The run's data.
+#' @return A list: `n` (the daemons on this machine), `need` (what each
+#'   needs, [daemon_need()]) and `available` ([memory_available()], `NA`
+#'   when it cannot be read; not read when `n` is 0).
+#' @keywords internal
+#' @noRd
+local_daemon_memory <- function(reports, processes, n_rows, n_predictors) {
+
+  here  <- Sys.info()[["nodename"]]
+  local <- Filter(function(r) identical(r$host, here), reports)
+  n     <- length(unique(vapply(local, function(r) r$pid, integer(1))))
+
+  list(n         = n,
+       need      = daemon_need(processes, n_rows, n_predictors),
+       available = if (n > 0L) memory_available() else NA_real_)
+
+}
+
 #' Warn when the daemons on this machine would need more memory than it has
 #'
 #' @description
 #' Run at a parallel `evaluate()`'s or `fit()`'s door, once the daemons have
 #' reported ([daemon_reports()]). The daemons counted are those on this
-#' machine, by the host name each reported; daemons elsewhere are not
-#' checked, since only this machine's memory can be read here. When those
-#' daemons' need ([daemon_need()]) is more than the memory available
+#' machine ([local_daemon_memory()]). When those daemons' need
+#' ([daemon_need()]) is more than the memory available
 #' ([memory_available()]), an `input` warning is recorded on the verb's
 #' collector, raised once at its end, suggesting the most daemons that fit,
 #' or a sequential run below two. A reading that cannot be made is a note.
@@ -555,22 +582,21 @@ daemon_need <- function(processes, n_rows, n_predictors) {
 #' @noRd
 check_daemon_memory <- function(reports, models, isolate, n_rows, n_predictors, collector, verb) {
 
-  here    <- Sys.info()[["nodename"]]
-  local   <- Filter(function(r) identical(r$host, here), reports)
-  n_local <- length(unique(vapply(local, function(r) r$pid, integer(1))))
+  processes <- daemon_processes(models, isolate)
+  local     <- local_daemon_memory(reports, processes, n_rows, n_predictors)
+  n_local   <- local$n
 
   if (n_local == 0L) return(FALSE)
 
-  available <- memory_available()
+  available <- local$available
 
   if (!is.finite(available)) {
     log_note(collector, "{.fn {verb}} could not read the memory available on this machine, so it did not check that its mirai daemons fit in it.")
     return(FALSE)
   }
 
-  processes <- daemon_processes(models, isolate)
-  need      <- daemon_need(processes, n_rows, n_predictors)
-  total     <- n_local * need
+  need  <- local$need
+  total <- n_local * need
 
   if (total <= available) return(FALSE)
 
@@ -705,24 +731,20 @@ split_need <- function(inner, order, n, processes, n_rows, n_predictors, n_train
 #' @noRd
 check_split_memory <- function(reports, extra, processes, n_rows, n_predictors, n_split, collector, verb) {
 
-  here    <- Sys.info()[["nodename"]]
-  local   <- Filter(function(r) identical(r$host, here), reports)
-  n_local <- length(unique(vapply(local, function(r) r$pid, integer(1))))
+  local     <- local_daemon_memory(reports, processes, n_rows, n_predictors)
+  n_local   <- local$n
+  available <- local$available
 
-  if (n_local == 0L) return(TRUE)
+  if (n_local == 0L || !is.finite(available)) return(TRUE)
 
-  available <- memory_available()
-
-  if (!is.finite(available)) return(TRUE)
-
-  need <- n_local * daemon_need(processes, n_rows, n_predictors)
+  need <- n_local * local$need
 
   if (need + extra <= available) return(TRUE)
 
   gb <- function(bytes) format(round(bytes / 1e9, 1), nsmall = 1)
 
   log_note(collector, c(
-    "{.fn {verb}} ran each configuration on one daemon: the inner daemons it would start for {n_split} long configuration{?s} would need about {gb(extra)} GB on this machine beside the {gb(need)} GB its {n_local} daemon{?s} need, and {gb(available)} GB is available."
+    "{.fn {verb}} ran each configuration on one daemon: the inner daemons it would start for {n_split} long configuration{?s} would need about {gb(extra)} GB on this machine beside the {gb(need)} GB its {n_local} daemon{?s} {?needs/need}, and {gb(available)} GB is available."
   ))
 
   FALSE

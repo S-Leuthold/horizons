@@ -575,10 +575,10 @@ describe("check_split_memory()", {
   processes <- c(daemon = 1L, isolated = 0L)
   need_two  <- 2 * daemon_need(processes, 1000, 200)
 
-  check <- function(available, extra) {
+  check <- function(available, extra, reports = daemons_on(pids = 1:2, host = this_host())) {
     collector <- log_open("evaluate")
     local_mocked_bindings(memory_available = function() available)
-    fits <- check_split_memory(daemons_on(pids = 1:2, host = this_host()), extra, processes, 1000, 200,
+    fits <- check_split_memory(reports, extra, processes, 1000, 200,
                                n_split = 1L, collector = collector, verb = "evaluate")
     list(fits = fits, rows = log_close(collector))
   }
@@ -606,6 +606,22 @@ describe("check_split_memory()", {
                               gb(need_two), gb(need_two + 0.5e9)), fixed = TRUE)
 
     expect_false(check(need_two / 2, 1e9)$fits)
+
+    ## One daemon here
+    one <- check(need_two / 2 + 0.5e9, 1e9, daemons_on(pids = 1L, host = this_host()))
+    expect_match(gsub("\\s+", " ", one$rows$message), sprintf("beside the %s GB its 1 daemon needs,", gb(need_two / 2)),
+                 fixed = TRUE)
+
+  })
+
+  it("counts only the daemons on this machine, as the check at the door does", {
+
+    ## Two here and two elsewhere: room for the two here and the split
+    elsewhere <- c(daemons_on(pids = 1:2, host = this_host()), daemons_on(pids = 3:4, host = "another-machine"))
+    expect_true(check(need_two + 2e9, 1e9, elsewhere)$fits)
+
+    ## None here: nothing to check
+    expect_true(check(1, 1e9, daemons_on(pids = 1:2, host = "another-machine"))$fits)
 
   })
 
