@@ -85,6 +85,16 @@
 #' full-resolution table is a signal to add `feature_selection` there too.
 #' See GitHub issue #40.
 #'
+#' **plsr with `feature_selection = "pca"`:**
+#'
+#' `plsr` scales its predictors to unit variance, and PCA's scores are
+#' uncorrelated, so on them PLS re-projects what PCA has already projected:
+#' its first component is already the least-squares fit on the kept
+#' components (principal component regression at `pca_threshold`), every
+#' count of `num_comp` is that same model, and the choice is one component.
+#' The pairing runs, and tunes nothing; `evaluate()` says so once in its
+#' tree and on the object's log. See GitHub issue #278.
+#'
 #' **Recipe settings:**
 #'
 #' `sg_window` and `pca_threshold` are set once per object, not per

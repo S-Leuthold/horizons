@@ -464,6 +464,37 @@ pls_cap_records <- function(folds, best_params, outcome) {
 
 }
 
+#' What evaluate() says about plsr on PCA scores
+#'
+#' @description
+#' PCA's scores are uncorrelated, and the plsr engine scales its predictors
+#' to one variance, so on them the first PLS component is already the
+#' least-squares fit on the kept components, and every count of `num_comp`
+#' is that model ([pls_fit()] stops there). Nothing departs from what was
+#' asked, so it is not a warning: `evaluate()` says it once a run, as a line
+#' in its tree and a note on the log, when its grid pairs the two.
+#'
+#' @param configs The grid, `config$configs`.
+#' @return `NULL` when no configuration pairs plsr with
+#'   `feature_selection = "pca"`; else a list of `ids` (those
+#'   configurations) and `line`, Character(1).
+#' @keywords internal
+#' @noRd
+pls_pca_note <- function(configs) {
+
+  ids <- configs$config_id[configs$model %in% "plsr" & configs$feature_selection %in% "pca"]
+
+  if (length(ids) == 0) return(NULL)
+
+  n <- length(ids)
+
+  list(ids  = ids,
+       line = cli::format_inline(
+         "plsr on PCA scores ({n} configuration{?s}): PLS re-projects scores PCA has already projected, so it fits least squares on the kept components and every component count is the same model; {?it runs/they run}, and tune{?s/} nothing."
+       ))
+
+}
+
 #' Warning records without the PLS engine's cap
 #'
 #' @param records Records shaped like [new_warning_log()]'s, read from the
