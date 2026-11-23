@@ -775,10 +775,11 @@ search_budget <- function(iter, n_params, grid_size) {
 #' The points fit()'s warm-started re-tune starts from
 #'
 #' @description
-#' `evaluate()`'s point and one neighbour per tuned parameter
-#' ([build_warmstart_grid()]): the fewest starting points with which
-#' `tune_bayes()` does not warn that it has too few for the parameters, and
-#' at least the two its Gaussian process needs. A cold start, with no point
+#' `evaluate()`'s point and, for `n_params` tuned parameters, as many points
+#' drawn at random from the local grid around it ([build_warmstart_grid()]),
+#' each parameter's value and its nearby values crossed: the fewest starting
+#' points with which `tune_bayes()` does not warn that it has too few for the
+#' parameters, and at least the two its Gaussian process needs. A cold start, with no point
 #' to start from, grids `grid_size` points instead.
 #'
 #' @param n_params Integer. The parameters the model tunes.

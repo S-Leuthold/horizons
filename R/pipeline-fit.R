@@ -69,11 +69,13 @@
 #' @section The re-tune:
 #' Each member's re-tune starts from `evaluate()`'s hyperparameters, clamped
 #' into the range `fit()`'s data allow (a `num_comp` above the cap of fewer
-#' rows, say), and one neighbour per tuned parameter, and runs a Bayesian
-#' search of at least `final_bayesian_iter` iterations ([configure()]),
-#' raised so that the start and the search try ten points a tuned parameter,
-#' which stops once `control_horizons(no_improve = )` iterations in a row
-#' have not improved on its best. A space small enough is gridded whole
+#' rows, say), and, for a model tuning d parameters, d points drawn at random
+#' from a local grid around them, each parameter's value and its nearby
+#' values crossed. It then runs a Bayesian search with a budget of at least
+#' `final_bayesian_iter` iterations ([configure()]), raised so that the start
+#' and the search try ten points a tuned parameter, which stops once
+#' `control_horizons(no_improve = )` iterations in a row have not improved on
+#' its best. A space small enough is gridded whole
 #' instead (see "Cold start from one configuration"). The member then keeps
 #' `evaluate()`'s hyperparameters unless the best candidate scored on every
 #' fold has a CV RMSE lower than theirs by more than that candidate's
@@ -319,8 +321,8 @@
 #'   is empty again, since the ensemble was built on the members it replaces.
 #'   `models$results` records how each member's re-tune started and what it
 #'   kept: `warm_start` (`TRUE` when `evaluate()`'s parameters were usable,
-#'   so the re-tune starts from them and their neighbours or from the whole
-#'   space, `FALSE` for a space-filling grid), `start_grid_size`, the points
+#'   so the re-tune starts from them and the points drawn around them or
+#'   from the whole space, `FALSE` for a space-filling grid), `start_grid_size`, the points
 #'   it started from (`NA` with the re-tune off), and `retune_moved` (see
 #'   "The re-tune").
 #'
@@ -1525,7 +1527,7 @@ retune_header_line <- function(iter, raised, no_improve) {
   if (iter == 0) return(paste0("Re-tune: ", retune_off_text()))
 
   paste0(
-    "Re-tune: from evaluate()'s hyperparameters and one neighbour per tuned parameter, ", iter, " iterations",
+    "Re-tune: from evaluate()'s hyperparameters and d points drawn around them for d tuned parameters, ", iter, " iterations",
     if (!is.null(raised)) paste0(" (", raised, ")"),
     if (!isFALSE(no_improve)) paste0(", stopping after ", no_improve, " without improvement"),
     "; evaluate()'s are kept unless the best candidate is better by more than its standard error"

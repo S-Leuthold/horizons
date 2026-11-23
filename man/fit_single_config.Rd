@@ -64,8 +64,9 @@ alone. A cold start at 0 still grids \code{grid_size} points.}
 
 \item{grid_size}{Integer. The space-filling grid's size on a cold start
 (\code{best_params_eval} \code{NULL} or unusable). A warm start begins from
-\code{evaluate()}'s parameters and one neighbour per tuned parameter
-(\code{warm_start_size()}), whatever \code{grid_size} is.}
+\code{evaluate()}'s parameters and, for d tuned parameters, d points drawn
+around them from a local grid (\code{warm_start_size()}), whatever
+\code{grid_size} is.}
 
 \item{tune_ranges}{Named list of \code{c(lower, upper)} by parameter id, in
 dials' units: the ranges the re-tune searches, set before the data cap
@@ -144,7 +145,7 @@ warnings and notes, ride on the list as the attribute
 \code{"unit_records"}, for \code{fit()} to lift its horizons warnings and notes
 onto the log.
 \code{warm_start} is \code{TRUE} when \code{best_params_eval} was usable, so the
-re-tune starts from it and one neighbour per tuned parameter, or from
+re-tune starts from it and d points drawn around it, or from
 the whole space when that fits the budget (\code{exhaustive_grid()}), \code{FALSE}
 when it fell back to a
 space-filling grid, and \code{NA} (both) when the config failed before
@@ -165,7 +166,8 @@ does not read as a member whose parameters missed a fold.
 \description{
 Inner-loop function for \code{fit()}. Takes a single config row from the
 evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
-from evaluate()'s hyperparameters and one neighbour per tuned parameter,
+from evaluate()'s hyperparameters and d points drawn around them from a
+local grid (\code{build_warmstart_grid()}), for d tuned parameters,
 keeping evaluate()'s unless the best candidate beats them by the margin
 (\code{choose_member_params()}), generates OOF predictions, fits a final
 deployable model, evaluates on the held-out test set, and detects

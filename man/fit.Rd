@@ -84,8 +84,8 @@ training object carried a \verb{$selection} from \code{select_training()}, which
 is empty again, since the ensemble was built on the members it replaces.
 \code{models$results} records how each member's re-tune started and what it
 kept: \code{warm_start} (\code{TRUE} when \code{evaluate()}'s parameters were usable,
-so the re-tune starts from them and their neighbours or from the whole
-space, \code{FALSE} for a space-filling grid), \code{start_grid_size}, the points
+so the re-tune starts from them and the points drawn around them or
+from the whole space, \code{FALSE} for a space-filling grid), \code{start_grid_size}, the points
 it started from (\code{NA} with the re-tune off), and \code{retune_moved} (see
 "The re-tune").
 }
@@ -159,11 +159,13 @@ per-member results travel on the condition as \code{results}, and
 
 Each member's re-tune starts from \code{evaluate()}'s hyperparameters, clamped
 into the range \code{fit()}'s data allow (a \code{num_comp} above the cap of fewer
-rows, say), and one neighbour per tuned parameter, and runs a Bayesian
-search of at least \code{final_bayesian_iter} iterations (\code{\link[=configure]{configure()}}),
-raised so that the start and the search try ten points a tuned parameter,
-which stops once \code{control_horizons(no_improve = )} iterations in a row
-have not improved on its best. A space small enough is gridded whole
+rows, say), and, for a model tuning d parameters, d points drawn at random
+from a local grid around them, each parameter's value and its nearby
+values crossed. It then runs a Bayesian search with a budget of at least
+\code{final_bayesian_iter} iterations (\code{\link[=configure]{configure()}}), raised so that the start
+and the search try ten points a tuned parameter, which stops once
+\code{control_horizons(no_improve = )} iterations in a row have not improved on
+its best. A space small enough is gridded whole
 instead (see "Cold start from one configuration"). The member then keeps
 \code{evaluate()}'s hyperparameters unless the best candidate scored on every
 fold has a CV RMSE lower than theirs by more than that candidate's

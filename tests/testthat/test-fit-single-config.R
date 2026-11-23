@@ -1351,7 +1351,7 @@ describe("fit_single_config() - the points the re-tune starts from", {
 
   }
 
-  it("starts from evaluate()'s point and one neighbour per tuned parameter, whatever grid_size is", {
+  it("starts from evaluate()'s point and d points drawn around it for d tuned parameters, whatever grid_size is", {
 
     rf <- start_of("rf", make_fit_best_params())
 

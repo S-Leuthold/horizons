@@ -49,7 +49,8 @@ Default 10. Minimum 1, and at least 2 when \code{bayesian_iter} or
 \code{final_bayesian_iter} is above 0, since \code{evaluate()}'s Bayesian search
 starts from the grid, and so does \code{fit()}'s re-tune on a cold start.
 \code{fit()}'s re-tune of \code{evaluate()}'s members starts instead from each
-member's hyperparameters and one neighbour per tuned parameter.}
+member's hyperparameters and, for d tuned parameters, d points drawn
+around them.}
 
 \item{bayesian_iter}{\code{integer}. Bayesian optimization iterations, at
 least: a model tuning more parameters runs more, so that its grid and its
@@ -67,10 +68,11 @@ model.}
 \item{final_bayesian_iter}{\code{integer}. Bayesian optimization iterations for
 \code{fit()}'s re-tune of each member, at least, raised as \code{bayesian_iter}
 is, counting the points the re-tune starts from. From \code{evaluate()}'s
-hyperparameters and one neighbour per tuned parameter that is 25 up to
-two tuned parameters, 26 for cubist and mlp, 35 for lightgbm and 53 for
-xgboost; on a cold start, from the grid, 25 up to three tuned parameters
-at the defaults, 30 for lightgbm and 50 for xgboost. Each re-tune stops
+hyperparameters and d points drawn around them, for d tuned parameters,
+that is 25 up to two tuned parameters, 26 for cubist and mlp, 35 for
+lightgbm and 53 for xgboost; on a cold start, from the grid, 25 up to
+three tuned parameters at the defaults, 30 for lightgbm and 50 for
+xgboost. Each re-tune stops
 once \code{control_horizons(no_improve = )} iterations in a row have not
 improved on its best. Default 25. Minimum 0: 0 turns the re-tune off,
 so each member keeps \code{evaluate()}'s hyperparameters, clamped into

@@ -3,7 +3,8 @@
 #' @description
 #' Inner-loop function for `fit()`. Takes a single config row from the
 #' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
-#' from evaluate()'s hyperparameters and one neighbour per tuned parameter,
+#' from evaluate()'s hyperparameters and d points drawn around them from a
+#' local grid (`build_warmstart_grid()`), for d tuned parameters,
 #' keeping evaluate()'s unless the best candidate beats them by the margin
 #' (`choose_member_params()`), generates OOF predictions, fits a final
 #' deployable model, evaluates on the held-out test set, and detects
@@ -54,8 +55,9 @@
 #'   alone. A cold start at 0 still grids `grid_size` points.
 #' @param grid_size Integer. The space-filling grid's size on a cold start
 #'   (`best_params_eval` `NULL` or unusable). A warm start begins from
-#'   `evaluate()`'s parameters and one neighbour per tuned parameter
-#'   (`warm_start_size()`), whatever `grid_size` is.
+#'   `evaluate()`'s parameters and, for d tuned parameters, d points drawn
+#'   around them from a local grid (`warm_start_size()`), whatever
+#'   `grid_size` is.
 #' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
 #'   dials' units: the ranges the re-tune searches, set before the data cap
 #'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
@@ -118,7 +120,7 @@
 #'   `"unit_records"`, for `fit()` to lift its horizons warnings and notes
 #'   onto the log.
 #'   `warm_start` is `TRUE` when `best_params_eval` was usable, so the
-#'   re-tune starts from it and one neighbour per tuned parameter, or from
+#'   re-tune starts from it and d points drawn around it, or from
 #'   the whole space when that fits the budget (`exhaustive_grid()`), `FALSE`
 #'   when it fell back to a
 #'   space-filling grid, and `NA` (both) when the config failed before
@@ -319,10 +321,11 @@ fit_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## Step 4: Warm-start re-tuning
     ## -----------------------------------------------------------------------
-    ## The search starts from evaluate()'s parameters and one neighbour per
-    ## tuned parameter, or from a space-filling grid of grid_size points when
-    ## there are none to use; how it started is recorded before it runs, so a
-    ## re-tune that fails still says. The budget counts that start. A search
+    ## The search starts from evaluate()'s parameters and, for d tuned
+    ## parameters, d points drawn around them from a local grid
+    ## (build_warmstart_grid()), or from a space-filling grid of grid_size
+    ## points when there are none to use; how it started is recorded before
+    ## it runs, so a re-tune that fails still says. The budget counts that start. A search
     ## space that costs no more fits than the start and the Bayesian search
     ## would make together (plsr's num_comp, one fit a fold) is gridded whole,
     ## with no Bayesian stage, as evaluate() grids it:
