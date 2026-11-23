@@ -36,7 +36,7 @@
 #' directory, so `"auto"` chooses it only when there is one (#233).
 #'
 #' On the configs axis the worker runs tune sequentially, unless the run's
-#' plan gives its configuration inner daemons ([split_plan()]), which it
+#' plan gives its configuration inner daemons (`split_plan()`), which it
 #' starts on its own daemon. `control_horizons()` refuses `"both"`.
 #'
 #' @param parallelize_over One of `"auto"`, `"configs"`, `"resamples"`, as

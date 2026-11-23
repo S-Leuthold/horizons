@@ -48,7 +48,7 @@ rule is \code{n_configs >= cv_folds}. Dispatching configs needs a checkpoint
 directory, so \code{"auto"} chooses it only when there is one (#233).
 
 On the configs axis the worker runs tune sequentially, unless the run's
-plan gives its configuration inner daemons (\code{\link[=split_plan]{split_plan()}}), which it
+plan gives its configuration inner daemons (\code{split_plan()}), which it
 starts on its own daemon. \code{control_horizons()} refuses \code{"both"}.
 }
 \keyword{internal}
