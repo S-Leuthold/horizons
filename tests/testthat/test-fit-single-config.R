@@ -563,7 +563,7 @@ describe("fit_single_config() - failure paths", {
   it("names the parameter finalization when the bounds cannot be set", {
 
     setup <- fsc()$setup
-    local_mocked_bindings(cap_pls_components = function(...) stop("the bounds could not be set"))
+    local_mocked_bindings(cap_by_data = function(...) stop("the bounds could not be set"))
 
     expect_failed_at(run_on_shared(setup), "Parameter finalization",
                      "the bounds could not be set", warm_start = NA)
@@ -1140,25 +1140,26 @@ describe("fit_single_config() - measured coverage when it cannot be measured (#1
 
 describe("fit_single_config() - a search space that fits the budget", {
 
-  run_plsr <- function(final_bayesian_iter) {
+  run_plsr <- function(final_bayesian_iter, model = "plsr", ...) {
 
     setup    <- make_fit_setup(n_wn = 20)
     searched <- FALSE
 
     local_mocked_bindings(bayes_search = function(...) {
       searched <<- TRUE
-      list(results = list(...)$initial, n_dropped = 0L)
+      list(results = list(...)$initial, n_dropped = 0L, n_iter = 0L, stop = "budget")
     })
 
     result <- fit_single_config(
-      config_row          = make_fit_config(model = "plsr"),
+      config_row          = make_fit_config(model = model),
       split_F             = setup$split_F,
       cv_resamples        = setup$folds,
       role_map            = setup$role_map,
       best_params_eval    = NULL,
       final_bayesian_iter = final_bayesian_iter,
       grid_size           = 2L,
-      seed                = 42L
+      seed                = 42L,
+      ...
     )
 
     list(result = result, searched = searched)
@@ -1176,13 +1177,214 @@ describe("fit_single_config() - a search space that fits the budget", {
 
   })
 
-  it("still searches a space with more points than the budget", {
+  it("grids plsr's every count whatever the budget, one fit a fold", {
 
-    got <- run_plsr(5L)
+    got <- run_plsr(1L)
+
+    expect_identical(got$result$status, "success")
+    expect_false(got$searched)
+    expect_identical(got$result$start_grid_size, 12L)
+
+  })
+
+  it("still searches a space whose fits outnumber the budget", {
+
+    ## rf on 12 predictors: 12 values of mtry by 39 of min_n
+    got <- run_plsr(5L, model = "rf")
 
     expect_identical(got$result$status, "success")
     expect_true(got$searched)
     expect_identical(got$result$start_grid_size, 2L)
+
+  })
+
+  it("grids whole a space that fits the raised budget, though not the iterations asked for", {
+
+    ## rf over 5 values of mtry by 3 of min_n: 15 fits against 2 + 3 asked
+    ## for, and 2 + 18 once the budget rule raises the two-parameter search
+    got <- run_plsr(3L, model = "rf", tune_ranges = list(mtry = c(1, 5), min_n = c(2, 4)))
+
+    expect_identical(got$result$status, "success")
+    expect_false(got$searched)
+    expect_identical(got$result$start_grid_size, 15L)
+
+  })
+
+})
+
+
+## =========================================================================
+## The ranges searched (tune_ranges)
+## =========================================================================
+
+describe("fit_single_config() - the ranges searched (tune_ranges)", {
+
+  it("keeps the warm-start grid and every re-tune candidate within a committees range, evaluate()'s choice outside it clamped", {
+
+    skip_if_not_installed("Cubist")
+
+    seen        <- new.env()
+    real_retune <- tune_warmstart_bayes
+    local_mocked_bindings(tune_warmstart_bayes = function(...) {
+      seen$grid <- list(...)$initial_grid
+      out       <- real_retune(...)
+      seen$results <- out$tune_results
+      out
+    })
+
+    setup  <- make_fit_setup(n = 40, n_wn = 12)
+    result <- suppressWarnings(fit_single_config(
+      config_row          = make_fit_config(model = "cubist"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = tibble::tibble(committees = 20L, neighbors = 3L, max_rules = 20L),
+      final_bayesian_iter = 3L,
+      grid_size           = 3L,
+      tune_ranges         = list(committees = c(1, 8)),
+      seed                = 42L,
+      isolate             = FALSE
+    ))
+
+    expect_identical(result$status, "success")
+    expect_true(result$warm_start)
+    expect_true(all(seen$grid$committees >= 1 & seen$grid$committees <= 8))
+    expect_true(8L %in% seen$grid$committees)
+    expect_true(all(tune::collect_metrics(seen$results)$committees <= 8))
+
+  })
+
+})
+
+
+## =========================================================================
+## The Bayesian budget per tuned parameter
+## =========================================================================
+
+describe("fit_single_config() - the Bayesian budget per tuned parameter", {
+
+  it("gives the re-tune ten points a tuned parameter less the grid when that is more than asked", {
+
+    seen <- NULL
+    local_mocked_bindings(tune_warmstart_bayes = function(..., bayesian_iter) {
+      seen <<- bayesian_iter
+      stop("stopped after the budget")
+    })
+
+    setup <- make_fit_setup()
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 3L,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    ## rf tunes two: 20 points less the grid of 2
+    expect_identical(seen, 18L)
+
+  })
+
+})
+
+
+## =========================================================================
+## The re-tune's stopping rule
+## =========================================================================
+
+describe("fit_single_config() - the re-tune's stopping rule", {
+
+  it("passes no_improve to the re-tune, and keeps how far its search went on the member, failed or not", {
+
+    setup <- make_fit_setup()
+    seen  <- NULL
+    local_mocked_bindings(tune_warmstart_bayes = function(..., no_improve) {
+      seen <<- no_improve
+      list(tune_results = NULL, best_params = NULL, grid = NULL, n_dropped = 0L,
+           bayes_iter = 4L, bayes_stop = "no_improve")
+    })
+
+    ## The member fails after its re-tune, reading the warnings of a result
+    ## that is not there, and still says how far the search went
+    member <- fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 30L,
+      grid_size           = 2L,
+      no_improve          = 2L,
+      seed                = 42L
+    )
+
+    expect_identical(seen, 2L)
+    expect_identical(member$status, "failed")
+    expect_identical(member$bayes_iter, 4L)
+    expect_identical(member$bayes_stop, "no_improve")
+
+  })
+
+})
+
+
+## =========================================================================
+## A PLS member's warnings when one fit serves every count (#109)
+## =========================================================================
+
+describe("fit_single_config() - a PLS member's warnings when one fit serves every count (#109)", {
+
+  ## Counts 1 to 12 gridded whole on folds of eight predictors (16
+  ## wavenumbers past the raw step's edge trim): the re-tune's one fit a
+  ## fold is at 12, capped at 8. The bound is widened past the data and the
+  ## choice fixed, as in evaluate_single_config()'s tests.
+  run_capped <- function(chosen) {
+
+    local_mocked_bindings(
+      finalize_bound  = function(param_set, predictors, folds) {
+        stats::update(param_set, num_comp = dials::num_comp(c(1L, 12L)))
+      },
+      select_complete = function(results, metric, n_folds, debug = FALSE) {
+        cm <- tune::collect_metrics(results)
+        unique(cm[cm$num_comp == chosen, c("num_comp", ".config")])
+      }
+    )
+
+    setup <- make_fit_setup(n = 60, n_wn = 16)
+
+    suppressWarnings(fit_single_config(
+      config_row          = make_fit_config(model = "plsr"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = NULL,
+      final_bayesian_iter = 0L,
+      grid_size           = 12L,
+      seed                = 42L
+    ))
+
+  }
+
+  it("leaves off the re-tune stage's cap when the chosen count fits every fold", {
+
+    result <- run_capped(2L)
+
+    expect_identical(result$status, "success")
+    expect_false(any(grepl("PLS fitted", result$warnings, fixed = TRUE)))
+
+  })
+
+  it("says a fold could not hold the chosen count from its out-of-fold fits", {
+
+    result <- run_capped(10L)
+    lines  <- result$warnings[grepl("PLS fitted", result$warnings, fixed = TRUE)]
+
+    expect_identical(result$status, "success")
+    expect_true(any(grepl("PLS fitted 8 components, not the 10 asked for: .*3 of 3 folds", lines)))
+    expect_false(any(grepl("the 12 asked for", lines, fixed = TRUE)))
 
   })
 

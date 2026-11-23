@@ -110,6 +110,45 @@
 #' `feature_selection = "pca"` and is read by nothing else. Both defaults are
 #' the values the recipe ran before they were settable. See GitHub issue #62.
 #'
+#' **Tuning ranges:**
+#'
+#' `evaluate()` and `fit()` search each tuned parameter over a range: its
+#' engine's, or horizons' where it sets one, or one given in `tune_ranges`.
+#' horizons sets two: Cubist's `committees` 1 to 25, since a fit's time grows
+#' linearly with its committees and more of them seldom lowered the
+#' cross-validated error by much, and plsr's `num_comp` 1 to 30. A range is
+#' named by the parameter's id and applies to every configured model that
+#' tunes it. The ids each model tunes:
+#'
+#' * `rf`: `mtry`, `min_n`
+#' * `cubist`: `committees`, `neighbors`, `max_rules`
+#' * `xgboost`: `tree_depth`, `learn_rate`, `mtry`, `min_n`,
+#'   `loss_reduction`, `sample_size` (a proportion of the rows)
+#' * `plsr`: `num_comp`
+#' * `elastic_net`: `penalty`, `mixture`
+#' * `svm_rbf`: `cost`, `rbf_sigma`
+#' * `mlp`: `hidden_units`, `penalty`, `epochs`
+#' * `lightgbm`: `tree_depth`, `learn_rate`, `mtry`, `min_n`
+#' * `mars`: `prod_degree`, `num_terms`
+#'
+#' A range is in dials' units: a parameter searched on a log scale takes its
+#' range in log10 (log2 for `cost`), so `learn_rate = c(-3, -1)` searches
+#' 0.001 to 0.1. The data still cap `mtry` at the predictors a recipe keeps,
+#' and `num_comp` at those and the smallest fold's rows less one, narrowing a
+#' range given here; a range whose lower bound is above that cap fails the
+#' configuration, saying so. `configure()` refuses a name no configured model
+#' tunes, a range that is not two finite numbers with the lower below the
+#' upper, an `mtry` or `num_comp` range starting below 1 (each counts the
+#' predictors or components a fit uses, so 0 is no model), and a fractional
+#' bound on a whole-number parameter (typed where the model's engine is
+#' installed, and again by `evaluate()` and `fit()` once they have checked
+#' the engines of the models they fit). An engine's own limits are not
+#' checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
+#' range past them fails those candidates' fits, which the row reports. The
+#' ranges are recorded as `config$tuning$ranges`, so `fit()` re-tunes over
+#' the space `evaluate()` searched, and a checkpoint tuned over other ranges
+#' is not resumed. `ensemble()`'s meta-learners keep their own grids.
+#'
 #' **Outcome range:**
 #'
 #' `outcome_range` is the physical range of the outcome, `c(lower, upper)`,
@@ -162,10 +201,23 @@
 #'   Default 10. Minimum 1, and at least 2 when `bayesian_iter` or
 #'   `final_bayesian_iter` is above 0, since both Bayesian searches start
 #'   from the grid.
-#' @param bayesian_iter `integer`. Bayesian optimization iterations.
-#'   Default 15. Minimum 0.
+#' @param bayesian_iter `integer`. Bayesian optimization iterations, at
+#'   least: a model tuning more parameters runs more, so that its grid and its
+#'   search together try at least ten points a tuned parameter (`10 * d -
+#'   grid_size` iterations for `d` parameters, when that is more). At the
+#'   defaults that is 15 for rf, elastic_net and svm_rbf, 20 for cubist and
+#'   mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
+#'   `control_horizons(no_improve = )` iterations in a row have not improved
+#'   on its best. A space that costs no more fits than the grid and the
+#'   search together is gridded whole, with no search: a submodel's values
+#'   share one fit, so plsr's components are gridded whole, every count
+#'   scored from one fit a fold, and at the defaults so is mars's space, two
+#'   fits a fold. Default 15. Minimum 0: 0 turns the search off for every
+#'   model.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
-#'   the final fit on the selected configuration. Default 25. Minimum 0.
+#'   the final fit on the selected configuration, at least, raised as
+#'   `bayesian_iter` is (25 up to three tuned parameters at the defaults, 30
+#'   for lightgbm, 50 for xgboost). Default 25. Minimum 0.
 #' @param sg_window `integer`. Savitzky-Golay window in grid points, applied
 #'   to every configuration. Default 9. Must be odd, at least 5, and (checked
 #'   by `evaluate()`) smaller than the number of spectral columns. For
@@ -173,6 +225,11 @@
 #' @param pca_threshold `numeric`. Share of variance `feature_selection =
 #'   "pca"` keeps, applied to every configuration that uses it. Default
 #'   0.995. Must be in (0, 1].
+#' @param tune_ranges `list` or `NULL`. Ranges of tuned parameters, by
+#'   parameter id, each `c(lower, upper)` in dials' units, applied to every
+#'   configured model that tunes the parameter and merged over horizons'
+#'   defaults (`committees` 1 to 25, `num_comp` 1 to 30). Default `NULL`, the
+#'   defaults alone. See Tuning ranges.
 #' @param outcome_range `numeric(2)`. The outcome's physical range,
 #'   `c(lower, upper)` with lower < upper; either end may be infinite. Every
 #'   scored and served prediction is clamped to it. Default `c(0, Inf)`,
@@ -188,7 +245,8 @@
 #'   * Outcome variable promoted to `role = "outcome"` in `data$role_map`
 #'   * `config$configs` — tibble of configuration grid (5 columns)
 #'   * `config$n_configs` — integer count
-#'   * `config$tuning` — list of tuning parameters
+#'   * `config$tuning` — list of tuning parameters, with `ranges`, the
+#'     ranges searched (see Tuning ranges)
 #'   * `config$expansion` — list of original inputs (for reproducibility)
 #'   * `config$recipe` — the recipe settings every configuration is built
 #'     with: `sg_window` and `pca_threshold`
@@ -220,6 +278,12 @@
 #'   pca_threshold     = 0.99
 #' )
 #'
+#' # Cubist searched over up to 50 committees, and rf's mtry over 1 to 200
+#' hd |> configure(
+#'   models      = c("rf", "cubist"),
+#'   tune_ranges = list(committees = c(1, 50), mtry = c(1, 200))
+#' )
+#'
 #' # A signed property: no floor at zero
 #' hd |> configure(outcome = "d13C", outcome_range = c(-Inf, Inf))
 #'
@@ -242,6 +306,7 @@ configure <- function(x,
                       final_bayesian_iter   = 25L,
                       sg_window             = 9L,
                       pca_threshold         = 0.995,
+                      tune_ranges           = NULL,
                       outcome_range         = c(0, Inf),
                       verbose               = getOption("horizons.verbose", TRUE)) {
 
@@ -332,6 +397,32 @@ configure <- function(x,
       "x" = "Got {.code grid_size = {grid_size}}, with {.code {searches}}.",
       "i" = "The Bayesian searches start from the grid and need at least two of its points; raise {.arg grid_size}, or set {.arg bayesian_iter} and {.arg final_bayesian_iter} to 0."
     ), kind = "input")
+
+  }
+
+  ## 1.4b Validate tune_ranges ------------------------------------------------
+  ## Each name must be a parameter a configured model tunes, so a misspelt
+  ## one is refused rather than ignored (tune_range_findings()); each range
+  ## is typed on its parameter where the model's engine is installed, and
+  ## evaluate() and fit() type it again after their package checks
+  ## (range_type_findings()). The findings are rendered text, so they go
+  ## into the refusal as values (abort_findings()).
+
+  if (!is.null(tune_ranges)) {
+
+    range_findings <- c(tune_range_findings(tune_ranges, models),
+                        range_type_findings(tune_ranges, models))
+
+    if (length(range_findings) > 0) {
+
+      abort_findings(
+        range_findings,
+        "{.arg tune_ranges} must be a named list of ranges of parameters the configured models tune.",
+        kind   = "input",
+        remedy = "Each range is {.code c(lower, upper)} in dials' units, e.g. {.code tune_ranges = list(committees = c(1, 50))}."
+      )
+
+    }
 
   }
 
@@ -588,7 +679,10 @@ configure <- function(x,
     cv_folds            = as.integer(cv_folds),
     grid_size           = as.integer(grid_size),
     bayesian_iter       = as.integer(bayesian_iter),
-    final_bayesian_iter = as.integer(final_bayesian_iter)
+    final_bayesian_iter = as.integer(final_bayesian_iter),
+    ## horizons' default ranges with the given ones over them, which
+    ## evaluate() and fit() search (apply_tune_ranges())
+    ranges              = merge_ranges(tune_ranges)
   )
 
   x$config$expansion <- list(
@@ -646,6 +740,16 @@ configure <- function(x,
     cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
     cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
                grid_size, "\n"))
+
+    ## The ranges the configured models search where horizons or the user
+    ## set one, so the committees cap is seen where it is set
+    ranges_line <- configured_ranges_line(x$config$tuning$ranges, models)
+
+    if (!is.null(ranges_line)) {
+
+      cat(paste0("\u2502  \u251C\u2500 Ranges: ", ranges_line, "\n"))
+
+    }
 
     window_cm <- x$config$recipe$sg_window * axis_spacing_cm(x)
 
@@ -793,6 +897,274 @@ is_valid_outcome_range <- function(r) {
 outcome_range_setting <- function(x) {
 
   x$config$outcome_range
+
+}
+
+
+## ---------------------------------------------------------------------------
+## The tuning ranges (configure(tune_ranges = ))
+## ---------------------------------------------------------------------------
+
+#' The tuned parameters of a set of models, and the models that tune each
+#'
+#' @param models Character. Short model names.
+#' @return Named list: parameter id -> the models (character) tuning it, in
+#'   the order the models tune them.
+#' @keywords internal
+#' @noRd
+tuned_by <- function(models) {
+
+  models <- unique(models)
+  ids    <- unique(unlist(lapply(models, function(m) MODEL_SPECS[[m]]$tuned), use.names = FALSE))
+
+  stats::setNames(lapply(ids, function(id) {
+    models[vapply(models, function(m) id %in% MODEL_SPECS[[m]]$tuned, logical(1))]
+  }), ids)
+
+}
+
+#' The ranges an object records: horizons' defaults with the user's over them
+#'
+#' @param given Named list of `c(lower, upper)`, or `NULL`.
+#' @return Named list of double pairs, sorted by name.
+#' @keywords internal
+#' @noRd
+merge_ranges <- function(given) {
+
+  ranges <- utils::modifyList(TUNE_RANGES, given %||% list())
+
+  lapply(ranges[sort(names(ranges), method = "radix")], function(r) as.double(unname(r)))
+
+}
+
+#' The configure tree's line of the ranges the configured models search
+#'
+#' @param ranges The recorded ranges.
+#' @param models Character. The configured models.
+#' @return Character(1), e.g. `"committees 1 to 25 (cubist); num_comp 1 to 30
+#'   (plsr)"`, or `NULL` when no configured model tunes a ranged parameter.
+#' @keywords internal
+#' @noRd
+configured_ranges_line <- function(ranges, models) {
+
+  tuned <- tuned_by(models)
+  ids   <- intersect(sort(names(ranges), method = "radix"), names(tuned))
+
+  if (length(ids) == 0) return(NULL)
+
+  paste(vapply(ids, function(id) {
+    paste0(format_ranges(ranges[id]), " (", paste(tuned[[id]], collapse = ", "), ")")
+  }, character(1), USE.NAMES = FALSE), collapse = "; ")
+
+}
+
+#' A set of ranges as one text, the form the checkpoint settings record
+#'
+#' @param ranges Named list of `c(lower, upper)`.
+#' @return Character(1), e.g. `"committees 1 to 25; num_comp 1 to 30"`,
+#'   sorted by name.
+#' @keywords internal
+#' @noRd
+format_ranges <- function(ranges) {
+
+  ids <- sort(names(ranges), method = "radix")
+
+  paste(vapply(ids, function(id) {
+    paste(id, as.character(as.double(ranges[[id]][1])), "to", as.character(as.double(ranges[[id]][2])))
+  }, character(1), USE.NAMES = FALSE), collapse = "; ")
+
+}
+
+#' What is wrong with a set of tuning ranges
+#'
+#' @description
+#' The one check of a set of ranges' shape, at `configure()`'s door and in
+#' every verb's validator ([config_findings()]): a named list, its names
+#' unique, each element two finite numbers with the lower below the upper,
+#' and an `mtry` or `num_comp` range starting at 1 or more
+#' (`BOUNDED_PARAMETERS`, which count what a fit uses). With `check_names`,
+#' each name must be a parameter a model in `models` tunes (their ids in
+#' `MODEL_SPECS`), so a misspelt one is refused rather than ignored. It
+#' needs no package: whether a range is of its parameter's type is
+#' [range_type_findings()]'s.
+#'
+#' @param ranges The ranges, as given.
+#' @param models Character. The configured models, read only with
+#'   `check_names`.
+#' @param arg Character(1). How the messages name the ranges.
+#' @param check_names Logical(1). Refuse a name no model in `models` tunes.
+#' @return Character: one finding per problem, empty when there are none.
+#' @keywords internal
+#' @noRd
+tune_range_findings <- function(ranges, models = character(0), arg = "tune_ranges", check_names = TRUE) {
+
+  if (!is.list(ranges) || is.data.frame(ranges)) {
+    return(cli::format_inline("{.arg {arg}} must be a named list of ranges, not {.obj_type_friendly {ranges}}."))
+  }
+
+  if (length(ranges) == 0) return(character(0))
+
+  ids <- names(ranges)
+
+  if (is.null(ids) || anyNA(ids) || !all(nzchar(ids))) {
+    return(cli::format_inline("Every range in {.arg {arg}} must be named by the parameter it sets."))
+  }
+
+  findings <- character(0)
+  repeated <- unique(ids[duplicated(ids)])
+
+  if (length(repeated) > 0) {
+    findings <- c(findings, cli::format_inline("{.arg {arg}} names {.field {repeated}} more than once."))
+  }
+
+  shaped <- vapply(ranges, is_range_pair, logical(1))
+
+  for (id in ids[!shaped]) {
+    got      <- paste(deparse(ranges[[id]]), collapse = " ")
+    findings <- c(findings, cli::format_inline(
+      "{.arg {arg}}'s {.field {id}} must be two finite numbers, the lower below the upper, not {.code {got}}."
+    ))
+  }
+
+  ## The parameters the data bound (BOUNDED_PARAMETERS) count the
+  ## predictors or components a fit uses, so a range below 1 holds values
+  ## that are no model: every plsr count fails at num_comp = 0, from the one
+  ## fit the counts share, and ranger reads mtry = 0 as its own default
+  for (id in intersect(ids[shaped], BOUNDED_PARAMETERS)) {
+    lower <- ranges[[id]][1]
+    if (lower < 1) {
+      findings <- c(findings, cli::format_inline(
+        "{.arg {arg}}'s {.field {id}} must start at 1 or more, not {lower}: it counts the predictors or components a fit uses, at least one."
+      ))
+    }
+  }
+
+  if (check_names) {
+
+    unknown <- setdiff(ids, names(tuned_by(models)))
+
+    if (length(unknown) > 0) {
+      listed   <- paste0(vapply(unique(models), function(m) {
+        paste0(paste(MODEL_SPECS[[m]]$tuned, collapse = ", "), " (", m, ")")
+      }, character(1)), collapse = "; ")
+      findings <- c(findings, cli::format_inline(
+        "{.arg {arg}} names {cli::qty(length(unknown))}{?a parameter/parameters} no configured model tunes: {.field {unknown}}. The configured models tune {listed}."
+      ))
+    }
+
+  }
+
+  findings
+
+}
+
+#' Whether a range is two finite numbers, the lower below the upper
+#'
+#' @param r A range, as given.
+#' @return Logical(1).
+#' @keywords internal
+#' @noRd
+is_range_pair <- function(r) {
+
+  is.numeric(r) && length(r) == 2 && all(is.finite(r)) && r[1] < r[2]
+
+}
+
+#' Which ranges are not of their parameters' types
+#'
+#' @description
+#' Each well-shaped range ([tune_range_findings()]) is set on the parameter
+#' of every model in `models` that tunes it ([dials::range_set()]), so a
+#' range of the wrong type, a fractional bound on a whole-number parameter,
+#' is refused in dials' words. Building a model's parameter set needs its
+#' engine, so a model whose packages are not installed is skipped:
+#' `configure()`, which checks no packages, types what it can, and
+#' [evaluate()] and [fit()] type every range of the models they fit at
+#' their doors, right after their package checks
+#' ([check_config_packages()]), where nothing is skipped
+#' ([check_range_types()]). The validators check the ranges' shape alone,
+#' so a fitted object is validated without loading the engines of models
+#' it holds no member of.
+#'
+#' @param ranges The ranges, as given or recorded.
+#' @param models Character. The models whose parameters the ranges are set
+#'   on.
+#' @param arg Character(1). How the messages name the ranges.
+#' @return Character: one finding per range a model's parameter refused,
+#'   empty when there are none.
+#' @keywords internal
+#' @noRd
+range_type_findings <- function(ranges, models, arg = "tune_ranges") {
+
+  if (!is.list(ranges) || is.data.frame(ranges) || is.null(names(ranges))) return(character(0))
+
+  ids    <- names(ranges)
+  usable <- !is.na(ids) & nzchar(ids) & !duplicated(ids) & vapply(ranges, is_range_pair, logical(1))
+  ranges <- ranges[usable]
+
+  findings <- character(0)
+
+  for (m in unique(models)) {
+
+    ids_m <- intersect(names(ranges), MODEL_SPECS[[m]]$tuned)
+    if (length(ids_m) == 0) next
+
+    if (!all(vapply(MODEL_SPECS[[m]]$packages, requireNamespace, logical(1), quietly = TRUE))) next
+
+    param_set <- hardhat::extract_parameter_set_dials(define_model_spec(m, isolate = FALSE))
+
+    for (id in ids_m) {
+
+      param   <- param_set$object[[which(param_set$id == id)]]
+      refused <- tryCatch({
+        dials::range_set(param, as.double(ranges[[id]]))
+        NULL
+      }, error = function(e) condition_summary(e))
+
+      if (!is.null(refused)) {
+        findings <- c(findings, cli::format_inline(
+          "{.arg {arg}}'s {.field {id}} is not a range of {m}'s {.field {id}}: {refused}"
+        ))
+      }
+
+    }
+
+  }
+
+  findings
+
+}
+
+#' Refuse recorded ranges the models a verb fits cannot take
+#'
+#' @description
+#' The door check of [evaluate()] and [fit()], straight after their package
+#' checks, so every engine it builds a parameter set for is installed: each
+#' recorded range typed on the parameters of `models`
+#' ([range_type_findings()]). `configure()` types a range only where the
+#' model's engine is installed, so one it could not type, or one edited by
+#' hand, is refused here before any work.
+#'
+#' @param ranges `config$tuning$ranges`.
+#' @param models Character. The models the verb fits.
+#' @param call The frame the refusal reports: the verb's.
+#' @return Invisibly `NULL`; aborts with `horizons_error_validation`, its
+#'   findings as `findings`.
+#' @keywords internal
+#' @noRd
+check_range_types <- function(ranges, models, call = rlang::caller_env()) {
+
+  findings <- range_type_findings(ranges, models, arg = "config$tuning$ranges")
+
+  if (length(findings) > 0) {
+
+    abort_validation(findings,
+                     remedy = "Re-run {.fn configure} with {.arg tune_ranges} the models' parameters can take.",
+                     call   = call)
+
+  }
+
+  invisible(NULL)
 
 }
 

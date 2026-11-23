@@ -87,7 +87,12 @@
 #' are returned (`horizons_warning_partial_failure`, naming them with each
 #' distinct cause). It records as notes on the log, without a warning, a
 #' member's fitted workflow stored whole because it could not be slimmed and
-#' in-sample interval diagnostics that could not be computed. The folds are
+#' in-sample interval diagnostics that could not be computed, and how many
+#' members' re-tunes the Bayesian search's stopping rule ended early
+#' (`control_horizons(no_improve = )`: a search stops once that many
+#' iterations in a row have not improved on its best, and `FALSE` runs every
+#' iteration), each member recording the iterations its search began
+#' (`bayes_iter`) and why it ended (`bayes_stop`). The folds are
 #' drawn from the rows the members are fitted on, which must outnumber the
 #' folds, or `fit()` refuses, as `evaluate()` does.
 #'
@@ -132,10 +137,11 @@
 #' `evaluate()` to warm-start from, the re-tune starts from a space-filling
 #' grid of `grid_size` points; the console tree says so, and
 #' `models$results$warm_start` is `FALSE`. On either path, a search space
-#' whose tuned parameters are all whole numbers, with no more points than
-#' `grid_size + final_bayesian_iter`, is gridded whole with no Bayesian
-#' search, as `evaluate()` grids it: at the defaults that is every plsr
-#' member, each `num_comp` up to its cap tried. The degradation check needs
+#' whose tuned parameters are all whole numbers, costing no more fits than
+#' the grid and the Bayesian iterations together, is gridded whole with no
+#' Bayesian search, as `evaluate()` grids it: a submodel's values share one
+#' fit, so that is every plsr member, each `num_comp` up to its cap tried
+#' from one fit a fold. The degradation check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
 #'
@@ -183,12 +189,13 @@
 #'   from the session's random stream, which is left where it was and
 #'   printed in the tree. A seed given here overrides the object's and is
 #'   recorded as `models$seed`, which [ensemble()] takes.
-#' @param control A [control_horizons()] object: how the run goes, not what
-#'   it computes. `fit()` reads `allow_par`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `isolate`, `min_calib_rows`, `min_ad_rows` and
-#'   `min_degradation_rows`, and refuses any other field that is set. The
-#'   control it ran with, defaults filled in, is recorded as
-#'   `models$control`.
+#' @param control A [control_horizons()] object: how the run goes, and,
+#'   through `isolate` and `no_improve`, part of what it computes (see
+#'   [control_horizons()]). `fit()` reads `allow_par`, `verbose`, `debug`,
+#'   `breaker`, `keep_traces`, `isolate`, `no_improve`, `min_calib_rows`,
+#'   `min_ad_rows` and `min_degradation_rows`, and refuses any other field
+#'   that is set. The control it ran with, defaults filled in, is recorded
+#'   as `models$control`.
 #'
 #' @section Parallelism:
 #' Before any member is fitted, each fold's recipe is prepared once for the
@@ -503,6 +510,10 @@ fit <- function(x,
   member_configs <- all_configs[all_configs$config_id %in% top_configs$config_id, ]
 
   check_config_packages(member_configs, "fit")
+
+  ## The recorded ranges on the parameters of the members' models, now that
+  ## their engines are known to be installed, as evaluate() types them
+  check_range_types(tuning$ranges, member_configs$model)
 
   ## Fits a model's engine would otherwise carry state across run in this
   ## session when isolation is turned off, which the log notes
@@ -838,9 +849,12 @@ fit <- function(x,
 
     }
 
+    raised <- raised_budgets(member_configs$model, final_bayesian_iter, tuning$grid_size)
+
     cat(paste0(
       "\u2502  Bayesian: ", final_bayesian_iter,
-      if (cold_start) " iterations from a space-filling grid\n" else " iterations with warm-start\n"
+      if (cold_start) " iterations from a space-filling grid" else " iterations with warm-start",
+      if (!is.null(raised)) paste0(" (", raised, ")"), "\n"
     ))
 
     ## A parallel fit runs the members' folds on the daemons
@@ -954,6 +968,8 @@ fit <- function(x,
       best_params_eval    = best_params_eval,
       final_bayesian_iter = final_bayesian_iter,
       grid_size           = tuning$grid_size,
+      tune_ranges         = tuning$ranges,
+      no_improve          = control$no_improve,
       compute_uq          = compute_uq,
       compute_ad          = compute_ad,
       allow_par           = allow_par,
@@ -1259,6 +1275,13 @@ fit <- function(x,
 
   class(x) <- c("horizons_fit", "horizons_eval", "horizons_data", "list")
 
+  ## How many of the re-tunes' Bayesian searches the stopping rule ended: a
+  ## note on the log, and a line in the summary below
+  stop_line <- early_stop_line(results_tibble$bayes_stop, control$no_improve,
+                               "The re-tune's Bayesian search", "member")
+
+  if (!is.null(stop_line)) log_note(collector, "{stop_line}")
+
   ## What the run reported goes on the object's log before it is certified
   x$log <- log_close(collector, x$log)
 
@@ -1283,6 +1306,8 @@ fit <- function(x,
     cat(paste0(
       "\u2502  \u251C\u2500 Successful: ", n_success, " / ", n_best, "\n"
     ))
+
+    if (!is.null(stop_line)) cat(paste0("\u2502  \u251C\u2500 ", stop_line, "\n"))
 
     if (n_degraded > 0) {
 
@@ -1410,6 +1435,8 @@ member_row <- function(res) {
     best_params     = list(res$best_params),
     warm_start      = res$warm_start %||% NA,
     start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
+    bayes_iter      = as.integer(res$bayes_iter %||% NA_integer_),
+    bayes_stop      = as.character(res$bayes_stop %||% NA_character_),
     error_message   = res$error_message %||% NA_character_,
     class           = res$class %||% NA_character_,
     trace           = list(res$trace),
@@ -1525,6 +1552,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
     status                = "not_evaluated",
     below_prune_threshold = NA,
     prune_threshold       = NA_real_,
+    bayes_iter            = NA_integer_,
+    bayes_stop            = NA_character_,
     rmse    = NA_real_, rrmse    = NA_real_, rsq    = NA_real_,
     ccc     = NA_real_, rpd      = NA_real_, mae    = NA_real_,
     cv_rmse = NA_real_, cv_rrmse = NA_real_, cv_rsq = NA_real_,

@@ -40,11 +40,22 @@
 #' @param best_params_eval Single-row tibble of best params from evaluate(),
 #'   or NULL (`fit()`'s cold start), in which case the re-tune starts from a
 #'   space-filling grid.
-#' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning.
-#'   When every tuned parameter is a whole number and the space has no more
-#'   points than `grid_size + final_bayesian_iter`, the grid is every point
-#'   and no Bayesian search runs (`exhaustive_grid()`).
+#' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning, at
+#'   least: raised as `evaluate_single_config()`'s are (`search_budget()`).
+#'   When every tuned parameter is a whole number and the space costs no
+#'   more fits than the grid and those iterations together (a submodel's
+#'   values sharing one fit), the grid is every point and no Bayesian search
+#'   runs (`exhaustive_grid()`).
 #' @param grid_size Integer. Grid size for warm-start exploration.
+#' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
+#'   dials' units: the ranges the re-tune searches, set before the data cap
+#'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
+#'   `config$tuning$ranges`, the ranges `evaluate()` searched. Default
+#'   `TUNE_RANGES`.
+#' @param no_improve A whole number of at least 1, or `FALSE`: the re-tune's
+#'   Bayesian iterations without improvement after which it stops
+#'   (`control_horizons(no_improve = )`, which `fit()` reads). Default
+#'   `BAYES_NO_IMPROVE_DEFAULT`.
 #' @param compute_uq Logical. Whether to train UQ components.
 #' @param compute_ad Logical. Whether to fit the applicability domain, on the
 #'   same calibration set as UQ.
@@ -100,7 +111,10 @@
 #'   re-tune's grid is centred on it or is the whole space when that fits
 #'   the budget (`exhaustive_grid()`), `FALSE` when it fell back to a
 #'   space-filling grid, and `NA` (both) when the config failed before
-#'   tuning. `start_grid_size` is the starting grid's points.
+#'   tuning. `start_grid_size` is the starting grid's points. `bayes_iter`
+#'   and `bayes_stop` are the iterations the re-tune's Bayesian search began
+#'   and why it ended (`"no_improve"`, `"budget"` or `"failed"`), both `NA`
+#'   when no search ran.
 #'
 #' @keywords internal
 fit_single_config <- function(config_row,
@@ -112,6 +126,8 @@ fit_single_config <- function(config_row,
                               best_params_eval,
                               final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
                               grid_size           = DEFAULT_GRID_SIZE,
+                              tune_ranges         = TUNE_RANGES,
+                              no_improve          = BAYES_NO_IMPROVE_DEFAULT,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
                               allow_par           = FALSE,
@@ -181,6 +197,10 @@ fit_single_config <- function(config_row,
   warm_start      <- NA
   start_grid_size <- NA_integer_
 
+  ## How far the re-tune's Bayesian search went, once it has run
+  bayes_iter <- NA_integer_
+  bayes_stop <- NA_character_
+
   unit <- run_unit({
 
     ## -----------------------------------------------------------------------
@@ -211,16 +231,19 @@ fit_single_config <- function(config_row,
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
     ## -----------------------------------------------------------------------
-    ## Step 2: Finalize parameter set (mtry / num_comp upper bound; num_comp
-    ## also by the smallest fold's rows, #216)
+    ## Step 2: Finalize parameter set (the ranges, then the mtry / num_comp
+    ## upper bound; num_comp also by the smallest fold's rows, #216)
     ## -----------------------------------------------------------------------
-    ## The prep rule evaluate_single_config() follows: each fold's recipe is
+    ## The configured ranges first, as in evaluate_single_config(), so the
+    ## re-tune searches the space evaluate() did. The prep rule
+    ## evaluate_single_config() follows: each fold's recipe is
     ## prepped once, before the re-tune, and the re-tune and the out-of-fold
     ## predictions are scored on it; the bounds are read from one more prep,
     ## of the fold recipe on the whole training part. A step's error in either
     ## ends the member with its class.
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
+    param_set   <- unit_step("finalize_parameters", apply_tune_ranges(param_set, tune_ranges))
     prepped_now <- bounded_model(config_row$model)
 
     ## The member's fold preps: fit()'s entries, or, called on its own,
@@ -273,15 +296,17 @@ fit_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## The grid is centred on evaluate()'s parameters, or space-filling when
     ## there are none to use; how it started is recorded before it runs, so a
-    ## re-tune that fails still says. A search space with no more points than
-    ## the grid and the Bayesian search would try together (plsr's num_comp)
-    ## is gridded whole, with no Bayesian stage, as evaluate() grids it:
+    ## re-tune that fails still says. A search space that costs no more fits
+    ## than the grid and the Bayesian search would make together (plsr's
+    ## num_comp, one fit a fold) is gridded whole, with no Bayesian stage, as
+    ## evaluate() grids it:
     ## tune's search errors inside its loop once it has no value left to
     ## propose, which would read as a failed search although every value was
     ## tried.
 
-    whole_space     <- exhaustive_grid(param_set, grid_size + final_bayesian_iter)
-    search_iter     <- if (is.null(whole_space)) final_bayesian_iter else 0L
+    iters           <- search_budget(final_bayesian_iter, nrow(param_set), grid_size)
+    whole_space     <- exhaustive_grid(param_set, grid_size + iters, MODEL_SPECS[[config_row$model]]$submodel)
+    search_iter     <- if (is.null(whole_space)) iters else 0L
     initial_grid    <- unit_step("warm_start_tune", whole_space %||% with_unit_seed(
       seed, stage("warmstart-grid"),
       build_warmstart_grid(best_params_eval, param_set, max_points = grid_size)
@@ -295,6 +320,7 @@ fit_single_config <- function(config_row,
       initial_grid  = initial_grid,
       param_set     = param_set,
       bayesian_iter = search_iter,
+      no_improve    = no_improve,
       metric_set    = tune_metrics,
       allow_par     = allow_par,
       debug         = debug,
@@ -303,6 +329,8 @@ fit_single_config <- function(config_row,
     ))
 
     best_params <- retune$best_params
+    bayes_iter  <- as.integer(retune$bayes_iter)
+    bayes_stop  <- retune$bayes_stop
 
     ## The warnings tune kept for the chosen candidate (#109), as
     ## evaluate_single_config() reads them: the re-tune returns the grid
@@ -310,7 +338,16 @@ fit_single_config <- function(config_row,
     ## Bayesian result carries that grid's notes as iteration 0
     candidate <- unit_step("select_best", candidate_of(retune$tune_results, best_params,
                                                        retune$grid, model_wflow))
-    collect_notes_from(retune$tune_results, candidate = candidate)
+
+    ## The PLS engine's cap is left off the re-tune's notes: one fit serves
+    ## every count of a grid stage, so they name the stage's largest count.
+    ## The out-of-fold fits below are at the chosen count, and their own
+    ## notes say where a fold capped it (pls_cap_records()).
+    warning_log <- dplyr::bind_rows(
+      warning_log,
+      drop_pls_caps(tune_note_records(retune$tune_results, type = "warning", scope = "cv",
+                                      candidate = candidate))
+    )
 
     unmapped <- unmapped_line(candidate)
 
@@ -589,6 +626,8 @@ fit_single_config <- function(config_row,
       best_params      = best_params,
       warm_start       = warm_start,
       start_grid_size  = start_grid_size,
+      bayes_iter       = bayes_iter,
+      bayes_stop       = bayes_stop,
       cv_predictions   = cv_predictions,
       test_metrics     = test_metrics,
       cv_metrics       = cv_metrics,
@@ -625,6 +664,8 @@ fit_single_config <- function(config_row,
       best_params      = NULL,
       warm_start       = warm_start,
       start_grid_size  = start_grid_size,
+      bayes_iter       = bayes_iter,
+      bayes_stop       = bayes_stop,
       cv_predictions   = NULL,
       test_metrics     = NULL,
       cv_metrics       = NULL,

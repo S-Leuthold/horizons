@@ -47,6 +47,14 @@
 #   on an engine's name (parsnip's tunable() for lightgbm, tune's checks for
 #   glmnet) would see a twin as another engine; the contract test compares a
 #   twin's tunable() with its engine's.
+# - `submodel`: the tuned parameter one fit scores at every value, as the
+#   engine's registration marks it (`has_submodel`): tune fits the grid
+#   candidates that differ only in it once, at its largest value, and
+#   predicts the others from that fit (parsnip::multi_predict()). The
+#   contract test holds each row to its engine's registration, both ways;
+#   the PLS engine horizons registers takes its own from here
+#   (register_pls_engine()), and the whole-space rule counts its values as
+#   one fit (exhaustive_grid(), R/fit-warmstart.R).
 #
 # An engine's traits are read through engine_spec() (R/utils-models.R), which
 # finds the row of an isolated twin's engine too.
@@ -70,6 +78,7 @@ MODEL_SPECS <- list(
     label    = "Cubist",
     packages = c("rules", "Cubist"),
     tuned    = c("committees", "neighbors", "max_rules"),
+    submodel = "neighbors",
     isolate  = c(repeats = "topepo/Cubist#6", memory = "topepo/Cubist#8")
   ),
 
@@ -89,7 +98,8 @@ MODEL_SPECS <- list(
     engine   = "pls",
     label    = "PLS",
     packages = "pls",
-    tuned    = "num_comp"
+    tuned    = "num_comp",
+    submodel = "num_comp"
   ),
 
   elastic_net = list(
@@ -97,7 +107,8 @@ MODEL_SPECS <- list(
     engine   = "glmnet",
     label    = "Elastic Net",
     packages = "glmnet",
-    tuned    = c("penalty", "mixture")
+    tuned    = c("penalty", "mixture"),
+    submodel = "penalty"
   ),
 
   svm_rbf = list(
@@ -133,7 +144,8 @@ MODEL_SPECS <- list(
     engine   = "earth",
     label    = "MARS",
     packages = "earth",
-    tuned    = c("prod_degree", "num_terms")
+    tuned    = c("prod_degree", "num_terms"),
+    submodel = "num_terms"
   )
 
 )
@@ -158,13 +170,24 @@ SELECTION_PACKAGES <- list(
   cars        = "pls"
 )
 
-# The most components the plsr model tunes over (#216). The runners cap it
-# further at the predictors the recipe keeps and the smallest fold's rows less
-# one (cap_pls_components(), R/pls-engine.R). MIR models often want more than
-# the handful a default range allows, and 30 keeps a grid's points where
-# models land. Not a field of MODEL_SPECS: CARS caps its components with it
-# too (R/step-select-cars.R).
+# The most components the plsr model tunes over (#216), its default range's
+# upper bound in TUNE_RANGES. The runners cap it further at the predictors the
+# recipe keeps and the smallest fold's rows less one (cap_by_data(),
+# R/fold-cache.R). MIR models often want more than the handful a default
+# range allows, and 30 keeps a grid's points where models land. Not a field
+# of MODEL_SPECS: CARS caps its components with it too (R/step-select-cars.R).
 PLS_MAX_COMP <- 30L
+
+# horizons' default ranges of tuned parameters, keyed by the dials parameter
+# id, in dials' units (a log-scale parameter's in log10): configure()'s
+# `tune_ranges` is merged over them and recorded as config$tuning$ranges,
+# which evaluate() and fit() apply to every model that tunes the parameter
+# (apply_tune_ranges(), R/fit-warmstart.R). Another parameter keeps its
+# engine's range. Cubist's fit time grows linearly with its committees, and
+# on the profiled grids the best cross-validated RMSE at 25 committees or
+# fewer was within about a third of a standard error of the best over 1 to
+# 100.
+TUNE_RANGES <- list(committees = c(1, 25), num_comp = c(1, PLS_MAX_COMP))
 
 ## Transformations ------------------------------------------------------------
 
@@ -238,7 +261,25 @@ HIGHER_BETTER_METRICS <- c("rpd", "rsq", "ccc")
 DEFAULT_GRID_SIZE <- 10
 DEFAULT_BAYES_ITER <- 15
 DEFAULT_CV_FOLDS <- 5
-BAYES_NO_IMPROVE_LIMIT <- 10
+
+# The Bayesian iterations without improvement after which a search stops
+# (control_horizons(no_improve = )), in evaluate() and fit()'s re-tune alike.
+# Each verb says how many of its searches stopped early, and how to change
+# it. 10 is tune's own default. A search whose starting grid puts only one
+# point in a narrow good region (svm_rbf on PCA scores, for one) can spend
+# more than five iterations exploring before it first improves on that point.
+BAYES_NO_IMPROVE_DEFAULT <- 10L
+
+# The points a search gives each tuned parameter, the grid and the Bayesian
+# iterations together: the iterations asked for are a floor, raised for a
+# model tuning d parameters to BAYES_POINTS_PER_PARAM * d less the grid when
+# that is more (search_budget(), R/fit-warmstart.R). Tools agree on about ten
+# a parameter: SMAC starts from ten configurations a parameter, and Loeppky,
+# Sacks and Welch (2009) justify ten points a dimension for a Gaussian
+# process design. It is the package's rule, not a checkpoint setting: a
+# change to it, or to search_budget(), changes how rows are scored, and bumps
+# SCORING_SCHEMA.
+BAYES_POINTS_PER_PARAM <- 10L
 DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 
 # Recipe settings configure() records and build_recipe() applies to every
@@ -371,6 +412,8 @@ SHARED_ARG_NAMES <- c(
   "role_map",
   "grid_size",
   "bayesian_iter",
+  "tune_ranges",
+  "no_improve",
   "prune",
   "prune_threshold",
   "seed",

@@ -308,6 +308,8 @@ point_matches <- function(point, grid) {
 #' @param initial_grid The starting grid, from [build_warmstart_grid()].
 #' @param param_set Finalized `parameters` object.
 #' @param bayesian_iter Integer. Bayesian iterations after grid. 0 = grid only.
+#' @param no_improve A whole number, or `FALSE`: the Bayesian search's
+#'   stopping rule (`bayes_search()`).
 #' @param metric_set A `yardstick::metric_set`.
 #' @param allow_par Logical. Passed to tune control functions.
 #' @param debug Logical. Stop at the first failure rather than fall back.
@@ -317,9 +319,11 @@ point_matches <- function(point, grid) {
 #'
 #' @return List with `tune_results` (the result the hyperparameters were
 #'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
-#'   (`initial_grid`, which the member reads its notes through, #109) and
+#'   (`initial_grid`, which the member reads its notes through, #109),
 #'   `n_dropped` (the candidates the Bayesian search proposed and tune
-#'   dropped, scored on no fold).
+#'   dropped, scored on no fold), and `bayes_iter` and `bayes_stop`, the
+#'   iterations the search began and why it ended (`bayes_search()`'s
+#'   `n_iter` and `stop`; `NA` with no Bayesian search).
 #'
 #' @keywords internal
 tune_warmstart_bayes <- function(workflow,
@@ -327,6 +331,7 @@ tune_warmstart_bayes <- function(workflow,
                                  initial_grid,
                                  param_set,
                                  bayesian_iter,
+                                 no_improve = BAYES_NO_IMPROVE_DEFAULT,
                                  metric_set,
                                  allow_par = FALSE,
                                  debug     = FALSE,
@@ -372,6 +377,8 @@ tune_warmstart_bayes <- function(workflow,
 
   tune_results <- grid_results
   n_dropped    <- 0L
+  bayes_iter   <- NA_integer_
+  bayes_stop   <- NA_character_
 
   if (bayesian_iter > 0) {
 
@@ -383,6 +390,7 @@ tune_warmstart_bayes <- function(workflow,
       param_info    = param_set,
       metrics       = metric_set,
       seed          = bayes_seed,
+      no_improve    = no_improve,
       allow_par     = allow_par,
       parallel_over = "resamples",
       debug         = debug,
@@ -392,6 +400,8 @@ tune_warmstart_bayes <- function(workflow,
 
     tune_results <- search$results
     n_dropped    <- search$n_dropped
+    bayes_iter   <- search$n_iter
+    bayes_stop   <- search$stop
 
   }
 
@@ -401,7 +411,9 @@ tune_warmstart_bayes <- function(workflow,
     tune_results = tune_results,
     best_params  = unit_step("select_best", select_complete(tune_results, "rmse", n_folds, debug)),
     grid         = initial_grid,
-    n_dropped    = n_dropped
+    n_dropped    = n_dropped,
+    bayes_iter   = bayes_iter,
+    bayes_stop   = bayes_stop
   )
 
 }
@@ -433,6 +445,14 @@ tune_warmstart_bayes <- function(workflow,
 #' on candidates left out ([incomplete_note()]), and under `debug` the first
 #' stops the call.
 #'
+#' The search stops after `no_improve` iterations without improving on the
+#' best (tune's own rule), and the log says so ("No improvement for ..."),
+#' which is read too, with each iteration's header: the result does not
+#' show it, since an iteration whose candidate tune dropped binds no row.
+#' tune checks its rule on the last iteration too, so a search the rule
+#' stops there ran every iteration asked for, and is recorded as such. The
+#' verbs say how many searches stopped early from what this returns.
+#'
 #' An isolated fit whose process dies ([run_isolated()]) fails the unit
 #' with `horizons_error_process_died`, whether tune kept it as a note or
 #' dropped the candidate, so the search is not fallen back from. tune keeps
@@ -462,13 +482,20 @@ tune_warmstart_bayes <- function(workflow,
 #' @param workflow,resamples,initial,iter,param_info,metrics Passed to
 #'   [tune::tune_bayes()].
 #' @param seed Integer. The stage's seed, for [tune::control_bayes()].
+#' @param no_improve A whole number of at least 1, or `FALSE` to run every
+#'   iteration: the iterations without improvement after which the search
+#'   stops (`control_horizons(no_improve = )`).
 #' @param allow_par,parallel_over Passed to [tune::control_bayes()].
 #' @param debug Logical(1). Stop at the first failure rather than fall back.
 #' @param search,grid Character(1). How the messages name the search and the
 #'   grid it started from, e.g. `"the Bayesian search"` and `"the grid"`.
 #' @return List with `results` (the tune result to choose from: the
-#'   search's when it ran an iteration, else `initial`) and `n_dropped` (the
-#'   candidates it proposed that tune dropped, scored on no fold).
+#'   search's when it ran an iteration, else `initial`), `n_dropped` (the
+#'   candidates it proposed that tune dropped, scored on no fold), `n_iter`
+#'   (the iterations it began; 0 when it failed before its first) and `stop`
+#'   (why it ended: `"no_improve"`, the stopping rule, before the last
+#'   iteration asked for; `"failed"`, an error it kept what it finished from;
+#'   or `"budget"`, every iteration asked for).
 #' @keywords internal
 #' @noRd
 bayes_search <- function(workflow,
@@ -478,6 +505,7 @@ bayes_search <- function(workflow,
                          param_info,
                          metrics,
                          seed,
+                         no_improve    = BAYES_NO_IMPROVE_DEFAULT,
                          allow_par     = FALSE,
                          parallel_over = "resamples",
                          debug         = FALSE,
@@ -488,6 +516,8 @@ bayes_search <- function(workflow,
   all_failed  <- NULL
   interrupted <- FALSE
   n_dropped   <- 0L
+  n_entered   <- 0L
+  no_better   <- FALSE
   search_cap  <- paste0(toupper(substr(search, 1, 1)), substring(search, 2))
 
   ## The deaths of isolated fits' processes, read where the fits ran: on the
@@ -500,6 +530,8 @@ bayes_search <- function(workflow,
 
   read_log <- function(m) {
     text <- cli::ansi_strip(conditionMessage(m))
+    if (grepl("Iteration [0-9]+", text)) n_entered <<- n_entered + 1L
+    if (grepl("No improvement for", text, fixed = TRUE)) no_better <<- TRUE
     if (grepl("All models failed for:", text, fixed = TRUE)) {
       n_dropped <<- n_dropped + 1L
       if (is.null(all_failed)) {
@@ -525,7 +557,8 @@ bayes_search <- function(workflow,
             save_workflow = FALSE,
             verbose       = FALSE,
             verbose_iter  = TRUE,
-            no_improve    = BAYES_NO_IMPROVE_LIMIT,
+            ### tune takes Inf for a search with no stopping rule
+            no_improve    = if (isFALSE(no_improve)) Inf else no_improve,
             seed          = seed,
             allow_par     = allow_par,
             parallel_over = parallel_over
@@ -580,20 +613,32 @@ bayes_search <- function(workflow,
   ## way the result holds only the initial grid, whose rows tune gives `.iter`
   ## 0, so a search that kept nothing has no iteration past it.
   cause  <- if (!is.null(stopped)) condition_summary(stopped)
-  n_iter <- if (is.null(bayes_results)) 0L else max(bayes_results$.iter)
+  n_kept <- if (is.null(bayes_results)) 0L else max(bayes_results$.iter)
 
-  if (n_iter > 0) {
+  ## Why the search ended, which the verbs count: an error first, since an
+  ## error's search may also have gone without improvement. tune checks its
+  ## rule after every iteration, the last included, so the rule ended the
+  ## search only when it stopped short of the iterations asked for
+  ended <- if (!is.null(cause)) {
+    "failed"
+  } else if (no_better && n_entered < iter) {
+    "no_improve"
+  } else {
+    "budget"
+  }
+
+  if (n_kept > 0) {
 
     if (!is.null(cause)) {
 
       warn_in_unit("substitution",
-                   "{search_cap} stopped early, after {n_iter} iteration{?s}, so the hyperparameters were chosen from those and {grid}: {cause}")
+                   "{search_cap} stopped early, after {n_kept} iteration{?s}, so the hyperparameters were chosen from those and {grid}: {cause}")
 
     }
 
     ## Candidates that failed in some folds leave their reasons in .notes,
     ## which the caller reads
-    return(list(results = bayes_results, n_dropped = n_dropped))
+    return(list(results = bayes_results, n_dropped = n_dropped, n_iter = n_entered, stop = ended))
 
   }
 
@@ -611,7 +656,141 @@ bayes_search <- function(workflow,
 
   }
 
-  list(results = initial, n_dropped = n_dropped)
+  list(results = initial, n_dropped = n_dropped, n_iter = n_entered, stop = ended)
+
+}
+
+#' The Bayesian iterations a model's search runs
+#'
+#' @description
+#' The iterations asked for (`configure()`'s `bayesian_iter`, or
+#' `final_bayesian_iter` for `fit()`'s re-tune) are a floor: a model tuning
+#' `n_params` parameters runs enough that its grid and its search together
+#' try `BAYES_POINTS_PER_PARAM` points a parameter, when that is more. No
+#' model searches less than asked, and the stopping rule
+#' (`control_horizons(no_improve = )`) ends each search where it stops
+#' improving. 0 stays 0: a search turned off stays off.
+#'
+#' @param iter Integer. The iterations asked for.
+#' @param n_params Integer. The parameters the model tunes.
+#' @param grid_size Integer. The grid's points.
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+search_budget <- function(iter, n_params, grid_size) {
+
+  if (iter == 0) return(0L)
+
+  as.integer(max(iter, BAYES_POINTS_PER_PARAM * n_params - grid_size))
+
+}
+
+#' The tree's words for the models whose search the budget raises
+#'
+#' @param models Character. The configured models, or the members'.
+#' @param iter,grid_size As [search_budget()] takes them.
+#' @return Character(1), e.g. `"raised to 20 for cubist, 50 for xgboost: at
+#'   least 10 points a tuned parameter"`, or `NULL` when no model's is.
+#' @keywords internal
+#' @noRd
+raised_budgets <- function(models, iter, grid_size) {
+
+  ### A model that tunes only its submodel is gridded whole, one fit a fold,
+  ### and never searches (exhaustive_grid()), so its budget is not said
+  models  <- Filter(function(m) length(setdiff(MODEL_SPECS[[m]]$tuned, MODEL_SPECS[[m]]$submodel)) > 0,
+                    unique(models))
+  budgets <- vapply(models, function(m) search_budget(iter, length(MODEL_SPECS[[m]]$tuned), grid_size),
+                    integer(1))
+  raised  <- budgets > iter
+
+  if (!any(raised)) return(NULL)
+
+  by_budget <- split(models[raised], factor(budgets[raised], levels = sort(unique(budgets[raised]))))
+
+  paste0("raised to ",
+         paste(vapply(names(by_budget), function(b) paste(b, "for", paste(by_budget[[b]], collapse = " and ")),
+                      character(1)), collapse = ", "),
+         ": at least ", BAYES_POINTS_PER_PARAM, " points a tuned parameter")
+
+}
+
+#' What a verb says when its Bayesian searches stopped early
+#'
+#' @description
+#' The stopping rule (`control_horizons(no_improve = )`) is the user's to
+#' see and to turn off, so a verb whose searches it stopped says how many
+#' and how: one note on its log and one line in its tree, counted from each
+#' configuration's or member's `bayes_stop`, rows resumed from a checkpoint
+#' included (their settings record held the same limit).
+#'
+#' @param stops Character: each configuration's or member's `bayes_stop`,
+#'   `NA` where no search ran.
+#' @param no_improve The limit the searches ran under.
+#' @param search Character(1). What the searches are, capitalized.
+#' @param unit Character(1). What they ran in, singular.
+#' @return Character(1), or `NULL` when no search stopped by the rule.
+#' @keywords internal
+#' @noRd
+early_stop_line <- function(stops, no_improve, search, unit) {
+
+  n_ran     <- sum(!is.na(stops))
+  n_stopped <- sum(stops %in% "no_improve")
+
+  if (n_stopped == 0) return(NULL)
+
+  units <- if (n_ran == 1) unit else paste0(unit, "s")
+
+  cli::format_inline(
+    "{search} stopped early in {n_stopped} of the {n_ran} {units} it ran in, after {no_improve} iteration{?s} without improvement; {.code control_horizons(no_improve = FALSE)} runs every iteration, and a larger number waits longer."
+  )
+
+}
+
+## ---------------------------------------------------------------------------
+## apply_tune_ranges — the configured ranges on a model's parameter set
+## ---------------------------------------------------------------------------
+
+#' Set the configured ranges on a model's parameter set
+#'
+#' @description
+#' Each range of `config$tuning$ranges` (`configure(tune_ranges = )`, merged
+#' over `TUNE_RANGES`) the parameter set holds is set on its parameter, by
+#' id, in dials' units ([dials::range_set()]). Both single-config runners
+#' call it on the set they read from the workflow, before the bounds
+#' ([finalize_bound()]): [dials::finalize()] then fills only an upper bound
+#' still unknown, and the data cap narrows a range to what the folds hold.
+#' The grid, the Bayesian search, [exhaustive_grid()] and the warm start
+#' ([build_warmstart_grid()]) all read the set, so each searches the range.
+#'
+#' @param param_set A `parameters` object.
+#' @param ranges Named list of `c(lower, upper)` by parameter id.
+#' @return The parameter set.
+#' @keywords internal
+#' @noRd
+apply_tune_ranges <- function(param_set, ranges) {
+
+  for (id in intersect(names(ranges), param_set$id)) {
+
+    param     <- param_set$object[[which(param_set$id == id)]]
+    param_set <- update_parameter(param_set, id, dials::range_set(param, ranges[[id]]))
+
+  }
+
+  param_set
+
+}
+
+#' Replace one parameter of a parameter set
+#'
+#' @param param_set A `parameters` object.
+#' @param id Character(1). The parameter's id.
+#' @param param The `param` object to put in its place.
+#' @return The parameter set.
+#' @keywords internal
+#' @noRd
+update_parameter <- function(param_set, id, param) {
+
+  do.call(stats::update, c(list(param_set), stats::setNames(list(param), id)))
 
 }
 
@@ -623,20 +802,25 @@ bayes_search <- function(workflow,
 #'
 #' @description
 #' When every tuned parameter takes whole-number values over a known range
-#' and the space has no more points than `budget`, the whole space as a grid;
+#' and the space costs no more fits than `budget`, the whole space as a grid;
 #' otherwise `NULL`. A search whose budget covers the space is then
 #' exhaustive: the grid is every point and no Bayesian stage runs, since
 #' tune's search, once it has no value left to propose, errors inside its
-#' loop rather than stopping.
+#' loop rather than stopping. The fits are the points of every parameter but
+#' the model's submodel (`MODEL_SPECS`' `submodel`), whose values one fit
+#' scores, so plsr's whole component range is one fit a fold, and is
+#' gridded whole at any budget.
 #'
 #' @param param_set A finalized `dials` parameter set.
-#' @param budget Numeric(1). The points the search would try: the grid's
+#' @param budget Numeric(1). The fits the search would make: the grid's
 #'   size and the Bayesian iterations together.
+#' @param submodel Character(1) or `NULL`. The id of the parameter one fit
+#'   scores at every value.
 #' @return A tibble with one column per parameter (named by its id) and one
 #'   row per point, or `NULL`.
 #' @keywords internal
 #' @noRd
-exhaustive_grid <- function(param_set, budget) {
+exhaustive_grid <- function(param_set, budget, submodel = NULL) {
 
   if (nrow(param_set) == 0) return(NULL)
 
@@ -664,9 +848,11 @@ exhaustive_grid <- function(param_set, budget) {
   })
 
   if (any(vapply(values, is.null, logical(1)))) return(NULL)
-  if (prod(lengths(values)) > budget) return(NULL)
 
   names(values) <- param_set$id
+
+  ## A submodel's values share their fit
+  if (prod(lengths(values[setdiff(names(values), submodel)])) > budget) return(NULL)
 
   tibble::as_tibble(expand.grid(values, KEEP.OUT.ATTRS = FALSE))
 

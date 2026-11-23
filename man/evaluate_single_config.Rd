@@ -11,6 +11,8 @@ evaluate_single_config(
   role_map,
   grid_size = DEFAULT_GRID_SIZE,
   bayesian_iter = DEFAULT_BAYES_ITER,
+  tune_ranges = TUNE_RANGES,
+  no_improve = BAYES_NO_IMPROVE_DEFAULT,
   prune = FALSE,
   prune_threshold = 1,
   allow_par = FALSE,
@@ -39,10 +41,25 @@ evaluate_single_config(
 
 \item{grid_size}{Integer. Number of grid points for \code{tune_grid()}.}
 
-\item{bayesian_iter}{Integer. Iterations for \code{tune_bayes()}. Set to 0 to
-skip Bayesian optimization entirely. When every tuned parameter is a
-whole number and the space has no more points than \code{grid_size + bayesian_iter}, the grid is every point and the Bayesian stage does not
-run (\code{exhaustive_grid()}).}
+\item{bayesian_iter}{Integer. Iterations for \code{tune_bayes()}, at least:
+raised for a model tuning several parameters so that the grid and the
+search try \code{BAYES_POINTS_PER_PARAM} points a parameter
+(\code{search_budget()}). Set to 0 to skip Bayesian optimization entirely.
+When every tuned parameter is a whole number and the space costs no
+more fits than the grid and those iterations together (a submodel's
+values sharing one fit, so plsr's whole range at any budget), the grid
+is every point and the Bayesian stage does not run
+(\code{exhaustive_grid()}).}
+
+\item{tune_ranges}{Named list of \code{c(lower, upper)} by parameter id, in
+dials' units: the ranges the model's parameters are searched over, set
+before the data cap them (\code{apply_tune_ranges()}). \code{evaluate()} reads
+them from \code{configure()}'s \code{config$tuning$ranges}. Default \code{TUNE_RANGES}.}
+
+\item{no_improve}{A whole number of at least 1, or \code{FALSE}: the Bayesian
+iterations without improvement after which the search stops
+(\code{control_horizons(no_improve = )}, which \code{evaluate()} reads). Default
+\code{BAYES_NO_IMPROVE_DEFAULT}.}
 
 \item{prune}{Logical. If TRUE, record whether the best grid-search RPD
 falls below \code{prune_threshold} (\code{below_prune_threshold}), and when it
@@ -112,7 +129,11 @@ them here, with the same code.}
 Single-row tibble with columns: \code{config_id}, \code{status} (\code{"pruned"}
 means Bayesian refinement was skipped), \code{below_prune_threshold} (logical;
 \code{NA} when \code{prune = FALSE}), \code{prune_threshold} (the threshold that reading
-was taken against; \code{NA} when \code{prune = FALSE}), the six
+was taken against; \code{NA} when \code{prune = FALSE}), \code{bayes_iter} and
+\code{bayes_stop} (the iterations the Bayesian search began, and why it
+ended: \code{"no_improve"}, \code{"budget"} or \code{"failed"}; kept on a
+configuration that failed after its search, and both \code{NA} when no
+search ran), the six
 test-set metrics \code{rmse}, \code{rrmse}, \code{rsq}, \code{ccc}, \code{rpd}, \code{mae}, the six
 cross-validated means at the selected hyperparameters \code{cv_rmse},
 \code{cv_rrmse}, \code{cv_rsq}, \code{cv_ccc}, \code{cv_rpd}, \code{cv_mae} (what \code{evaluate()} and

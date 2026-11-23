@@ -18,6 +18,7 @@ control_horizons(
   min_ad_rows = NULL,
   min_degradation_rows = NULL,
   isolate = NULL,
+  no_improve = NULL,
   min_resemblance_rows = NULL
 )
 }
@@ -89,6 +90,16 @@ never holds the library. \code{FALSE} runs both in the process that calls
 them, and the run says so. Default \code{getOption("horizons.isolate", TRUE)}.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=select_training]{select_training()}}.}
 
+\item{no_improve}{A whole number of at least 1, or \code{FALSE}. The Bayesian
+iterations without improvement on the best after which a search stops:
+\code{\link[=evaluate]{evaluate()}}'s, and \code{\link[=fit]{fit()}}'s re-tune. Each verb says how many of its
+searches stopped early, and how to change it. \code{FALSE} runs every
+iteration asked for. Default 10, tune's own. A smaller limit runs
+faster but can end a search that is still exploring: when the starting
+grid puts only one point in a narrow good region, as it can for
+\code{svm_rbf} on PCA scores, the search may take more than five iterations
+to improve on that point. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
+
 \item{min_resemblance_rows}{A whole number of at least 2. The fewest library
 rows \code{\link[=select_training]{select_training()}}'s resemblance check takes its reference
 distribution from. Default 30.}
@@ -98,9 +109,12 @@ A \code{horizons_control} object.
 }
 \description{
 Arguments say what a verb computes; a control object says how it runs:
-parallelism, console output, checkpoints, how failures are handled, and the
-minimums below which part of a run is skipped or refused. None of these
-change what a successful run means.
+parallelism, console output, checkpoints, how failures are handled, the
+minimums below which part of a run is skipped or refused, and when a
+search stops. Most of these change only how a run goes. Two change what
+it computes: \code{isolate}, since a Cubist fit otherwise depends on the fits
+before it, and \code{no_improve}, how far the Bayesian searches go. \code{\link[=evaluate]{evaluate()}}
+records both with a checkpoint's settings.
 
 Every field defaults to \code{NULL}, which leaves it to the verb's default. A
 verb refuses a field that is set but that it does not use, so one control

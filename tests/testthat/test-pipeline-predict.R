@@ -47,7 +47,8 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
   obj$config$configs       <- configs
   obj$config$n_configs     <- 1L
   obj$config$tuning        <- list(cv_folds = 3L, grid_size = 3L,
-                                   bayesian_iter = 0L, final_bayesian_iter = 0L)
+                                   bayesian_iter = 0L, final_bayesian_iter = 0L,
+                                   ranges = merge_ranges(NULL))
 
   ## What configure() writes beside the grid, at its defaults
   obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
@@ -60,6 +61,8 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
     results     = tibble::tibble(config_id = "cfg_001", status = "success",
                                  ## the prune gate's reading, as prune = FALSE writes it
                                  below_prune_threshold = NA, prune_threshold = NA_real_,
+                                 ## no Bayesian search ran
+                                 bayes_iter = NA_integer_, bayes_stop = NA_character_,
                                  rmse = 0.4, rrmse = 0.1, rsq = 0.8,
                                  ccc = 0.85, rpd = 1.5, mae = 0.3,
                                  ## fit() ranks on the CV panel (#50)
@@ -1969,6 +1972,53 @@ describe("predict.horizons_fit() - fresh-process round trip", {
 
     expect_true(all(c(".pred_lower", ".pred_upper", ".interval_width") %in% names(p)))
     expect_true(all(p$.pred_lower <= p$.pred_upper))
+
+  })
+
+})
+
+
+## =========================================================================
+## Validating the fit loads no engine its members do not use
+## =========================================================================
+## The validators check the recorded tuning ranges' shape alone; typing them
+## builds each model's engine, which evaluate() and fit() do at their doors
+## after their package checks. So predicting from a fit whose grid
+## configured cubist, with no cubist member, never loads Cubist (rules loads
+## with horizons, whose parsnip engines it registers). A fresh process shows
+## it, since this one has loaded Cubist already. Only an installed build, as
+## the round trip above.
+
+describe("predict.horizons_fit() - the engines a fresh process loads", {
+
+  it("predicts from a fit whose grid configured cubist without loading Cubist, when no member is cubist", {
+
+    testthat::skip_if_not_installed("callr")
+    testthat::skip_on_cran()
+    skip_if_dev_package()
+
+    ## The stored fit: cubist, plsr and rf configured, three rf members
+    fixture <- ens_fitted()
+    expect_true("cubist" %in% fixture$config$configs$model)
+    expect_false("cubist" %in% fixture$config$configs$model[
+      fixture$config$configs$config_id %in% names(fixture$models$workflows)])
+
+    got <- callr::r(
+      func = function(fit_path, new_df) {
+        library(horizons)
+        attached <- loadedNamespaces()
+        p        <- predict(readRDS(fit_path), new_df, interval = FALSE)
+        list(n      = nrow(p),
+             added  = intersect(setdiff(loadedNamespaces(), attached), c("rules", "Cubist")),
+             cubist = "Cubist" %in% loadedNamespaces())
+      },
+      args = list(fit_path = normalizePath(testthat::test_path("fixtures", "ensemble_fit.rds")),
+                  new_df   = ens_test_set())
+    )
+
+    expect_gt(got$n, 0L)
+    expect_identical(got$added, character(0))
+    expect_false(got$cubist)
 
   })
 

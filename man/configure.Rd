@@ -17,6 +17,7 @@ configure(
   final_bayesian_iter = 25L,
   sg_window = 9L,
   pca_threshold = 0.995,
+  tune_ranges = NULL,
   outcome_range = c(0, Inf),
   verbose = getOption("horizons.verbose", TRUE)
 )
@@ -48,11 +49,23 @@ Default 10. Minimum 1, and at least 2 when \code{bayesian_iter} or
 \code{final_bayesian_iter} is above 0, since both Bayesian searches start
 from the grid.}
 
-\item{bayesian_iter}{\code{integer}. Bayesian optimization iterations.
-Default 15. Minimum 0.}
+\item{bayesian_iter}{\code{integer}. Bayesian optimization iterations, at
+least: a model tuning more parameters runs more, so that its grid and its
+search together try at least ten points a tuned parameter (\code{10 * d - grid_size} iterations for \code{d} parameters, when that is more). At the
+defaults that is 15 for rf, elastic_net and svm_rbf, 20 for cubist and
+mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
+\code{control_horizons(no_improve = )} iterations in a row have not improved
+on its best. A space that costs no more fits than the grid and the
+search together is gridded whole, with no search: a submodel's values
+share one fit, so plsr's components are gridded whole, every count
+scored from one fit a fold, and at the defaults so is mars's space, two
+fits a fold. Default 15. Minimum 0: 0 turns the search off for every
+model.}
 
 \item{final_bayesian_iter}{\code{integer}. Bayesian optimization iterations for
-the final fit on the selected configuration. Default 25. Minimum 0.}
+the final fit on the selected configuration, at least, raised as
+\code{bayesian_iter} is (25 up to three tuned parameters at the defaults, 30
+for lightgbm, 50 for xgboost). Default 25. Minimum 0.}
 
 \item{sg_window}{\code{integer}. Savitzky-Golay window in grid points, applied
 to every configuration. Default 9. Must be odd, at least 5, and (checked
@@ -61,6 +74,12 @@ by \code{evaluate()}) smaller than the number of spectral columns. For
 
 \item{pca_threshold}{\code{numeric}. Share of variance \code{feature_selection = "pca"} keeps, applied to every configuration that uses it. Default
 0.995. Must be in (0, 1].}
+
+\item{tune_ranges}{\code{list} or \code{NULL}. Ranges of tuned parameters, by
+parameter id, each \code{c(lower, upper)} in dials' units, applied to every
+configured model that tunes the parameter and merged over horizons'
+defaults (\code{committees} 1 to 25, \code{num_comp} 1 to 30). Default \code{NULL}, the
+defaults alone. See Tuning ranges.}
 
 \item{outcome_range}{\code{numeric(2)}. The outcome's physical range,
 \code{c(lower, upper)} with lower < upper; either end may be infinite. Every
@@ -80,7 +99,8 @@ A modified \code{horizons_data} object with:
 \item Outcome variable promoted to \code{role = "outcome"} in \code{data$role_map}
 \item \code{config$configs} — tibble of configuration grid (5 columns)
 \item \code{config$n_configs} — integer count
-\item \code{config$tuning} — list of tuning parameters
+\item \code{config$tuning} — list of tuning parameters, with \code{ranges}, the
+ranges searched (see Tuning ranges)
 \item \code{config$expansion} — list of original inputs (for reproducibility)
 \item \code{config$recipe} — the recipe settings every configuration is built
 with: \code{sg_window} and \code{pca_threshold}
@@ -195,6 +215,46 @@ spectrum. \code{pca_threshold} is the share of variance kept by
 \code{feature_selection = "pca"} and is read by nothing else. Both defaults are
 the values the recipe ran before they were settable. See GitHub issue #62.
 
+\strong{Tuning ranges:}
+
+\code{evaluate()} and \code{fit()} search each tuned parameter over a range: its
+engine's, or horizons' where it sets one, or one given in \code{tune_ranges}.
+horizons sets two: Cubist's \code{committees} 1 to 25, since a fit's time grows
+linearly with its committees and more of them seldom lowered the
+cross-validated error by much, and plsr's \code{num_comp} 1 to 30. A range is
+named by the parameter's id and applies to every configured model that
+tunes it. The ids each model tunes:
+\itemize{
+\item \code{rf}: \code{mtry}, \code{min_n}
+\item \code{cubist}: \code{committees}, \code{neighbors}, \code{max_rules}
+\item \code{xgboost}: \code{tree_depth}, \code{learn_rate}, \code{mtry}, \code{min_n},
+\code{loss_reduction}, \code{sample_size} (a proportion of the rows)
+\item \code{plsr}: \code{num_comp}
+\item \code{elastic_net}: \code{penalty}, \code{mixture}
+\item \code{svm_rbf}: \code{cost}, \code{rbf_sigma}
+\item \code{mlp}: \code{hidden_units}, \code{penalty}, \code{epochs}
+\item \code{lightgbm}: \code{tree_depth}, \code{learn_rate}, \code{mtry}, \code{min_n}
+\item \code{mars}: \code{prod_degree}, \code{num_terms}
+}
+
+A range is in dials' units: a parameter searched on a log scale takes its
+range in log10 (log2 for \code{cost}), so \code{learn_rate = c(-3, -1)} searches
+0.001 to 0.1. The data still cap \code{mtry} at the predictors a recipe keeps,
+and \code{num_comp} at those and the smallest fold's rows less one, narrowing a
+range given here; a range whose lower bound is above that cap fails the
+configuration, saying so. \code{configure()} refuses a name no configured model
+tunes, a range that is not two finite numbers with the lower below the
+upper, an \code{mtry} or \code{num_comp} range starting below 1 (each counts the
+predictors or components a fit uses, so 0 is no model), and a fractional
+bound on a whole-number parameter (typed where the model's engine is
+installed, and again by \code{evaluate()} and \code{fit()} once they have checked
+the engines of the models they fit). An engine's own limits are not
+checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
+range past them fails those candidates' fits, which the row reports. The
+ranges are recorded as \code{config$tuning$ranges}, so \code{fit()} re-tunes over
+the space \code{evaluate()} searched, and a checkpoint tuned over other ranges
+is not resumed. \code{ensemble()}'s meta-learners keep their own grids.
+
 \strong{Outcome range:}
 
 \code{outcome_range} is the physical range of the outcome, \code{c(lower, upper)},
@@ -253,6 +313,12 @@ hd |> configure(
   feature_selection = "pca",
   sg_window         = 15L,
   pca_threshold     = 0.99
+)
+
+# Cubist searched over up to 50 committees, and rf's mtry over 1 to 200
+hd |> configure(
+  models      = c("rf", "cubist"),
+  tune_ranges = list(committees = c(1, 50), mtry = c(1, 200))
 )
 
 # A signed property: no floor at zero

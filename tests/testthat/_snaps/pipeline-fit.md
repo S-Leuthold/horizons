@@ -10,7 +10,7 @@
       │  Split: 48 train / 12 test (evaluate()'s held-out rows)
       │  CV: 3-fold stratified on SOC
       │  Stratified CV on fewer strata: too little data for 4
-      │  Bayesian: 25 iterations with warm-start
+      │  Bayesian: 25 iterations with warm-start (raised to 28 for cubist: at least 10 points a tuned parameter)
       │  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)
       │
       │  ├─ [1/2] Random Forest + none + raw + none

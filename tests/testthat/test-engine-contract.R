@@ -275,6 +275,32 @@ describe("the engine contract's table", {
 
   })
 
+  it("names as a model's submodel exactly the tuned parameter its engine registers as one", {
+
+    ## tune reads a submodel from the engine's registration, so the row says
+    ## what the registration does, both ways: a row naming one its engine
+    ## does not register fails here, and so does an engine registering a
+    ## tuned one the row leaves out. A model whose packages are missing
+    ## registers nothing to compare.
+    for (model in names(MODEL_SPECS)) {
+
+      row <- MODEL_SPECS[[model]]
+      sub <- row$submodel %||% character(0)
+
+      expect_true(is.character(sub) && length(sub) <= 1L && all(sub %in% row$tuned),
+                  label = paste0(model, "'s submodel is one of its tuned parameters"))
+
+      if (!all(vapply(row$packages, requireNamespace, logical(1), quietly = TRUE))) next
+
+      args       <- parsnip::get_from_env(paste0(row$fn, "_args"))
+      registered <- args$parsnip[args$engine == row$engine & args$has_submodel]
+
+      expect_identical(intersect(registered, row$tuned), sub,
+                       label = paste0("the tuned parameters ", model, "'s engine registers as submodels"))
+    }
+
+  })
+
 })
 
 ## ---------------------------------------------------------------------------

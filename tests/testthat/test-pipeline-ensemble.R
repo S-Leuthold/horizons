@@ -105,7 +105,7 @@ describe("ensemble() oof_predictions - correct row alignment", {
 ## =========================================================================
 ## TEETH — no double back-transform (§9 regression)
 ## =========================================================================
-## Members are fit under log / sqrt / none. If any stage back-transforms an
+## Members are fit under log and sqrt. If any stage back-transforms an
 ## already-back-transformed prediction, values explode out of physical range.
 ## Bulk_C (g/kg) is a small positive quantity; assert ensemble + OOF predictions
 ## stay in a sane range and are non-negative.
@@ -1593,7 +1593,7 @@ describe("ensemble() - CV+ coverage after a response trim (#103)", {
       )
       obj$config$n_configs     <- 2L
       obj$config$tuning        <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L,
-                                       final_bayesian_iter = 0L)
+                                       final_bayesian_iter = 0L, ranges = merge_ranges(NULL))
       obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
                                        pca_threshold = DEFAULT_PCA_THRESHOLD)
       obj$config$outcome_range <- c(-Inf, Inf)

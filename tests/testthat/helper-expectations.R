@@ -80,3 +80,31 @@ without_time <- function(log) {
   log[, setdiff(names(log), "time"), drop = FALSE]
 
 }
+
+#' Whether each Bayesian iteration improved on the best before it
+#'
+#' tune's stopping rule counts the iterations since the last strict
+#' improvement of the first metric's mean on the best so far, the initial
+#' grid's included, and an iteration whose candidate it dropped counts as
+#' none. So a search stopped at `no_improve = 1` improved at every iteration
+#' but its last.
+#'
+#' @param results A `tune_bayes()` result.
+#' @param n_iter Integer. The iterations the search began.
+#' @param metric Character(1). The metric tune optimised.
+#'
+#' @return Logical, one per iteration.
+improved_each <- function(results, n_iter, metric = "rmse") {
+
+  means <- tune::collect_metrics(results)
+  means <- means[means$.metric == metric, ]
+  best  <- min(means$mean[means$.iter == 0])
+
+  vapply(seq_len(n_iter), function(i) {
+    now    <- means$mean[means$.iter == i]
+    better <- length(now) == 1 && now < best
+    if (better) best <<- now
+    better
+  }, logical(1))
+
+}

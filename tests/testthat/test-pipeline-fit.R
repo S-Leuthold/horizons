@@ -29,9 +29,13 @@ mfo <- function() memo_fixture("mfo", make_fit_object)
 
 ## The two-member fit. Its re-tune runs two Bayesian iterations after the
 ## warm-start grid, so fit() runs tune_warmstart_bayes()'s Bayesian stage end
-## to end here. At n = 60 the calibration set is under N_CALIB_MIN, so UQ and
-## AD would be off whatever the flags said.
+## to end here; the budget rule, which would raise them to 18 for rf and 28
+## for cubist, is held off for the build, since these tests need the stage,
+## not its length. At n = 60 the calibration set is under N_CALIB_MIN, so UQ
+## and AD would be off whatever the flags said.
 build_fit60 <- function() {
+
+  local_mocked_bindings(BAYES_POINTS_PER_PARAM = 0L)
 
   obj <- make_fit_object(n = 60, n_configs = 2)
   obj$config$tuning$final_bayesian_iter <- 2L

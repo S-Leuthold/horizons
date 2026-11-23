@@ -126,7 +126,8 @@ new_horizons_data <- function(analysis = NULL,
                   tuning = list(cv_folds            = 5L,
                                 grid_size           = 10L,
                                 bayesian_iter       = 15L,
-                                final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER),
+                                final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
+                                ranges              = merge_ranges(NULL)),
 
                   ## Written by configure(): list(sg_window, pca_threshold),
                   ## the settings build_recipe() applies to every config.
@@ -1048,6 +1049,14 @@ config_findings <- function(x) {
     ))
 
   }
+
+  ### The ranges the models are searched over, which configure() writes:
+  ### their shape (tune_range_findings()). Their types need the models'
+  ### engines, which evaluate() and fit() check at their doors before typing
+  ### them (check_range_types()), so validating an object loads no engine
+  range_findings <- tune_range_findings(tuning$ranges, arg = "config$tuning$ranges",
+                                        check_names = FALSE)
+  findings       <- c(findings, sub("\\.$", "", range_findings))
 
   recipe        <- x$config$recipe
   sg_window     <- if (is.list(recipe)) recipe$sg_window
@@ -2250,6 +2259,24 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 
     }
 
+    ## The Bayesian search's record, which every row writer records too (NA
+    ## when no search ran) and evaluate() counts its early stops from
+    if (!"bayes_iter" %in% names(res) || !is.integer(res$bayes_iter)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no integer {.field bayes_iter} column, the iterations each Bayesian search began"
+      ))
+
+    }
+
+    if (!"bayes_stop" %in% names(res) || !is.character(res$bayes_stop)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field results} has no character {.field bayes_stop} column, why each Bayesian search ended"
+      ))
+
+    }
+
     ## Each row of a screened evaluation records the settings evaluate()
     ## scored it under, which fit() compares its outcome range with. fit()'s
     ## cold start scores nothing, so its unscreened evaluation has none.
@@ -2696,6 +2723,8 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
                    best_params     = "list",
                    warm_start      = "logical",
                    start_grid_size = "integer",
+                   bayes_iter      = "integer",
+                   bayes_stop      = "character",
                    error_message   = "character",
                    class           = "character",
                    trace           = "list",

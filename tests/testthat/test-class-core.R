@@ -1372,6 +1372,9 @@ make_valid_eval <- function() {
     ## the prune gate's reading, as prune = FALSE writes it
     below_prune_threshold = NA,
     prune_threshold       = NA_real_,
+    ## the Bayesian search's record, as a run without one writes it
+    bayes_iter            = NA_integer_,
+    bayes_stop            = NA_character_,
     ## the settings evaluate() stamps on every row
     settings  = rep(list(eval_settings(
       cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
@@ -1391,7 +1394,8 @@ make_valid_eval <- function() {
                                preprocessing     = "raw",
                                feature_selection = "none"),
       tuning  = list(cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
-                     final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER),
+                     final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
+                     ranges = merge_ranges(NULL)),
       recipe  = list(sg_window     = DEFAULT_SG_WINDOW,
                      pca_threshold = DEFAULT_PCA_THRESHOLD),
       outcome_range = DEFAULT_OUTCOME_RANGE
@@ -3402,6 +3406,39 @@ describe("config_findings() at every verb's door", {
 
   })
 
+  it("refuses a ranges record that is not a set of ranges, and leaves each range's type to the verbs that search it", {
+
+    cases <- list(
+      list(record = NULL,                                         finding = "must be a named list of ranges, not NULL"),
+      list(record = c(1, 25),                                     finding = "must be a named list of ranges"),
+      list(record = list(c(1, 25)),                               finding = "must be named by the parameter it sets"),
+      list(record = list(committees = c(25, 1)),                  finding = "committees must be two finite numbers, the lower below the upper, not `c(25, 1)`"),
+      list(record = list(committees = c(1, 25), committees = c(2, 9)), finding = "names committees more than once"),
+      list(record = list(mtry = c(0, 200)),                      finding = "mtry must start at 1 or more, not 0")
+    )
+
+    for (case in cases) {
+
+      obj <- configured_object()
+      obj$config$tuning["ranges"] <- list(case$record)
+      expect_true(any(grepl(case$finding, finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                  label = deparse1(case$record))
+
+    }
+
+    ## The record at its defaults, and one the models do not all tune, pass
+    obj <- configured_object()
+    obj$config$tuning$ranges <- merge_ranges(list(mtry = c(1, 200)))
+    expect_identical(validate_horizons_data(obj), obj)
+
+    ## So does a fractional bound on a whole-number parameter: typing it
+    ## builds the model's engine, which evaluate() and fit() do at their
+    ## doors once they have checked it is installed (check_range_types())
+    obj$config$tuning$ranges <- merge_ranges(list(num_comp = c(1.5, 30)))
+    expect_identical(validate_horizons_data(obj), obj)
+
+  })
+
   it("refuses an evaluated object without its configuration grid, which would leave the configuration unchecked (#212)", {
 
     ## The stored fit, as a verb wrote it. Without the grid the base
@@ -3642,6 +3679,27 @@ describe("the class validators' new checks (#234)", {
     cold <- screened
     cold$evaluation$screened <- FALSE
     expect_identical(validate_horizons_eval(cold), cold)
+
+  })
+
+  it("require the Bayesian search's record on every evaluation, of its type", {
+
+    for (column in c("bayes_iter", "bayes_stop")) {
+
+      obj <- make_valid_eval()
+      obj$evaluation$results[[column]] <- NULL
+      expect_true(any(grepl(paste0("results has no ", if (column == "bayes_iter") "integer " else "character ",
+                                   column, " column"),
+                            finding_of(validate_horizons_eval(obj)), fixed = TRUE)), label = column)
+
+    }
+
+    obj <- make_valid_eval()
+    obj$evaluation$results$bayes_iter <- 3
+    obj$evaluation$results$bayes_stop <- NA
+    findings <- finding_of(validate_horizons_eval(obj))
+    expect_true(any(grepl("no integer bayes_iter column", findings, fixed = TRUE)))
+    expect_true(any(grepl("no character bayes_stop column", findings, fixed = TRUE)))
 
   })
 
