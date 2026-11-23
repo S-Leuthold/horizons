@@ -447,7 +447,7 @@ tune_warmstart_bayes <- function(workflow,
 }
 
 
-#' The re-tune's choice: evaluate()'s point, unless a candidate beats it
+#' The re-tune's choice: evaluate()'s point, unless the best candidate beats it
 #'
 #' @description
 #' With `evaluate()`'s point (`incumbent`) among the candidates scored on

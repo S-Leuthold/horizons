@@ -4,7 +4,7 @@
 #' Inner-loop function for `fit()`. Takes a single config row from the
 #' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
 #' from evaluate()'s hyperparameters and one neighbour per tuned parameter,
-#' keeping evaluate()'s unless a candidate beats them by the margin
+#' keeping evaluate()'s unless the best candidate beats them by the margin
 #' (`choose_member_params()`), generates OOF predictions, fits a final
 #' deployable model, evaluates on the held-out test set, and detects
 #' performance degradation.

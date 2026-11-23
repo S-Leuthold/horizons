@@ -3,7 +3,7 @@
 #' @description
 #' Re-tunes the top N configurations from `evaluate()` with warm-start
 #' Bayesian optimization, keeping each one's hyperparameters from
-#' `evaluate()` unless the re-tune finds a candidate better by more than its
+#' `evaluate()` unless the re-tune's best candidate is better by more than its
 #' standard error (see "The re-tune"), generates out-of-fold (OOF) CV
 #' predictions for
 #' downstream stacking, fits final deployable models, scores them on
@@ -1528,7 +1528,7 @@ retune_header_line <- function(iter, raised, no_improve) {
     "Re-tune: from evaluate()'s hyperparameters and one neighbour per tuned parameter, ", iter, " iterations",
     if (!is.null(raised)) paste0(" (", raised, ")"),
     if (!isFALSE(no_improve)) paste0(", stopping after ", no_improve, " without improvement"),
-    "; evaluate()'s are kept unless a candidate is better by more than its standard error"
+    "; evaluate()'s are kept unless the best candidate is better by more than its standard error"
   )
 
 }
@@ -1583,7 +1583,7 @@ retune_kept_line <- function(moved) {
   if (n_kept == 0) return(NULL)
 
   cli::format_inline(
-    "The re-tune kept evaluate()'s hyperparameters for {n_kept} of {n_ran} member{?s}: a candidate replaces them only when its CV RMSE is lower by more than its standard error."
+    "The re-tune kept evaluate()'s hyperparameters for {n_kept} of {n_ran} member{?s}: the best candidate replaces them only when its CV RMSE is lower by more than its standard error, or when they were not scored on every fold."
   )
 
 }

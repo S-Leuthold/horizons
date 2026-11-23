@@ -92,7 +92,7 @@ it started from (\code{NA} with the re-tune off), and \code{retune_moved} (see
 \description{
 Re-tunes the top N configurations from \code{evaluate()} with warm-start
 Bayesian optimization, keeping each one's hyperparameters from
-\code{evaluate()} unless the re-tune finds a candidate better by more than its
+\code{evaluate()} unless the re-tune's best candidate is better by more than its
 standard error (see "The re-tune"), generates out-of-fold (OOF) CV
 predictions for
 downstream stacking, fits final deployable models, scores them on

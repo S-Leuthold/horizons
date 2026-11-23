@@ -489,8 +489,9 @@ describe("fit() - each member is one unit", {
                                out, fixed = TRUE)), 1L)
     expect_identical(sum(grepl("\u251C\u2500 Re-tune:", out, fixed = TRUE)), 2L)
 
-    line <- paste0("The re-tune kept evaluate()'s hyperparameters for 1 of 2 members: a candidate replaces them ",
-                   "only when its CV RMSE is lower by more than its standard error.")
+    line <- paste0("The re-tune kept evaluate()'s hyperparameters for 1 of 2 members: the best candidate replaces ",
+                   "them only when its CV RMSE is lower by more than its standard error, or when they were not ",
+                   "scored on every fold.")
     expect_true(paste0("\u2502  \u251C\u2500 ", line) %in% out)
     expect_true(line %in% fitted$log$message[fitted$log$verb == "fit" & fitted$log$type == "note"])
 
