@@ -141,7 +141,9 @@
 #' the grid and the Bayesian iterations together, is gridded whole with no
 #' Bayesian search, as `evaluate()` grids it: a submodel's values share one
 #' fit, so that is every plsr member, each `num_comp` up to its cap tried
-#' from one fit a fold. The degradation check needs
+#' from one fit a fold. On the `evaluate()` path that holds unless
+#' `final_bayesian_iter` is 0, which turns the re-tune off. The degradation
+#' check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
 #'
@@ -1011,8 +1013,10 @@ fit <- function(x,
       }
 
       ## Whether the re-tune kept evaluate()'s parameters, and by how much
-      ## its best candidate led them
-      retune_text <- retune_member_line(config_result$retune_moved, config_result$retune_gain)
+      ## its best candidate led them; with the re-tune off the header says
+      retune_text <- if (final_bayesian_iter > 0) {
+        retune_member_line(config_result$retune_moved, config_result$retune_gain)
+      }
 
       if (!is.null(retune_text)) cat(paste0("\u2502  ", cont, "\u251C\u2500 ", retune_text, "\n"))
 
@@ -1289,10 +1293,19 @@ fit <- function(x,
 
   if (!is.null(stop_line)) log_note(collector, "{stop_line}")
 
-  ## How many members kept evaluate()'s parameters: a note, and a line below
-  kept_line <- retune_kept_line(results_tibble$retune_moved)
+  ## How many members kept evaluate()'s parameters: a note, and a line below.
+  ## With the re-tune off every member with them keeps them, which one note
+  ## says, as the header does.
+  kept_line <- if (final_bayesian_iter > 0) retune_kept_line(results_tibble$retune_moved)
 
   if (!is.null(kept_line)) log_note(collector, "{kept_line}")
+
+  if (final_bayesian_iter == 0 && any(results_tibble$warm_start %in% TRUE)) {
+
+    off_line <- paste0("The re-tune is ", retune_off_text(), ".")
+    log_note(collector, "{off_line}")
+
+  }
 
   ## What the run reported goes on the object's log before it is certified
   x$log <- log_close(collector, x$log)
@@ -1467,7 +1480,7 @@ member_row <- function(res) {
 
 #' The tree header's line for the re-tune on the evaluate() path
 #'
-#' @param iter Integer. `final_bayesian_iter`.
+#' @param iter Integer. `final_bayesian_iter`, 0 for the re-tune off.
 #' @param raised Character(1) or `NULL`: [raised_budgets()]'s words.
 #' @param no_improve The stopping rule's limit, or `FALSE`.
 #' @return Character(1).
@@ -1475,12 +1488,25 @@ member_row <- function(res) {
 #' @noRd
 retune_header_line <- function(iter, raised, no_improve) {
 
+  if (iter == 0) return(paste0("Re-tune: ", retune_off_text()))
+
   paste0(
     "Re-tune: from evaluate()'s hyperparameters and one neighbour per tuned parameter, ", iter, " iterations",
     if (!is.null(raised)) paste0(" (", raised, ")"),
     if (!isFALSE(no_improve)) paste0(", stopping after ", no_improve, " without improvement"),
     "; evaluate()'s are kept unless a candidate is better by more than its standard error"
   )
+
+}
+
+#' What fit() says when its re-tune is off
+#'
+#' @return Character(1): the words the tree's header and the log's note share.
+#' @keywords internal
+#' @noRd
+retune_off_text <- function() {
+
+  "off (`final_bayesian_iter = 0`), so each member keeps evaluate()'s hyperparameters; `configure(final_bayesian_iter = )` above 0 turns it on"
 
 }
 

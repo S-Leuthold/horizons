@@ -233,7 +233,9 @@ whose tuned parameters are all whole numbers, costing no more fits than
 the grid and the Bayesian iterations together, is gridded whole with no
 Bayesian search, as \code{evaluate()} grids it: a submodel's values share one
 fit, so that is every plsr member, each \code{num_comp} up to its cap tried
-from one fit a fold. The degradation check needs
+from one fit a fold. On the \code{evaluate()} path that holds unless
+\code{final_bayesian_iter} is 0, which turns the re-tune off. The degradation
+check needs
 nothing from \code{evaluate()}, since it compares the test RPD with \code{fit()}'s
 own cross-validation.
 

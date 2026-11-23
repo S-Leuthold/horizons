@@ -224,7 +224,10 @@
 #'   xgboost; on a cold start, from the grid, 25 up to three tuned parameters
 #'   at the defaults, 30 for lightgbm and 50 for xgboost. Each re-tune stops
 #'   once `control_horizons(no_improve = )` iterations in a row have not
-#'   improved on its best. Default 25. Minimum 0.
+#'   improved on its best. Default 25. Minimum 0: 0 turns the re-tune off,
+#'   so each member keeps `evaluate()`'s hyperparameters, clamped into
+#'   `fit()`'s range and scored by its out-of-fold predictions alone; a cold
+#'   start still grids `grid_size` points.
 #' @param sg_window `integer`. Savitzky-Golay window in grid points, applied
 #'   to every configuration. Default 9. Must be odd, at least 5, and (checked
 #'   by `evaluate()`) smaller than the number of spectral columns. For

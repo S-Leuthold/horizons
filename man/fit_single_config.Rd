@@ -57,7 +57,10 @@ least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}),
 counting the points the re-tune starts from. When every tuned parameter
 is a whole number and the space costs no more fits than the start and
 those iterations together (a submodel's values sharing one fit), the
-grid is every point and no Bayesian search runs (\code{exhaustive_grid()}).}
+grid is every point and no Bayesian search runs (\code{exhaustive_grid()}).
+0 turns the re-tune off for a member with usable \code{best_params_eval}: it
+keeps them, clamped into its range, scored by the out-of-fold pass
+alone. A cold start at 0 still grids \code{grid_size} points.}
 
 \item{grid_size}{Integer. The space-filling grid's size on a cold start
 (\code{best_params_eval} \code{NULL} or unusable). A warm start begins from
@@ -145,7 +148,8 @@ re-tune starts from it and one neighbour per tuned parameter, or from
 the whole space when that fits the budget (\code{exhaustive_grid()}), \code{FALSE}
 when it fell back to a
 space-filling grid, and \code{NA} (both) when the config failed before
-tuning. \code{start_grid_size} is the starting grid's points. \code{bayes_iter}
+tuning. \code{start_grid_size} is the starting grid's points, \code{NA} with
+\code{warm_start} \code{TRUE} when the re-tune is off. \code{bayes_iter}
 and \code{bayes_stop} are the iterations the re-tune's Bayesian search began
 and why it ended (\code{"no_improve"}, \code{"budget"} or \code{"failed"}), both \code{NA}
 when no search ran. \code{retune_moved} is \code{FALSE} when the member kept

@@ -152,9 +152,11 @@ describe("fit_single_config() - success path", {
     expect_false(result$degraded)
     expect_true(is.na(result$degraded_reason))
 
-    ## It started from evaluate()'s parameters, so it records whether it
-    ## kept them
-    expect_true(is.logical(result$retune_moved) && !is.na(result$retune_moved))
+    ## Its re-tune is off (final_bayesian_iter = 0), so it kept evaluate()'s
+    ## parameters with no starting grid
+    expect_false(result$retune_moved)
+    expect_true(result$warm_start)
+    expect_identical(result$start_grid_size, NA_integer_)
 
   })
 
@@ -378,19 +380,21 @@ describe("fit_single_config() - log transformation", {
   config <- make_fit_config(transformation = "log")
   best_p <- make_fit_best_params()
 
-  result <- fit_single_config(
+  ## The re-tune on, so it selects (#49): one Bayesian iteration, the budget
+  ## rule held off
+  result <- testthat::with_mocked_bindings(fit_single_config(
     config_row       = config,
     split_F          = setup$split_F,
     cv_resamples     = setup$folds,
     calib_data       = NULL,
     role_map         = setup$role_map,
     best_params_eval = best_p,
-    final_bayesian_iter = 0L,
+    final_bayesian_iter = 1L,
     grid_size        = 2L,
     compute_uq       = FALSE,
     allow_par        = FALSE,
     seed             = 42L
-  )
+  ), BAYES_POINTS_PER_PARAM = 0L)
 
   it("succeeds with log transformation", {
 
@@ -424,6 +428,7 @@ describe("fit_single_config() - log transformation", {
     ## keep that name for selection to succeed at all.
     expect_s3_class(result$best_params, "data.frame")
     expect_equal(nrow(result$best_params), 1L)
+    expect_identical(result$bayes_iter, 1L)
 
   })
 
@@ -448,9 +453,10 @@ describe("fit_single_config() - failure paths", {
   ## mocks anything, so the shared fit is never built under a mock
   ## (helper-memo.R).
   run_on_shared <- function(setup,
-                            config_row       = make_fit_config(),
-                            train_data       = NULL,
-                            best_params_eval = make_fit_best_params()) {
+                            config_row          = make_fit_config(),
+                            train_data          = NULL,
+                            best_params_eval    = make_fit_best_params(),
+                            final_bayesian_iter = 0L) {
 
     fit_single_config(
       config_row          = config_row,
@@ -460,7 +466,7 @@ describe("fit_single_config() - failure paths", {
       train_data          = train_data,
       role_map            = setup$role_map,
       best_params_eval    = best_params_eval,
-      final_bayesian_iter = 0L,
+      final_bayesian_iter = final_bayesian_iter,
       grid_size           = 2L,
       compute_uq          = FALSE,
       allow_par           = FALSE,
@@ -469,10 +475,21 @@ describe("fit_single_config() - failure paths", {
 
   }
 
+  ## The re-tune's stages run only with the re-tune on: one Bayesian
+  ## iteration, the budget rule held off, since these tests need the stage
+  ## and not its length
+  run_retuned <- function(setup) {
+
+    local_mocked_bindings(BAYES_POINTS_PER_PARAM = 0L)
+    run_on_shared(setup, final_bayesian_iter = 1L)
+
+  }
+
   ## The failed result: the stage named ahead of the cause, the documented
   ## values of a failed config (warm_start and start_grid_size NA when it
-  ## failed before the re-tune), and no fitted parts
-  expect_failed_at <- function(result, stage, cause, warm_start) {
+  ## failed before the re-tune; start_grid_size NA, with warm_start TRUE,
+  ## when the re-tune was off, so no grid ran), and no fitted parts
+  expect_failed_at <- function(result, stage, cause, warm_start, gridded = isFALSE(warm_start)) {
 
     expect_equal(result$status, "failed")
     expect_match(result$error_message, paste0("^", stage, " failed: "))
@@ -482,10 +499,10 @@ describe("fit_single_config() - failure paths", {
     expect_identical(result$degraded_reason, NA_character_)
     expect_identical(result$warm_start, warm_start)
 
-    if (is.na(warm_start)) {
-      expect_identical(result$start_grid_size, NA_integer_)
-    } else {
+    if (gridded) {
       expect_true(is.integer(result$start_grid_size) && !is.na(result$start_grid_size))
+    } else {
+      expect_identical(result$start_grid_size, NA_integer_)
     }
 
     expect_null(result$fitted_workflow)
@@ -580,8 +597,8 @@ describe("fit_single_config() - failure paths", {
     local_mocked_bindings(tune_warmstart_bayes = function(...) stop("the search broke"))
 
     ## Its starting grid was built, so how the re-tune started is recorded
-    expect_failed_at(run_on_shared(setup), "Warm-start tuning", "the search broke",
-                     warm_start = TRUE)
+    expect_failed_at(run_retuned(setup), "Warm-start tuning", "the search broke",
+                     warm_start = TRUE, gridded = TRUE)
 
   })
 
@@ -590,8 +607,8 @@ describe("fit_single_config() - failure paths", {
     setup <- fsc()$setup
     local_mocked_bindings(candidate_of = function(...) stop("the chosen candidate could not be read"))
 
-    expect_failed_at(run_on_shared(setup), "Parameter selection",
-                     "the chosen candidate could not be read", warm_start = TRUE)
+    expect_failed_at(run_retuned(setup), "Parameter selection",
+                     "the chosen candidate could not be read", warm_start = TRUE, gridded = TRUE)
 
   })
 
@@ -600,8 +617,8 @@ describe("fit_single_config() - failure paths", {
     setup <- fsc()$setup
     local_mocked_bindings(incomplete_note = function(...) stop("the left-out candidates could not be counted"))
 
-    expect_failed_at(run_on_shared(setup), "Parameter selection",
-                     "the left-out candidates could not be counted", warm_start = TRUE)
+    expect_failed_at(run_retuned(setup), "Parameter selection",
+                     "the left-out candidates could not be counted", warm_start = TRUE, gridded = TRUE)
 
   })
 
@@ -904,7 +921,9 @@ describe("fit_single_config() - row minimums", {
 ## butcher() failure stores the unbutchered workflow. render_warning_log()
 ## shows five lines, most frequent first; each stage's warning is raised ten
 ## times, more than any of tune's notes can arrive, and mtry is the two
-## predictors the raw step keeps, so tune adds no note of its own.
+## predictors the raw step keeps, so tune adds no note of its own. The
+## re-tune runs, so its stage warns: one Bayesian iteration, the budget rule
+## held off.
 
 build_fsc_mocked <- function() {
 
@@ -933,7 +952,7 @@ build_fsc_mocked <- function() {
       calib_data          = NULL,
       role_map            = setup$role_map,
       best_params_eval    = make_fit_best_params(mtry = 2L),
-      final_bayesian_iter = 0L,
+      final_bayesian_iter = 1L,
       grid_size           = 2L,
       compute_uq          = FALSE,
       allow_par           = FALSE,
@@ -951,6 +970,7 @@ build_fsc_mocked <- function() {
       butcher = function(x, ...) stop("butcher failed"),
       .package = "butcher"
     ),
+    BAYES_POINTS_PER_PARAM = 0L,
     build_recipe         = warn_then("the recipe stage warned", real_recipe),
     define_model_spec    = warn_then("the model stage warned", real_spec),
     prepped_predictors   = warn_then("the finalize stage warned", real_preds),
@@ -1351,6 +1371,127 @@ describe("fit_single_config() - the points the re-tune starts from", {
   it("starts a cold start from a space-filling grid of grid_size points", {
 
     expect_identical(start_of("rf", NULL)$member$start_grid_size, 7L)
+
+  })
+
+})
+
+
+## =========================================================================
+## The re-tune off (final_bayesian_iter = 0)
+## =========================================================================
+
+describe("fit_single_config() - the re-tune off", {
+
+  ## The re-tune's grid and its search, recorded as they are asked for
+  run_off <- function(best_params_eval, model = "rf") {
+
+    asked      <- character(0)
+    real_grid  <- build_warmstart_grid
+    real_tune  <- tune_warmstart_bayes
+    local_mocked_bindings(
+      build_warmstart_grid = function(...) { asked <<- c(asked, "grid"); real_grid(...) },
+      tune_warmstart_bayes = function(...) { asked <<- c(asked, "tune"); real_tune(...) }
+    )
+
+    setup  <- fsc()$setup
+    result <- fit_single_config(
+      config_row          = make_fit_config(model = model),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = best_params_eval,
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    list(result = result, asked = asked)
+
+  }
+
+  it("keeps evaluate()'s parameters, clamped, with no starting grid and no search", {
+
+    ## evaluate()'s mtry of 5 is above the two predictors the raw step keeps
+    got <- run_off(make_fit_best_params())
+
+    expect_identical(got$asked, character(0))
+    expect_identical(got$result$status, "success")
+    expect_identical(got$result$best_params$mtry, 2L)
+    expect_identical(got$result$best_params$min_n, 5L)
+    expect_false(got$result$retune_moved)
+    expect_true(got$result$warm_start)
+    expect_identical(got$result$start_grid_size, NA_integer_)
+    expect_identical(got$result$bayes_iter, NA_integer_)
+    expect_identical(got$result$bayes_stop, NA_character_)
+
+  })
+
+  it("still grids a cold start, choosing its best candidate", {
+
+    got <- run_off(NULL)
+
+    expect_identical(got$asked, c("grid", "tune"))
+    expect_identical(got$result$start_grid_size, 2L)
+    expect_identical(got$result$retune_moved, NA)
+
+  })
+
+})
+
+
+describe("fit_single_config() - a kept or moved member's out-of-fold predictions", {
+
+  ## The re-tune's choice made on hand-set scores (as in the margin's tests
+  ## above), against the same member with the re-tune off, started from the
+  ## parameters chosen: its out-of-fold predictions are fit_resamples() at
+  ## those parameters under the `oof` stage on either path
+  member_at <- function(lead = NULL, best_params_eval = make_fit_best_params()) {
+
+    setup     <- fsc()$setup
+    incumbent <- tibble::tibble(mtry = 2L, min_n = 5L)
+    other     <- NULL
+
+    if (!is.null(lead)) {
+      local_hand_scored_grid(function(row) {
+        point <- row[names(incumbent)]
+        if (point_matches(incumbent, point)) return(LEAD_BASE + lead * LEAD_SE)
+        if (is.null(other)) other <<- point
+        if (point_matches(other, point)) LEAD_BASE else LEAD_BASE + 10
+      })
+      local_mocked_bindings(bayes_search = function(...) {
+        list(results = list(...)$initial, n_dropped = 0L, n_iter = 1L, stop = "budget")
+      })
+    }
+
+    fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = best_params_eval,
+      final_bayesian_iter = if (is.null(lead)) 0L else 1L,
+      grid_size           = 3L,
+      seed                = 42L
+    )
+
+  }
+
+  it("gives a kept member evaluate()'s point's predictions, and a moved one its candidate's", {
+
+    kept  <- member_at(lead = 0.5)
+    moved <- member_at(lead = 2)
+
+    expect_false(kept$retune_moved)
+    expect_true(moved$retune_moved)
+
+    off_kept  <- member_at(best_params_eval = make_fit_best_params())
+    off_moved <- member_at(best_params_eval = moved$best_params[c("mtry", "min_n")])
+
+    expect_identical(kept$cv_predictions, off_kept$cv_predictions)
+    expect_identical(kept$test_metrics, off_kept$test_metrics)
+    expect_identical(moved$cv_predictions, off_moved$cv_predictions)
+    expect_false(identical(moved$cv_predictions, kept$cv_predictions))
 
   })
 
@@ -1920,7 +2061,10 @@ describe("fit_single_config() - the stages' units", {
     real_check <- check_degradation
     at         <- list()
 
+    ## The re-tune on, so its starting grid is drawn: one Bayesian iteration,
+    ## the budget rule held off
     local_mocked_bindings(
+      BAYES_POINTS_PER_PARAM = 0L,
       build_warmstart_grid = function(...) {
         at$grid <<- get(".Random.seed", envir = globalenv())
         real_grid(...)
@@ -1938,7 +2082,7 @@ describe("fit_single_config() - the stages' units", {
       calib_data          = NULL,
       role_map            = shared$setup$role_map,
       best_params_eval    = make_fit_best_params(),
-      final_bayesian_iter = 0L,
+      final_bayesian_iter = 1L,
       grid_size           = 2L,
       compute_uq          = FALSE,
       allow_par           = FALSE,

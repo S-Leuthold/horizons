@@ -496,6 +496,37 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("says once, in its header and on its log, that the re-tune is off at final_bayesian_iter = 0, and counts no member as kept", {
+
+    obj <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 0L
+
+    out <- utils::capture.output(
+      fitted <- testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(verbose = TRUE))),
+        fit_single_config = function(config_row, ...) {
+          member <- fitted_member(config_row)
+          member$retune_moved <- FALSE
+          member
+        },
+        .package = "horizons"
+      )
+    )
+
+    off <- paste0("off (`final_bayesian_iter = 0`), so each member keeps evaluate()'s hyperparameters; ",
+                  "`configure(final_bayesian_iter = )` above 0 turns it on")
+
+    expect_true(paste0("\u2502  Re-tune: ", off) %in% out)
+    expect_false(any(grepl("\u251C\u2500 Re-tune:", out, fixed = TRUE)))
+    expect_false(any(grepl("The re-tune kept", out, fixed = TRUE)))
+
+    notes <- fitted$log$message[fitted$log$verb == "fit" & fitted$log$type == "note"]
+    expect_identical(sum(notes == paste0("The re-tune is ", off, ".")), 1L)
+    expect_false(any(grepl("The re-tune kept", notes, fixed = TRUE)))
+
+  })
+
   it("records each member's failure class, backtrace and warnings, and warns partial_failure once", {
 
     obj <- fit_obj(2L)
