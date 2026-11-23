@@ -1844,7 +1844,10 @@ profiles_left <- function() {
 }
 
 ## rf, plsr and cubist, so a seeded engine, a submodel engine and an isolated
-## fit's chain all run on inner daemons, with a Bayesian search
+## fit's chain all run on inner daemons, with a Bayesian search. On this
+## data only rf's row moves with its stages' seeds: plsr and cubist choose
+## and score the same whatever the seed, so a split that changed a seed
+## would show in rf's row alone.
 inner_object <- function() {
   obj <- make_eval_object(n = 60, n_configs = 3)
   obj$config$configs$model <- c("rf", "plsr", "cubist")
@@ -1979,8 +1982,10 @@ describe("evaluate() - inner daemons", {
     skip_on_cran()
     skip_if_dev_package()
 
+    ## Every configuration split onto both daemons, so each runs alone on
+    ## two inner daemons
     local_test_daemons(2)
-    local_split(3L)
+    local_split(1:3)
 
     run <- function(inner_daemons, dir) {
       with_deadline(suppressWarnings(evaluate(inner_object(), seed = 42L,
@@ -1991,6 +1996,12 @@ describe("evaluate() - inner daemons", {
 
     split   <- run(TRUE, withr::local_tempdir())
     unsplit <- run(FALSE, withr::local_tempdir())
+
+    ## The split engaged: every configuration's inner daemons connected and
+    ## ran its folds
+    note <- split$log[grepl("on inner daemons it started", split$log$message, fixed = TRUE), ]
+    expect_identical(note$ids[[1]], c("cfg_001", "cfg_002", "cfg_003"))
+    expect_false(any(grepl("did not connect", split$log$message, fixed = TRUE)))
 
     cols <- setdiff(names(split$evaluation$results), "runtime_secs")
     expect_identical(split$evaluation$results[cols], unsplit$evaluation$results[cols])
