@@ -51,7 +51,7 @@
 #' @section The Bayesian search's stopping rule:
 #' Each configuration's Bayesian search stops once `no_improve` iterations in
 #' a row have not improved on its best (`control_horizons(no_improve = )`,
-#' default 5), tune's own rule. `evaluate()` says how many searches stopped
+#' default 10), tune's own rule. `evaluate()` says how many searches stopped
 #' early, in its tree and as a note on the object's log, and each row records
 #' the iterations its search began (`bayes_iter`) and why it ended
 #' (`bayes_stop`: `"no_improve"`, `"budget"` for every iteration asked for,

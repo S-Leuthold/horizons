@@ -265,8 +265,10 @@ DEFAULT_CV_FOLDS <- 5
 # The Bayesian iterations without improvement after which a search stops
 # (control_horizons(no_improve = )), in evaluate() and fit()'s re-tune alike.
 # Each verb says how many of its searches stopped early, and how to change
-# it.
-BAYES_NO_IMPROVE_DEFAULT <- 5L
+# it. 10 is tune's own default. A search whose starting grid puts only one
+# point in a narrow good region (svm_rbf on PCA scores, for one) can spend
+# more than five iterations exploring before it first improves on that point.
+BAYES_NO_IMPROVE_DEFAULT <- 10L
 
 # The points a search gives each tuned parameter, the grid and the Bayesian
 # iterations together: the iterations asked for are a floor, raised for a

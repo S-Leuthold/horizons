@@ -63,7 +63,7 @@ describe("control_horizons()", {
 
   })
 
-  it("takes no_improve as a whole number of at least 1 or FALSE, for evaluate() and fit(), defaulting to 5", {
+  it("takes no_improve as a whole number of at least 1 or FALSE, for evaluate() and fit(), defaulting to 10", {
 
     expect_identical(control_horizons(no_improve = 1L)$no_improve, 1L)
     expect_false(control_horizons(no_improve = FALSE)$no_improve)
@@ -75,7 +75,7 @@ describe("control_horizons()", {
 
     expect_identical(CONTROL_FIELDS$no_improve$verbs, c("evaluate", "fit"))
     expect_identical(resolve_control(NULL, "evaluate")$no_improve, BAYES_NO_IMPROVE_DEFAULT)
-    expect_identical(resolve_control(NULL, "fit")$no_improve, 5L)
+    expect_identical(resolve_control(NULL, "fit")$no_improve, 10L)
     expect_error(resolve_control(control_horizons(no_improve = 3), "ensemble"), "no_improve",
                  class = "horizons_error_input")
 

@@ -2273,7 +2273,7 @@ describe("evaluate() - checkpoint data provenance", {
                                    ## horizons' default ranges, in the
                                    ## record's text, and the stopping rule
                                    tune_ranges = "committees 1 to 25; num_comp 1 to 30",
-                                   no_improve = 5L,
+                                   no_improve = 10L,
                                    prune = FALSE,
                                    prune_threshold = NA_real_, seed = 42L,
                                    seed_rule = SEED_RULE,
@@ -3026,7 +3026,7 @@ describe("evaluate() - tuning-settings provenance", {
     tmpdir <- ck$dir
     first  <- ck$value$first
 
-    expect_true(all(vapply(first$evaluation$results$settings, `[[`, numeric(1), "no_improve") == 5))
+    expect_true(all(vapply(first$evaluation$results$settings, `[[`, numeric(1), "no_improve") == 10))
 
     for (other in list(3L, FALSE)) {
 
@@ -3037,7 +3037,7 @@ describe("evaluate() - tuning-settings provenance", {
       )
 
       expect_s3_class(err, "horizons_error_input")
-      expect_match(flat_message(err), paste0("no_improve = 5 (this run: ", other, ")"), fixed = TRUE)
+      expect_match(flat_message(err), paste0("no_improve = 10 (this run: ", other, ")"), fixed = TRUE)
 
     }
 

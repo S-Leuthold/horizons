@@ -98,7 +98,7 @@ specified metric. The best configuration is stored for downstream use by
 
 Each configuration's Bayesian search stops once \code{no_improve} iterations in
 a row have not improved on its best (\code{control_horizons(no_improve = )},
-default 5), tune's own rule. \code{evaluate()} says how many searches stopped
+default 10), tune's own rule. \code{evaluate()} says how many searches stopped
 early, in its tree and as a note on the object's log, and each row records
 the iterations its search began (\code{bayes_iter}) and why it ended
 (\code{bayes_stop}: \code{"no_improve"}, \code{"budget"} for every iteration asked for,

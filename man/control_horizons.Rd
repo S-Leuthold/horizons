@@ -94,7 +94,11 @@ them, and the run says so. Default \code{getOption("horizons.isolate", TRUE)}.
 iterations without improvement on the best after which a search stops:
 \code{\link[=evaluate]{evaluate()}}'s, and \code{\link[=fit]{fit()}}'s re-tune. Each verb says how many of its
 searches stopped early, and how to change it. \code{FALSE} runs every
-iteration asked for. Default 5. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
+iteration asked for. Default 10, tune's own. A smaller limit runs
+faster but can end a search that is still exploring: when the starting
+grid puts only one point in a narrow good region, as it can for
+\code{svm_rbf} on PCA scores, the search may take more than five iterations
+to improve on that point. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
 
 \item{min_resemblance_rows}{A whole number of at least 2. The fewest library
 rows \code{\link[=select_training]{select_training()}}'s resemblance check takes its reference

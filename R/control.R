@@ -289,7 +289,11 @@ CONTROL_FIELDS <- list(
 #'   iterations without improvement on the best after which a search stops:
 #'   [evaluate()]'s, and [fit()]'s re-tune. Each verb says how many of its
 #'   searches stopped early, and how to change it. `FALSE` runs every
-#'   iteration asked for. Default 5. [evaluate()], [fit()].
+#'   iteration asked for. Default 10, tune's own. A smaller limit runs
+#'   faster but can end a search that is still exploring: when the starting
+#'   grid puts only one point in a narrow good region, as it can for
+#'   `svm_rbf` on PCA scores, the search may take more than five iterations
+#'   to improve on that point. [evaluate()], [fit()].
 #' @param min_resemblance_rows A whole number of at least 2. The fewest library
 #'   rows [select_training()]'s resemblance check takes its reference
 #'   distribution from. Default 30.
