@@ -472,13 +472,15 @@ pls_cap_records <- function(folds, best_params, outcome) {
 #' to one variance, so on them the first PLS component is already the
 #' least-squares fit on the kept components, and every count of `num_comp`
 #' is that model ([pls_fit()] stops there). Nothing departs from what was
-#' asked, so it is not a warning: `evaluate()` says it once a run, as a line
-#' in its tree and a note on the log, when its grid pairs the two.
+#' asked, so it is not a warning: `evaluate()` says it once a run, as a short
+#' line in its tree and the whole sentence as a note on the log, when its grid
+#' pairs the two.
 #'
 #' @param configs The grid, `config$configs`.
 #' @return `NULL` when no configuration pairs plsr with
 #'   `feature_selection = "pca"`; else a list of `ids` (those
-#'   configurations) and `line`, Character(1).
+#'   configurations), `line` (the tree's) and `note` (the log's), each
+#'   Character(1).
 #' @keywords internal
 #' @noRd
 pls_pca_note <- function(configs) {
@@ -491,6 +493,9 @@ pls_pca_note <- function(configs) {
 
   list(ids  = ids,
        line = cli::format_inline(
+         "plsr on PCA scores ({n} configuration{?s}): least squares on the kept components, so num_comp tunes nothing"
+       ),
+       note = cli::format_inline(
          "plsr on PCA scores ({n} configuration{?s}): PLS re-projects scores PCA has already projected, so it fits least squares on the kept components and every component count is the same model; {?it runs/they run}, and tune{?s/} nothing."
        ))
 

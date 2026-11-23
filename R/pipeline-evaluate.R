@@ -876,10 +876,10 @@ evaluate <- function(x,
   }
 
   ## What plsr fits on PCA scores, said once for the grid: a note on the log,
-  ## and a line in the header below
+  ## and a short line in the header below
   pls_pca <- pls_pca_note(configs)
 
-  if (!is.null(pls_pca)) log_note(collector, "{pls_pca$line}", ids = pls_pca$ids)
+  if (!is.null(pls_pca)) log_note(collector, "{pls_pca$note}", ids = pls_pca$ids)
 
   ## -----------------------------------------------------------------------
   ## Step 7: Render tree header
