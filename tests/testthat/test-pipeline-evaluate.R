@@ -2260,12 +2260,11 @@ describe("evaluate() - checkpoint data provenance", {
     expect_identical(manifest$data_hash, res$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, res$evaluation$n_train)
 
-    ## Each configuration's cell of the cost table, for the monitor's ETA, in
-    ## the grid's order: cfg_002's cubist costs more than cfg_001's rf, so a
-    ## record in the order they start would differ
+    ## Each configuration's cost, for the monitor's ETA, in the grid's order
     expect_identical(manifest$config_ids, c("cfg_001", "cfg_002"))
     expect_identical(manifest$config_cost,
-                     unname(CONFIG_COST_SECONDS[c("rf/none", "cubist/none")]))
+                     config_costs(ck$value$obj$config$configs, res$evaluation$n_train,
+                                  config_kept(ck$value$obj$config$configs, ck$value$obj$data$role_map)))
 
     expect_identical(manifest$settings,
                      eval_settings(cv_folds = 3L, grid_size = 2L,
@@ -2294,6 +2293,24 @@ describe("evaluate() - checkpoint data provenance", {
     expect_identical(manifest$data_fields$outcome, "SOC")
     expect_identical(row$settings[[1]], manifest$settings)
     expect_identical(res$evaluation$results$settings[[1]], manifest$settings)
+
+  })
+
+  it("writes the manifest's costs again once the fold stage knows what each preparation kept", {
+
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$configs$feature_selection[2] <- "pca"
+    dir <- withr::local_tempdir()
+
+    ## The predictors kept, told apart before the stage and after it
+    local_mocked_bindings(config_kept = function(configs, role_map, record = NULL) {
+      rep(if (is.null(record)) 1 else 2, nrow(configs))
+    })
+
+    ev <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir, verbose = FALSE)))
+
+    manifest <- readRDS(file.path(dir, "eval_manifest.rds"))
+    expect_identical(manifest$config_cost, config_costs(obj$config$configs, ev$evaluation$n_train, c(2, 2)))
 
   })
 

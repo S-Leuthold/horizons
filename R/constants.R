@@ -506,40 +506,79 @@ PROCESS_DIED <- "The process horizons started for"
 # hours.
 DISPATCH_POLL_SECONDS <- 0.1
 
-# Seconds one configuration took, by model and feature selection, from which
-# the configs axis starts the longest configurations first (dispatch_order(),
-# R/utils-parallel.R) and monitor_evaluate() weights its ETA (config_costs(),
-# recorded in the manifest). Measured whole, preps and Bayesian candidates
-# included, on 0.12.0's coverage grid: 835 training rows, 1,701 predictors,
-# snv_deriv1, 10 folds, a grid of 10 and 15 Bayesian iterations, one
-# configuration per worker. lightgbm failed every configuration of that run,
-# so its cells are xgboost's, which its fits are within 20% of. Every
-# configuration in a run shares its rows and predictors, so only the cells
-# relative to one another are used (the order, and the ETA's weights), and
-# the table is not scaled by them. A new model or selection adds its cells
-# (test-utils-parallel.R holds the table to VALID_MODELS x
-# VALID_FEATURE_SELECTION). Kept apart from MODEL_SPECS: it is one
-# measurement over models and selections, documented and refitted whole.
+# What one configuration is expected to take, from which the configs axis
+# starts the longest configurations first (dispatch_order(),
+# R/utils-parallel.R), gives the long ones inner daemons (split_plan()) and
+# monitor_evaluate() weights its ETA (config_costs(), recorded in the
+# manifest):
+#
+#   seconds = cell(model, selection) x (rows / CONFIG_ROWS_REF)^CONFIG_ROW_EXPONENT[model]
+#             x kept / CONFIG_KEPT_REF[selection]
+#
+# with `rows` the run's training rows and `kept` the predictors the
+# configuration's preparation keeps, which the fold stage knows before any
+# configuration runs. Only each configuration's share of a run is read (the
+# order, the split, the ETA's weights), so the seconds' scale does not
+# matter. One configuration's estimate can be off by a factor of two either
+# way, from when its Bayesian search stops.
+#
+# The cells are seconds on the local grid (835 training rows, 1,701
+# predictors, 10 folds, a grid of 10, one configuration per daemon), each at
+# the reference count of predictors kept, refitted on 2026-11-23:
+#
+# - cubist, xgboost, svm_rbf and elastic_net with pca or correlation: their
+#   mean over the four configurations of local-real at no_improve 10, after
+#   the fold stage and the search's changes of 0.13.0;
+# - plsr: the coverage grid's five configurations, measured the same way;
+# - every other cell: 0.12.0's coverage grid times its model's ratio, the
+#   median over its measured cells of the measured cell over 0.12.0's
+#   (cubist 0.96, xgboost 1.06, svm_rbf 0.61, elastic_net 0.55), or over
+#   every measured cell (0.61) for rf, mlp and mars, none of which was
+#   measured since; lightgbm's cells are xgboost's, whose fits its are within
+#   20% of.
+#
+# A new model or selection adds its cells (test-utils-parallel.R holds the
+# table to VALID_MODELS x VALID_FEATURE_SELECTION). Kept apart from
+# MODEL_SPECS: it is one measurement over models and selections, documented
+# and refitted whole.
 CONFIG_COST_SECONDS <- c(
-  "rf/none"           = 12861, "rf/pca"          = 672, "rf/correlation"          = 1974,
-  "rf/boruta"         = 11089, "rf/cars"         = 5379,
-  "cubist/none"       = 18772, "cubist/pca"      = 679, "cubist/correlation"      = 4634,
-  "cubist/boruta"     = 17954, "cubist/cars"     = 13245,
-  "xgboost/none"      = 6273,  "xgboost/pca"     = 357, "xgboost/correlation"     = 1807,
-  "xgboost/boruta"    = 11910, "xgboost/cars"    = 6310,
-  "plsr/none"         = 93,    "plsr/pca"        = 162, "plsr/correlation"        = 159,
-  "plsr/boruta"       = 2820,  "plsr/cars"       = 632,
-  "elastic_net/none"  = 72,    "elastic_net/pca" = 114, "elastic_net/correlation" = 157,
-  "elastic_net/boruta" = 3854, "elastic_net/cars" = 669,
-  "svm_rbf/none"      = 344,   "svm_rbf/pca"     = 175, "svm_rbf/correlation"     = 167,
-  "svm_rbf/boruta"    = 3807,  "svm_rbf/cars"    = 731,
-  "mlp/none"          = 2377,  "mlp/pca"         = 381, "mlp/correlation"         = 3037,
-  "mlp/boruta"        = 5805,  "mlp/cars"        = 7038,
-  "lightgbm/none"     = 6273,  "lightgbm/pca"    = 357, "lightgbm/correlation"    = 1807,
-  "lightgbm/boruta"   = 11910, "lightgbm/cars"   = 6310,
-  "mars/none"         = 364,   "mars/pca"        = 16,  "mars/correlation"        = 52,
-  "mars/boruta"       = 604,   "mars/cars"       = 289
+  "rf/none"           = 7833,  "rf/pca"          = 409, "rf/correlation"          = 1202,
+  "rf/boruta"         = 6754,  "rf/cars"         = 3276,
+  "cubist/none"       = 18063, "cubist/pca"      = 995, "cubist/correlation"      = 2124,
+  "cubist/boruta"     = 17276, "cubist/cars"     = 12745,
+  "xgboost/none"      = 6628,  "xgboost/pca"     = 354, "xgboost/correlation"     = 2030,
+  "xgboost/boruta"    = 12585, "xgboost/cars"    = 6668,
+  "plsr/none"         = 11,    "plsr/pca"        = 7,   "plsr/correlation"        = 7,
+  "plsr/boruta"       = 42,    "plsr/cars"       = 16,
+  "elastic_net/none"  = 40,    "elastic_net/pca" = 58,  "elastic_net/correlation" = 92,
+  "elastic_net/boruta" = 2109, "elastic_net/cars" = 366,
+  "svm_rbf/none"      = 209,   "svm_rbf/pca"     = 103, "svm_rbf/correlation"     = 105,
+  "svm_rbf/boruta"    = 2319,  "svm_rbf/cars"    = 445,
+  "mlp/none"          = 1448,  "mlp/pca"         = 232, "mlp/correlation"         = 1850,
+  "mlp/boruta"        = 3535,  "mlp/cars"        = 4287,
+  "lightgbm/none"     = 6628,  "lightgbm/pca"    = 354, "lightgbm/correlation"    = 2030,
+  "lightgbm/boruta"   = 12585, "lightgbm/cars"   = 6668,
+  "mars/none"         = 222,   "mars/pca"        = 10,  "mars/correlation"        = 32,
+  "mars/boruta"       = 368,   "mars/cars"       = 176
 )
+
+# The training rows the cells were measured at
+CONFIG_ROWS_REF <- 835
+
+# How a model's configuration time grows with the rows: the exponent of
+# rows / CONFIG_ROWS_REF. Fitted for the four models measured on both the
+# local grid and the library draw (8,272 rows) in 0.12.0, the mean over
+# their 32 configurations of the log ratio of seconds per predictor kept;
+# lightgbm takes xgboost's, and the models with no such pair 1.
+CONFIG_ROW_EXPONENT <- c(
+  rf = 1, cubist = 1.44, xgboost = 0.73, plsr = 1, elastic_net = 0.85,
+  svm_rbf = 1.31, mlp = 1, lightgbm = 0.73, mars = 1
+)
+
+# The predictors kept at which each selection's cells were measured: the mean
+# over the local grid's 10 folds of what the coverage grid's preparation
+# (snv_deriv1, no transformation) kept, as the fold stage counts it.
+CONFIG_KEPT_REF <- c(none = 1701, pca = 52, correlation = 316, boruta = 1686, cars = 1018)
 
 # Vocabulary of control_horizons(parallelize_over = ). "both" is deliberately
 # absent for v1; control_horizons() refuses it with a hint.
@@ -581,7 +620,7 @@ SCORING_SCHEMA <- 9L
 # the daemons connected as the run began), the training-data fingerprint and
 # its fields,
 # and the tuning settings. Schema 5 adds `config_cost`, each configuration's
-# cell of CONFIG_COST_SECONDS in `config_ids`' order, which weights the
+# expected cost (config_costs()) in `config_ids`' order, which weights the
 # monitor's ETA. Bump it when a field the monitor reads changes; the
 # monitor refuses a manifest of any other schema.
 EVAL_MANIFEST_SCHEMA <- 5L

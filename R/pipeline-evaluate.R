@@ -144,9 +144,11 @@
 #' for the call.
 #'
 #' * `"configs"`: one task per config on the daemons, with tune running
-#'   sequentially inside each. The configs start longest first, by a table
-#'   of the seconds each model and feature selection took on a measured
-#'   grid, so the short ones fill the daemons at the end; the rows come back
+#'   sequentially inside each. The configs start longest first, by an
+#'   estimate of each one's time (the seconds its model and feature
+#'   selection took on a measured grid, scaled to the run's rows and the
+#'   predictors its preparation keeps), so the short ones fill the daemons
+#'   at the end; the rows come back
 #'   in configuration order whatever order they finish in. At most one
 #'   config per connected daemon is in flight. The configs' data are written
 #'   once, to a file in `<output_dir>/tmp/`, which each config's daemon
@@ -980,7 +982,9 @@ evaluate <- function(x,
   ## is scoring, with the data fields and the tuning settings. The monitor
   ## gates checkpoint rows against them, as evaluate() does, and re-reads the
   ## manifest on every poll, so it is written atomically. Each
-  ## configuration's expected cost weights the monitor's ETA.
+  ## configuration's expected cost weights the monitor's ETA: here at the
+  ## cells' reference counts of predictors kept, and written again once the
+  ## fold stage knows what each preparation kept (Step 7d).
 
   if (!is.null(output_dir)) {
 
@@ -989,7 +993,7 @@ evaluate <- function(x,
       n_total                      = n_total,
       n_pending                    = n_pending,
       config_ids                   = configs$config_id,
-      config_cost                  = config_costs(configs),
+      config_cost                  = config_costs(configs, n_train, config_kept(configs, role_map)),
       start_time                   = start_time,
       metric                       = metric,
       cv_folds                     = cv_folds,
@@ -1136,6 +1140,7 @@ evaluate <- function(x,
 
   run_completed <- FALSE
   fold_store    <- NULL
+  fold_stage    <- NULL
 
   if (length(fold_units) > 0) {
 
@@ -1167,6 +1172,19 @@ evaluate <- function(x,
         cat(paste0("\u2502  ", line, "\n"))
       }
       cat("\u2502\n")
+
+    }
+
+    ## The costs again, from the predictors each preparation kept, for the
+    ## monitor's ETA, by the same writer
+    if (!is.null(output_dir)) {
+
+      manifest$config_cost <- config_costs(configs, n_train, config_kept(configs, role_map, fold_stage))
+      not_written          <- write_output_file(manifest, manifest_path)
+
+      if (!is.null(not_written)) {
+        abort_output_write(manifest_path, not_written, results_so_far(unname(checkpoint_results)))
+      }
 
     }
 
@@ -1393,8 +1411,12 @@ evaluate <- function(x,
     ## read the payload stops the run in the window, with the rows so far,
     ## which are checkpointed; a package missing on a daemon comes back as
     ## the worker's error, and is systemic here.
+    ## The pending configurations' costs, from what their preparations kept,
+    ## which the window starts them longest first by
+    pending_costs <- config_costs(pending_configs, n_train, config_kept(pending_configs, role_map, fold_stage))
+
     stop_on_worker_death(
-      dispatch_configs(pending_configs, payload_path, finished, rows_so_far, output_dir,
+      dispatch_configs(pending_configs, pending_costs, payload_path, finished, rows_so_far, output_dir,
                        call = rlang::current_env()),
       rows_so_far(), output_dir
     )

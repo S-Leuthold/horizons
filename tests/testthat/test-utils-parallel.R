@@ -80,10 +80,10 @@ describe("resolve_parallel_axis()", {
 })
 
 ## =========================================================================
-## dispatch_order()
+## config_costs(), config_kept() and dispatch_order()
 ## =========================================================================
 
-describe("dispatch_order()", {
+describe("config_costs()", {
 
   it("has a positive cost for every model and feature selection configure() admits", {
 
@@ -96,19 +96,47 @@ describe("dispatch_order()", {
 
   })
 
-  it("starts the longest configurations first, and keeps grid order among equal costs", {
+  it("has a row exponent for every model and a reference count for every selection, each once", {
 
-    configs <- tibble::tibble(
-      model             = c("plsr", "cubist", "xgboost", "lightgbm", "mars"),
-      feature_selection = c("pca",  "none",   "none",    "none",     "pca")
-    )
+    expect_identical(sort(names(CONFIG_ROW_EXPONENT)), sort(VALID_MODELS))
+    expect_true(all(is.finite(CONFIG_ROW_EXPONENT) & CONFIG_ROW_EXPONENT > 0))
 
-    ## cubist with no selection is the costliest cell, mars with PCA the
-    ## cheapest; xgboost and lightgbm cost the same, so grid order holds
-    expect_identical(dispatch_order(configs), c(2L, 3L, 4L, 1L, 5L))
+    expect_identical(sort(names(CONFIG_KEPT_REF)), sort(VALID_FEATURE_SELECTION))
+    expect_true(all(is.finite(CONFIG_KEPT_REF) & CONFIG_KEPT_REF > 0))
 
-    ## Two rows of one cell keep their grid order too
-    expect_identical(dispatch_order(configs[c(1, 1, 2), ]), c(3L, 1L, 2L))
+  })
+
+  it("is the cell at the grid's rows and the reference count of predictors kept", {
+
+    configs <- tibble::tibble(model = c("cubist", "plsr"), feature_selection = c("pca", "none"))
+
+    expect_equal(config_costs(configs, CONFIG_ROWS_REF, CONFIG_KEPT_REF[configs$feature_selection]),
+                 unname(CONFIG_COST_SECONDS[c("cubist/pca", "plsr/none")]))
+
+  })
+
+  it("reorders models by their row exponents as the rows grow", {
+
+    ## Cubist's fits grow faster with the rows than xgboost's: the cheaper
+    ## configuration on the measured grid is the dearer one on a library
+    ## draw's rows
+    configs <- tibble::tibble(model = c("xgboost", "cubist"), feature_selection = c("correlation", "pca"))
+    kept    <- CONFIG_KEPT_REF[configs$feature_selection]
+
+    expect_gt(CONFIG_ROW_EXPONENT[["cubist"]], CONFIG_ROW_EXPONENT[["xgboost"]])
+    expect_identical(dispatch_order(config_costs(configs, CONFIG_ROWS_REF, kept)), c(1L, 2L))
+    expect_identical(dispatch_order(config_costs(configs, 8272, kept)), c(2L, 1L))
+
+  })
+
+  it("scales a configuration by the predictors its preparation kept", {
+
+    configs <- tibble::tibble(model = "rf", feature_selection = c("correlation", "correlation"))
+    ref     <- CONFIG_KEPT_REF[["correlation"]]
+
+    costs <- config_costs(configs, 2000, c(ref, 2 * ref))
+
+    expect_equal(costs[2], 2 * costs[1])
 
   })
 
@@ -116,7 +144,63 @@ describe("dispatch_order()", {
 
     configs <- tibble::tibble(model = "rf", feature_selection = "lasso")
 
-    expect_error(dispatch_order(configs), "has no cost for", class = "horizons_error_internal")
+    expect_error(config_costs(configs, 100, 1), "has no cost for", class = "horizons_error_internal")
+
+  })
+
+})
+
+describe("config_kept()", {
+
+  role_map <- tibble::tibble(variable = c("id", "y", paste0("wn_", 1:40)),
+                             role     = c("id", "outcome", rep("predictor", 40)))
+
+  configs <- tibble::tibble(
+    model             = "rf",
+    preprocessing     = "snv",
+    transformation    = c("log", "log", "none", "none"),
+    feature_selection = c("none", "correlation", "correlation", "pca")
+  )
+
+  it("counts every predictor for no selection, and the reference count before the fold stage", {
+
+    expect_equal(config_kept(configs, role_map),
+                 c(40, unname(CONFIG_KEPT_REF[c("correlation", "correlation", "pca")])))
+
+  })
+
+  it("takes the mean its folds kept from the stage's record, by the prep each configuration reads", {
+
+    ## correlation reads the outcome, so each transformation is its own
+    ## prep; one PCA prep serves every transformation; the training part's
+    ## prep is not a fold's
+    record <- tibble::tibble(
+      prep         = c("snv/correlation/log", "snv/correlation/log", "snv/correlation/none",
+                       "snv/correlation/none", "snv/pca", "snv/pca", "snv/pca"),
+      fold         = c("Fold1", "Fold2", "Fold1", "Fold2", "Fold1", "Fold2", "training"),
+      n_predictors = c(10L, 20L, 6L, 8L, 3L, 5L, 100L)
+    )
+
+    expect_equal(config_kept(configs, role_map, record), c(40, 15, 7, 4))
+
+  })
+
+  it("keeps the reference count for a configuration the stage built nothing for", {
+
+    record <- tibble::tibble(prep = "snv/pca", fold = "Fold1", n_predictors = 3L)
+
+    expect_equal(config_kept(configs, role_map, record),
+                 c(40, unname(CONFIG_KEPT_REF[c("correlation", "correlation")]), 3))
+
+  })
+
+})
+
+describe("dispatch_order()", {
+
+  it("starts the longest first, and keeps grid order among equal costs", {
+
+    expect_identical(dispatch_order(c(5, 30, 10, 10, 1)), c(2L, 3L, 4L, 1L, 5L))
 
   })
 
@@ -229,7 +313,7 @@ describe("dispatch_configs()", {
 
   it("collects every task that finished in a pass before it stops, so the stop carries their rows", {
 
-    ## One cell of the cost table, so they start in grid order
+    ## Equal costs, so they start in grid order
     configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"),
                               model = "plsr", feature_selection = "none")
     row     <- function(id) tibble::tibble(config_id = id, status = "success")
@@ -247,7 +331,7 @@ describe("dispatch_configs()", {
     finished$rows <- list()
 
     err <- expect_error(
-      dispatch_configs(configs, "payload.rds", finished, function() dplyr::bind_rows(finished$rows)),
+      dispatch_configs(configs, rep(1, 3), "payload.rds", finished, function() dplyr::bind_rows(finished$rows)),
       class = "horizons_error_systemic"
     )
 
@@ -281,7 +365,7 @@ describe("dispatch_configs()", {
     finished$rows <- list()
 
     err <- expect_error(
-      dispatch_configs(configs, unread$path, finished, function() dplyr::bind_rows(finished$rows)),
+      dispatch_configs(configs, rep(1, 3), unread$path, finished, function() dplyr::bind_rows(finished$rows)),
       class = "horizons_error_systemic"
     )
 

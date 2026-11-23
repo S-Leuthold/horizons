@@ -106,17 +106,29 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 #' The seconds each configuration is expected to take
 #'
 #' @description
-#' Each configuration's cell of `CONFIG_COST_SECONDS`, the seconds a
-#' configuration of its model and feature selection took on a measured grid.
-#' The configs axis starts the longest first by it ([dispatch_order()]), and
-#' `monitor_evaluate()` weights its ETA by it, from the run's manifest.
+#' Each configuration's cell of `CONFIG_COST_SECONDS` (the seconds a
+#' configuration of its model and feature selection took on the measured
+#' local grid), times the run's rows over the grid's (`CONFIG_ROWS_REF`)
+#' raised to its model's `CONFIG_ROW_EXPONENT`, times the predictors its
+#' preparation keeps over the cell's reference count (`CONFIG_KEPT_REF`).
+#' The configs axis starts the longest first by it ([dispatch_order()]) and
+#' gives the long ones inner daemons by it ([split_plan()]), and
+#' `monitor_evaluate()` weights its ETA by it, from the run's manifest. Only
+#' each configuration's share of the run is read, so the scale of the
+#' seconds does not matter. One configuration's estimate can be off by a
+#' factor of two either way, from when its Bayesian search stops, which
+#' nothing knows before it runs.
 #'
 #' @param configs The configurations, with `model` and `feature_selection`
 #'   columns.
+#' @param n_rows Numeric(1). The rows the configurations are tuned on: the
+#'   run's training part.
+#' @param kept Numeric, one per row of `configs`: the predictors each
+#'   configuration's preparation keeps ([config_kept()]).
 #' @return Numeric, one unnamed cost per row of `configs`.
 #' @keywords internal
 #' @noRd
-config_costs <- function(configs) {
+config_costs <- function(configs, n_rows, kept) {
 
   keys <- paste(configs$model, configs$feature_selection, sep = "/")
   cost <- unname(CONFIG_COST_SECONDS[keys])
@@ -134,30 +146,75 @@ config_costs <- function(configs) {
 
   }
 
-  cost
+  rows <- (as.numeric(n_rows) / CONFIG_ROWS_REF)^unname(CONFIG_ROW_EXPONENT[configs$model])
+
+  cost * rows * unname(kept) / unname(CONFIG_KEPT_REF[configs$feature_selection])
+
+}
+
+#' The predictors each configuration's preparation keeps
+#'
+#' @description
+#' What [config_costs()] scales a cell by. A configuration with no feature
+#' selection keeps every predictor of the role map. One with a selection
+#' keeps what its fold preparations kept, the mean over its folds, which the
+#' fold stage knows before any configuration runs ([fold_stage_record()]);
+#' before the stage, or for a configuration the stage built nothing for (one
+#' resumed from its checkpoint), the cell's reference count, so its cost is
+#' its cell at the run's rows.
+#'
+#' @param configs The configurations, with `preprocessing`,
+#'   `feature_selection` and `transformation` columns.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param record The fold stage's record, or `NULL` before it.
+#' @return Numeric, one per row of `configs`.
+#' @keywords internal
+#' @noRd
+config_kept <- function(configs, role_map, record = NULL) {
+
+  selection <- configs$feature_selection
+  kept      <- unname(CONFIG_KEPT_REF[selection])
+
+  kept[selection == "none"] <- sum(role_map$role == "predictor")
+
+  if (is.null(record) || nrow(record) == 0) return(kept)
+
+  ## The record names each prep by its preprocessing, selection and, where
+  ## the selection reads the outcome, transformation: the unit's name
+  ## without the verb and the fold
+  folds   <- record[record$fold != "training", , drop = FALSE]
+  by_prep <- tapply(folds$n_predictors, folds$prep, mean)
+
+  label <- vapply(seq_len(nrow(configs)), function(i) {
+    paste(fold_prep_scope("evaluate", configs[i, ])[-(1:2)], collapse = "/")
+  }, character(1))
+
+  found <- selection != "none" & label %in% names(by_prep)
+  kept[found] <- unname(by_prep[label[found]])
+
+  kept
 
 }
 
 #' The order the configs axis starts its configurations in
 #'
 #' @description
-#' Longest first: by [config_costs()], so the longest start first and the
-#' short ones fill the daemons at the end. Ties keep grid order, so the order
-#' is deterministic. The results do not depend on it: every draw is seeded
-#' from the run's seed and its own name, each fit of an engine that carries
-#' state from one fit to the next (`cubist`) runs in a process of its own,
-#' and the rows are put back in configuration order before they are bound.
+#' Longest first: by their costs ([config_costs()]), so the longest start
+#' first and the short ones fill the daemons at the end. Ties keep grid
+#' order, so the order is deterministic. The results do not depend on it:
+#' every draw is seeded from the run's seed and its own name, each fit of an
+#' engine that carries state from one fit to the next (`cubist`) runs in a
+#' process of its own, and the rows are put back in configuration order
+#' before they are bound.
 #'
-#' @param configs The configurations to run, with `model` and
-#'   `feature_selection` columns.
-#' @return Integer: the row positions of `configs`, in the order to start
-#'   them.
+#' @param costs Numeric: each configuration's cost, in grid order.
+#' @return Integer: the positions of `costs`, in the order to start them.
 #' @keywords internal
 #' @noRd
-dispatch_order <- function(configs) {
+dispatch_order <- function(costs) {
 
   ### order() leaves ties in their original order, which is grid order
-  order(-config_costs(configs))
+  order(-costs)
 
 }
 
@@ -1101,6 +1158,8 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #' to `finished$rows` as it finishes.
 #'
 #' @param configs The configurations still to run, the payload's `configs`.
+#' @param costs Numeric: each configuration's cost ([config_costs()]), in
+#'   the order of `configs`.
 #' @param payload_path Character(1). The absolute path of the file holding
 #'   the payload every task reads ([evaluate_config_worker()]).
 #' @param finished An environment whose `rows` the window appends each row
@@ -1113,7 +1172,7 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #'   `finished$rows`.
 #' @keywords internal
 #' @noRd
-dispatch_configs <- function(configs, payload_path, finished, rows_so_far, output_dir = NULL,
+dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far, output_dir = NULL,
                              call = rlang::caller_env()) {
 
   ### The task's call, quoted here: its names are the task's arguments
@@ -1121,7 +1180,7 @@ dispatch_configs <- function(configs, payload_path, finished, rows_so_far, outpu
 
   dispatch_units(
     n       = nrow(configs),
-    order   = dispatch_order(configs),
+    order   = dispatch_order(costs),
     task    = function(i) {
       list(call = task_call,
            args = list(worker = evaluate_config_worker, config_i = i, payload_path = payload_path))

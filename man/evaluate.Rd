@@ -195,9 +195,11 @@ carries its rows. Without an \code{output_dir} they are held in this session
 for the call.
 \itemize{
 \item \code{"configs"}: one task per config on the daemons, with tune running
-sequentially inside each. The configs start longest first, by a table
-of the seconds each model and feature selection took on a measured
-grid, so the short ones fill the daemons at the end; the rows come back
+sequentially inside each. The configs start longest first, by an
+estimate of each one's time (the seconds its model and feature
+selection took on a measured grid, scaled to the run's rows and the
+predictors its preparation keeps), so the short ones fill the daemons
+at the end; the rows come back
 in configuration order whatever order they finish in. At most one
 config per connected daemon is in flight. The configs' data are written
 once, to a file in \verb{<output_dir>/tmp/}, which each config's daemon
