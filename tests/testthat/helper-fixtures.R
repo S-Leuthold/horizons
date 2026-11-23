@@ -144,3 +144,46 @@ local_model_specs <- function(rows, .env = parent.frame()) {
                                   .env = .env)
 
 }
+
+
+## ---------------------------------------------------------------------------
+## A tune result scored by hand
+## ---------------------------------------------------------------------------
+
+#' A tune result with its candidates' fold RMSEs set by hand, so a test of
+#' fit()'s re-tune choice fixes the means and standard errors it reads.
+#' `rmse` takes one row of a fold's metrics (its parameters among its
+#' columns) and returns that candidate's RMSE on every fold, in the result's
+#' fold order.
+set_fold_rmse <- function(results, rmse) {
+
+  for (f in seq_len(nrow(results))) {
+
+    m <- results$.metrics[[f]]
+
+    for (r in which(m$.metric == "rmse")) m$.estimate[r] <- rmse(m[r, , drop = FALSE])[f]
+
+    results$.metrics[[f]] <- m
+
+  }
+
+  results
+
+}
+
+#' tune_grid() as the re-tune calls it, its fold RMSEs then set by
+#' set_fold_rmse(), for the calling frame
+local_hand_scored_grid <- function(rmse, .env = parent.frame()) {
+
+  real_grid <- tune::tune_grid
+
+  testthat::local_mocked_bindings(tune_grid = function(...) set_fold_rmse(real_grid(...), rmse),
+                                  .package = "tune", .env = .env)
+
+}
+
+## Three folds' RMSEs for a hand-scored candidate, and their standard error
+## (the folds' sd over the square root of three): a candidate at
+## LEAD_BASE + k * LEAD_SE trails one at LEAD_BASE by k of its standard errors
+LEAD_BASE <- c(1.0, 1.2, 1.4)
+LEAD_SE   <- 0.2 / sqrt(3)

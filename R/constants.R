@@ -328,6 +328,15 @@ UQ_QUANTILE_TREES        <- 500L
 UQ_QUANTILE_MIN_NODE     <- 5L
 UQ_QUANTILE_NODE_DIVISOR <- 250L
 
+### fit()'s re-tune keeps evaluate()'s hyperparameters unless its best
+### candidate's CV RMSE is lower than theirs by more than this many of the
+### best candidate's standard errors: tune::select_by_one_std_err()'s bound,
+### with evaluate()'s point in the place of the simplest model. The point was
+### chosen on evaluate()'s folds and is scored fresh on fit()'s, while the
+### best candidate is the best of many tried on fit()'s folds, so it beats the
+### point by the selection's optimism alone even where nothing is better.
+RETUNE_MARGIN_SE <- 1
+
 ### The degradation check bootstraps the test RPD and flags a config only when
 ### the whole DEGRADATION_LEVEL interval lies below the CV mean RPD. Below
 ### DEGRADATION_MIN_N test rows a bootstrap interval means little, so nothing

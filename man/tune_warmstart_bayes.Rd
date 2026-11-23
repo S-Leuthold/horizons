@@ -9,6 +9,7 @@ tune_warmstart_bayes(
   cv_resamples,
   initial_grid,
   param_set,
+  incumbent = NULL,
   bayesian_iter,
   no_improve = BAYES_NO_IMPROVE_DEFAULT,
   metric_set,
@@ -29,6 +30,10 @@ once.}
 
 \item{param_set}{Finalized \code{parameters} object.}
 
+\item{incumbent}{Single-row tibble of \code{evaluate()}'s tuned parameters,
+clamped into \code{param_set}'s ranges and among \code{initial_grid}'s points, or
+\code{NULL} (a cold start, or parameters that were unusable). Default \code{NULL}.}
+
 \item{bayesian_iter}{Integer. Bayesian iterations after grid. 0 = grid only.}
 
 \item{no_improve}{A whole number, or \code{FALSE}: the Bayesian search's
@@ -47,12 +52,13 @@ its phases' units.}
 }
 \value{
 List with \code{tune_results} (the result the hyperparameters were
-chosen from), \code{best_params} (single-row tibble, with \code{.config}), \code{grid}
-(\code{initial_grid}, which the member reads its notes through, #109),
-\code{n_dropped} (the candidates the Bayesian search proposed and tune
-dropped, scored on no fold), and \code{bayes_iter} and \code{bayes_stop}, the
-iterations the search began and why it ended (\code{bayes_search()}'s
-\code{n_iter} and \code{stop}; \code{NA} with no Bayesian search).
+chosen from), \code{best_params} (single-row tibble, with \code{.config}), \code{moved}
+and \code{gain} (\code{choose_member_params()}'s), \code{grid} (\code{initial_grid}, which
+the member reads its notes through, #109), \code{n_dropped} (the candidates
+the Bayesian search proposed and tune dropped, scored on no fold), and
+\code{bayes_iter} and \code{bayes_stop}, the iterations the search began and why
+it ended (\code{bayes_search()}'s \code{n_iter} and \code{stop}; \code{NA} with no Bayesian
+search).
 }
 \description{
 The re-tuning sequence of a \code{fit()} member, run inside its unit:
@@ -70,7 +76,9 @@ Each phase is a stage of the member's own (\code{warmstart-tune}, \code{bayes};
 \code{with_unit_seed()}), with its seed given to the engine and to the search,
 so the search does not depend on what the grid stage drew, nor on the
 axis it ran on (#151).
-3. Choose the hyperparameters by RMSE among the candidates scored on every
-fold (\code{select_complete()}).
+3. Choose the hyperparameters among the candidates scored on every fold:
+\code{incumbent}, \code{evaluate()}'s point, unless the best candidate's CV RMSE
+is lower than its by more than the best's standard error, and with no
+incumbent the best by RMSE (\code{choose_member_params()}).
 }
 \keyword{internal}

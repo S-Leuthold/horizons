@@ -98,7 +98,8 @@
 #'
 #' @return List with fields: config_id, status, degraded (`NA` when the
 #'   check could not run), degraded_reason, fitted_workflow, best_params,
-#'   warm_start, start_grid_size, cv_predictions, test_metrics, cv_metrics,
+#'   warm_start, start_grid_size, bayes_iter, bayes_stop, retune_moved,
+#'   retune_gain (a fitted member's), cv_predictions, test_metrics, cv_metrics,
 #'   uq, ad, warnings, error_message (the failed step and the cause), class
 #'   (the failure's root class), trace (the backtrace as text under
 #'   `keep_traces`, else `NULL`), runtime_secs. `uq`, when present, carries
@@ -114,7 +115,13 @@
 #'   tuning. `start_grid_size` is the starting grid's points. `bayes_iter`
 #'   and `bayes_stop` are the iterations the re-tune's Bayesian search began
 #'   and why it ended (`"no_improve"`, `"budget"` or `"failed"`), both `NA`
-#'   when no search ran.
+#'   when no search ran. `retune_moved` is `FALSE` when the member kept
+#'   `evaluate()`'s parameters, clamped into its range, `TRUE` when the
+#'   re-tune chose another candidate (one past the margin, or any when
+#'   `evaluate()`'s were not scored on every fold), and `NA` with none to
+#'   keep (a cold start, unusable parameters, or a member that failed before
+#'   the choice); `retune_gain` is the best candidate's lead over them in its
+#'   own standard errors (`choose_member_params()`), for the tree.
 #'
 #' @keywords internal
 fit_single_config <- function(config_row,
@@ -200,6 +207,11 @@ fit_single_config <- function(config_row,
   ## How far the re-tune's Bayesian search went, once it has run
   bayes_iter <- NA_integer_
   bayes_stop <- NA_character_
+
+  ## Whether the re-tune's choice left evaluate()'s parameters, once it has
+  ## chosen, and by how much the best candidate led them
+  retune_moved <- NA
+  retune_gain  <- NA_real_
 
   unit <- run_unit({
 
@@ -314,11 +326,14 @@ fit_single_config <- function(config_row,
     warm_start      <- usable_best_params(best_params_eval, param_set)
     start_grid_size <- nrow(initial_grid)
 
+    ## evaluate()'s point, clamped, is the incumbent on the search and on the
+    ## whole space alike: kept unless a candidate beats it by the margin
     retune <- unit_step("warm_start_tune", tune_warmstart_bayes(
       workflow      = model_wflow,
       cv_resamples  = prepped_folds$folds,
       initial_grid  = initial_grid,
       param_set     = param_set,
+      incumbent     = if (warm_start) clamp_best_params(best_params_eval, param_set),
       bayesian_iter = search_iter,
       no_improve    = no_improve,
       metric_set    = tune_metrics,
@@ -328,9 +343,11 @@ fit_single_config <- function(config_row,
       config_id     = config_id
     ))
 
-    best_params <- retune$best_params
-    bayes_iter  <- as.integer(retune$bayes_iter)
-    bayes_stop  <- retune$bayes_stop
+    best_params  <- retune$best_params
+    bayes_iter   <- as.integer(retune$bayes_iter)
+    bayes_stop   <- retune$bayes_stop
+    retune_moved <- as.logical(retune$moved %||% NA)
+    retune_gain  <- as.numeric(retune$gain %||% NA_real_)
 
     ## The warnings tune kept for the chosen candidate (#109), as
     ## evaluate_single_config() reads them: the re-tune returns the grid
@@ -359,6 +376,13 @@ fit_single_config <- function(config_row,
                                                          nrow(retune$grid), retune$n_dropped))
 
     if (!is.null(left_out)) pin(left_out)
+
+    ## evaluate()'s point missed a fold of fit()'s, so it took no part (#101)
+    if (isTRUE(retune_moved) && is.na(retune_gain)) {
+
+      pin("evaluate()'s hyperparameters were not scored on every fold of fit()'s, so the re-tune's best candidate was taken.")
+
+    }
 
     ## -----------------------------------------------------------------------
     ## Step 5: Finalize workflow and generate OOF predictions
@@ -628,6 +652,8 @@ fit_single_config <- function(config_row,
       start_grid_size  = start_grid_size,
       bayes_iter       = bayes_iter,
       bayes_stop       = bayes_stop,
+      retune_moved     = retune_moved,
+      retune_gain      = retune_gain,
       cv_predictions   = cv_predictions,
       test_metrics     = test_metrics,
       cv_metrics       = cv_metrics,
@@ -666,6 +692,7 @@ fit_single_config <- function(config_row,
       start_grid_size  = start_grid_size,
       bayes_iter       = bayes_iter,
       bayes_stop       = bayes_stop,
+      retune_moved     = retune_moved,
       cv_predictions   = NULL,
       test_metrics     = NULL,
       cv_metrics       = NULL,

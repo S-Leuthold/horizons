@@ -851,11 +851,12 @@ fit <- function(x,
 
     raised <- raised_budgets(member_configs$model, final_bayesian_iter, tuning$grid_size)
 
-    cat(paste0(
-      "\u2502  Bayesian: ", final_bayesian_iter,
-      if (cold_start) " iterations from a space-filling grid" else " iterations with warm-start",
-      if (!is.null(raised)) paste0(" (", raised, ")"), "\n"
-    ))
+    cat(paste0("\u2502  ", if (cold_start) {
+      paste0("Bayesian: ", final_bayesian_iter, " iterations from a space-filling grid",
+             if (!is.null(raised)) paste0(" (", raised, ")"))
+    } else {
+      retune_header_line(final_bayesian_iter, raised, control$no_improve)
+    }, "\n"))
 
     ## A parallel fit runs the members' folds on the daemons
     for (line in parallel_tree_lines(if (allow_par) "resamples" else "sequential", n_daemons,
@@ -1008,6 +1009,12 @@ fit <- function(x,
         ))
 
       }
+
+      ## Whether the re-tune kept evaluate()'s parameters, and by how much
+      ## its best candidate led them
+      retune_text <- retune_member_line(config_result$retune_moved, config_result$retune_gain)
+
+      if (!is.null(retune_text)) cat(paste0("\u2502  ", cont, "\u251C\u2500 ", retune_text, "\n"))
 
       if (config_result$status == "success") {
 
@@ -1282,6 +1289,11 @@ fit <- function(x,
 
   if (!is.null(stop_line)) log_note(collector, "{stop_line}")
 
+  ## How many members kept evaluate()'s parameters: a note, and a line below
+  kept_line <- retune_kept_line(results_tibble$retune_moved)
+
+  if (!is.null(kept_line)) log_note(collector, "{kept_line}")
+
   ## What the run reported goes on the object's log before it is certified
   x$log <- log_close(collector, x$log)
 
@@ -1308,6 +1320,7 @@ fit <- function(x,
     ))
 
     if (!is.null(stop_line)) cat(paste0("\u2502  \u251C\u2500 ", stop_line, "\n"))
+    if (!is.null(kept_line)) cat(paste0("\u2502  \u251C\u2500 ", kept_line, "\n"))
 
     if (n_degraded > 0) {
 
@@ -1437,11 +1450,80 @@ member_row <- function(res) {
     start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
     bayes_iter      = as.integer(res$bayes_iter %||% NA_integer_),
     bayes_stop      = as.character(res$bayes_stop %||% NA_character_),
+    retune_moved    = as.logical(res$retune_moved %||% NA),
     error_message   = res$error_message %||% NA_character_,
     class           = res$class %||% NA_character_,
     trace           = list(res$trace),
     warnings        = list(res$warnings),
     runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## The re-tune's lines in the tree and the log
+## ---------------------------------------------------------------------------
+
+#' The tree header's line for the re-tune on the evaluate() path
+#'
+#' @param iter Integer. `final_bayesian_iter`.
+#' @param raised Character(1) or `NULL`: [raised_budgets()]'s words.
+#' @param no_improve The stopping rule's limit, or `FALSE`.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+retune_header_line <- function(iter, raised, no_improve) {
+
+  paste0(
+    "Re-tune: from a grid centred on evaluate()'s hyperparameters, ", iter, " iterations",
+    if (!is.null(raised)) paste0(" (", raised, ")"),
+    if (!isFALSE(no_improve)) paste0(", stopping after ", no_improve, " without improvement"),
+    "; evaluate()'s are kept unless a candidate is better by more than its standard error"
+  )
+
+}
+
+#' A member's tree line on what its re-tune kept
+#'
+#' @param moved,gain The member's `retune_moved` and `retune_gain`.
+#' @return Character(1), or `NULL` with nothing to keep (`moved` missing or
+#'   `NA`).
+#' @keywords internal
+#' @noRd
+retune_member_line <- function(moved, gain) {
+
+  if (is.null(moved) || is.na(moved)) return(NULL)
+
+  gain <- gain %||% NA_real_
+  by   <- if (!is.na(gain)) paste0(" by ", signif(gain, 2), " of its standard errors")
+
+  if (moved) {
+    return(paste0("Re-tune: moved to ", if (is.null(by)) "its best candidate" else paste0("a candidate better", by)))
+  }
+
+  if (isTRUE(gain == 0)) return("Re-tune: kept evaluate()'s hyperparameters, which no candidate beat")
+
+  paste0("Re-tune: kept evaluate()'s hyperparameters", if (!is.null(by)) paste0("; the best candidate was better", by))
+
+}
+
+#' The run's line on how many members kept evaluate()'s hyperparameters
+#'
+#' @param moved Logical: each member's `retune_moved`, `NA` where its
+#'   re-tune had no parameters of `evaluate()`'s to keep.
+#' @return Character(1), or `NULL` when no member kept them.
+#' @keywords internal
+#' @noRd
+retune_kept_line <- function(moved) {
+
+  n_ran  <- sum(!is.na(moved))
+  n_kept <- sum(moved %in% FALSE)
+
+  if (n_kept == 0) return(NULL)
+
+  cli::format_inline(
+    "The re-tune kept evaluate()'s hyperparameters for {n_kept} of {n_ran} member{?s}: a candidate replaces them only when its CV RMSE is lower by more than its standard error."
   )
 
 }

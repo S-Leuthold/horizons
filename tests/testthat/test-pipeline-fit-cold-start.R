@@ -107,12 +107,18 @@ describe("fit() - cold start from one configuration (#45)", {
     expect_false(cold$models$results$warm_start)
     expect_identical(cold$models$results$start_grid_size, 2L)
 
+    ## No parameters of evaluate()'s to keep: the best candidate, and no
+    ## record of a move
+    expect_identical(cold$models$results$retune_moved, NA)
+    expect_false(any(grepl("Re-tune:", cold_out, fixed = TRUE)))
+
   })
 
   it("records a warm start on the evaluate() path and prints no space-filling note", {
 
     expect_true(warm$models$results$warm_start)
     expect_false(any(grepl("space-filling", warm_out, fixed = TRUE)))
+    expect_false(is.na(warm$models$results$retune_moved))
 
   })
 

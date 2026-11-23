@@ -2725,6 +2725,7 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
                    start_grid_size = "integer",
                    bayes_iter      = "integer",
                    bayes_stop      = "character",
+                   retune_moved    = "logical",
                    error_message   = "character",
                    class           = "character",
                    trace           = "list",

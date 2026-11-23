@@ -460,6 +460,42 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("says per member whether its re-tune kept evaluate()'s hyperparameters, and counts those that did among the members with them to keep", {
+
+    ## Three members: one kept evaluate()'s parameters, one moved off them,
+    ## and one had none to keep (its re-tune chose with no incumbent)
+    obj   <- four_members()
+    calls <- 0L
+    out   <- utils::capture.output(
+      fitted <- testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 3L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(verbose = TRUE))),
+        fit_single_config = function(config_row, ...) {
+          calls  <<- calls + 1L
+          member <- fitted_member(config_row)
+          member$retune_moved <- c(FALSE, TRUE, NA)[calls]
+          member$retune_gain  <- c(0.4, 1.8, NA)[calls]
+          member
+        },
+        .package = "horizons"
+      )
+    )
+
+    expect_identical(fitted$models$results$retune_moved, c(FALSE, TRUE, NA))
+
+    expect_identical(sum(grepl("Re-tune: kept evaluate()'s hyperparameters; the best candidate was better by 0.4 of its standard errors",
+                               out, fixed = TRUE)), 1L)
+    expect_identical(sum(grepl("Re-tune: moved to a candidate better by 1.8 of its standard errors",
+                               out, fixed = TRUE)), 1L)
+    expect_identical(sum(grepl("\u251C\u2500 Re-tune:", out, fixed = TRUE)), 2L)
+
+    line <- paste0("The re-tune kept evaluate()'s hyperparameters for 1 of 2 members: a candidate replaces them ",
+                   "only when its CV RMSE is lower by more than its standard error.")
+    expect_true(paste0("\u2502  \u251C\u2500 ", line) %in% out)
+    expect_true(line %in% fitted$log$message[fitted$log$verb == "fit" & fitted$log$type == "note"])
+
+  })
+
   it("records each member's failure class, backtrace and warnings, and warns partial_failure once", {
 
     obj <- fit_obj(2L)

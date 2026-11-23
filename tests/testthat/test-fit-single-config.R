@@ -84,7 +84,7 @@ make_fit_best_params <- function(mtry = 5L, trees = 200L, min_n = 5L) {
 ## Expected fields in the output list
 EXPECTED_FIT_FIELDS <- c(
   "config_id", "status", "degraded", "degraded_reason",
-  "fitted_workflow", "best_params",
+  "fitted_workflow", "best_params", "retune_moved",
   "cv_predictions", "test_metrics", "cv_metrics",
   "uq", "warnings", "error_message", "runtime_secs"
 )
@@ -151,6 +151,10 @@ describe("fit_single_config() - success path", {
     expect_true(!is.na(result$degraded))
     expect_false(result$degraded)
     expect_true(is.na(result$degraded_reason))
+
+    ## It started from evaluate()'s parameters, so it records whether it
+    ## kept them
+    expect_true(is.logical(result$retune_moved) && !is.na(result$retune_moved))
 
   })
 
@@ -1328,6 +1332,160 @@ describe("fit_single_config() - the re-tune's stopping rule", {
 
   })
 
+  it("keeps whether the re-tune moved off evaluate()'s parameters on a member that fails after its choice", {
+
+    setup <- make_fit_setup()
+    local_mocked_bindings(tune_warmstart_bayes = function(...) {
+      list(tune_results = NULL, best_params = NULL, moved = TRUE, gain = 2, grid = NULL,
+           n_dropped = 0L, bayes_iter = 4L, bayes_stop = "budget")
+    })
+
+    member <- fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 3L,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    expect_identical(member$status, "failed")
+    expect_true(member$retune_moved)
+
+  })
+
+})
+
+
+## =========================================================================
+## The re-tune's choice: evaluate()'s point unless a candidate beats it
+## =========================================================================
+## The starting grid's fold RMSEs are set by hand (set_fold_rmse()), so each
+## test fixes how far the best candidate leads evaluate()'s point, in the
+## best's standard errors (LEAD_SE).
+
+describe("fit_single_config() - the re-tune keeps evaluate()'s hyperparameters unless a candidate beats them by the margin", {
+
+  ## rf's starting grid of three points: the first candidate other than
+  ## evaluate()'s point leads it by `lead` of its standard errors, and the
+  ## third trails both. The search returns its starting grid, so the choice
+  ## is made on these scores.
+  run_scored <- function(lead) {
+
+    setup     <- fsc()$setup
+    ## evaluate()'s mtry of 5, clamped to the two predictors the raw step keeps
+    incumbent <- tibble::tibble(mtry = 2L, min_n = 5L)
+    other     <- NULL
+
+    local_hand_scored_grid(function(row) {
+      point <- row[names(incumbent)]
+      if (point_matches(incumbent, point)) return(LEAD_BASE + lead * LEAD_SE)
+      if (is.null(other)) other <<- point
+      if (point_matches(other, point)) LEAD_BASE else LEAD_BASE + 10
+    })
+    local_mocked_bindings(bayes_search = function(...) {
+      list(results = list(...)$initial, n_dropped = 0L, n_iter = 1L, stop = "budget")
+    })
+
+    result <- fit_single_config(
+      config_row          = make_fit_config(),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(),
+      final_bayesian_iter = 1L,
+      grid_size           = 3L,
+      seed                = 42L
+    )
+
+    list(result = result, incumbent = incumbent, other = other)
+
+  }
+
+  it("keeps evaluate()'s point when the best candidate leads it by less than its standard error", {
+
+    got <- run_scored(0.5)
+
+    expect_identical(got$result$status, "success")
+    expect_identical(got$result$best_params[c("mtry", "min_n")], got$incumbent)
+    expect_false(got$result$retune_moved)
+    expect_equal(got$result$retune_gain, 0.5)
+
+  })
+
+  it("moves to the best candidate when it leads evaluate()'s point by more", {
+
+    got <- run_scored(2)
+
+    expect_identical(got$result$status, "success")
+    expect_identical(got$result$best_params[c("mtry", "min_n")], got$other)
+    expect_false(isTRUE(all(got$other == got$incumbent)))
+    expect_true(got$result$retune_moved)
+    expect_equal(got$result$retune_gain, 2)
+
+  })
+
+  ## A plsr member's counts are gridded whole: 20 wavenumbers keep 12
+  ## predictors, so num_comp takes 1 to 12. Count 3 is the best, `incumbent`
+  ## scores as `scores` gives, and every other count trails.
+  run_whole <- function(num_comp, scored_at, scores) {
+
+    setup <- make_fit_setup(n_wn = 20)
+
+    local_hand_scored_grid(function(row) {
+      if (row$num_comp == 3L) LEAD_BASE else if (row$num_comp == scored_at) scores else LEAD_BASE + 10
+    })
+
+    fit_single_config(
+      config_row          = make_fit_config(model = "plsr"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = tibble::tibble(num_comp = num_comp),
+      final_bayesian_iter = 1L,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+  }
+
+  it("keeps evaluate()'s count on a space gridded whole, as on a search", {
+
+    result <- run_whole(5L, 5L, LEAD_BASE + 0.5 * LEAD_SE)
+
+    expect_identical(result$status, "success")
+    expect_identical(result$start_grid_size, 12L)
+    expect_identical(result$best_params$num_comp, 5L)
+    expect_false(result$retune_moved)
+
+  })
+
+  it("keeps evaluate()'s count clamped into fit()'s range when it lies outside it", {
+
+    ## evaluate() chose 30 components; fit()'s 12 predictors cap the range
+    result <- run_whole(30L, 12L, LEAD_BASE + 0.5 * LEAD_SE)
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params$num_comp, 12L)
+    expect_false(result$retune_moved)
+
+  })
+
+  it("takes the best candidate, saying why, when evaluate()'s point was not scored on every fold (#101)", {
+
+    result <- run_whole(5L, 5L, c(LEAD_BASE[1:2], NA))
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params$num_comp, 3L)
+    expect_true(result$retune_moved)
+    expect_identical(result$retune_gain, NA_real_)
+    expect_true(paste0("evaluate()'s hyperparameters were not scored on every fold of fit()'s, ",
+                       "so the re-tune's best candidate was taken.") %in% result$warnings)
+
+  })
+
 })
 
 
@@ -1397,7 +1555,9 @@ describe("fit_single_config() - a PLS member's warnings when one fit serves ever
 ## The re-tune's grid is fixed, with mtry = 50 above the predictors: ranger
 ## warns for those candidates only. The choice is fixed at mtry = 2, and the
 ## recipe warns at every prep. `stages` stands in for the reading of tune's
-## grid schedule when given.
+## grid schedule when given. A cold start, so the choice is the best
+## candidate's, which select_complete() gives, with no point of evaluate()'s
+## to keep.
 
 describe("fit_single_config() - the warnings of the chosen candidate (#109)", {
 
@@ -1428,7 +1588,7 @@ describe("fit_single_config() - the warnings of the chosen candidate (#109)", {
       split_F             = setup$split_F,
       cv_resamples        = setup$folds,
       role_map            = setup$role_map,
-      best_params_eval    = make_fit_best_params(),
+      best_params_eval    = NULL,
       final_bayesian_iter = 0L,
       grid_size           = 4L,
       seed                = 42L

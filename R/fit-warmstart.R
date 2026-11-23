@@ -315,8 +315,10 @@ point_matches <- function(point, grid) {
 #' `with_unit_seed()`), with its seed given to the engine and to the search,
 #' so the search does not depend on what the grid stage drew, nor on the
 #' axis it ran on (#151).
-#' 3. Choose the hyperparameters by RMSE among the candidates scored on every
-#'    fold (`select_complete()`).
+#' 3. Choose the hyperparameters among the candidates scored on every fold:
+#'    `incumbent`, `evaluate()`'s point, unless the best candidate's CV RMSE
+#'    is lower than its by more than the best's standard error, and with no
+#'    incumbent the best by RMSE (`choose_member_params()`).
 #'
 #' @param workflow A tidymodels workflow, not fitted: the member's model
 #'   alone, as [fit_single_config()] gives it, over prepped folds.
@@ -324,6 +326,9 @@ point_matches <- function(point, grid) {
 #'   once.
 #' @param initial_grid The starting grid, from [build_warmstart_grid()].
 #' @param param_set Finalized `parameters` object.
+#' @param incumbent Single-row tibble of `evaluate()`'s tuned parameters,
+#'   clamped into `param_set`'s ranges and among `initial_grid`'s points, or
+#'   `NULL` (a cold start, or parameters that were unusable). Default `NULL`.
 #' @param bayesian_iter Integer. Bayesian iterations after grid. 0 = grid only.
 #' @param no_improve A whole number, or `FALSE`: the Bayesian search's
 #'   stopping rule (`bayes_search()`).
@@ -335,18 +340,20 @@ point_matches <- function(point, grid) {
 #'   its phases' units.
 #'
 #' @return List with `tune_results` (the result the hyperparameters were
-#'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
-#'   (`initial_grid`, which the member reads its notes through, #109),
-#'   `n_dropped` (the candidates the Bayesian search proposed and tune
-#'   dropped, scored on no fold), and `bayes_iter` and `bayes_stop`, the
-#'   iterations the search began and why it ended (`bayes_search()`'s
-#'   `n_iter` and `stop`; `NA` with no Bayesian search).
+#'   chosen from), `best_params` (single-row tibble, with `.config`), `moved`
+#'   and `gain` (`choose_member_params()`'s), `grid` (`initial_grid`, which
+#'   the member reads its notes through, #109), `n_dropped` (the candidates
+#'   the Bayesian search proposed and tune dropped, scored on no fold), and
+#'   `bayes_iter` and `bayes_stop`, the iterations the search began and why
+#'   it ended (`bayes_search()`'s `n_iter` and `stop`; `NA` with no Bayesian
+#'   search).
 #'
 #' @keywords internal
 tune_warmstart_bayes <- function(workflow,
                                  cv_resamples,
                                  initial_grid,
                                  param_set,
+                                 incumbent = NULL,
                                  bayesian_iter,
                                  no_improve = BAYES_NO_IMPROVE_DEFAULT,
                                  metric_set,
@@ -422,16 +429,79 @@ tune_warmstart_bayes <- function(workflow,
 
   }
 
-  ## --- Phase 3: Select best -----------------------------------------------
+  ## --- Phase 3: evaluate()'s point, or a candidate past the margin --------
+
+  choice <- unit_step("select_best", choose_member_params(tune_results, incumbent, n_folds, debug))
 
   list(
     tune_results = tune_results,
-    best_params  = unit_step("select_best", select_complete(tune_results, "rmse", n_folds, debug)),
+    best_params  = choice$best_params,
+    moved        = choice$moved,
+    gain         = choice$gain,
     grid         = initial_grid,
     n_dropped    = n_dropped,
     bayes_iter   = bayes_iter,
     bayes_stop   = bayes_stop
   )
+
+}
+
+
+#' The re-tune's choice: evaluate()'s point, unless a candidate beats it
+#'
+#' @description
+#' With `evaluate()`'s point (`incumbent`) among the candidates scored on
+#' every fold, it is kept unless the best of them has a CV RMSE lower than
+#' the point's by more than `margin` of the best's standard errors:
+#' `tune::select_by_one_std_err()`'s bound, the best's mean plus its
+#' `std_err`, with the point in the place of the simplest model
+#' (`RETUNE_MARGIN_SE`). The point is found among them by its tuned
+#' parameters ([point_matches()]), on the search and on a space gridded
+#' whole alike. With no incumbent (a cold start, or parameters that were
+#' unusable), or one not scored on every fold (#101), the best candidate is
+#' chosen, as [select_complete()] chooses it.
+#'
+#' @param results The tune result the hyperparameters are chosen from.
+#' @param incumbent Single-row tibble of `evaluate()`'s tuned parameters,
+#'   clamped ([clamp_best_params()]), or `NULL`.
+#' @param n_folds Integer(1). The folds drawn.
+#' @param debug Logical(1).
+#' @param margin Numeric(1). How many of the best candidate's standard
+#'   errors its lead must exceed.
+#' @return List: `best_params` (single-row tibble of the chosen candidate's
+#'   parameters and `.config`, as [select_complete()] returns it), `moved`
+#'   (`FALSE` when the incumbent is kept, `TRUE` when another candidate is
+#'   chosen, `NA` with no incumbent) and `gain` (the best candidate's lead
+#'   over the incumbent in the best's standard errors, 0 when the incumbent
+#'   is the best; `NA` with no incumbent, and with one not scored on every
+#'   fold, which `moved` `TRUE` tells apart).
+#' @keywords internal
+#' @noRd
+choose_member_params <- function(results, incumbent, n_folds, debug = FALSE,
+                                 margin = RETUNE_MARGIN_SE) {
+
+  if (is.null(incumbent)) {
+
+    return(list(best_params = select_complete(results, "rmse", n_folds, debug),
+                moved = NA, gain = NA_real_))
+
+  }
+
+  ranked <- rank_complete(results, "rmse", n_folds, debug)
+  params <- c(tune::.get_tune_parameter_names(results), ".config")
+  best   <- ranked[1, , drop = FALSE]
+  at     <- which(point_matches(incumbent, ranked[names(incumbent)]))
+
+  ## Not scored on every fold, so no part of the choice (#101)
+  if (length(at) == 0) return(list(best_params = best[params], moved = TRUE, gain = NA_real_))
+
+  kept  <- ranked[at[1], , drop = FALSE]
+  lead  <- kept$mean - best$mean
+  moved <- lead > margin * best$std_err
+
+  list(best_params = if (moved) best[params] else kept[params],
+       moved       = moved,
+       gain        = if (lead == 0) 0 else lead / best$std_err)
 
 }
 
