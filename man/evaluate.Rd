@@ -56,9 +56,9 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 through \code{isolate} and \code{no_improve}, part of what it computes (see
 \code{\link[=control_horizons]{control_horizons()}}). \code{evaluate()} reads \code{allow_par},
 \code{parallelize_over}, \code{output_dir}, \code{verbose}, \code{debug}, \code{breaker},
-\code{keep_traces}, \code{isolate}, \code{inner_daemons} and \code{no_improve}, and refuses
-any other field that is set. The control it ran with, defaults filled
-in, is recorded as \code{evaluation$control}.}
+\code{keep_traces}, \code{isolate}, \code{inner_daemons}, \code{threads} and \code{no_improve},
+and refuses any other field that is set. The control it ran with,
+defaults filled in, is recorded as \code{evaluation$control}.}
 }
 \value{
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with
@@ -176,7 +176,11 @@ With fewer than two daemons connected it runs sequentially and warns, with
 class \code{horizons_warning_substitution}, naming the call that would set
 them; the warning is also a row of the object's \code{log}. Without
 \code{allow_par}, \code{evaluate()} runs in the calling process and never reads the
-daemons. It never sets, resizes or resets them; on the configs axis it can
+daemons; there \code{rf}, \code{xgboost} and \code{lightgbm} fit on
+\code{control_horizons(threads = )} threads, one by default, and the results
+are the same on any number. On the daemons each fits on one thread, so the
+cores a parallel run uses are the daemons set, and \code{threads} above one
+with \code{allow_par} is refused. It never sets, resizes or resets them; on the configs axis it can
 start daemons of its own for a long configuration's folds, on that
 configuration's daemon and within the count set (see "Inner daemons"
 below).

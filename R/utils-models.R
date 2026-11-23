@@ -5,7 +5,7 @@
 #' `MODEL_SPECS`: parsnip's model function `fn`, called with the row's
 #' `fixed` arguments and each of its `tuned` arguments as `tune::tune()`; the
 #' engine `model_engine()` names, with the row's `engine_args` and its
-#' thread argument (`threads$argument`) at `ENGINE_THREADS`; and the
+#' thread argument (`threads$argument`) at `threads`; and the
 #' regression mode. Each argument is captured as parsnip captures one written
 #' in the call (`500`, `tune::tune()`, `"impurity"`). Used by
 #' `evaluate_single_config()` and `fit_single_config()` to build the workflow
@@ -17,10 +17,13 @@
 #' @param isolate Logical. Whether a model `MODEL_SPECS` marks `isolate`
 #'   takes its engine's isolated twin, which fits each model in a process of
 #'   its own (`model_engine()`); `control_horizons(isolate = )`.
+#' @param threads A whole number. The threads an engine with a thread
+#'   argument fits on: `ENGINE_THREADS` (one) on the daemons, and
+#'   `control_horizons(threads = )` on a run in the session.
 #'
 #' @return A `parsnip` model specification with `mode = "regression"`.
 #' @keywords internal
-define_model_spec <- function(model, isolate = TRUE) {
+define_model_spec <- function(model, isolate = TRUE, threads = ENGINE_THREADS) {
 
   row <- MODEL_SPECS[[model]]
 
@@ -33,9 +36,9 @@ define_model_spec <- function(model, isolate = TRUE) {
   tuned <- rep(list(quote(tune::tune())), length(row$tuned))
   names(tuned) <- row$tuned
 
-  ## The engine's thread argument at the package's count, which an engine
-  ## left to its own default may set to every core (bonsai's lightgbm does)
-  threads <- if (!is.null(row$threads$argument)) stats::setNames(list(ENGINE_THREADS), row$threads$argument)
+  ## The engine's thread argument at the count given, which an engine left
+  ## to its own default may set to every core (bonsai's lightgbm does)
+  threads <- if (!is.null(row$threads$argument)) stats::setNames(list(as.integer(threads)), row$threads$argument)
 
   ## The model's call is put together from the row and evaluated here, so
   ## parsnip captures every argument as the expression the row holds
@@ -75,22 +78,24 @@ engine_spec <- function(engine) {
 
 }
 
-#' The engines' thread options, at the package's thread count
+#' The engines' thread options, at a thread count
 #'
 #' @description
 #' Each `option` the rows of `MODEL_SPECS` declare under `threads`, as a
 #' named list for [options()]. The one reader of them, for every place that
-#' pins threads: [pin_parent_threads()], the configs-axis worker,
-#' `.onLoad()` and [isolated_fit()].
+#' sets threads: [pin_parent_threads()], the configs-axis worker,
+#' `.onLoad()` and [isolated_fit()] at the package's count, and a sequential
+#' `evaluate()` or `fit()` at `control_horizons(threads = )`.
 #'
-#' @return Named list: option name -> `ENGINE_THREADS`.
+#' @param threads A whole number: `ENGINE_THREADS` by default.
+#' @return Named list: option name -> `threads`, as an integer.
 #' @keywords internal
 #' @noRd
-engine_thread_options <- function() {
+engine_thread_options <- function(threads = ENGINE_THREADS) {
 
   option <- unique(unlist(lapply(MODEL_SPECS, function(row) row$threads$option), use.names = FALSE))
 
-  stats::setNames(rep(list(ENGINE_THREADS), length(option)), option)
+  stats::setNames(rep(list(as.integer(threads)), length(option)), option)
 
 }
 

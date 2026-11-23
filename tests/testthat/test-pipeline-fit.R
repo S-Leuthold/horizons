@@ -285,6 +285,47 @@ describe("fit() - its control", {
 
   })
 
+  it("fits its members on control_horizons(threads = ) threads, with ranger's option at that count, and on one without it (#114)", {
+
+    withr::local_options(ranger.num.threads = 7L)
+    base <- mfo()
+
+    ## What each member is sent, and the option as it is fitted
+    sent <- function(control) {
+      seen <- NULL
+      local_mocked_bindings(fit_single_config = function(..., threads) {
+        seen <<- c(threads = threads, option = getOption("ranger.num.threads"))
+        rlang::abort("stop", class = "member_reached")
+      })
+      expect_error(suppressWarnings(fit(base, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, control = control)),
+                   class = "member_reached")
+      seen
+    }
+
+    expect_equal(sent(control_horizons(threads = 3)), c(threads = 3, option = 3))
+    expect_equal(sent(control_horizons()), c(threads = 1, option = 1))
+    expect_identical(getOption("ranger.num.threads"), 7L)
+
+    ## And a member fitted on them: rf's engine argument in its workflow
+    obj <- make_fit_object(n_configs = 1, models = "rf")
+    obj$config$tuning$final_bayesian_iter <- 0L
+    res <- suppressWarnings(fit(obj, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                                control = control_horizons(threads = 2)))
+    spec <- workflows::extract_spec_parsnip(res$models$workflows[[1]])
+    expect_identical(rlang::eval_tidy(spec$eng_args$num.threads), 2L)
+
+  })
+
+  it("refuses threads above one with allow_par, before anything is fitted (#114)", {
+
+    obj <- mfo()
+    local_mocked_bindings(fit_single_config = function(...) stop("a member was fitted"))
+
+    expect_error(fit(obj, n_best = 1L, control = control_horizons(allow_par = TRUE, threads = 2)),
+                 "is for a run in this session", class = "horizons_error_input")
+
+  })
+
   it("gates UQ and AD on the calibration rows it is given as the minimum", {
 
     ## 60 rows: 48 in Split F's training part, 10 of them calibration rows

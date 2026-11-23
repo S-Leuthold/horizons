@@ -149,6 +149,20 @@ describe("define_model_spec()", {
 
   })
 
+  it("sets each engine's thread argument to the count it is given, and one by default", {
+
+    ## rf, xgboost and lightgbm, the rows with a thread argument
+    with_arg <- Filter(function(model) !is.null(MODEL_SPECS[[model]]$threads$argument), VALID_MODELS)
+    expect_setequal(with_arg, c("rf", "xgboost", "lightgbm"))
+
+    for (model in with_arg) {
+      arg <- MODEL_SPECS[[model]]$threads$argument
+      expect_identical(rlang::eval_tidy(define_model_spec(model, threads = 4)$eng_args[[arg]]), 4L, label = model)
+      expect_identical(rlang::eval_tidy(define_model_spec(model)$eng_args[[arg]]), 1L, label = model)
+    }
+
+  })
+
   it("refuses a model the table does not hold, as an internal error", {
 
     ## An unknown model is refused at every verb's door first
@@ -173,6 +187,12 @@ describe("engine_thread_options()", {
     local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
 
     expect_identical(engine_thread_options(), list(ranger.num.threads = 1L, horizons.test.threads = 1L))
+
+  })
+
+  it("gives them a count it is given, as a whole number", {
+
+    expect_identical(engine_thread_options(4), list(ranger.num.threads = 4L))
 
   })
 

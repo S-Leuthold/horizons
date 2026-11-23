@@ -44,9 +44,9 @@
 #'   through `isolate` and `no_improve`, part of what it computes (see
 #'   [control_horizons()]). `evaluate()` reads `allow_par`,
 #'   `parallelize_over`, `output_dir`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `isolate`, `inner_daemons` and `no_improve`, and refuses
-#'   any other field that is set. The control it ran with, defaults filled
-#'   in, is recorded as `evaluation$control`.
+#'   `keep_traces`, `isolate`, `inner_daemons`, `threads` and `no_improve`,
+#'   and refuses any other field that is set. The control it ran with,
+#'   defaults filled in, is recorded as `evaluation$control`.
 #'
 #' @section The Bayesian search's stopping rule:
 #' Each configuration's Bayesian search stops once `no_improve` iterations in
@@ -125,7 +125,11 @@
 #' class `horizons_warning_substitution`, naming the call that would set
 #' them; the warning is also a row of the object's `log`. Without
 #' `allow_par`, `evaluate()` runs in the calling process and never reads the
-#' daemons. It never sets, resizes or resets them; on the configs axis it can
+#' daemons; there `rf`, `xgboost` and `lightgbm` fit on
+#' `control_horizons(threads = )` threads, one by default, and the results
+#' are the same on any number. On the daemons each fits on one thread, so the
+#' cores a parallel run uses are the daemons set, and `threads` above one
+#' with `allow_par` is refused. It never sets, resizes or resets them; on the configs axis it can
 #' start daemons of its own for a long configuration's folds, on that
 #' configuration's daemon and within the count set (see "Inner daemons"
 #' below).
@@ -524,6 +528,9 @@ evaluate <- function(x,
 
   }
 
+  ## threads is for a run in this session (#114)
+  check_threads_sequential(control)
+
   collector <- log_open("evaluate")
 
   ## -----------------------------------------------------------------------
@@ -712,6 +719,14 @@ evaluate <- function(x,
 
     unpin_threads <- pin_parent_threads()
     on.exit(unpin_threads(), add = TRUE)
+
+  } else {
+
+    ## A run in this session fits the engines with a thread argument on
+    ## control_horizons(threads = ) threads (#114), and their options
+    ## (ranger's, which it reads to predict) match while it runs
+    restore_threads <- options(engine_thread_options(control$threads))
+    on.exit(options(restore_threads), add = TRUE)
 
   }
 
@@ -1315,6 +1330,7 @@ evaluate <- function(x,
         debug           = debug,
         keep_traces     = control$keep_traces,
         isolate         = control$isolate,
+        threads         = if (axis$axis == "sequential") control$threads else ENGINE_THREADS,
         fold_entries    = fold_entries
       ), results_so_far(results_list), output_dir, daemons = axis$tune_allow_par)
 

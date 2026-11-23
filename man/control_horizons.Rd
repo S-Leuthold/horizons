@@ -19,6 +19,7 @@ control_horizons(
   min_degradation_rows = NULL,
   isolate = NULL,
   inner_daemons = NULL,
+  threads = NULL,
   no_improve = NULL,
   min_resemblance_rows = NULL
 )
@@ -101,6 +102,12 @@ BLAS runs on one thread, which \code{evaluate()} sets on its daemons through
 floating-point rounding, which the run says (see \code{\link[=evaluate]{evaluate()}}'s
 "Inner daemons"). \code{FALSE} runs every configuration on one daemon.
 Default \code{getOption("horizons.inner_daemons", TRUE)}. \code{\link[=evaluate]{evaluate()}}.}
+
+\item{threads}{A whole number. The threads \code{rf}, \code{xgboost} and \code{lightgbm}
+fit and predict on when the verb runs in this session; the results are
+the same on any number. A run with \code{allow_par = TRUE} fits each on one
+thread a daemon, since the daemons set are its cores, and refuses a
+\code{threads} above 1. Default 1. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
 
 \item{no_improve}{A whole number of at least 1, or \code{FALSE}. The Bayesian
 iterations without improvement on the best after which a search stops:

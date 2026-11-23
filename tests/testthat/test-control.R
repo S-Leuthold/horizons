@@ -48,6 +48,7 @@ describe("control_horizons()", {
       min_degradation_rows = -5,
       isolate              = "no",
       inner_daemons        = 2,
+      threads              = 0,
       no_improve           = 0,
       min_resemblance_rows = NA_real_
     )
@@ -61,6 +62,36 @@ describe("control_horizons()", {
       expect_match(conditionMessage(err), field, fixed = TRUE, label = field)
 
     }
+
+  })
+
+  it("takes threads as a whole number of at least 1, for evaluate() and fit(), defaulting to one", {
+
+    expect_identical(control_horizons(threads = 4)$threads, 4)
+
+    for (bad in list(0, 2.5, TRUE, NA_integer_, c(2, 4), "4")) {
+      expect_error(control_horizons(threads = bad), "threads", class = "horizons_error_input",
+                   label = deparse1(bad))
+    }
+
+    expect_identical(CONTROL_FIELDS$threads$verbs, c("evaluate", "fit"))
+    expect_identical(resolve_control(NULL, "evaluate")$threads, ENGINE_THREADS)
+    expect_identical(resolve_control(NULL, "fit")$threads, 1L)
+    expect_error(resolve_control(control_horizons(threads = 2), "ensemble"), "threads",
+                 class = "horizons_error_input")
+
+  })
+
+  it("refuses threads above one on a parallel run, and takes them on a sequential one", {
+
+    err <- expect_error(check_threads_sequential(resolve_control(control_horizons(allow_par = TRUE, threads = 4), "fit")),
+                        class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "`control_horizons(threads = 4)` is for a run in this session", fixed = TRUE)
+    expect_match(msg, "set more daemons with `mirai::daemons(n)`", fixed = TRUE)
+
+    expect_null(check_threads_sequential(resolve_control(control_horizons(threads = 4), "evaluate")))
+    expect_null(check_threads_sequential(resolve_control(control_horizons(allow_par = TRUE), "evaluate")))
 
   })
 

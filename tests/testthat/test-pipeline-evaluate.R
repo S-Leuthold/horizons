@@ -3640,6 +3640,103 @@ describe("evaluate() - the circuit breaker", {
 
 })
 
+## =========================================================================
+## Threads on a run in this session (#114)
+## =========================================================================
+
+describe("evaluate() - threads on a run in this session (#114)", {
+
+  ## What each configuration's spec was built with, and ranger's option as
+  ## it was built
+  spec_threads <- function(obj, control) {
+    seen <- list()
+    real <- define_model_spec
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+      seen[[length(seen) + 1L]] <<- list(threads = threads, option = getOption("ranger.num.threads"))
+      real(model, isolate, threads)
+    })
+    suppressWarnings(evaluate(obj, seed = 42L, control = control))
+    seen
+  }
+
+  it("builds each configuration's spec on control_horizons(threads = ) threads, with ranger's option at that count while it runs, and on one without it", {
+
+    withr::local_options(ranger.num.threads = 7L)
+    obj <- make_eval_object(n = 60, n_configs = 1)
+
+    four <- spec_threads(obj, control_horizons(threads = 4))
+    one  <- spec_threads(obj, control_horizons())
+
+    expect_gt(length(four), 0L)
+    expect_true(all(vapply(four, function(x) x$threads == 4 && identical(x$option, 4L), logical(1))))
+    expect_gt(length(one), 0L)
+    expect_true(all(vapply(one, function(x) x$threads == 1 && identical(x$option, 1L), logical(1))))
+
+    ## The session's own, once each run is over
+    expect_identical(getOption("ranger.num.threads"), 7L)
+
+  })
+
+  it("leaves the session's OpenMP and BLAS threads as they are on a run in the session, whatever threads is", {
+
+    skip_if_not_installed("RhpcBLASctl")
+
+    ## Raised first, so a run that pinned them to one would show it: threads
+    ## is the engines' own count, and BLAS is pinned only where a parallel
+    ## run fits (pin_parent_threads(), prepare_worker())
+    old_omp <- RhpcBLASctl::omp_get_max_threads()
+    withr::defer(RhpcBLASctl::omp_set_num_threads(old_omp))
+    RhpcBLASctl::omp_set_num_threads(2L)
+    skip_if_not(RhpcBLASctl::omp_get_max_threads() == 2L, "OpenMP's threads cannot be raised here")
+
+    seen <- NULL
+    real <- define_model_spec
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+      seen <<- c(threads = threads, omp = RhpcBLASctl::omp_get_max_threads())
+      real(model, isolate, threads)
+    })
+
+    suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                              control = control_horizons(threads = 4)))
+
+    expect_equal(seen, c(threads = 4, omp = 2))
+    expect_identical(RhpcBLASctl::omp_get_max_threads(), 2L)
+
+  })
+
+  it("refuses threads above one with allow_par, before anything is drawn", {
+
+    local_mocked_bindings(draw_eval_split = function(...) stop("the split was drawn"))
+
+    err <- expect_error(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                                 control = control_horizons(allow_par = TRUE, threads = 4)),
+                        class = "horizons_error_input")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "`control_horizons(threads = 4)` is for a run in this session",
+                 fixed = TRUE)
+
+  })
+
+  it("gives rf and xgboost the same results on one thread and on two (the tier, at fixture size)", {
+
+    skip_if_not_installed("xgboost")
+
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    obj$config$configs$model <- c("rf", "xgboost")
+
+    run  <- function(threads) {
+      suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(threads = threads)))$evaluation$results
+    }
+    one <- run(1)
+    two <- run(2)
+
+    expect_identical(one$status, c("success", "success"))
+    cols <- setdiff(names(one), "runtime_secs")
+    expect_identical(two[cols], one[cols])
+
+  })
+
+})
+
 ## On the resamples axis tune runs the folds on the daemons, and a death there
 ## is no error of tune's own: the connected daemons fall across the
 ## configuration. These mock the axis and the count; the two after them kill

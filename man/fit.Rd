@@ -56,9 +56,9 @@ recorded as \code{models$seed}, which \code{\link[=ensemble]{ensemble()}} takes.
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, and,
 through \code{isolate} and \code{no_improve}, part of what it computes (see
 \code{\link[=control_horizons]{control_horizons()}}). \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug},
-\code{breaker}, \code{keep_traces}, \code{isolate}, \code{no_improve}, \code{min_calib_rows},
-\code{min_ad_rows} and \code{min_degradation_rows}, and refuses any other field
-that is set. The control it ran with, defaults filled in, is recorded
+\code{breaker}, \code{keep_traces}, \code{isolate}, \code{threads}, \code{no_improve},
+\code{min_calib_rows}, \code{min_ad_rows} and \code{min_degradation_rows}, and refuses
+any other field that is set. The control it ran with, defaults filled in, is recorded
 as \code{models$control}.}
 }
 \value{
@@ -336,7 +336,11 @@ OOF pass on the \href{https://mirai.r-lib.org}{mirai} daemons the caller has set
 \code{future::plan()} is not used, and \code{fit()} never sets, resizes or resets
 the daemons. With fewer than two connected, \code{fit()} runs sequentially and
 warns, with class \code{horizons_warning_substitution}; the warning is also a
-row of the object's \code{log}. A daemon that dies during a member, read as
+row of the object's \code{log}. A run in this session fits \code{rf}, \code{xgboost} and
+\code{lightgbm} members on \code{control_horizons(threads = )} threads, one by
+default, and the results are the same on any number; on the daemons each
+fits on one, and \code{threads} above one with \code{allow_par} is refused, as in
+\code{\link[=evaluate]{evaluate()}}. A daemon that dies during a member, read as
 fewer daemons connected after it than before, stops the call with
 \code{horizons_error_systemic} and the members so far; so does one exiting
 under \code{maxtasks}, \code{idletime} or \code{walltime}, which the count cannot tell

@@ -556,7 +556,10 @@ describe("evaluate() - the parallel axis's setup", {
     expect_identical(sequential$manifest,
                      list(plan = "sequential", workers = 1L, axis = "sequential"))
 
-    expect_identical(c(two$inside, sequential$inside), c(1L, 7L))
+    ## One thread a daemon on the resamples axis; a run in this session sets
+    ## it to control_horizons(threads = ), one by default (#114). Either
+    ## way the session's own is back once the run is over
+    expect_identical(c(two$inside, sequential$inside), c(1L, 1L))
     expect_identical(getOption("ranger.num.threads"), 7L)
 
   })

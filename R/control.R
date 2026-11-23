@@ -94,7 +94,9 @@ control_check_off_or_count <- function(floor) {
 
 }
 
-control_check_chunk_size <- function(x, arg, call) {
+### A count of at least one: the neighbour search's targets per chunk, the
+### threads a sequential run's engines fit on
+control_check_count <- function(x, arg, call) {
 
   check_arg(rlang::check_number_whole, x, min = 1, arg = arg, call = call)
 
@@ -154,7 +156,7 @@ CONTROL_FIELDS <- list(
 
   chunk_size = list(
     default = function() SELECT_CHUNK_SIZE,
-    check   = control_check_chunk_size,
+    check   = control_check_count,
     verbs   = "select_training"
   ),
 
@@ -199,6 +201,16 @@ CONTROL_FIELDS <- list(
     option  = "horizons.inner_daemons",
     check   = control_check_bool,
     verbs   = "evaluate"
+  ),
+
+  ### The threads the engines with a thread argument fit on when the run is
+  ### sequential; on the daemons each fits on one, since the daemons set are
+  ### the cores the run is given. The results do not depend on it, so
+  ### evaluate() does not record it with a checkpoint's settings
+  threads = list(
+    default = function() ENGINE_THREADS,
+    check   = control_check_count,
+    verbs   = c("evaluate", "fit")
   ),
 
   ### Changes what a run computes, as isolate does for cubist, so evaluate()
@@ -305,6 +317,11 @@ CONTROL_FIELDS <- list(
 #'   floating-point rounding, which the run says (see [evaluate()]'s
 #'   "Inner daemons"). `FALSE` runs every configuration on one daemon.
 #'   Default `getOption("horizons.inner_daemons", TRUE)`. [evaluate()].
+#' @param threads A whole number. The threads `rf`, `xgboost` and `lightgbm`
+#'   fit and predict on when the verb runs in this session; the results are
+#'   the same on any number. A run with `allow_par = TRUE` fits each on one
+#'   thread a daemon, since the daemons set are its cores, and refuses a
+#'   `threads` above 1. Default 1. [evaluate()], [fit()].
 #' @param no_improve A whole number of at least 1, or `FALSE`. The Bayesian
 #'   iterations without improvement on the best after which a search stops:
 #'   [evaluate()]'s, and [fit()]'s re-tune. Each verb says how many of its
@@ -343,6 +360,7 @@ control_horizons <- function(...,
                              min_degradation_rows = NULL,
                              isolate              = NULL,
                              inner_daemons        = NULL,
+                             threads              = NULL,
                              no_improve           = NULL,
                              min_resemblance_rows = NULL) {
 
@@ -458,6 +476,37 @@ resolve_control <- function(control, verb, call = rlang::caller_env()) {
   }
 
   structure(resolved, class = "horizons_control")
+
+}
+
+
+#' Refuse threads above one on a parallel run
+#'
+#' @description
+#' On the daemons each engine fits on one thread, so the cores a parallel
+#' run uses are the daemons set (DECISIONS 2026-11-13); `threads` is the
+#' count for a run in this session. Asking for both is refused at the verb's
+#' door, before anything is drawn.
+#'
+#' @param control The verb's resolved control ([resolve_control()]).
+#' @param call The frame the refusal reports: the verb's.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_threads_sequential <- function(control, call = rlang::caller_env()) {
+
+  threads <- control$threads
+
+  if (isTRUE(control$allow_par) && threads > 1) {
+
+    abort_horizons(c(
+      "{.code control_horizons(threads = {threads})} is for a run in this session, and {.code allow_par = TRUE} runs on the mirai daemons, each fitting on one thread.",
+      "i" = "To use more cores in parallel, set more daemons with {.code mirai::daemons(n)}; to fit on {threads} threads here, leave {.arg allow_par} off."
+    ), kind = "input", call = call)
+
+  }
+
+  invisible(NULL)
 
 }
 

@@ -4,7 +4,7 @@
 \alias{define_model_spec}
 \title{Define a Parsnip Model Specification}
 \usage{
-define_model_spec(model, isolate = TRUE)
+define_model_spec(model, isolate = TRUE, threads = ENGINE_THREADS)
 }
 \arguments{
 \item{model}{Character. One of the short names in \code{VALID_MODELS}:
@@ -14,6 +14,10 @@ define_model_spec(model, isolate = TRUE)
 \item{isolate}{Logical. Whether a model \code{MODEL_SPECS} marks \code{isolate}
 takes its engine's isolated twin, which fits each model in a process of
 its own (\code{model_engine()}); \code{control_horizons(isolate = )}.}
+
+\item{threads}{A whole number. The threads an engine with a thread
+argument fits on: \code{ENGINE_THREADS} (one) on the daemons, and
+\code{control_horizons(threads = )} on a run in the session.}
 }
 \value{
 A \code{parsnip} model specification with \code{mode = "regression"}.
@@ -23,7 +27,7 @@ Builds a model's tunable parsnip specification from its row of
 \code{MODEL_SPECS}: parsnip's model function \code{fn}, called with the row's
 \code{fixed} arguments and each of its \code{tuned} arguments as \code{tune::tune()}; the
 engine \code{model_engine()} names, with the row's \code{engine_args} and its
-thread argument (\code{threads$argument}) at \code{ENGINE_THREADS}; and the
+thread argument (\code{threads$argument}) at \code{threads}; and the
 regression mode. Each argument is captured as parsnip captures one written
 in the call (\code{500}, \code{tune::tune()}, \code{"impurity"}). Used by
 \code{evaluate_single_config()} and \code{fit_single_config()} to build the workflow
