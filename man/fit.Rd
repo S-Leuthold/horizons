@@ -171,9 +171,14 @@ instead (see "Cold start from one configuration"). The member then keeps
 fold has a CV RMSE lower than theirs by more than that candidate's
 standard error: \code{tune::select_by_one_std_err()}'s bound, with
 \code{evaluate()}'s choice in the place of the simplest model. That choice was
-made on \code{evaluate()}'s folds and is scored fresh on \code{fit()}'s, while the
-best candidate is the best of many tried on \code{fit()}'s folds, so it beats
-the choice by the selection alone even where nothing is better.
+made on \code{evaluate()}'s folds and is scored once on \code{fit()}'s, a fresh
+draw, while the best candidate is the best of many tried on \code{fit()}'s
+folds, so it beats the choice by the selection alone even where nothing
+is better. The draw is fresh but the rows are not: \code{evaluate()} chose on
+its training rows, which hold \code{fit()}'s and, with UQ or AD on, the
+calibration rows, so a member that keeps the choice is fitted at
+hyperparameters the calibration rows took part in choosing, as they took
+part in choosing the members (#44).
 Hyperparameters of \code{evaluate()}'s that were not scored on every fold take
 no part, and the best candidate is taken, which the member's \code{warnings}
 say. The member's out-of-fold predictions are made at the hyperparameters

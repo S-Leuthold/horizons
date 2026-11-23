@@ -332,9 +332,11 @@ UQ_QUANTILE_NODE_DIVISOR <- 250L
 ### candidate's CV RMSE is lower than theirs by more than this many of the
 ### best candidate's standard errors: tune::select_by_one_std_err()'s bound,
 ### with evaluate()'s point in the place of the simplest model. The point was
-### chosen on evaluate()'s folds and is scored fresh on fit()'s, while the
-### best candidate is the best of many tried on fit()'s folds, so it beats the
-### point by the selection's optimism alone even where nothing is better.
+### chosen on evaluate()'s folds and is scored once on fit()'s, a fresh draw,
+### while the best candidate is the best of many tried on fit()'s folds, so it
+### beats the point by the selection's optimism alone even where nothing is
+### better. Only the draw is fresh: evaluate() chose the point on rows that
+### hold fit()'s and, with UQ or AD on, the calibration rows (#44).
 RETUNE_MARGIN_SE <- 1
 
 ### The degradation check bootstraps the test RPD and flags a config only when
