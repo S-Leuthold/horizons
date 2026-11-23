@@ -134,7 +134,7 @@ built them, shaped as \code{\link[=evaluate_single_config]{evaluate_single_confi
 List with fields: config_id, status, degraded (\code{NA} when the
 check could not run), degraded_reason, fitted_workflow, best_params,
 warm_start, start_grid_size, bayes_iter, bayes_stop, retune_moved,
-retune_gain (a fitted member's), cv_predictions, test_metrics, cv_metrics,
+retune_gain, cv_predictions, test_metrics, cv_metrics,
 uq, ad, warnings, error_message (the failed step and the cause), class
 (the failure's root class), trace (the backtrace as text under
 \code{keep_traces}, else \code{NULL}), runtime_secs. \code{uq}, when present, carries
@@ -158,7 +158,9 @@ re-tune chose another candidate (one past the margin, or any when
 \code{evaluate()}'s were not scored on every fold), and \code{NA} with none to
 keep (a cold start, unusable parameters, or a member that failed before
 the choice); \code{retune_gain} is the best candidate's lead over them in its
-own standard errors (\code{choose_member_params()}), for the tree.
+own standard errors (\code{choose_member_params()}), for the tree, kept as
+\code{retune_moved} is by a member that fails after the choice, so its line
+does not read as a member whose parameters missed a fold.
 }
 \description{
 Inner-loop function for \code{fit()}. Takes a single config row from the

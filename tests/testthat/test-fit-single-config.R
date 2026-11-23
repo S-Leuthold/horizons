@@ -84,7 +84,7 @@ make_fit_best_params <- function(mtry = 5L, trees = 200L, min_n = 5L) {
 ## Expected fields in the output list
 EXPECTED_FIT_FIELDS <- c(
   "config_id", "status", "degraded", "degraded_reason",
-  "fitted_workflow", "best_params", "retune_moved",
+  "fitted_workflow", "best_params", "retune_moved", "retune_gain",
   "cv_predictions", "test_metrics", "cv_metrics",
   "uq", "warnings", "error_message", "runtime_secs"
 )
@@ -1535,7 +1535,7 @@ describe("fit_single_config() - the re-tune's stopping rule", {
 
   })
 
-  it("keeps whether the re-tune moved off evaluate()'s parameters on a member that fails after its choice", {
+  it("keeps whether the re-tune moved off evaluate()'s parameters, and by how much, on a member that fails after its choice", {
 
     setup <- make_fit_setup()
     local_mocked_bindings(tune_warmstart_bayes = function(...) {
@@ -1556,6 +1556,7 @@ describe("fit_single_config() - the re-tune's stopping rule", {
 
     expect_identical(member$status, "failed")
     expect_true(member$retune_moved)
+    expect_identical(member$retune_gain, 2)
 
   })
 
