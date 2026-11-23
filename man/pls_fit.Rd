@@ -28,24 +28,36 @@ most components the data can hold. A fit asked for more uses that many and
 warns, with class \code{horizons_warning_substitution}: the runners cap the tuning range from the whole training set, so a
 fold whose recipe selects fewer predictors can still reach this cap.
 
-The fit also stops before a component that carries nothing more about the
-outcome, and warns the same way. PLS with \code{a} components is the least-squares
-fit over the first \code{a} directions of the Krylov space \verb{X'y, (X'X)X'y, ...},
-and once that space holds every direction the outcome touches, the fit is
-the least-squares fit on the predictors, and any later component would be
-formed from rounding error. On nearly orthogonal predictors PLS also
-reaches that fit, to within \code{PLS_TOL}, after a few components, and the
-later ones would change it by less. So component \code{k} (from the second on) is fitted
-only while what is left of the outcome after \code{k - 1} components is more
-than \code{PLS_TOL} of the centred outcome's norm, its weight and score are
-finite, and the component's covariance with that residual is more than
-\code{PLS_TOL} times the norms of the scaled predictors and of the residual:
-LSQR's two stopping tests (Paige and Saunders 1982), which are PLS's two
-breakdowns. On PCA scores, which are uncorrelated and which scaling gives
-one variance, the first component is already that fit, so every count
-holds one component: plsr on them is the least-squares regression on the
-kept components. On inputs where no component is degenerate nothing
-changes. The first component is always fitted.
+The fit also stops before a component that would add nothing to it, and
+warns the same way. PLS with \code{a} components is the least-squares fit over
+the first \code{a} directions of the Krylov space \verb{X'y, (X'X)X'y, ...}, and once
+that space holds every direction the outcome touches, the fit is the
+least-squares fit on the predictors, and a later component would be formed
+from rounding error. So component \code{k} (from the second on) is fitted only
+while
+\itemize{
+\item what is left of the outcome after \code{k - 1} components is more than
+\code{PLS_TOL} of the centred outcome's norm (it is not yet fitted exactly);
+\item its weight and score are finite;
+\item its score's norm is more than \code{PLS_TOL} of the scaled predictors' norm
+(their rank is not spent, as a constant or an exactly collinear column
+spends it);
+\item its score's cosine with what is left of the outcome is more than
+\code{PLS_TOL} (the score still fits some of it).
+}
+
+\code{PLS_TOL} is 1e-9. The last two are the factors of LSQR's second stopping
+test (Paige and Saunders 1982), tested apart: on ill-conditioned spectra a
+real component has a small score but a real covariance with the outcome,
+which their product would read as rounding. On PCA scores, which are
+uncorrelated and which scaling gives one variance, the first component is
+already the least-squares fit, so every later score's cosine is rounding
+and every count holds one component: plsr on them is the least-squares
+regression on the kept components. The cosine also ends a fit that has
+converged on least squares, as on nearly orthogonal predictors, where the
+next component would fit less than \code{PLS_TOL} of what is left. Where no
+component is degenerate nothing changes. The first component is always
+fitted.
 
 While tuning, tune calls it at a grid stage's largest count, and the fit
 predicts every count of the stage (\code{\link[=multi_predict._horizons_pls]{multi_predict._horizons_pls()}}). Each

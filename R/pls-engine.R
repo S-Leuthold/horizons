@@ -97,24 +97,35 @@ register_pls_engine <- function() {
 #' warns, with class `horizons_warning_substitution`: the runners cap the tuning range from the whole training set, so a
 #' fold whose recipe selects fewer predictors can still reach this cap.
 #'
-#' The fit also stops before a component that carries nothing more about the
-#' outcome, and warns the same way. PLS with `a` components is the least-squares
-#' fit over the first `a` directions of the Krylov space `X'y, (X'X)X'y, ...`,
-#' and once that space holds every direction the outcome touches, the fit is
-#' the least-squares fit on the predictors, and any later component would be
-#' formed from rounding error. On nearly orthogonal predictors PLS also
-#' reaches that fit, to within `PLS_TOL`, after a few components, and the
-#' later ones would change it by less. So component `k` (from the second on) is fitted
-#' only while what is left of the outcome after `k - 1` components is more
-#' than `PLS_TOL` of the centred outcome's norm, its weight and score are
-#' finite, and the component's covariance with that residual is more than
-#' `PLS_TOL` times the norms of the scaled predictors and of the residual:
-#' LSQR's two stopping tests (Paige and Saunders 1982), which are PLS's two
-#' breakdowns. On PCA scores, which are uncorrelated and which scaling gives
-#' one variance, the first component is already that fit, so every count
-#' holds one component: plsr on them is the least-squares regression on the
-#' kept components. On inputs where no component is degenerate nothing
-#' changes. The first component is always fitted.
+#' The fit also stops before a component that would add nothing to it, and
+#' warns the same way. PLS with `a` components is the least-squares fit over
+#' the first `a` directions of the Krylov space `X'y, (X'X)X'y, ...`, and once
+#' that space holds every direction the outcome touches, the fit is the
+#' least-squares fit on the predictors, and a later component would be formed
+#' from rounding error. So component `k` (from the second on) is fitted only
+#' while
+#'
+#' - what is left of the outcome after `k - 1` components is more than
+#'   `PLS_TOL` of the centred outcome's norm (it is not yet fitted exactly);
+#' - its weight and score are finite;
+#' - its score's norm is more than `PLS_TOL` of the scaled predictors' norm
+#'   (their rank is not spent, as a constant or an exactly collinear column
+#'   spends it);
+#' - its score's cosine with what is left of the outcome is more than
+#'   `PLS_TOL` (the score still fits some of it).
+#'
+#' `PLS_TOL` is 1e-9. The last two are the factors of LSQR's second stopping
+#' test (Paige and Saunders 1982), tested apart: on ill-conditioned spectra a
+#' real component has a small score but a real covariance with the outcome,
+#' which their product would read as rounding. On PCA scores, which are
+#' uncorrelated and which scaling gives one variance, the first component is
+#' already the least-squares fit, so every later score's cosine is rounding
+#' and every count holds one component: plsr on them is the least-squares
+#' regression on the kept components. The cosine also ends a fit that has
+#' converged on least squares, as on nearly orthogonal predictors, where the
+#' next component would fit less than `PLS_TOL` of what is left. Where no
+#' component is degenerate nothing changes. The first component is always
+#' fitted.
 #'
 #' While tuning, tune calls it at a grid stage's largest count, and the fit
 #' predicts every count of the stage ([multi_predict._horizons_pls()]). Each
@@ -162,10 +173,10 @@ pls_fit <- function(x, y, ncomp = 2L) {
 #'
 #' @description
 #' Each column's standard deviation, and 1 for a column whose deviation is
-#' below `PLS_TOL` or not finite: `scale = TRUE` would divide a constant
-#' column by zero, which makes every prediction `NaN`. Also the Frobenius norm
-#' of the centred predictors once divided, which [pls_informative()]
-#' measures a component's covariance against.
+#' below `sqrt(.Machine$double.eps)` or not finite: `scale = TRUE` would
+#' divide a constant column by zero, which makes every prediction `NaN`. Also
+#' the Frobenius norm of the centred predictors once divided, which
+#' [pls_informative()] measures a component's score against.
 #'
 #' @param x Numeric matrix of predictors.
 #' @return List with `sds` (the divisors, one per column) and `norm`.
@@ -173,9 +184,11 @@ pls_fit <- function(x, y, ncomp = 2L) {
 #' @noRd
 pls_scale <- function(x) {
 
+  ### A column's spread in its own units: a test of no spread, not one of
+  ### the stop's ratios, so not PLS_TOL
   sd  <- apply(x, 2, stats::sd)
   sds <- sd
-  sds[!is.finite(sds) | sds < PLS_TOL] <- 1
+  sds[!is.finite(sds) | sds < sqrt(.Machine$double.eps)] <- 1
 
   list(sds = sds, norm = sqrt((nrow(x) - 1) * sum((sd / sds)^2)))
 
@@ -209,28 +222,29 @@ pls_plsr <- function(x, y, ncomp, sds) {
 #'
 #' @description
 #' The count of components before the first, from the second on, that fails
-#' one of three tests, read from the fit's documented `scores`,
+#' one of four tests, read from the fit's documented `scores`,
 #' `loading.weights` and `residuals` (the outcome deflated by each component
 #' in turn, centred). With `f_j` what is left of the centred outcome after `j`
-#' components, component `k` is fitted only while
+#' components and `t_k` component `k`'s score, component `k` is fitted only
+#' while
 #'
-#' 1. `f_(k-1)` is more than `PLS_TOL` of the centred outcome's norm: the
-#'    outcome is not yet fitted exactly (LSQR's first test, Paige and
+#' 1. `||f_(k-1)||` is more than `PLS_TOL` times the centred outcome's norm:
+#'    the outcome is not yet fitted exactly (LSQR's first test, Paige and
 #'    Saunders 1982);
-#' 2. `|t_k' f_(k-1)|`, the covariance of the component's score with that
-#'    residual and the norm of its unnormalised weight, is more than
-#'    `PLS_TOL` times `x_norm` times the residual's norm: the fit is not yet
-#'    the least-squares fit (LSQR's second test);
+#' 2. (a) `||t_k||` is more than `PLS_TOL` times `x_norm`: the score is not
+#'    rounding, so the predictors' rank is not spent; and (b)
+#'    `|t_k' f_(k-1)|` is more than `PLS_TOL` times `||t_k||` times
+#'    `||f_(k-1)||`: the score's cosine with the residual is not rounding, so
+#'    it still fits some of it. Their product is LSQR's second test, which
+#'    reads a small score with a real covariance, as on ill-conditioned
+#'    bands, the same as rounding; tested apart, each has its own margin;
 #' 3. its weight and score are finite: pls returns a weight that is exactly
 #'    zero as `NaN` (0 / 0), the exact case of 1 or 2.
 #'
 #' They are tested in the order 1, 3, 2, so a `NaN` never reaches a
-#' comparison. Measuring the covariance against the predictors' norm rather
-#' than the score's own catches a score that is itself rounding, when the
-#' predictors' rank is spent. A first component that is not finite (no
-#' predictor covaries with the outcome, or the outcome is constant) is left
-#' as pls returns it, so the fit predicts `NaN`, as a fit of one component
-#' does.
+#' comparison. A first component that is not finite (no predictor covaries
+#' with the outcome, or the outcome is constant) is left as pls returns it,
+#' so the fit predicts `NaN`, as a fit of one component does.
 #'
 #' The other PLS fits in horizons keep their own fits: CARS scores its
 #' subsets with pls's own cross-validation, which returns no segment's fit to
@@ -270,8 +284,13 @@ pls_informative <- function(fit, y, x_norm) {
     ## 3. pls's 0 / 0: the weight was exactly zero
     if (!all(is.finite(weights[, k])) || !all(is.finite(scores[, k]))) return(k - 1L)
 
-    ## 2. The fit is the least-squares fit on these predictors
-    if (abs(sum(scores[, k] * f_prev)) <= PLS_TOL * x_norm * f_norm) return(k - 1L)
+    t_norm <- sqrt(sum(scores[, k]^2))
+
+    ## 2a. The score is rounding: the predictors' rank is spent
+    if (t_norm <= PLS_TOL * x_norm) return(k - 1L)
+
+    ## 2b. The score fits nothing of what is left: the fit is least squares
+    if (abs(sum(scores[, k] * f_prev)) <= PLS_TOL * t_norm * f_norm) return(k - 1L)
 
   }
 

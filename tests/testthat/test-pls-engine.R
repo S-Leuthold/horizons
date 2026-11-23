@@ -336,21 +336,24 @@ describe("pls_fit() - the stop at the components that carry information", {
 
   })
 
-  it("keeps a real component whose covariance with the outcome is a few orders of magnitude above rounding", {
+  it("keeps a real component whose small score and small covariance with the outcome would together read as rounding", {
 
-    ## Eight orthogonal directions with distinct variances from 1 to 1e-9 of
-    ## the first, rotated by a Hadamard matrix so that every column has the
-    ## same variance and scaling keeps those variances, and an outcome that
-    ## loads on every direction: the eighth component's covariance with what
-    ## is left of the outcome is about 3e-5 of the norms it is measured
-    ## against, three orders of magnitude above PLS_TOL
+    ## Eight orthogonal directions with variances from 1 to 1e-14 of the
+    ## first, rotated by a Hadamard matrix so that every column has the same
+    ## variance and scaling keeps those variances, as ill-conditioned bands
+    ## would be; an outcome that loads 1 on the first seven directions and
+    ## 1e-4 on the eighth, and noise kept off the predictors. The eighth
+    ## score is about 1e-7 of the predictors' norm and its cosine with what is
+    ## left of the outcome about 2e-3, each far above PLS_TOL, while their
+    ## product, LSQR's single statistic, is about 1.5e-10, below it.
     withr::local_seed(4)
     n <- 60
     h <- matrix(1, 1, 1)
     for (i in 1:3) h <- rbind(cbind(h, h), cbind(h, -h))
     u <- qr.Q(qr(scale(matrix(stats::rnorm(n * 8), n), scale = FALSE)))
-    x <- u %*% diag(sqrt(10^seq(0, -9, length.out = 8) * (n - 1))) %*% t(h / sqrt(8))
-    y <- drop(u %*% rep(1, 8)) + stats::rnorm(n, sd = 0.01)
+    x <- u %*% diag(sqrt(10^seq(0, -14, length.out = 8) * (n - 1))) %*% t(h / sqrt(8))
+    e <- stats::rnorm(n, sd = 0.01)
+    y <- drop(u %*% c(rep(1, 7), 1e-4)) + e - drop(u %*% crossprod(u, e))
 
     expect_no_warning(fit <- pls_fit(x, y, ncomp = 8L))
     expect_identical(fit$horizons_ncomp, 8L)

@@ -178,17 +178,18 @@ SELECTION_PACKAGES <- list(
 # of MODEL_SPECS: CARS caps its components with it too (R/step-select-cars.R).
 PLS_MAX_COMP <- 30L
 
-# The plsr engine's one tolerance for "nothing here", relative: a predictor
-# whose standard deviation is below it is left unscaled, and a PLS fit stops
-# before a component whose covariance with what is left of the outcome is
-# below it, as a share of the predictors' and that residual's norms, or once
-# the outcome is fitted to within it of its own norm (pls_informative(),
-# R/pls-engine.R). It is pls's own NIPALS tolerance, and tighter than LSQR's
-# defaults (1e-6). The components it cuts are rounding error (on PCA scores,
-# six orders of magnitude below it), or, on nearly orthogonal predictors,
-# where PLS reaches the least-squares fit within a few components, ones that
-# move predictions by less than a millionth of the outcome's spread.
-PLS_TOL <- sqrt(.Machine$double.eps)
+# The PLS stop's tolerance, relative (pls_informative(), R/pls-engine.R). A
+# fit stops before a component once what is left of the outcome is within it
+# of the outcome's norm (fitted exactly), once the component's score is
+# within it of the scaled predictors' norm (their rank spent: a constant or
+# an exactly collinear column), or once that score's cosine with what is left
+# of the outcome is within it (nothing left to fit: PCA scores on the rows
+# they were computed on, or a fit already at least squares). Measured on 359
+# sets of real spectra and 41 rounding cases (#278): rounding sits at least
+# 160 times below it; on spectra, real scores sit at least 130 times above it
+# and real cosines at least 19 times, 400 times for any component that moves
+# held-out predictions by more than a millionth of the outcome's spread.
+PLS_TOL <- 1e-9
 
 # horizons' default ranges of tuned parameters, keyed by the dials parameter
 # id, in dials' units (a log-scale parameter's in log10): configure()'s
