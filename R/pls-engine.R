@@ -412,36 +412,52 @@ PLS_CAP_PATTERN <- "^PLS fitted [0-9]+ components?, not the [0-9]+ asked for: "
 #' fold that capped a larger count would be reported on a row whose count it
 #' held (#109). The runners leave those notes off ([drop_pls_caps()]) and
 #' report the chosen count here instead, fold by fold, in [pls_fit()]'s
-#' words: each fold whose predictors, or analysis rows less one, are fewer
-#' than the count. `fit()` needs none: its out-of-fold fits are at the chosen
-#' count, and their own warnings say it.
+#' words: each fold whose fit at the count holds fewer components, capped by
+#' its predictors or analysis rows less one, or stopped where the components
+#' carry nothing more ([pls_count()]). A stop depends on the fold's data, not
+#' only its dimensions, so each fold's count is fitted on its analysis rows,
+#' exactly as tune's fit saw them: the frame's outcome column, and its other
+#' columns, in order, as the predictors ([fold_workflow()]). A count of one
+#' makes no fit, since a fit of one component cannot stop. `fit()` needs
+#' none: its out-of-fold fits are at the chosen count, and their own warnings
+#' say it.
 #'
 #' @param folds The `rset` tuned over, assembled from the fold preps
 #'   ([assemble_folds()]): each fold's frame holds the outcome and that
 #'   fold's predictors.
 #' @param best_params One-row tibble of the chosen hyperparameters.
+#' @param outcome Character(1). The outcome column of the folds' frames.
 #' @return Records shaped like [new_warning_log()]'s, as [tune_note_records()]
 #'   gives them: scope `"cv"`, one per distinct text with the folds that
 #'   raised it. Empty when the count fits every fold, or when `num_comp` was
 #'   not tuned.
 #' @keywords internal
 #' @noRd
-pls_cap_records <- function(folds, best_params) {
+pls_cap_records <- function(folds, best_params, outcome) {
 
   if (!"num_comp" %in% names(best_params)) return(new_warning_log())
 
   requested <- as.integer(best_params$num_comp[[1]])
 
-  ### Each capped fold's warning as it would arrive from the fit, grouped as
-  ### the fold preps' warnings are
+  ### Each fold's warning as it would arrive from the fit, grouped as the
+  ### fold preps' warnings are
   arrivals <- Map(function(split, fold) {
+
     n_predictors <- ncol(split$data) - 1L
     n_rows       <- length(split$in_id)
-    fitted       <- pls_components(requested, n_predictors, n_rows)
-    if (fitted < requested) {
-      parts <- condition_parts(pls_cap_message(fitted, requested, n_predictors, n_rows), max_chars = Inf)
+    count        <- list(ncomp = pls_components(requested, n_predictors, n_rows), reason = "cap")
+
+    if (count$ncomp > 1L) {
+      rows  <- split$data[split$in_id, , drop = FALSE]
+      count <- pls_count(as.matrix(rows[setdiff(names(rows), outcome)]), rows[[outcome]], requested)
+    }
+
+    if (count$ncomp < requested) {
+      text  <- pls_cap_message(count$ncomp, requested, n_predictors, n_rows, count$reason)
+      parts <- condition_parts(text, max_chars = Inf)
       tibble::tibble(cause = parts$cause, where = parts$where, fold = fold)
     }
+
   }, folds$splits, resample_ids(folds))
 
   fold_warning_records(arrivals, nrow(folds))

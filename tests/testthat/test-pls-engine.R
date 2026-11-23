@@ -472,7 +472,7 @@ describe("pls_cap_records()", {
 
   it("says, as the fits at the chosen count would, which folds cannot hold it", {
 
-    recs <- pls_cap_records(folds, tibble::tibble(num_comp = 6L, .config = "pre0_mod1_post0"))
+    recs <- pls_cap_records(folds, tibble::tibble(num_comp = 6L, .config = "pre0_mod1_post0"), "y")
 
     expect_identical(recs$cause, c(
       "PLS fitted 4 components, not the 6 asked for: the data have 4 predictors and 30 rows.",
@@ -492,8 +492,54 @@ describe("pls_cap_records()", {
 
   it("is empty when the count fits every fold, or no count was tuned", {
 
-    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(num_comp = 4L))), 0L)
-    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(mtry = 3L))), 0L)
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(num_comp = 4L), "y")), 0L)
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(mtry = 3L), "y")), 0L)
+
+  })
+
+  it("says which folds' fits stop below the chosen count, counted on each fold's own rows, as the fits at that count would", {
+
+    ## Folds as assemble_folds() makes them, the outcome first. Fold2 holds
+    ## PCA scores computed on its own analysis rows, uncorrelated there, so a
+    ## fit on them stops at one component; the other folds' predictors carry
+    ## the outcome over several components. The dimensions alone cannot tell
+    ## the folds apart: each has 8 predictors and 40 analysis rows.
+    withr::local_seed(8)
+    fold_with <- function(scores) {
+      x <- matrix(stats::rnorm(48 * 8), 48)
+      if (scores) {
+        pca     <- stats::prcomp(x[1:40, ], scale. = TRUE)
+        x[1:40, ] <- pca$x
+        x[41:48, ] <- stats::predict(pca, x[41:48, ])
+      }
+      data <- data.frame(y = drop(x %*% seq(1, 0.3, length.out = 8)) + stats::rnorm(48, sd = 0.1), x)
+      rsample::make_splits(list(analysis = 1:40, assessment = 41:48), data = data)
+    }
+    folds <- rsample::manual_rset(list(fold_with(FALSE), fold_with(TRUE), fold_with(FALSE)),
+                                  ids = paste0("Fold", 1:3))
+
+    recs <- pls_cap_records(folds, tibble::tibble(num_comp = 3L, .config = "pre0_mod1_post0"), "y")
+
+    expect_identical(recs$cause, pls_cap_message(1L, 3L, 8L, 40L, "stop"))
+    expect_identical(recs$folds, list("Fold2"))
+
+    ## The line a fit at that count on each fold reads, from tune's notes
+    oof <- withr::with_seed(5, suppressMessages(tune::fit_resamples(
+      tune::finalize_workflow(fold_workflow(define_model_spec("plsr"), "y"), tibble::tibble(num_comp = 3L)),
+      folds, control = tune::control_resamples(verbose = FALSE)
+    )))
+    expect_identical(render_warning_log(recs), render_warning_log(tune_note_records(oof)))
+
+    ## A count of one cannot stop, so it is not fitted
+    n_fits <- 0L
+    real_plsr <- pls::plsr
+    local_mocked_bindings(plsr = function(...) {
+      n_fits <<- n_fits + 1L
+      real_plsr(...)
+    }, .package = "pls")
+
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(num_comp = 1L), "y")), 0L)
+    expect_identical(n_fits, 0L)
 
   })
 
