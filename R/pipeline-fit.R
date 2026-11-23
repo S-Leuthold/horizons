@@ -2,7 +2,10 @@
 #'
 #' @description
 #' Re-tunes the top N configurations from `evaluate()` with warm-start
-#' Bayesian optimization, generates out-of-fold (OOF) CV predictions for
+#' Bayesian optimization, keeping each one's hyperparameters from
+#' `evaluate()` unless the re-tune finds a candidate better by more than its
+#' standard error (see "The re-tune"), generates out-of-fold (OOF) CV
+#' predictions for
 #' downstream stacking, fits final deployable models, scores them on
 #' `evaluate()`'s held-out test rows, and optionally trains uncertainty
 #' quantification (UQ) components.
@@ -63,6 +66,33 @@
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
 #'
+#' @section The re-tune:
+#' Each member's re-tune starts from `evaluate()`'s hyperparameters, clamped
+#' into the range `fit()`'s data allow (a `num_comp` above the cap of fewer
+#' rows, say), and one neighbour per tuned parameter, and runs a Bayesian
+#' search of at least `final_bayesian_iter` iterations ([configure()]),
+#' raised so that the start and the search try ten points a tuned parameter,
+#' which stops once `control_horizons(no_improve = )` iterations in a row
+#' have not improved on its best. A space small enough is gridded whole
+#' instead (see "Cold start from one configuration"). The member then keeps
+#' `evaluate()`'s hyperparameters unless the best candidate scored on every
+#' fold has a CV RMSE lower than theirs by more than that candidate's
+#' standard error: `tune::select_by_one_std_err()`'s bound, with
+#' `evaluate()`'s choice in the place of the simplest model. That choice was
+#' made on `evaluate()`'s folds and is scored fresh on `fit()`'s, while the
+#' best candidate is the best of many tried on `fit()`'s folds, so it beats
+#' the choice by the selection alone even where nothing is better.
+#' Hyperparameters of `evaluate()`'s that were not scored on every fold take
+#' no part, and the best candidate is taken, which the member's `warnings`
+#' say. The member's out-of-fold predictions are made at the hyperparameters
+#' it keeps, and `models$results$retune_moved` records which it kept:
+#' `FALSE` for `evaluate()`'s, `TRUE` for another candidate, `NA` with none
+#' to keep (a cold start, or parameters that were unusable). The tree says
+#' per member which, and by how many of the best candidate's standard errors
+#' it led. `final_bayesian_iter = 0` turns the re-tune off: each member
+#' keeps `evaluate()`'s hyperparameters, clamped, scored by its out-of-fold
+#' predictions alone, as `tune::fit_best()` refits a choice.
+#'
 #' @section What fit() reports:
 #' `fit()` warns once per kind at its end, after writing each warning to the
 #' object's `log`: a stratified draw (the calibration split, the folds, a
@@ -92,7 +122,9 @@
 #' (`control_horizons(no_improve = )`: a search stops once that many
 #' iterations in a row have not improved on its best, and `FALSE` runs every
 #' iteration), each member recording the iterations its search began
-#' (`bayes_iter`) and why it ended (`bayes_stop`). The folds are
+#' (`bayes_iter`) and why it ended (`bayes_stop`); and how many members kept
+#' `evaluate()`'s hyperparameters, or, with `final_bayesian_iter = 0`, that
+#' the re-tune was off (see "The re-tune"). The folds are
 #' drawn from the rows the members are fitted on, which must outnumber the
 #' folds, or `fit()` refuses, as `evaluate()` does.
 #'
@@ -285,10 +317,12 @@
 #'   `predict()` reads when asked for conformal intervals). Called on a
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
 #'   is empty again, since the ensemble was built on the members it replaces.
-#'   `models$results` records how each member's re-tune started:
-#'   `warm_start` (`TRUE` when `evaluate()`'s parameters were usable, so the
-#'   grid is centred on them or is the whole space, `FALSE` for a
-#'   space-filling grid) and `start_grid_size`, the starting grid's points.
+#'   `models$results` records how each member's re-tune started and what it
+#'   kept: `warm_start` (`TRUE` when `evaluate()`'s parameters were usable,
+#'   so the re-tune starts from them and their neighbours or from the whole
+#'   space, `FALSE` for a space-filling grid), `start_grid_size`, the points
+#'   it started from (`NA` with the re-tune off), and `retune_moved` (see
+#'   "The re-tune").
 #'
 #' @export
 fit <- function(x,
