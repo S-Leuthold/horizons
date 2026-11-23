@@ -497,6 +497,21 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("never prints a moved member's lead at or below the margin, nor a kept member's above it", {
+
+    ## A lead just past one standard error rounds to 1 at two digits, which
+    ## would read as a lead the margin keeps
+    expect_identical(retune_member_line(TRUE, 1.004),
+                     "Re-tune: moved to a candidate better by more than 1 of its standard errors")
+    expect_identical(retune_member_line(TRUE, 1.8),
+                     "Re-tune: moved to a candidate better by 1.8 of its standard errors")
+    expect_identical(retune_member_line(FALSE, 0.996),
+                     "Re-tune: kept evaluate()'s hyperparameters; the best candidate was better by 1 of its standard errors")
+    expect_identical(retune_member_line(FALSE, 1),
+                     "Re-tune: kept evaluate()'s hyperparameters; the best candidate was better by 1 of its standard errors")
+
+  })
+
   it("says once, in its header and on its log, that the re-tune is off at final_bayesian_iter = 0, and counts no member as kept", {
 
     obj <- fit_obj(2L)

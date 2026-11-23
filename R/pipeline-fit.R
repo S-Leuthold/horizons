@@ -1546,6 +1546,11 @@ retune_off_text <- function() {
 
 #' A member's tree line on what its re-tune kept
 #'
+#' The lead is rounded to two significant digits, except that a moved
+#' member's never reads at or below the margin (`RETUNE_MARGIN_SE`): one
+#' that rounds there reads "more than" the margin. A kept member's lead is at
+#' most the margin, and so is its rounding.
+#'
 #' @param moved,gain The member's `retune_moved` and `retune_gain`.
 #' @return Character(1), or `NULL` with nothing to keep (`moved` missing or
 #'   `NA`).
@@ -1555,8 +1560,12 @@ retune_member_line <- function(moved, gain) {
 
   if (is.null(moved) || is.na(moved)) return(NULL)
 
-  gain <- gain %||% NA_real_
-  by   <- if (!is.na(gain)) paste0(" by ", signif(gain, 2), " of its standard errors")
+  gain  <- gain %||% NA_real_
+  shown <- signif(gain, 2)
+
+  if (moved && !is.na(gain) && shown <= RETUNE_MARGIN_SE) shown <- paste("more than", RETUNE_MARGIN_SE)
+
+  by <- if (!is.na(gain)) paste0(" by ", shown, " of its standard errors")
 
   if (moved) {
     return(paste0("Re-tune: moved to ", if (is.null(by)) "its best candidate" else paste0("a candidate better", by)))
