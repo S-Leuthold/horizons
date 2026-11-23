@@ -497,6 +497,40 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("names the members gridded whole in its header, in place of a search they never run", {
+
+    skip_if_not_installed("earth")
+
+    ## rf searches; plsr's components are gridded whole, one fit a fold, and
+    ## so is mars's space, two fits. At one iteration the floor raises rf's
+    ## budget and would raise mars's, which never searches.
+    obj <- four_members(c("rf", "plsr"))
+    obj$config$configs$model[obj$config$configs$config_id == "cfg_004"] <- "mars"
+    obj$config$tuning$final_bayesian_iter <- 1L
+    out <- utils::capture.output(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 4L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(verbose = TRUE))),
+        fit_single_config = function(config_row, ...) fitted_member(config_row),
+        .package = "horizons"
+      )
+    )
+
+    expect_identical(
+      grep("Re-tune: ", out, value = TRUE, fixed = TRUE)[1],
+      paste0("\u2502  Re-tune: from evaluate()'s hyperparameters and d points drawn around them for d tuned ",
+             "parameters, 1 iterations (raised to 17 for rf: at least 10 points a tuned parameter); ",
+             "plsr and mars gridded whole; ",
+             "evaluate()'s are kept unless the best candidate is better by more than its standard error")
+    )
+
+    ## Every member gridded whole: no search's words at all
+    expect_identical(retune_header_line(25L, NULL, character(0), "plsr"),
+                     paste0("Re-tune: plsr gridded whole; evaluate()'s are kept unless the best candidate is ",
+                            "better by more than its standard error"))
+
+  })
+
   it("never prints a moved member's lead at or below the margin, nor a kept member's above it", {
 
     ## A lead just past one standard error rounds to 1 at two digits, which

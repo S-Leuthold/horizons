@@ -892,13 +892,25 @@ fit <- function(x,
 
     }
 
-    raised <- raised_budgets(member_configs$model, final_bayesian_iter, tuning$grid_size, warm = !cold_start)
+    ## A model gridded whole runs no search, so the header names it rather
+    ## than giving it a search's words or budget
+    whole    <- whole_space_models(member_configs$model, final_bayesian_iter, tuning$grid_size, tuning$ranges,
+                                   warm = !cold_start)
+    searched <- setdiff(unique(member_configs$model), whole)
+    raised   <- raised_budgets(searched, final_bayesian_iter, tuning$grid_size, warm = !cold_start)
 
     cat(paste0("\u2502  ", if (cold_start) {
-      paste0("Bayesian: ", final_bayesian_iter, " iterations from a space-filling grid",
-             if (!is.null(raised)) paste0(" (", raised, ")"))
+      paste0("Bayesian: ", paste(c(
+        if (length(searched) > 0) {
+          paste0(final_bayesian_iter, " iterations from a space-filling grid",
+                 if (!is.null(raised)) paste0(" (", raised, ")"))
+        } else {
+          "none"
+        },
+        gridded_whole_text(whole)
+      ), collapse = "; "))
     } else {
-      retune_header_line(final_bayesian_iter, raised, control$no_improve)
+      retune_header_line(final_bayesian_iter, raised, searched, whole)
     }, "\n"))
 
     ## A parallel fit runs the members' folds on the daemons
@@ -1521,22 +1533,47 @@ member_row <- function(res) {
 
 #' The tree header's line for the re-tune on the evaluate() path
 #'
+#' The search's words for the members that search, and the models gridded
+#' whole named apart ([whole_space_models()]). The stopping rule is said
+#' where it stops a search, in the summary and the log
+#' ([early_stop_line()]), as `evaluate()`'s tree says it.
+#'
 #' @param iter Integer. `final_bayesian_iter`, 0 for the re-tune off.
-#' @param raised Character(1) or `NULL`: [raised_budgets()]'s words.
-#' @param no_improve The stopping rule's limit, or `FALSE`.
+#' @param raised Character(1) or `NULL`: [raised_budgets()]'s words, for the
+#'   models that search.
+#' @param searched,whole Character: the members' models that search, and
+#'   those gridded whole.
 #' @return Character(1).
 #' @keywords internal
 #' @noRd
-retune_header_line <- function(iter, raised, no_improve) {
+retune_header_line <- function(iter, raised, searched, whole) {
 
   if (iter == 0) return(paste0("Re-tune: ", retune_off_text()))
 
+  search <- if (length(searched) > 0) {
+    paste0("from evaluate()'s hyperparameters and d points drawn around them for d tuned parameters, ", iter,
+           " iterations", if (!is.null(raised)) paste0(" (", raised, ")"))
+  }
+
   paste0(
-    "Re-tune: from evaluate()'s hyperparameters and d points drawn around them for d tuned parameters, ", iter, " iterations",
-    if (!is.null(raised)) paste0(" (", raised, ")"),
-    if (!isFALSE(no_improve)) paste0(", stopping after ", no_improve, " without improvement"),
+    "Re-tune: ", paste(c(search, gridded_whole_text(whole)), collapse = "; "),
     "; evaluate()'s are kept unless the best candidate is better by more than its standard error"
   )
+
+}
+
+#' The tree's words for the models gridded whole
+#'
+#' @param whole Character: [whole_space_models()]'s.
+#' @return Character(1), e.g. `"plsr and mars gridded whole"`, or `NULL`
+#'   when there are none.
+#' @keywords internal
+#' @noRd
+gridded_whole_text <- function(whole) {
+
+  if (length(whole) == 0) return(NULL)
+
+  paste(paste(whole, collapse = " and "), "gridded whole")
 
 }
 

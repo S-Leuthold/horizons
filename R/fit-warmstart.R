@@ -826,6 +826,37 @@ raised_budgets <- function(models, iter, grid_size, warm = FALSE) {
 
 }
 
+#' The models whose re-tune grids its space whole
+#'
+#' @description
+#' The models whose search space [exhaustive_grid()] grids whole on its
+#' ranges before the data are seen, at the budget their re-tune runs: plsr,
+#' whose components one fit scores, and at the defaults mars, two fits a
+#' fold. The data only narrow a range that is known before them
+#' ([finalize_bound()]), so these are gridded whole whatever the rows; a
+#' space the rows make small enough is gridded whole too, which only its
+#' member can see. `fit()`'s tree names them in place of a search they never
+#' run.
+#'
+#' @param models Character. The members' models.
+#' @param iter,grid_size,warm As [raised_budgets()] takes them.
+#' @param ranges Named list of `c(lower, upper)` by parameter id: the ranges
+#'   the re-tune searches (`config$tuning$ranges`).
+#' @return Character: the models gridded whole, each once.
+#' @keywords internal
+#' @noRd
+whole_space_models <- function(models, iter, grid_size, ranges, warm = FALSE) {
+
+  Filter(function(m) {
+    param_set <- apply_tune_ranges(hardhat::extract_parameter_set_dials(define_model_spec(m, isolate = FALSE)),
+                                   ranges)
+    n_params  <- nrow(param_set)
+    start     <- if (warm) warm_start_size(n_params) else grid_size
+    !is.null(exhaustive_grid(param_set, start + search_budget(iter, n_params, start), MODEL_SPECS[[m]]$submodel))
+  }, unique(models))
+
+}
+
 #' What a verb says when its Bayesian searches stopped early
 #'
 #' @description

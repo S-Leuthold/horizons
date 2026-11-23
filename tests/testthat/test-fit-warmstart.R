@@ -1063,6 +1063,27 @@ describe("search_budget()", {
 
   })
 
+  it("names the models whose re-tune grids its space whole, from their ranges before the data", {
+
+    skip_if_not_installed("earth")
+
+    ## plsr's components are one fit a fold, and mars's space at the defaults
+    ## two (num_terms is its submodel), so both are gridded whole at any
+    ## budget a re-tune runs; rf's mtry has no range until the data set one
+    expect_identical(whole_space_models(c("rf", "plsr", "mars", "plsr"), 25L, 10L, TUNE_RANGES, warm = TRUE),
+                     c("plsr", "mars"))
+    expect_identical(whole_space_models(c("rf", "plsr", "mars"), 1L, 10L, TUNE_RANGES), c("plsr", "mars"))
+    expect_identical(whole_space_models("rf", 25L, 10L, TUNE_RANGES, warm = TRUE), character(0))
+
+    ## A cold start of one point with no search is a budget of one fit: plsr's
+    ## whole range, not mars's two fits
+    expect_identical(whole_space_models(c("plsr", "mars"), 0L, 1L, TUNE_RANGES), "plsr")
+
+    ## The ranges are the configured ones: a narrower num_comp is still one fit
+    expect_identical(whole_space_models("plsr", 25L, 10L, list(num_comp = c(1, 5)), warm = TRUE), "plsr")
+
+  })
+
 })
 
 

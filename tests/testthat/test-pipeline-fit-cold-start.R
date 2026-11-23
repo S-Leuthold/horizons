@@ -195,6 +195,33 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
+  it("names a member gridded whole in its header, in place of a search it never runs", {
+
+    whole <- obj
+    whole$config$configs$model <- "plsr"
+
+    ## Stop at the first member: only the header is under test
+    out <- utils::capture.output(
+      testthat::with_mocked_bindings(
+        tryCatch(
+          suppressWarnings(
+            fit(whole, compute_uq = FALSE, compute_ad = FALSE, control = control_horizons(verbose = TRUE))
+          ),
+          horizons_error_all_members_failed = function(e) NULL
+        ),
+        fit_single_config = function(...) {
+          list(config_id = "cfg_001", status = "failed", error_message = "mocked",
+               runtime_secs = 0)
+        },
+        .package = "horizons"
+      )
+    )
+
+    expect_true("\u2502  Bayesian: none; plsr gridded whole" %in% out)
+    expect_false(any(grepl("iterations from a space-filling grid", out, fixed = TRUE)))
+
+  })
+
   ## Degradation compares the test RPD with fit()'s own out-of-fold CV on the
   ## fit rows, not with evaluate()'s, so a cold start has what the check needs.
   it("checks degradation against its own cross-validation, which a cold start has", {
