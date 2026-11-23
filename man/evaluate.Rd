@@ -448,8 +448,9 @@ stops the call. So does a failure every configuration would share: when
 the first configurations to run fail the same way across at least two
 models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so far
 as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
-run every configuration; the configs axis has no breaker), and their
-failures are not checkpointed. A daemon that lacks a package the
+run every configuration), and their failures are not checkpointed. On the
+configs axis these are the first configurations to finish, and the stop
+cancels those still running. A daemon that lacks a package the
 configurations need, which this session has, is refused before the run
 (\code{horizons_error_missing_package}, see "Parallelism"); one found lacking
 it mid-run stops the run as systemic on the configs axis, and on the

@@ -1865,6 +1865,136 @@ describe("evaluate() - a checkpoint the configs axis cannot write", {
 })
 
 
+## The circuit breaker on the configs axis reads the configurations in the
+## order the window collects them. On the daemons a configuration named in
+## `fail` fails building its recipe, the same way in each but for its id and
+## a number, as the sequential tests' runner does
+## (test-pipeline-evaluate.R); one named in `wait` waits first, until cfg_001
+## has run to its end and a second more, so cfg_001's success comes in
+## before it. cfg_001 leaves a mark once it has run.
+
+local_breaker_daemons <- function(fail, wait = character(0), marks) {
+  with_deadline(mirai::everywhere({
+    ns           <- asNamespace("horizons")
+    real_recipe  <- get("build_recipe", envir = ns)
+    real_config  <- get("evaluate_single_config", envir = ns)
+    utils::assignInNamespace("build_recipe", function(config_row, ...) {
+      id <- config_row$config_id
+      if (id %in% wait) {
+        until <- Sys.time() + 60
+        while (!file.exists(file.path(marks, "cfg_001")) && Sys.time() < until) Sys.sleep(0.05)
+        Sys.sleep(1)
+      }
+      if (id %in% fail) stop(paste0("no recipe for ", id, " at ", nchar(id) * 7, " rows"))
+      real_recipe(config_row, ...)
+    }, ns = "horizons")
+    utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+      row <- real_config(config_row, ...)
+      if (config_row$config_id == "cfg_001") file.create(file.path(marks, "cfg_001"))
+      row
+    }, ns = "horizons")
+  }, fail = fail, wait = wait, marks = marks)[], 30)
+}
+
+## rf and cubist in turn, so a run of failures spans two models; at 60 rows
+## the cost table starts the rf configurations first
+breaker_run <- function(n_configs, dir, ...) {
+  with_deadline(suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = n_configs), seed = 42L,
+                                          control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                     output_dir = dir, verbose = FALSE, ...))), 300)
+}
+
+describe("evaluate() - the circuit breaker on the configs axis", {
+
+  it("stops when the first configurations to finish fail the same way across two models, checkpointing none, and cancels the rest (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    marks <- withr::local_tempdir()
+    local_breaker_daemons(fail = sprintf("cfg_%03d", 1:4), marks = marks)
+
+    err <- expect_error(breaker_run(4, dir), class = "horizons_error_systemic")
+
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The first 3 configurations to run all failed the same way, across 2 models, so `evaluate()` stopped rather than run the other 1.",
+                 fixed = TRUE)
+
+    ## The three it read, both models among them, and none checkpointed,
+    ## then or once the daemons are idle
+    expect_length(err$results$config_id, 3L)
+    expect_identical(unique(err$results$status), "failed")
+    expect_setequal(make_eval_object(n = 60, n_configs = 4)$config$configs$model[match(err$results$config_id, sprintf("cfg_%03d", 1:4))],
+                    c("rf", "cubist"))
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
+  it("is disarmed by a success among the first to finish, releasing the failure it held, and the run completes, each configuration checkpointed (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## cfg_003 fails at once and is held; cfg_001 succeeds and disarms the
+    ## breaker; the other three fail the same way after it, which would trip
+    ## a breaker still armed while cfg_004 was left to run
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    marks <- withr::local_tempdir()
+    local_breaker_daemons(fail = sprintf("cfg_%03d", 2:5), wait = sprintf("cfg_%03d", c(2L, 4L, 5L)), marks = marks)
+
+    ev <- breaker_run(5, dir)
+
+    expect_identical(ev$evaluation$results$status, c("success", rep("failed", 4L)))
+    expect_identical(ev$evaluation$best_config, "cfg_001")
+    expect_setequal(list.files(file.path(dir, "checkpoints")), sprintf("cfg_%03d.rds", 1:5))
+
+  })
+
+  it("runs every configuration with breaker = FALSE, checkpointing each (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    marks <- withr::local_tempdir()
+    local_breaker_daemons(fail = sprintf("cfg_%03d", 1:4), marks = marks)
+
+    err <- expect_error(breaker_run(4, dir, breaker = FALSE), class = "horizons_error_all_configs_failed")
+
+    expect_identical(err$results$config_id, sprintf("cfg_%03d", 1:4))
+    expect_setequal(list.files(file.path(dir, "checkpoints")), sprintf("cfg_%03d.rds", 1:4))
+
+  })
+
+  it("does not stop when nothing is left to run: the last configurations to finish failing alike end in the all-failed abort, checkpointed (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    dir   <- withr::local_tempdir()
+    marks <- withr::local_tempdir()
+    local_breaker_daemons(fail = sprintf("cfg_%03d", 1:3), marks = marks)
+
+    err <- expect_error(breaker_run(3, dir), class = "horizons_error_all_configs_failed")
+
+    expect_false(inherits(err, "horizons_error_systemic"))
+    expect_identical(err$results$config_id, sprintf("cfg_%03d", 1:3))
+    expect_setequal(list.files(file.path(dir, "checkpoints")), sprintf("cfg_%03d.rds", 1:3))
+
+  })
+
+})
+
 ## =========================================================================
 ## Inner daemons: a long configuration's folds on daemons of its own
 ## =========================================================================

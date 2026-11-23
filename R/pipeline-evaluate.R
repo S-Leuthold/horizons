@@ -393,8 +393,9 @@
 #' the first configurations to run fail the same way across at least two
 #' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
 #' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
-#' run every configuration; the configs axis has no breaker), and their
-#' failures are not checkpointed. A daemon that lacks a package the
+#' run every configuration), and their failures are not checkpointed. On the
+#' configs axis these are the first configurations to finish, and the stop
+#' cancels those still running. A daemon that lacks a package the
 #' configurations need, which this session has, is refused before the run
 #' (`horizons_error_missing_package`, see "Parallelism"); one found lacking
 #' it mid-run stops the run as systemic on the configs axis, and on the
@@ -1463,11 +1464,13 @@ evaluate <- function(x,
     }
 
     ## Each row is finished here as the window collects it, as the
-    ## sequential loop finishes it: this session writes its checkpoint, and
-    ## a write that fails stops the run with the rows so far, the
-    ## configurations in flight cancelled. The configurations still to run
-    ## are those not yet collected, in flight or waiting.
-    breaker  <- new_breaker(FALSE)
+    ## sequential loop finishes it: the circuit breaker watches the first
+    ## configurations to finish, this session writes the checkpoints it
+    ## releases, and a trip or a write that fails stops the run with the
+    ## rows so far, the configurations in flight cancelled. The
+    ## configurations still to run are those not yet collected, in flight or
+    ## waiting.
+    breaker  <- new_breaker(control$breaker)
     eval_env <- rlang::current_env()
 
     finish <- function(i, row) {
@@ -2399,11 +2402,12 @@ drop_unit_records <- function(rows) {
 ## Both stop the call with horizons_error_systemic and the rows so far, since
 ## every configuration still to run would fail the same way.
 
-#' A circuit breaker for the configurations a sequential run evaluates
+#' A circuit breaker for the configurations a run evaluates
 #'
 #' @description
-#' Armed from the start, it watches the configurations as they finish, not
-#' the rows loaded from checkpoints. A success, a pruned configuration, or a
+#' Armed from the start, it watches the configurations as they finish (on
+#' the configs axis, in the order the window collects them), not the rows
+#' loaded from checkpoints. A success, a pruned configuration, or a
 #' failure unlike those before it disarms it for the rest of the call. While
 #' armed it holds back the rows of the identical failures so far, and it
 #' trips once there are `limit` of them across at least two models, while
