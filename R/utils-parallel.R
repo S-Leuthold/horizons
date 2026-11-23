@@ -114,26 +114,22 @@ resolve_parallel_axis <- function(parallelize_over, allow_par, n_configs, cv_fol
 #' Each configuration's cell of `CONFIG_COST_SECONDS` (the seconds a
 #' configuration of its model and feature selection took on the measured
 #' local grid), times the run's rows over the grid's (`CONFIG_ROWS_REF`)
-#' raised to its model's `CONFIG_ROW_EXPONENT`, times the predictors its
-#' preparation keeps over the cell's reference count (`CONFIG_KEPT_REF`).
-#' The configs axis starts the longest first by it ([dispatch_order()]) and
-#' gives the long ones inner daemons by it ([split_plan()]), and
-#' `monitor_evaluate()` weights its ETA by it, from the run's manifest. Only
-#' each configuration's share of the run is read, so the scale of the
-#' seconds does not matter. One configuration's estimate can be off by a
-#' factor of two either way, from when its Bayesian search stops, which
-#' nothing knows before it runs.
+#' raised to its model's `CONFIG_ROW_EXPONENT`. The configs axis starts the
+#' longest first by it ([dispatch_order()]) and gives the long ones inner
+#' daemons by it ([split_plan()]), and `monitor_evaluate()` weights its ETA
+#' by it, from the run's manifest. Only each configuration's share of the
+#' run is read, so the scale of the seconds does not matter. One
+#' configuration's estimate can be off by a factor of two either way, from
+#' when its Bayesian search stops, which nothing knows before it runs.
 #'
 #' @param configs The configurations, with `model` and `feature_selection`
 #'   columns.
 #' @param n_rows Numeric(1). The rows the configurations are tuned on: the
 #'   run's training part.
-#' @param kept Numeric, one per row of `configs`: the predictors each
-#'   configuration's preparation keeps ([config_kept()]).
 #' @return Numeric, one unnamed cost per row of `configs`.
 #' @keywords internal
 #' @noRd
-config_costs <- function(configs, n_rows, kept) {
+config_costs <- function(configs, n_rows) {
 
   keys <- paste(configs$model, configs$feature_selection, sep = "/")
   cost <- unname(CONFIG_COST_SECONDS[keys])
@@ -151,53 +147,7 @@ config_costs <- function(configs, n_rows, kept) {
 
   }
 
-  rows <- (as.numeric(n_rows) / CONFIG_ROWS_REF)^unname(CONFIG_ROW_EXPONENT[configs$model])
-
-  cost * rows * unname(kept) / unname(CONFIG_KEPT_REF[configs$feature_selection])
-
-}
-
-#' The predictors each configuration's preparation keeps
-#'
-#' @description
-#' What [config_costs()] scales a cell by. A configuration with no feature
-#' selection keeps every predictor of the role map. One with a selection
-#' keeps what its fold preparations kept, the mean over its folds, which the
-#' fold stage knows before any configuration runs ([fold_stage_record()]);
-#' before the stage, or for a configuration the stage built nothing for (one
-#' resumed from its checkpoint), the cell's reference count, so its cost is
-#' its cell at the run's rows.
-#'
-#' @param configs The configurations, with `preprocessing`,
-#'   `feature_selection` and `transformation` columns.
-#' @param role_map Tibble with `variable` and `role` columns.
-#' @param record The fold stage's record, or `NULL` before it.
-#' @return Numeric, one per row of `configs`.
-#' @keywords internal
-#' @noRd
-config_kept <- function(configs, role_map, record = NULL) {
-
-  selection <- configs$feature_selection
-  kept      <- unname(CONFIG_KEPT_REF[selection])
-
-  kept[selection == "none"] <- sum(role_map$role == "predictor")
-
-  if (is.null(record) || nrow(record) == 0) return(kept)
-
-  ## The record names each prep by its preprocessing, selection and, where
-  ## the selection reads the outcome, transformation: the unit's name
-  ## without the verb and the fold
-  folds   <- record[record$fold != "training", , drop = FALSE]
-  by_prep <- tapply(folds$n_predictors, folds$prep, mean)
-
-  label <- vapply(seq_len(nrow(configs)), function(i) {
-    paste(fold_prep_scope("evaluate", configs[i, ])[-(1:2)], collapse = "/")
-  }, character(1))
-
-  found <- selection != "none" & label %in% names(by_prep)
-  kept[found] <- unname(by_prep[label[found]])
-
-  kept
+  cost * (as.numeric(n_rows) / CONFIG_ROWS_REF)^unname(CONFIG_ROW_EXPONENT[configs$model])
 
 }
 
@@ -643,6 +593,47 @@ check_daemon_memory <- function(reports, models, isolate, n_rows, n_predictors, 
   ))
 
   TRUE
+
+}
+
+#' The predictors each configuration's preparation keeps
+#'
+#' @description
+#' What [split_need()] sizes a configuration's fold frames by. A
+#' configuration with no feature selection keeps every predictor of the role
+#' map. One with a selection keeps what its fold preparations kept, the mean
+#' over its folds, which the fold stage knows before any configuration runs
+#' ([fold_stage_record()]); for one the stage built nothing for, every
+#' predictor too, which is the most it can keep.
+#'
+#' @param configs The configurations, with `preprocessing`,
+#'   `feature_selection` and `transformation` columns.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param record The fold stage's record, or `NULL` when it built nothing.
+#' @return Numeric, one per row of `configs`.
+#' @keywords internal
+#' @noRd
+config_kept <- function(configs, role_map, record = NULL) {
+
+  selection <- configs$feature_selection
+  kept      <- rep(as.numeric(sum(role_map$role == "predictor")), nrow(configs))
+
+  if (is.null(record) || nrow(record) == 0) return(kept)
+
+  ## The record names each prep by its preprocessing, selection and, where
+  ## the selection reads the outcome, transformation: the unit's name
+  ## without the verb and the fold
+  folds   <- record[record$fold != "training", , drop = FALSE]
+  by_prep <- tapply(folds$n_predictors, folds$prep, mean)
+
+  label <- vapply(seq_len(nrow(configs)), function(i) {
+    paste(fold_prep_scope("evaluate", configs[i, ])[-(1:2)], collapse = "/")
+  }, character(1))
+
+  found <- selection != "none" & label %in% names(by_prep)
+  kept[found] <- unname(by_prep[label[found]])
+
+  kept
 
 }
 

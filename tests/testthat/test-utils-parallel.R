@@ -80,7 +80,7 @@ describe("resolve_parallel_axis()", {
 })
 
 ## =========================================================================
-## config_costs(), config_kept() and dispatch_order()
+## config_costs() and dispatch_order()
 ## =========================================================================
 
 describe("config_costs()", {
@@ -96,22 +96,18 @@ describe("config_costs()", {
 
   })
 
-  it("has a row exponent for every model and a reference count for every selection, each once", {
+  it("has a row exponent for every model, once", {
 
     expect_identical(sort(names(CONFIG_ROW_EXPONENT)), sort(VALID_MODELS))
     expect_true(all(is.finite(CONFIG_ROW_EXPONENT) & CONFIG_ROW_EXPONENT > 0))
 
-    expect_identical(sort(names(CONFIG_KEPT_REF)), sort(VALID_FEATURE_SELECTION))
-    expect_true(all(is.finite(CONFIG_KEPT_REF) & CONFIG_KEPT_REF > 0))
-
   })
 
-  it("is the cell at the grid's rows and the reference count of predictors kept", {
+  it("is the cell at the grid's rows", {
 
     configs <- tibble::tibble(model = c("cubist", "plsr"), feature_selection = c("pca", "none"))
 
-    expect_equal(config_costs(configs, CONFIG_ROWS_REF, CONFIG_KEPT_REF[configs$feature_selection]),
-                 unname(CONFIG_COST_SECONDS[c("cubist/pca", "plsr/none")]))
+    expect_equal(config_costs(configs, CONFIG_ROWS_REF), unname(CONFIG_COST_SECONDS[c("cubist/pca", "plsr/none")]))
 
   })
 
@@ -121,22 +117,10 @@ describe("config_costs()", {
     ## configuration on the measured grid is the dearer one on a library
     ## draw's rows
     configs <- tibble::tibble(model = c("xgboost", "cubist"), feature_selection = c("correlation", "pca"))
-    kept    <- CONFIG_KEPT_REF[configs$feature_selection]
 
     expect_gt(CONFIG_ROW_EXPONENT[["cubist"]], CONFIG_ROW_EXPONENT[["xgboost"]])
-    expect_identical(dispatch_order(config_costs(configs, CONFIG_ROWS_REF, kept)), c(1L, 2L))
-    expect_identical(dispatch_order(config_costs(configs, 8272, kept)), c(2L, 1L))
-
-  })
-
-  it("scales a configuration by the predictors its preparation kept", {
-
-    configs <- tibble::tibble(model = "rf", feature_selection = c("correlation", "correlation"))
-    ref     <- CONFIG_KEPT_REF[["correlation"]]
-
-    costs <- config_costs(configs, 2000, c(ref, 2 * ref))
-
-    expect_equal(costs[2], 2 * costs[1])
+    expect_identical(dispatch_order(config_costs(configs, CONFIG_ROWS_REF)), c(1L, 2L))
+    expect_identical(dispatch_order(config_costs(configs, 8272)), c(2L, 1L))
 
   })
 
@@ -144,53 +128,7 @@ describe("config_costs()", {
 
     configs <- tibble::tibble(model = "rf", feature_selection = "lasso")
 
-    expect_error(config_costs(configs, 100, 1), "has no cost for", class = "horizons_error_internal")
-
-  })
-
-})
-
-describe("config_kept()", {
-
-  role_map <- tibble::tibble(variable = c("id", "y", paste0("wn_", 1:40)),
-                             role     = c("id", "outcome", rep("predictor", 40)))
-
-  configs <- tibble::tibble(
-    model             = "rf",
-    preprocessing     = "snv",
-    transformation    = c("log", "log", "none", "none"),
-    feature_selection = c("none", "correlation", "correlation", "pca")
-  )
-
-  it("counts every predictor for no selection, and the reference count before the fold stage", {
-
-    expect_equal(config_kept(configs, role_map),
-                 c(40, unname(CONFIG_KEPT_REF[c("correlation", "correlation", "pca")])))
-
-  })
-
-  it("takes the mean its folds kept from the stage's record, by the prep each configuration reads", {
-
-    ## correlation reads the outcome, so each transformation is its own
-    ## prep; one PCA prep serves every transformation; the training part's
-    ## prep is not a fold's
-    record <- tibble::tibble(
-      prep         = c("snv/correlation/log", "snv/correlation/log", "snv/correlation/none",
-                       "snv/correlation/none", "snv/pca", "snv/pca", "snv/pca"),
-      fold         = c("Fold1", "Fold2", "Fold1", "Fold2", "Fold1", "Fold2", "training"),
-      n_predictors = c(10L, 20L, 6L, 8L, 3L, 5L, 100L)
-    )
-
-    expect_equal(config_kept(configs, role_map, record), c(40, 15, 7, 4))
-
-  })
-
-  it("keeps the reference count for a configuration the stage built nothing for", {
-
-    record <- tibble::tibble(prep = "snv/pca", fold = "Fold1", n_predictors = 3L)
-
-    expect_equal(config_kept(configs, role_map, record),
-                 c(40, unname(CONFIG_KEPT_REF[c("correlation", "correlation")]), 3))
+    expect_error(config_costs(configs, 100), "has no cost for", class = "horizons_error_internal")
 
   })
 
@@ -560,6 +498,50 @@ describe("daemon_need() and daemon_processes()", {
     ## More data needs more
     expect_gt(daemon_need(c(daemon = 1L, isolated = 0L), 10000, 1701),
               daemon_need(c(daemon = 1L, isolated = 0L), 1000, 1701))
+
+  })
+
+})
+
+describe("config_kept()", {
+
+  role_map <- tibble::tibble(variable = c("id", "y", paste0("wn_", 1:40)),
+                             role     = c("id", "outcome", rep("predictor", 40)))
+
+  configs <- tibble::tibble(
+    model             = "rf",
+    preprocessing     = "snv",
+    transformation    = c("log", "log", "none", "none"),
+    feature_selection = c("none", "correlation", "correlation", "pca")
+  )
+
+  it("counts every predictor, the most any keeps, when the fold stage built nothing", {
+
+    expect_equal(config_kept(configs, role_map), rep(40, 4))
+
+  })
+
+  it("takes the mean its folds kept from the stage's record, by the prep each configuration reads", {
+
+    ## correlation reads the outcome, so each transformation is its own
+    ## prep; one PCA prep serves every transformation; the training part's
+    ## prep is not a fold's
+    record <- tibble::tibble(
+      prep         = c("snv/correlation/log", "snv/correlation/log", "snv/correlation/none",
+                       "snv/correlation/none", "snv/pca", "snv/pca", "snv/pca"),
+      fold         = c("Fold1", "Fold2", "Fold1", "Fold2", "Fold1", "Fold2", "training"),
+      n_predictors = c(10L, 20L, 6L, 8L, 3L, 5L, 100L)
+    )
+
+    expect_equal(config_kept(configs, role_map, record), c(40, 15, 7, 4))
+
+  })
+
+  it("counts every predictor for a configuration the stage built nothing for", {
+
+    record <- tibble::tibble(prep = "snv/pca", fold = "Fold1", n_predictors = 3L)
+
+    expect_equal(config_kept(configs, role_map, record), c(40, 40, 40, 3))
 
   })
 

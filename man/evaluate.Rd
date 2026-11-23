@@ -201,9 +201,8 @@ for the call.
 sequentially inside each, but for a long config's inner daemons (see
 below). The configs start longest first, by an
 estimate of each one's time (the seconds its model and feature
-selection took on a measured grid, scaled to the run's rows and the
-predictors its preparation keeps), so the short ones fill the daemons
-at the end; the rows come back
+selection took on a measured grid, scaled to the run's rows), so the
+short ones fill the daemons at the end; the rows come back
 in configuration order whatever order they finish in. At most one
 config per connected daemon is in flight, and a config with inner
 daemons holds as many. The configs' data are written

@@ -150,9 +150,8 @@
 #'   sequentially inside each, but for a long config's inner daemons (see
 #'   below). The configs start longest first, by an
 #'   estimate of each one's time (the seconds its model and feature
-#'   selection took on a measured grid, scaled to the run's rows and the
-#'   predictors its preparation keeps), so the short ones fill the daemons
-#'   at the end; the rows come back
+#'   selection took on a measured grid, scaled to the run's rows), so the
+#'   short ones fill the daemons at the end; the rows come back
 #'   in configuration order whatever order they finish in. At most one
 #'   config per connected daemon is in flight, and a config with inner
 #'   daemons holds as many. The configs' data are written
@@ -1013,9 +1012,7 @@ evaluate <- function(x,
   ## is scoring, with the data fields and the tuning settings. The monitor
   ## gates checkpoint rows against them, as evaluate() does, and re-reads the
   ## manifest on every poll, so it is written atomically. Each
-  ## configuration's expected cost weights the monitor's ETA: here at the
-  ## cells' reference counts of predictors kept, and written again once the
-  ## fold stage knows what each preparation kept (Step 7d).
+  ## configuration's expected cost weights the monitor's ETA.
 
   if (!is.null(output_dir)) {
 
@@ -1024,7 +1021,7 @@ evaluate <- function(x,
       n_total                      = n_total,
       n_pending                    = n_pending,
       config_ids                   = configs$config_id,
-      config_cost                  = config_costs(configs, n_train, config_kept(configs, role_map)),
+      config_cost                  = config_costs(configs, n_train),
       start_time                   = start_time,
       metric                       = metric,
       cv_folds                     = cv_folds,
@@ -1203,19 +1200,6 @@ evaluate <- function(x,
         cat(paste0("\u2502  ", line, "\n"))
       }
       cat("\u2502\n")
-
-    }
-
-    ## The costs again, from the predictors each preparation kept, for the
-    ## monitor's ETA, by the same writer
-    if (!is.null(output_dir)) {
-
-      manifest$config_cost <- config_costs(configs, n_train, config_kept(configs, role_map, fold_stage))
-      not_written          <- write_output_file(manifest, manifest_path)
-
-      if (!is.null(not_written)) {
-        abort_output_write(manifest_path, not_written, results_so_far(unname(checkpoint_results)))
-      }
 
     }
 
@@ -1425,11 +1409,10 @@ evaluate <- function(x,
     ## A task carries the payload's path, and the file is the payload; the
     ## tests of what a task carries in test-evaluate-parallel.R guard both.
 
-    ## The pending configurations' costs, from what their preparations kept,
-    ## which the window starts them longest first by, and the daemons each
-    ## one's folds run on (split_plan()), from the daemons connected now
-    pending_kept  <- config_kept(pending_configs, role_map, fold_stage)
-    pending_costs <- config_costs(pending_configs, n_train, pending_kept)
+    ## The pending configurations' costs, which the window starts them
+    ## longest first by, and the daemons each one's folds run on
+    ## (split_plan()), from the daemons connected now
+    pending_costs <- config_costs(pending_configs, n_train)
     n_now         <- connected_daemons()
     planned       <- split_plan(pending_costs, n_now, cv_folds)
     inner_plan    <- planned
@@ -1445,7 +1428,8 @@ evaluate <- function(x,
       processes <- daemon_processes(configs$model, control$isolate)
       extra     <- split_need(inner_plan, dispatch_order(pending_costs), n_now, processes,
                               n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
-                              n_train = n_train, kept = pending_kept, folds = cv_folds)
+                              n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
+                              folds = cv_folds)
 
       if (!check_split_memory(reports, extra, processes, n_rows = nrow(analysis),
                               n_predictors = sum(role_map$role == "predictor"),

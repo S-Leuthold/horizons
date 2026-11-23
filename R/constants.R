@@ -529,18 +529,19 @@ INNER_START_SECONDS <- 60
 # manifest):
 #
 #   seconds = cell(model, selection) x (rows / CONFIG_ROWS_REF)^CONFIG_ROW_EXPONENT[model]
-#             x kept / CONFIG_KEPT_REF[selection]
 #
-# with `rows` the run's training rows and `kept` the predictors the
-# configuration's preparation keeps, which the fold stage knows before any
-# configuration runs. Only each configuration's share of a run is read (the
-# order, the split, the ETA's weights), so the seconds' scale does not
-# matter. One configuration's estimate can be off by a factor of two either
-# way, from when its Bayesian search stops.
+# with `rows` the run's training rows. Only each configuration's share of a
+# run is read (the order, the split, the ETA's weights), so the seconds'
+# scale does not matter. One configuration's estimate can be off by a
+# factor of two either way, from when its Bayesian search stops. The
+# predictors a configuration's preparation keeps do not enter it: on the
+# measured grids a PCA preparation keeping three times the predictors of
+# another took about the same time, and the estimate predicted the longest
+# configurations' shares best without them.
 #
 # The cells are seconds on the local grid (835 training rows, 1,701
-# predictors, 10 folds, a grid of 10, one configuration per daemon), each at
-# the reference count of predictors kept, refitted on 2026-11-23:
+# predictors, 10 folds, a grid of 10, one configuration per daemon),
+# refitted on 2026-11-23:
 #
 # - cubist, xgboost, svm_rbf and elastic_net with pca or correlation: their
 #   mean over the four configurations of local-real at no_improve 10, after
@@ -548,8 +549,8 @@ INNER_START_SECONDS <- 60
 # - plsr: the coverage grid's five configurations, measured the same way;
 # - every other cell: 0.12.0's coverage grid times its model's ratio, the
 #   median over its measured cells of the measured cell over 0.12.0's
-#   (cubist 0.96, xgboost 1.06, svm_rbf 0.61, elastic_net 0.55), or over
-#   every measured cell (0.61) for rf, mlp and mars, none of which was
+#   (cubist 0.60, xgboost 0.80, svm_rbf 0.43, elastic_net 0.38), or over
+#   every measured cell (0.52) for rf, mlp and mars, none of which was
 #   measured since; lightgbm's cells are xgboost's, whose fits its are within
 #   20% of.
 #
@@ -558,24 +559,24 @@ INNER_START_SECONDS <- 60
 # MODEL_SPECS: it is one measurement over models and selections, documented
 # and refitted whole.
 CONFIG_COST_SECONDS <- c(
-  "rf/none"           = 7833,  "rf/pca"          = 409, "rf/correlation"          = 1202,
-  "rf/boruta"         = 6754,  "rf/cars"         = 3276,
-  "cubist/none"       = 18063, "cubist/pca"      = 995, "cubist/correlation"      = 2124,
-  "cubist/boruta"     = 17276, "cubist/cars"     = 12745,
-  "xgboost/none"      = 6628,  "xgboost/pca"     = 354, "xgboost/correlation"     = 2030,
-  "xgboost/boruta"    = 12585, "xgboost/cars"    = 6668,
+  "rf/none"           = 6718,  "rf/pca"          = 351, "rf/correlation"          = 1031,
+  "rf/boruta"         = 5792,  "rf/cars"         = 2810,
+  "cubist/none"       = 11331, "cubist/pca"      = 545, "cubist/correlation"      = 1870,
+  "cubist/boruta"     = 10837, "cubist/cars"     = 7995,
+  "xgboost/none"      = 5028,  "xgboost/pca"     = 216, "xgboost/correlation"     = 1805,
+  "xgboost/boruta"    = 9547,  "xgboost/cars"    = 5058,
   "plsr/none"         = 11,    "plsr/pca"        = 7,   "plsr/correlation"        = 7,
   "plsr/boruta"       = 42,    "plsr/cars"       = 16,
-  "elastic_net/none"  = 40,    "elastic_net/pca" = 58,  "elastic_net/correlation" = 92,
-  "elastic_net/boruta" = 2109, "elastic_net/cars" = 366,
-  "svm_rbf/none"      = 209,   "svm_rbf/pca"     = 103, "svm_rbf/correlation"     = 105,
-  "svm_rbf/boruta"    = 2319,  "svm_rbf/cars"    = 445,
-  "mlp/none"          = 1448,  "mlp/pca"         = 232, "mlp/correlation"         = 1850,
-  "mlp/boruta"        = 3535,  "mlp/cars"        = 4287,
-  "lightgbm/none"     = 6628,  "lightgbm/pca"    = 354, "lightgbm/correlation"    = 2030,
-  "lightgbm/boruta"   = 12585, "lightgbm/cars"   = 6668,
-  "mars/none"         = 222,   "mars/pca"        = 10,  "mars/correlation"        = 32,
-  "mars/boruta"       = 368,   "mars/cars"       = 176
+  "elastic_net/none"  = 27,    "elastic_net/pca" = 29,  "elastic_net/correlation" = 78,
+  "elastic_net/boruta" = 1450, "elastic_net/cars" = 252,
+  "svm_rbf/none"      = 147,   "svm_rbf/pca"     = 53,  "svm_rbf/correlation"     = 91,
+  "svm_rbf/boruta"    = 1622,  "svm_rbf/cars"    = 311,
+  "mlp/none"          = 1242,  "mlp/pca"         = 199, "mlp/correlation"         = 1586,
+  "mlp/boruta"        = 3032,  "mlp/cars"        = 3677,
+  "lightgbm/none"     = 5028,  "lightgbm/pca"    = 216, "lightgbm/correlation"    = 1805,
+  "lightgbm/boruta"   = 9547,  "lightgbm/cars"   = 5058,
+  "mars/none"         = 190,   "mars/pca"        = 9,   "mars/correlation"        = 27,
+  "mars/boruta"       = 316,   "mars/cars"       = 151
 )
 
 # The training rows the cells were measured at
@@ -584,17 +585,12 @@ CONFIG_ROWS_REF <- 835
 # How a model's configuration time grows with the rows: the exponent of
 # rows / CONFIG_ROWS_REF. Fitted for the four models measured on both the
 # local grid and the library draw (8,272 rows) in 0.12.0, the mean over
-# their 32 configurations of the log ratio of seconds per predictor kept;
-# lightgbm takes xgboost's, and the models with no such pair 1.
+# their 32 configurations of the log ratio of their seconds; lightgbm takes
+# xgboost's, and the models with no such pair 1.
 CONFIG_ROW_EXPONENT <- c(
-  rf = 1, cubist = 1.44, xgboost = 0.73, plsr = 1, elastic_net = 0.85,
-  svm_rbf = 1.31, mlp = 1, lightgbm = 0.73, mars = 1
+  rf = 1, cubist = 1.57, xgboost = 0.86, plsr = 1, elastic_net = 0.98,
+  svm_rbf = 1.44, mlp = 1, lightgbm = 0.86, mars = 1
 )
-
-# The predictors kept at which each selection's cells were measured: the mean
-# over the local grid's 10 folds of what the coverage grid's preparation
-# (snv_deriv1, no transformation) kept, as the fold stage counts it.
-CONFIG_KEPT_REF <- c(none = 1701, pca = 52, correlation = 316, boruta = 1686, cars = 1018)
 
 # The share of a run's work over its daemons above which a configuration
 # runs its folds on inner daemons (split_plan(), R/utils-parallel.R): split
