@@ -2035,18 +2035,20 @@ describe("evaluate_single_config() - a search space that fits the budget", {
 
 describe("evaluate_single_config() - a PLS config", {
 
-  it("chooses among the counts before a component one fold's fit cannot form, as fits of their own would, rather than failing", {
+  it("chooses one component when every fold's second component cannot be formed, scoring every count, rather than failing", {
 
-    ## As some BLAS round it, on one fold the second component's weight
-    ## comes out exactly 0, which pls returns as NaN in that weight and in
-    ## every count's coefficients of the fit (test-pls-engine.R shows it on
-    ## numbers every BLAS sums exactly). One fit serves every count of the
-    ## grid, 1 to 4 on the 4 predictors 12 wavenumbers keep.
+    ## As some BLAS round PCA scores, the second component's weight comes out
+    ## exactly 0, which pls returns as NaN in that weight and in every
+    ## count's coefficients of the fit (test-pls-engine.R shows it on numbers
+    ## every BLAS sums exactly). Here every fold's fit of two or more
+    ## components comes back that way, its scores left finite, so only the
+    ## weight shows it. One fit a fold serves every count of the grid, 1 to 4
+    ## on the 4 predictors 12 wavenumbers keep, and each stops at 1.
     real_plsr  <- pls::plsr
     degenerate <- 0L
     local_mocked_bindings(plsr = function(..., ncomp) {
       fit <- real_plsr(..., ncomp = ncomp)
-      if (ncomp >= 2 && degenerate == 0L) {
+      if (ncomp >= 2) {
         degenerate <<- degenerate + 1L
         fit$loading.weights[, 2:ncomp] <- NaN
         fit$coefficients[]             <- NaN
@@ -2054,16 +2056,28 @@ describe("evaluate_single_config() - a PLS config", {
       fit
     }, .package = "pls")
 
+    real_grid <- tune::tune_grid
+    seen      <- new.env()
+    local_mocked_bindings(tune_grid = function(...) {
+      seen$result <- real_grid(...)
+      seen$result
+    }, .package = "tune")
+
     setup <- make_eval_setup(n = 60, n_wn = 12)
     row   <- suppressWarnings(evaluate_single_config(
       config_row = make_eval_config(model = "plsr"), split = setup$split, cv_folds = setup$folds,
       role_map = setup$role_map, grid_size = 2, bayesian_iter = 3, seed = 42L
     ))
 
-    expect_identical(degenerate, 1L)
+    expect_identical(degenerate, nrow(setup$folds))
     expect_identical(row$status, "success")
     expect_identical(row$best_params[[1]]$num_comp, 1L)
-    expect_true(any(grepl("3 of 4 candidates", row$warnings[[1]], fixed = TRUE)))
+    expect_false(any(grepl("candidate", row$warnings[[1]], fixed = TRUE)))
+
+    cm <- tune::collect_metrics(seen$result)
+    cm <- cm[cm$.metric == "rmse", ]
+    expect_identical(sort(cm$num_comp), 1:4)
+    expect_identical(length(unique(cm$mean)), 1L)
 
   })
 

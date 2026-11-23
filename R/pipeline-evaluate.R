@@ -875,6 +875,12 @@ evaluate <- function(x,
     log_no_dispatcher(collector, "fold preparations", verb = "evaluate")
   }
 
+  ## What plsr fits on PCA scores, said once for the grid: a note on the log,
+  ## and a short line in the header below
+  pls_pca <- pls_pca_note(configs)
+
+  if (!is.null(pls_pca)) log_note(collector, "{pls_pca$note}", ids = pls_pca$ids)
+
   ## -----------------------------------------------------------------------
   ## Step 7: Render tree header
   ## -----------------------------------------------------------------------
@@ -949,6 +955,8 @@ evaluate <- function(x,
       cat(paste0("\u2502  ", cli::col_yellow(note), "\n"))
 
     }
+
+    if (!is.null(pls_pca)) cat(paste0("\u2502  ", cli::col_yellow(pls_pca$line), "\n"))
 
     ## A parallel axis has two daemons or more
     for (line in parallel_tree_lines(axis$axis, plan_workers, configs$model, control$isolate,

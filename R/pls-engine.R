@@ -97,13 +97,41 @@ register_pls_engine <- function() {
 #' warns, with class `horizons_warning_substitution`: the runners cap the tuning range from the whole training set, so a
 #' fold whose recipe selects fewer predictors can still reach this cap.
 #'
+#' The fit also stops before a component that would add nothing to it, and
+#' warns the same way. PLS with `a` components is the least-squares fit over
+#' the first `a` directions of the Krylov space `X'y, (X'X)X'y, ...`, and once
+#' that space holds every direction the outcome touches, the fit is the
+#' least-squares fit on the predictors, and a later component would be formed
+#' from rounding error. So component `k` (from the second on) is fitted only
+#' while
+#'
+#' - what is left of the outcome after `k - 1` components is more than
+#'   `PLS_TOL` of the centred outcome's norm (it is not yet fitted exactly);
+#' - its weight and score are finite;
+#' - its score's norm is more than `PLS_TOL` of the scaled predictors' norm
+#'   (their rank is not spent, as a constant or an exactly collinear column
+#'   spends it);
+#' - its score's cosine with what is left of the outcome is more than
+#'   `PLS_TOL` (the score still fits some of it).
+#'
+#' `PLS_TOL` is 1e-9. The last two are the factors of LSQR's second stopping
+#' test (Paige and Saunders 1982), tested apart: on ill-conditioned spectra a
+#' real component has a small score but a real covariance with the outcome,
+#' which their product would read as rounding. On PCA scores, which are
+#' uncorrelated and which scaling gives one variance, the first component is
+#' already the least-squares fit, so every later score's cosine is rounding
+#' and every count holds one component: plsr on them is the least-squares
+#' regression on the kept components. The cosine also ends a fit that has
+#' converged on least squares, as on nearly orthogonal predictors, where the
+#' next component would fit less than `PLS_TOL` of what is left. Where no
+#' component is degenerate nothing changes. The first component is always
+#' fitted.
+#'
 #' While tuning, tune calls it at a grid stage's largest count, and the fit
 #' predicts every count of the stage ([multi_predict._horizons_pls()]). Each
-#' count's coefficients are what a fit at that count gives, so a component
-#' [pls::plsr()] returns as `NaN` (its weight exactly zero, the components
-#' before it already fitting the outcome exactly) leaves the counts before it
-#' as a fit that stops short of it gives them, and the counts from it on
-#' `NaN`.
+#' count's coefficients are what a fit at that count gives: NIPALS forms its
+#' components in sequence, so a fit asked for fewer components than the stop
+#' holds those, and one asked for more stops in the same place.
 #'
 #' @param x Numeric matrix or data frame of predictors.
 #' @param y Numeric vector, the outcome.
@@ -111,27 +139,71 @@ register_pls_engine <- function() {
 #'
 #' @return The `mvr` object from [pls::plsr()], of class `horizons_pls` as
 #'   well (so parsnip's fit is `_horizons_pls`, which
-#'   [multi_predict._horizons_pls()] serves), with the number of components
-#'   used in `horizons_ncomp`.
+#'   [multi_predict._horizons_pls()] serves), holding the components it
+#'   used, their number in `horizons_ncomp`.
 #' @keywords internal
 #' @export
 pls_fit <- function(x, y, ncomp = 2L) {
 
   x         <- as.matrix(x)
   requested <- as.integer(ncomp)
-  ncomp     <- pls_components(requested, ncol(x), nrow(x))
+  count     <- pls_count(x, y, requested)
+  fit       <- count$fit
 
-  ## What ran differs from what was asked, under the documented cap
-  if (ncomp < requested) {
+  ### A stopped fit is refitted at the stop, so the object holds those
+  ### components and no others, as a fit asked for that many does
+  if (count$ncomp < fit$ncomp) fit <- pls_plsr(x, y, count$ncomp, count$sds)
 
-    warn_in_unit("substitution", pls_cap_message(ncomp, requested, ncol(x), nrow(x)))
+  ## What ran differs from what was asked: the documented cap, or the stop
+  if (count$reason != "asked") {
+
+    warn_in_unit("substitution", pls_cap_message(count$ncomp, requested, ncol(x), nrow(x), count$reason))
 
   }
 
-  ### scale = TRUE divides a constant column by a zero sd, which makes every
-  ### prediction NaN.
-  sds <- apply(x, 2, stats::sd)
+  fit$horizons_ncomp <- count$ncomp
+
+  ### A class of horizons' own, which predict() still serves as an mvr
+  class(fit) <- c("horizons_pls", class(fit))
+  fit
+
+}
+
+#' The divisors a PLS fit scales its predictors by
+#'
+#' @description
+#' Each column's standard deviation, and 1 for a column whose deviation is
+#' below `sqrt(.Machine$double.eps)` or not finite: `scale = TRUE` would
+#' divide a constant column by zero, which makes every prediction `NaN`. Also
+#' the Frobenius norm of the centred predictors once divided, which
+#' [pls_informative()] measures a component's score against.
+#'
+#' @param x Numeric matrix of predictors.
+#' @return List with `sds` (the divisors, one per column) and `norm`.
+#' @keywords internal
+#' @noRd
+pls_scale <- function(x) {
+
+  ### A column's spread in its own units: a test of no spread, not one of
+  ### the stop's ratios, so not PLS_TOL
+  sd  <- apply(x, 2, stats::sd)
+  sds <- sd
   sds[!is.finite(sds) | sds < sqrt(.Machine$double.eps)] <- 1
+
+  list(sds = sds, norm = sqrt((nrow(x) - 1) * sum((sd / sds)^2)))
+
+}
+
+#' The one pls::plsr() call of the plsr engine
+#'
+#' @param x Numeric matrix of predictors.
+#' @param y Numeric vector, the outcome.
+#' @param ncomp Integer. The components to fit.
+#' @param sds Numeric. The divisors ([pls_scale()]).
+#' @return The `mvr` object.
+#' @keywords internal
+#' @noRd
+pls_plsr <- function(x, y, ncomp, sds) {
 
   ### A formula made here would carry this frame, x included, into the fit's
   ### terms and every saved copy of it.
@@ -141,30 +213,116 @@ pls_fit <- function(x, y, ncomp = 2L) {
   data   <- data.frame(y = y)
   data$x <- x
 
-  fit <- pls::plsr(fml, data = data, ncomp = ncomp, scale = sds,
-                   method = "oscorespls", model = FALSE)
+  pls::plsr(fml, data = data, ncomp = ncomp, scale = sds,
+            method = "oscorespls", model = FALSE)
 
-  ### A component whose weight is exactly zero (the components before it
-  ### already fit y, to the last bit) comes back NaN, and the projection
-  ### carries it into every count's coefficients, so one fit could no longer
-  ### stand for the counts before it. Those take the coefficients of a fit
-  ### that stops short of it, as fits of their own give them; from it on the
-  ### counts stay NaN, as theirs are.
-  first <- which(!is.finite(colSums(unclass(fit$loading.weights))))[1]
+}
 
-  if (!is.na(first) && first > 1L) {
+#' The components of a PLS fit that carry information about the outcome
+#'
+#' @description
+#' The count of components before the first, from the second on, that fails
+#' one of four tests, read from the fit's documented `scores`,
+#' `loading.weights` and `residuals` (the outcome deflated by each component
+#' in turn, centred). With `f_j` what is left of the centred outcome after `j`
+#' components and `t_k` component `k`'s score, component `k` is fitted only
+#' while
+#'
+#' 1. `||f_(k-1)||` is more than `PLS_TOL` times the centred outcome's norm:
+#'    the outcome is not yet fitted exactly (LSQR's first test, Paige and
+#'    Saunders 1982);
+#' 2. (a) `||t_k||` is more than `PLS_TOL` times `x_norm`: the score is not
+#'    rounding, so the predictors' rank is not spent; and (b)
+#'    `|t_k' f_(k-1)|` is more than `PLS_TOL` times `||t_k||` times
+#'    `||f_(k-1)||`: the score's cosine with the residual is not rounding, so
+#'    it still fits some of it. Their product is LSQR's second test, which
+#'    reads a small score with a real covariance, as on ill-conditioned
+#'    bands, the same as rounding; tested apart, each has its own margin;
+#' 3. its weight and score are finite: pls returns a weight that is exactly
+#'    zero as `NaN` (0 / 0), the exact case of 1 or 2.
+#'
+#' They are tested in the order 1, 3, 2, so a `NaN` never reaches a
+#' comparison. A first component that is not finite (no predictor covaries
+#' with the outcome, or the outcome is constant) is left as pls returns it,
+#' so the fit predicts `NaN`, as a fit of one component does.
+#'
+#' The other PLS fits in horizons keep their own fits: CARS scores its
+#' subsets with pls's own cross-validation, which returns no segment's fit to
+#' test, and both it and `select_training(space = "pls")` fit spectral bands
+#' centred and unscaled after dropping near-constant ones, whose Krylov space
+#' does not end before their caps; the similarity space's count is the
+#' user's `ncomp`.
+#'
+#' @param fit An `mvr` object from [pls_plsr()].
+#' @param y Numeric vector, the outcome it was fitted to.
+#' @param x_norm Numeric(1). The Frobenius norm of the centred, scaled
+#'   predictors ([pls_scale()]).
+#' @return Integer: the components that pass, at least 1, at most
+#'   `fit$ncomp`.
+#' @keywords internal
+#' @noRd
+pls_informative <- function(fit, y, x_norm) {
 
-    lead <- pls::plsr(fml, data = data, ncomp = first - 1L, scale = sds,
-                      method = "oscorespls", model = FALSE)
-    fit$coefficients[, , seq_len(first - 1L)] <- lead$coefficients
+  scores  <- unclass(fit$scores)
+  weights <- unclass(fit$loading.weights)
+
+  ### n x 1 x ncomp, the one response's residual after each count
+  residuals <- matrix(fit$residuals, nrow = length(y))
+
+  if (!all(is.finite(weights[, 1])) || !all(is.finite(scores[, 1]))) return(fit$ncomp)
+
+  f0_norm <- sqrt(sum((y - mean(y))^2))
+
+  for (k in seq_len(fit$ncomp)[-1]) {
+
+    f_prev <- residuals[, k - 1L]
+    f_norm <- sqrt(sum(f_prev^2))
+
+    ## 1. The outcome is fitted exactly
+    if (f_norm <= PLS_TOL * f0_norm) return(k - 1L)
+
+    ## 3. pls's 0 / 0: the weight was exactly zero
+    if (!all(is.finite(weights[, k])) || !all(is.finite(scores[, k]))) return(k - 1L)
+
+    t_norm <- sqrt(sum(scores[, k]^2))
+
+    ## 2a. The score is rounding: the predictors' rank is spent
+    if (t_norm <= PLS_TOL * x_norm) return(k - 1L)
+
+    ## 2b. The score fits nothing of what is left: the fit is least squares
+    if (abs(sum(scores[, k] * f_prev)) <= PLS_TOL * t_norm * f_norm) return(k - 1L)
 
   }
 
-  fit$horizons_ncomp <- ncomp
+  fit$ncomp
 
-  ### A class of horizons' own, which predict() still serves as an mvr
-  class(fit) <- c("horizons_pls", class(fit))
-  fit
+}
+
+#' The components a PLS fit of a requested count holds, and why
+#'
+#' @description
+#' The count capped by the data ([pls_components()]), fitted, and stopped
+#' at the components that carry information ([pls_informative()]): what
+#' [pls_fit()] fits, and what [pls_cap_records()] reports a fold at.
+#'
+#' @param x Numeric matrix of predictors.
+#' @param y Numeric vector, the outcome.
+#' @param requested Integer. The count asked for.
+#' @return List with `ncomp` (the components held), `reason` (`"asked"`,
+#'   `"cap"` or `"stop"`, why it is not `requested`), `fit` (the fit at the
+#'   capped count, before any stop) and `sds` (its divisors).
+#' @keywords internal
+#' @noRd
+pls_count <- function(x, y, requested) {
+
+  capped  <- pls_components(requested, ncol(x), nrow(x))
+  scaling <- pls_scale(x)
+  fit     <- pls_plsr(x, y, capped, scaling$sds)
+  held    <- if (capped > 1L) pls_informative(fit, y, scaling$norm) else capped
+
+  reason <- if (held < capped) "stop" else if (capped < requested) "cap" else "asked"
+
+  list(ncomp = held, reason = reason, fit = fit, sds = scaling$sds)
 
 }
 
@@ -177,7 +335,7 @@ pls_fit <- function(x, y, ncomp = 2L) {
 #' predicts every count of the stage from that fit, in one call to the fit's
 #' `predict()`. A count above the components the fit holds
 #' (`horizons_ncomp`) is predicted at that many, as [pls_predict()] predicts
-#' a fit [pls_fit()] capped; the fit's own warning says so.
+#' a fit [pls_fit()] capped or stopped; the fit's own warning says so.
 #'
 #' @param object A parsnip `model_fit` of the `"pls"` engine.
 #' @param new_data Predictors, with the training predictors' columns in their
@@ -228,19 +386,33 @@ pls_components <- function(requested, n_predictors, n_rows) {
 
 }
 
-#' What a PLS fit capped below the count asked for says
+#' What a PLS fit capped or stopped below the count asked for says
 #'
 #' @description
 #' [pls_fit()]'s warning, and the words a tuned plsr row reports a fold that
 #' could not hold its chosen count in ([pls_cap_records()]), so both read the
-#' same line.
+#' same line. The cap and the stop share its lead, so one pattern
+#' (`PLS_CAP_PATTERN`) finds both.
 #'
 #' @param fitted,requested Integer. The components fitted, and asked for.
 #' @param n_predictors,n_rows Integer. The predictors and rows fitted on.
+#' @param reason Character(1). `"cap"`, the data's dimensions, or `"stop"`,
+#'   the fit already as close to the outcome as the predictors allow, so the
+#'   components after `fitted` would add nothing to it ([pls_informative()]).
 #' @return Character(1).
 #' @keywords internal
 #' @noRd
-pls_cap_message <- function(fitted, requested, n_predictors, n_rows) {
+pls_cap_message <- function(fitted, requested, n_predictors, n_rows, reason = "cap") {
+
+  if (identical(reason, "stop")) {
+
+    first <- if (fitted == 1) "the first already fits" else cli::format_inline("the first {fitted} already fit")
+
+    return(cli::format_inline(
+      "PLS fitted {fitted} component{?s}, not the {requested} asked for: {first} the outcome as closely as these predictors can, so further components would add nothing to the fit."
+    ))
+
+  }
 
   cli::format_inline(
     "PLS fitted {fitted} component{?s}, not the {requested} asked for: the data have {n_predictors} predictor{?s} and {n_rows} row{?s}."
@@ -248,7 +420,7 @@ pls_cap_message <- function(fitted, requested, n_predictors, n_rows) {
 
 }
 
-### Matches pls_cap_message()'s text
+### Matches pls_cap_message()'s text, the cap's and the stop's
 PLS_CAP_PATTERN <- "^PLS fitted [0-9]+ components?, not the [0-9]+ asked for: "
 
 #' A tuned plsr row's record of the folds that could not hold its count
@@ -260,39 +432,91 @@ PLS_CAP_PATTERN <- "^PLS fitted [0-9]+ components?, not the [0-9]+ asked for: "
 #' fold that capped a larger count would be reported on a row whose count it
 #' held (#109). The runners leave those notes off ([drop_pls_caps()]) and
 #' report the chosen count here instead, fold by fold, in [pls_fit()]'s
-#' words: each fold whose predictors, or analysis rows less one, are fewer
-#' than the count. `fit()` needs none: its out-of-fold fits are at the chosen
-#' count, and their own warnings say it.
+#' words: each fold whose fit at the count holds fewer components, capped by
+#' its predictors or analysis rows less one, or stopped where the components
+#' carry nothing more ([pls_count()]). A stop depends on the fold's data, not
+#' only its dimensions, so each fold's count is fitted on its analysis rows,
+#' exactly as tune's fit saw them: the frame's outcome column, and its other
+#' columns, in order, as the predictors ([fold_workflow()]). A count of one
+#' makes no fit, since a fit of one component cannot stop. `fit()` needs
+#' none: its out-of-fold fits are at the chosen count, and their own warnings
+#' say it.
 #'
 #' @param folds The `rset` tuned over, assembled from the fold preps
 #'   ([assemble_folds()]): each fold's frame holds the outcome and that
 #'   fold's predictors.
 #' @param best_params One-row tibble of the chosen hyperparameters.
+#' @param outcome Character(1). The outcome column of the folds' frames.
 #' @return Records shaped like [new_warning_log()]'s, as [tune_note_records()]
 #'   gives them: scope `"cv"`, one per distinct text with the folds that
 #'   raised it. Empty when the count fits every fold, or when `num_comp` was
 #'   not tuned.
 #' @keywords internal
 #' @noRd
-pls_cap_records <- function(folds, best_params) {
+pls_cap_records <- function(folds, best_params, outcome) {
 
   if (!"num_comp" %in% names(best_params)) return(new_warning_log())
 
   requested <- as.integer(best_params$num_comp[[1]])
 
-  ### Each capped fold's warning as it would arrive from the fit, grouped as
-  ### the fold preps' warnings are
+  ### Each fold's warning as it would arrive from the fit, grouped as the
+  ### fold preps' warnings are
   arrivals <- Map(function(split, fold) {
+
     n_predictors <- ncol(split$data) - 1L
     n_rows       <- length(split$in_id)
-    fitted       <- pls_components(requested, n_predictors, n_rows)
-    if (fitted < requested) {
-      parts <- condition_parts(pls_cap_message(fitted, requested, n_predictors, n_rows), max_chars = Inf)
+    count        <- list(ncomp = pls_components(requested, n_predictors, n_rows), reason = "cap")
+
+    if (count$ncomp > 1L) {
+      rows  <- split$data[split$in_id, , drop = FALSE]
+      count <- pls_count(as.matrix(rows[setdiff(names(rows), outcome)]), rows[[outcome]], requested)
+    }
+
+    if (count$ncomp < requested) {
+      text  <- pls_cap_message(count$ncomp, requested, n_predictors, n_rows, count$reason)
+      parts <- condition_parts(text, max_chars = Inf)
       tibble::tibble(cause = parts$cause, where = parts$where, fold = fold)
     }
+
   }, folds$splits, resample_ids(folds))
 
   fold_warning_records(arrivals, nrow(folds))
+
+}
+
+#' What evaluate() says about plsr on PCA scores
+#'
+#' @description
+#' PCA's scores are uncorrelated, and the plsr engine scales its predictors
+#' to one variance, so on them the first PLS component is already the
+#' least-squares fit on the kept components, and every count of `num_comp`
+#' is that model ([pls_fit()] stops there). Nothing departs from what was
+#' asked, so it is not a warning: `evaluate()` says it once a run, as a short
+#' line in its tree and the whole sentence as a note on the log, when its grid
+#' pairs the two.
+#'
+#' @param configs The grid, `config$configs`.
+#' @return `NULL` when no configuration pairs plsr with
+#'   `feature_selection = "pca"`; else a list of `ids` (those
+#'   configurations), `line` (the tree's) and `note` (the log's), each
+#'   Character(1).
+#' @keywords internal
+#' @noRd
+pls_pca_note <- function(configs) {
+
+  ids <- configs$config_id[configs$model %in% "plsr" & configs$feature_selection %in% "pca"]
+
+  if (length(ids) == 0) return(NULL)
+
+  n <- length(ids)
+
+  list(ids  = ids,
+       line = cli::format_inline(
+         "plsr on PCA scores ({n} configuration{?s}): least squares on the kept components, so num_comp tunes nothing"
+       ),
+       note = cli::format_inline(
+         "plsr on PCA scores ({n} configuration{?s}): PLS re-projects scores PCA has already projected, so it fits least squares on the kept components and every component count is the same model; {?it runs/they run}, and tune{?s/} nothing."
+       ))
 
 }
 

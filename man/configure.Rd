@@ -202,6 +202,16 @@ and \code{validate()} does not report them. A slow run with either on a
 full-resolution table is a signal to add \code{feature_selection} there too.
 See GitHub issue #40.
 
+\strong{plsr with \code{feature_selection = "pca"}:}
+
+\code{plsr} scales its predictors to unit variance, and PCA's scores are
+uncorrelated, so on them PLS re-projects what PCA has already projected:
+its first component is already the least-squares fit on the kept
+components (principal component regression at \code{pca_threshold}), every
+count of \code{num_comp} is that same model, and the choice is one component.
+The pairing runs, and tunes nothing; \code{evaluate()} says so once in its
+tree and on the object's log. See GitHub issue #278.
+
 \strong{Recipe settings:}
 
 \code{sg_window} and \code{pca_threshold} are set once per object, not per

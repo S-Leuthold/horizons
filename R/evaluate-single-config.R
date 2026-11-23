@@ -443,13 +443,13 @@ evaluate_single_config <- function(config_row,
     ## grid's notes as .iter 0, so this covers both stages.
     candidate <- unit_step("select_best", candidate_of(final_tune_results, best_params, grid, model_wflow))
 
-    ## The PLS engine's cap is read for the chosen count, fold by fold: one
-    ## fit serves every count of a grid stage, so the notes tune kept of it
-    ## name the stage's largest count (pls_cap_records())
+    ## The PLS engine's cap and stop are read for the chosen count, fold by
+    ## fold: one fit serves every count of a grid stage, so the notes tune
+    ## kept of it name the stage's largest count (pls_cap_records())
     warning_log <- dplyr::bind_rows(
       warning_log,
       drop_pls_caps(tune_note_records(final_tune_results, type = "warning", candidate = candidate)),
-      pls_cap_records(prepped_folds$folds, best_params)
+      pls_cap_records(prepped_folds$folds, best_params, outcome_col)
     )
 
     unmapped <- unmapped_line(candidate)

@@ -3194,6 +3194,80 @@ describe("evaluate() - the Bayesian search's stopping rule", {
 
 
 ## =========================================================================
+## plsr on PCA scores
+## =========================================================================
+## On PCA scores every plsr count is the least-squares fit on the kept
+## components (#278), so a grid that pairs them says so once, in a short line
+## in the tree and the whole sentence on the log, and warns nothing: nothing
+## departs from what was asked.
+
+describe("evaluate() - plsr on PCA scores", {
+
+  pairing_run <- function(models, selections) {
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = function(config_row, ...) {
+      mock_eval_row(template, config_row$config_id, "success")
+    })
+    obj <- make_eval_object(n = 60, n_configs = length(models))
+    obj$config$configs$model             <- models
+    obj$config$configs$feature_selection <- selections
+    out <- utils::capture.output(
+      ev <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(verbose = TRUE)))
+    )
+    list(out = out, ev = ev)
+  }
+
+  it("words the tree's line and the log's note for one configuration and for several", {
+
+    one <- tibble::tibble(config_id = "cfg_001", model = "plsr", feature_selection = "pca")
+    two <- tibble::tibble(config_id = c("a", "b", "c"), model = c("plsr", "rf", "plsr"),
+                          feature_selection = c("pca", "pca", "pca"))
+
+    expect_identical(pls_pca_note(one)$line,
+                     "plsr on PCA scores (1 configuration): least squares on the kept components, so num_comp tunes nothing")
+    expect_identical(pls_pca_note(two)$line,
+                     "plsr on PCA scores (2 configurations): least squares on the kept components, so num_comp tunes nothing")
+
+    expect_identical(pls_pca_note(one)$note, paste0(
+      "plsr on PCA scores (1 configuration): PLS re-projects scores PCA has already projected, so it fits ",
+      "least squares on the kept components and every component count is the same model; it runs, and tunes nothing."
+    ))
+    expect_identical(pls_pca_note(two)$ids, c("a", "c"))
+    expect_match(pls_pca_note(two)$note, "^plsr on PCA scores \\(2 configurations\\): .*; they run, and tune nothing\\.$")
+
+  })
+
+  it("says once, in the tree and as a note on the log naming the configurations, what plsr fits on PCA scores", {
+
+    got  <- pairing_run(c("plsr", "plsr", "rf"), c("pca", "none", "pca"))
+    said <- pls_pca_note(got$ev$config$configs)
+
+    ### The tree's line is the short one, the log's note the whole sentence
+    expect_identical(sum(grepl("plsr on PCA scores", got$out, fixed = TRUE)), 1L)
+    expect_true(paste0("\u2502  ", said$line) %in% got$out)
+
+    log   <- got$ev$log[got$ev$log$verb == "evaluate", ]
+    about <- grepl("plsr on PCA scores", log$message, fixed = TRUE)
+    expect_identical(sum(about), 1L)
+    expect_identical(log$type[about], "note")
+    expect_identical(log$message[about], said$note)
+    expect_identical(log$ids[about][[1]], "cfg_001")
+
+  })
+
+  it("says nothing when no configuration pairs plsr with PCA", {
+
+    got <- pairing_run(c("plsr", "rf"), c("none", "pca"))
+
+    expect_false(any(grepl("plsr on PCA scores", got$out, fixed = TRUE)))
+    expect_false(any(grepl("plsr on PCA scores", got$ev$log$message, fixed = TRUE)))
+
+  })
+
+})
+
+
+## =========================================================================
 ## What the configurations report on the log
 ## =========================================================================
 

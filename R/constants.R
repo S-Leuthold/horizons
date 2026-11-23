@@ -178,6 +178,19 @@ SELECTION_PACKAGES <- list(
 # of MODEL_SPECS: CARS caps its components with it too (R/step-select-cars.R).
 PLS_MAX_COMP <- 30L
 
+# The PLS stop's tolerance, relative (pls_informative(), R/pls-engine.R). A
+# fit stops before a component once what is left of the outcome is within it
+# of the outcome's norm (fitted exactly), once the component's score is
+# within it of the scaled predictors' norm (their rank spent: a constant or
+# an exactly collinear column), or once that score's cosine with what is left
+# of the outcome is within it (nothing left to fit: PCA scores on the rows
+# they were computed on, or a fit already at least squares). Measured on 359
+# sets of real spectra and 41 rounding cases (#278): rounding sits at least
+# 160 times below it; on spectra, real scores sit at least 130 times above it
+# and real cosines at least 19 times, 400 times for any component that moves
+# held-out predictions by more than a millionth of the outcome's spread.
+PLS_TOL <- 1e-9
+
 # horizons' default ranges of tuned parameters, keyed by the dials parameter
 # id, in dials' units (a log-scale parameter's in log10): configure()'s
 # `tune_ranges` is merged over them and recorded as config$tuning$ranges,
@@ -557,7 +570,10 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #   8  2026-11-20: each fold's recipe prepped once inside its configuration,
 #      so CARS's and Boruta's bands are selected once per fold under their
 #      own unit's seed and shared by every candidate (SEED_RULE 2).
-SCORING_SCHEMA <- 8L
+#   9  2026-11-23: a PLS fit stops at the components that carry information
+#      about the outcome, so plsr on PCA scores no longer scores counts
+#      fitted to rounding error (#278).
+SCORING_SCHEMA <- 9L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

@@ -4,9 +4,10 @@
 ## horizons registers a "pls" engine for parsnip's pls() model, fitting with
 ## pls::plsr(). These check the registration beside another package's engine,
 ## a fit with horizons loaded but not attached, the fit against pls::plsr()
-## directly, the component cap, tuning through tune, and the num_comp range
-## the runners hand to tune (#216). That the load registers the engine is
-## tested in test-zzz.R.
+## directly, the component cap, the stop at the components that carry
+## information (#278), tuning through tune, and the num_comp range the
+## runners hand to tune (#216). That the load registers the engine is tested
+## in test-zzz.R.
 
 
 ## Predictors with signal in a handful of columns, so several components help
@@ -19,6 +20,25 @@ make_pls_data <- function(n = 60, p = 40, seed = 11) {
   y <- 2 * x[, 1] - x[, 5] + 0.5 * x[, min(12, p)] + stats::rnorm(n, sd = 0.5)
 
   list(x = x, y = y, df = data.frame(y = y, x))
+
+}
+
+## Smooth, correlated spectra-like predictors (five latent spectra under a
+## moving average, a little noise), an outcome read from two bands, and the
+## PCA scores of the spectra computed on these same rows, as a fold's
+## step_pca() gives them: uncorrelated, so scaled they have one variance
+make_pls_spectra <- function(n = 60, p = 40, n_pcs = 8, seed = 1) {
+
+  withr::local_seed(seed)
+
+  latent <- matrix(stats::rnorm(n * 5), n) %*% matrix(stats::rnorm(5 * p), 5)
+  x      <- t(apply(latent, 1, function(r) stats::filter(r, rep(1 / 5, 5), circular = TRUE))) +
+    matrix(stats::rnorm(n * p, sd = 0.01), n)
+  colnames(x) <- paste0("wn_", seq(4000, by = -2, length.out = p))
+  y      <- x[, 3] - 2 * x[, 20] + stats::rnorm(n, sd = 0.1)
+  scores <- stats::prcomp(x, scale. = TRUE)$x[, seq_len(n_pcs)]
+
+  list(x = x, y = y, scores = scores)
 
 }
 
@@ -224,6 +244,158 @@ describe("the pls engine", {
 })
 
 
+describe("pls_fit() - the stop at the components that carry information", {
+
+  plsr_spec <- function(k) {
+    parsnip::pls(num_comp = k) |>
+      parsnip::set_engine("pls") |>
+      parsnip::set_mode("regression")
+  }
+
+  it("fits one component on PCA scores, the least-squares fit on them, and predicts every count as that one", {
+
+    d <- make_pls_spectra()
+
+    expect_warning(fit <- pls_fit(d$scores, d$y, ncomp = 8L),
+                   "PLS fitted 1 component, not the 8 asked for: the first already fits",
+                   class = "horizons_warning_substitution")
+    expect_identical(fit$horizons_ncomp, 1L)
+    expect_identical(fit$ncomp, 1L)
+
+    ## pls's coefficients are on the scaled predictors
+    ls_fit <- stats::lm(d$y ~ d$scores)
+    expect_equal(unname(drop(stats::coef(fit, ncomp = 1)) / fit$scale), unname(stats::coef(ls_fit)[-1]))
+    expect_equal(pls_predict(fit, d$scores), unname(stats::fitted(ls_fit)))
+
+    new  <- as.data.frame(d$scores[1:10, ])
+    pred <- suppressWarnings(parsnip::multi_predict(parsnip::fit_xy(plsr_spec(8), x = d$scores, y = d$y),
+                                                    new, num_comp = 1:8))
+    one  <- vapply(pred$.pred, function(p) p$.pred[p$num_comp == 1L], numeric(1))
+
+    for (k in 2:8) {
+      expect_identical(vapply(pred$.pred, function(p) p$.pred[p$num_comp == k], numeric(1)), one)
+    }
+
+  })
+
+  it("leaves a fit with no degenerate component exactly as pls::plsr() gives it, with no warning", {
+
+    d <- make_pls_spectra()
+
+    expect_no_warning(fit <- pls_fit(d$x, d$y, ncomp = 10L))
+
+    sds <- apply(d$x, 2, stats::sd)
+    ref <- pls::plsr(y ~ x, data = data.frame(y = d$y, x = I(d$x)), ncomp = 10,
+                     scale = sds, method = "oscorespls")
+
+    expect_identical(fit$horizons_ncomp, 10L)
+    expect_identical(unname(unclass(fit$coefficients)), unname(unclass(ref$coefficients)))
+
+  })
+
+  it("stops where a constant column spends the predictors' rank, with coefficients of the data's size", {
+
+    ## Centred, the constant column is zero, so the centred predictors have
+    ## rank 4 against the cap of 5: the fifth component would be formed from
+    ## the rounding left after four, its weight unit length and its score
+    ## rounding too
+    withr::local_seed(2)
+    x      <- matrix(stats::rnorm(30 * 5), 30)
+    x[, 3] <- 0.5
+    y      <- stats::rnorm(30)
+
+    expect_warning(fit <- pls_fit(x, y, ncomp = 5L),
+                   "PLS fitted 4 components, not the 5 asked for: the first 4 already fit",
+                   class = "horizons_warning_substitution")
+    expect_identical(fit$horizons_ncomp, 4L)
+
+    coefs <- stats::coef(fit, ncomp = 4)
+    expect_true(all(is.finite(coefs)))
+    expect_lt(max(abs(coefs)), 10)
+
+  })
+
+  it("stops at the same component whatever the units of the outcome and of a predictor", {
+
+    d <- make_pls_spectra()
+
+    ### One predictor in units 1e12 times smaller, so the predictors' norm the
+    ### stop measures against holds only when it is taken after scaling
+    rescaled <- function(x, k) {
+      x[, k] <- x[, k] * 1e12
+      x
+    }
+
+    ### Outcome in micro-units on the PCA scores, in units a hundred million
+    ### times larger on the spectra
+    big   <- suppressWarnings(pls_fit(rescaled(d$scores, 2), d$y * 1e6, ncomp = 8L))
+    small <- suppressWarnings(pls_fit(rescaled(d$x, 7), d$y * 1e-8, ncomp = 10L))
+
+    expect_identical(big$horizons_ncomp, 1L)
+    expect_identical(small$horizons_ncomp, 10L)
+
+  })
+
+  it("keeps a real component whose small score and small covariance with the outcome would together read as rounding", {
+
+    ## Eight orthogonal directions with variances from 1 to 1e-14 of the
+    ## first, rotated by a Hadamard matrix so that every column has the same
+    ## variance and scaling keeps those variances, as ill-conditioned bands
+    ## would be; an outcome that loads 1 on the first seven directions and
+    ## 1e-4 on the eighth, and noise kept off the predictors. The eighth
+    ## score is about 1e-7 of the predictors' norm and its cosine with what is
+    ## left of the outcome about 2e-3, each far above PLS_TOL, while their
+    ## product, LSQR's single statistic, is about 1.5e-10, below it.
+    withr::local_seed(4)
+    n <- 60
+    h <- matrix(1, 1, 1)
+    for (i in 1:3) h <- rbind(cbind(h, h), cbind(h, -h))
+    u <- qr.Q(qr(scale(matrix(stats::rnorm(n * 8), n), scale = FALSE)))
+    x <- u %*% diag(sqrt(10^seq(0, -14, length.out = 8) * (n - 1))) %*% t(h / sqrt(8))
+    e <- stats::rnorm(n, sd = 0.01)
+    y <- drop(u %*% c(rep(1, 7), 1e-4)) + e - drop(u %*% crossprod(u, e))
+
+    expect_no_warning(fit <- pls_fit(x, y, ncomp = 8L))
+    expect_identical(fit$horizons_ncomp, 8L)
+
+  })
+
+})
+
+
+describe("tune's choice among tied counts", {
+
+  it("takes the smallest of counts that tie exactly, as select_complete() reads tune's ranking", {
+
+    ## Canary (#278): on PCA scores every count from the stop on predicts as
+    ## the stop does, so their cross-validated means tie exactly, and the
+    ## choice relies on tune numbering a submodel's values in ascending order
+    ## and keeping tied rows in that order when it ranks them. Here the cap
+    ## makes the tie: two correlated predictors that carry the outcome with
+    ## opposite signs, so counts 2 to 5 are all fitted at 2, the
+    ## least-squares fit, and beat count 1.
+    withr::local_seed(3)
+    d    <- data.frame(x1 = stats::rnorm(45))
+    d$x2 <- 0.8 * d$x1 + stats::rnorm(45, sd = 0.6)
+    d$y  <- 2 * d$x1 - 2 * d$x2 + stats::rnorm(45, sd = 0.3)
+
+    folds <- rsample::vfold_cv(d, v = 3)
+    wf    <- fold_workflow(define_model_spec("plsr"), "y")
+    res   <- suppressMessages(tune::tune_grid(wf, folds, grid = tibble::tibble(num_comp = 1:5),
+                                              control = tune::control_grid(verbose = FALSE)))
+
+    cm <- tune::collect_metrics(res)
+    cm <- cm[cm$.metric == "rmse", ]
+    expect_identical(length(unique(cm$mean[cm$num_comp >= 2])), 1L)
+    expect_lt(cm$mean[cm$num_comp == 2], cm$mean[cm$num_comp == 1])
+
+    expect_identical(select_complete(res, "rmse", 3L)$num_comp, 2L)
+
+  })
+
+})
+
+
 describe("multi_predict() for a plsr fit", {
 
   it("predicts every count asked for from one fit, a count above the fit's own at the fit's", {
@@ -254,34 +426,57 @@ describe("multi_predict() for a plsr fit", {
 
   })
 
-  it("predicts the counts before a component whose weight is exactly zero as fits of their own do, and NaN from it on", {
+  it("stops before a component the outcome, already fitted exactly, leaves nothing to form, and predicts every count as the one it holds", {
 
     ## Two orthogonal predictors, each scaled to a sd of exactly 2, and an
     ## outcome the first component fits exactly, in numbers every BLAS
-    ## sums exactly: the second component's weight is 0, which pls returns
-    ## as NaN, and through its projection NaN at every count of the fit
+    ## sums exactly: the second component's weight would be 0, which pls
+    ## returns as NaN, and through its projection NaN at every count
     x <- cbind(a = c(2, -2, 2, -2, 0), b = c(2, 2, -2, -2, 0))
     y <- 5 + x[, "a"]
 
-    two <- pls_fit(x, y, ncomp = 2L)
-    one <- pls_fit(x, y, ncomp = 1L)
-    expect_true(all(is.nan(unclass(two$loading.weights)[, 2])))
+    expect_warning(two <- pls_fit(x, y, ncomp = 2L),
+                   "PLS fitted 1 component, not the 2 asked for: the first already fits",
+                   class = "horizons_warning_substitution")
+    expect_identical(two$horizons_ncomp, 1L)
+    expect_identical(two$ncomp, 1L)
 
     new <- as.data.frame(x)
-    expect_equal(pls_predict(one, new), y)
-    expect_identical(predict(two, newdata = data.frame(row = 1:5, x = I(x)), ncomp = 1)[, 1, 1],
-                     predict(one, newdata = data.frame(row = 1:5, x = I(x)), ncomp = 1)[, 1, 1])
-    expect_true(all(is.nan(predict(two, newdata = data.frame(row = 1:5, x = I(x)), ncomp = 2))))
+    expect_equal(pls_predict(two, new), y)
 
-    ## So a grid stage's one fit scores count 1 as its own fit does
+    ## So a grid stage's one fit scores both counts as the fit it holds
     spec <- parsnip::pls(num_comp = 2) |>
       parsnip::set_engine("pls") |>
       parsnip::set_mode("regression")
-    pred <- parsnip::multi_predict(parsnip::fit_xy(spec, x = x, y = y), new, num_comp = 1:2)
+    pred <- suppressWarnings(parsnip::multi_predict(parsnip::fit_xy(spec, x = x, y = y), new, num_comp = 1:2))
     at   <- function(k) vapply(pred$.pred, function(p) p$.pred[p$num_comp == k], numeric(1))
 
     expect_equal(at(1L), y)
-    expect_true(all(is.nan(at(2L))))
+    expect_equal(at(2L), y)
+
+  })
+
+  it("stops where the first component fits the outcome to rounding but not exactly, on the residual's norm alone", {
+
+    ## An outcome along the first singular direction of the scaled
+    ## predictors: the first component fits it, and what is left is rounding
+    ## but not zero. The second weight is then finite, and its score, a real
+    ## direction of the predictors, covaries with that residual as any
+    ## direction would, so only the test on the residual's norm stops here.
+    withr::local_seed(6)
+    x  <- matrix(stats::rnorm(40 * 6), 40) %*% matrix(stats::rnorm(36), 6)
+    xs <- scale(x)
+    y  <- 2 + drop(xs %*% svd(xs)$v[, 1])
+
+    full <- pls_plsr(x, y, 6L, pls_scale(x)$sds)
+    expect_true(all(is.finite(unclass(full$loading.weights))))
+    expect_gt(sqrt(sum(full$residuals[, 1, 1]^2)), 0)
+
+    expect_warning(fit <- pls_fit(x, y, ncomp = 6L),
+                   "PLS fitted 1 component, not the 6 asked for: the first already fits",
+                   class = "horizons_warning_substitution")
+    expect_identical(fit$horizons_ncomp, 1L)
+    expect_equal(pls_predict(fit, x), y)
 
   })
 
@@ -306,7 +501,7 @@ describe("pls_cap_records()", {
 
   it("says, as the fits at the chosen count would, which folds cannot hold it", {
 
-    recs <- pls_cap_records(folds, tibble::tibble(num_comp = 6L, .config = "pre0_mod1_post0"))
+    recs <- pls_cap_records(folds, tibble::tibble(num_comp = 6L, .config = "pre0_mod1_post0"), "y")
 
     expect_identical(recs$cause, c(
       "PLS fitted 4 components, not the 6 asked for: the data have 4 predictors and 30 rows.",
@@ -326,8 +521,54 @@ describe("pls_cap_records()", {
 
   it("is empty when the count fits every fold, or no count was tuned", {
 
-    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(num_comp = 4L))), 0L)
-    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(mtry = 3L))), 0L)
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(num_comp = 4L), "y")), 0L)
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(mtry = 3L), "y")), 0L)
+
+  })
+
+  it("says which folds' fits stop below the chosen count, counted on each fold's own rows, as the fits at that count would", {
+
+    ## Folds as assemble_folds() makes them, the outcome first. Fold2 holds
+    ## PCA scores computed on its own analysis rows, uncorrelated there, so a
+    ## fit on them stops at one component; the other folds' predictors carry
+    ## the outcome over several components. The dimensions alone cannot tell
+    ## the folds apart: each has 8 predictors and 40 analysis rows.
+    withr::local_seed(8)
+    fold_with <- function(scores) {
+      x <- matrix(stats::rnorm(48 * 8), 48)
+      if (scores) {
+        pca     <- stats::prcomp(x[1:40, ], scale. = TRUE)
+        x[1:40, ] <- pca$x
+        x[41:48, ] <- stats::predict(pca, x[41:48, ])
+      }
+      data <- data.frame(y = drop(x %*% seq(1, 0.3, length.out = 8)) + stats::rnorm(48, sd = 0.1), x)
+      rsample::make_splits(list(analysis = 1:40, assessment = 41:48), data = data)
+    }
+    folds <- rsample::manual_rset(list(fold_with(FALSE), fold_with(TRUE), fold_with(FALSE)),
+                                  ids = paste0("Fold", 1:3))
+
+    recs <- pls_cap_records(folds, tibble::tibble(num_comp = 3L, .config = "pre0_mod1_post0"), "y")
+
+    expect_identical(recs$cause, pls_cap_message(1L, 3L, 8L, 40L, "stop"))
+    expect_identical(recs$folds, list("Fold2"))
+
+    ## The line a fit at that count on each fold reads, from tune's notes
+    oof <- withr::with_seed(5, suppressMessages(tune::fit_resamples(
+      tune::finalize_workflow(fold_workflow(define_model_spec("plsr"), "y"), tibble::tibble(num_comp = 3L)),
+      folds, control = tune::control_resamples(verbose = FALSE)
+    )))
+    expect_identical(render_warning_log(recs), render_warning_log(tune_note_records(oof)))
+
+    ## A count of one cannot stop, so it is not fitted
+    n_fits <- 0L
+    real_plsr <- pls::plsr
+    local_mocked_bindings(plsr = function(...) {
+      n_fits <<- n_fits + 1L
+      real_plsr(...)
+    }, .package = "pls")
+
+    expect_identical(nrow(pls_cap_records(folds, tibble::tibble(num_comp = 1L), "y")), 0L)
+    expect_identical(n_fits, 0L)
 
   })
 
