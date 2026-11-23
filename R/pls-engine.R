@@ -378,7 +378,8 @@ pls_components <- function(requested, n_predictors, n_rows) {
 #' @param fitted,requested Integer. The components fitted, and asked for.
 #' @param n_predictors,n_rows Integer. The predictors and rows fitted on.
 #' @param reason Character(1). `"cap"`, the data's dimensions, or `"stop"`,
-#'   the components after `fitted` carrying nothing ([pls_informative()]).
+#'   the fit already as close to the outcome as the predictors allow, so the
+#'   components after `fitted` would add nothing to it ([pls_informative()]).
 #' @return Character(1).
 #' @keywords internal
 #' @noRd
@@ -389,7 +390,7 @@ pls_cap_message <- function(fitted, requested, n_predictors, n_rows, reason = "c
     first <- if (fitted == 1) "the first already fits" else cli::format_inline("the first {fitted} already fit")
 
     return(cli::format_inline(
-      "PLS fitted {fitted} component{?s}, not the {requested} asked for: {first} the outcome as closely as these predictors can, so any further component would fit rounding error."
+      "PLS fitted {fitted} component{?s}, not the {requested} asked for: {first} the outcome as closely as these predictors can, so further components would add nothing to the fit."
     ))
 
   }
