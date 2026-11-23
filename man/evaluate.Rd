@@ -56,8 +56,8 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 through \code{isolate} and \code{no_improve}, part of what it computes (see
 \code{\link[=control_horizons]{control_horizons()}}). \code{evaluate()} reads \code{allow_par},
 \code{parallelize_over}, \code{output_dir}, \code{verbose}, \code{debug}, \code{breaker},
-\code{keep_traces}, \code{isolate} and \code{no_improve}, and refuses any other field
-that is set. The control it ran with, defaults filled in, is recorded
+\code{keep_traces}, \code{isolate}, \code{inner_daemons} and \code{no_improve}, and refuses
+any other field that is set. The control it ran with, defaults filled in, is recorded
 as \code{evaluation$control}.}
 }
 \value{

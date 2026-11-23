@@ -18,6 +18,7 @@ control_horizons(
   min_ad_rows = NULL,
   min_degradation_rows = NULL,
   isolate = NULL,
+  inner_daemons = NULL,
   no_improve = NULL,
   min_resemblance_rows = NULL
 )
@@ -89,6 +90,14 @@ wherever the fit runs, and \code{\link[=select_training]{select_training()}}'s d
 never holds the library. \code{FALSE} runs both in the process that calls
 them, and the run says so. Default \code{getOption("horizons.isolate", TRUE)}.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=select_training]{select_training()}}.}
+
+\item{inner_daemons}{\code{logical(1)}. On \code{\link[=evaluate]{evaluate()}}'s configs axis, let a
+configuration whose share of the run's work is large run its folds on
+inner daemons that \code{evaluate()} starts on that configuration's daemon,
+taking as many of the daemons set, so the run does not wait on its
+longest configurations; the results are the same either way. \code{FALSE}
+runs every configuration on one daemon. Default
+\code{getOption("horizons.inner_daemons", TRUE)}. \code{\link[=evaluate]{evaluate()}}.}
 
 \item{no_improve}{A whole number of at least 1, or \code{FALSE}. The Bayesian
 iterations without improvement on the best after which a search stops:

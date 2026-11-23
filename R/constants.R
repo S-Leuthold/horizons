@@ -506,6 +506,12 @@ PROCESS_DIED <- "The process horizons started for"
 # hours.
 DISPATCH_POLL_SECONDS <- 0.1
 
+# Seconds a configuration's inner daemons have to connect once launched on
+# its daemon (start_inner_daemons(), R/utils-parallel.R); past it the
+# configuration runs its folds on its own daemon, with a note. They connect
+# in well under a second.
+INNER_START_SECONDS <- 60
+
 # What one configuration is expected to take, from which the configs axis
 # starts the longest configurations first (dispatch_order(),
 # R/utils-parallel.R), gives the long ones inner daemons (split_plan()) and

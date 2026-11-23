@@ -644,6 +644,164 @@ describe("check_daemon_memory()", {
 })
 
 ## =========================================================================
+## Inner daemons: a long configuration's folds on daemons of its own
+## =========================================================================
+## A configuration's task starts them on its daemon's default profile. Here
+## the session stands in for that daemon, with no daemons of its own set, so
+## each test resets the profile it sets.
+
+describe("start_inner_daemons()", {
+
+  it("starts the daemons on this process's profile, with its libraries and one thread, leaving its variables as they were", {
+
+    skip_on_cran()
+
+    mirai::daemons(0)
+    vars <- c("R_LIBS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+    was  <- Sys.getenv(vars, unset = NA)
+    withr::defer(mirai::daemons(0))
+
+    expect_true(with_deadline(start_inner_daemons(2L), 30))
+    expect_identical(connected_daemons(), 2L)
+
+    seen <- with_deadline(mirai::collect_mirai(mirai::mirai(Sys.getenv(vars), vars = vars)), 30)
+
+    expect_identical(seen[["R_LIBS"]], paste(.libPaths(), collapse = .Platform$path.sep))
+    expect_identical(unname(seen[c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS")]),
+                     rep(as.character(ENGINE_THREADS), 2))
+    expect_identical(Sys.getenv(vars, unset = NA), was)
+
+  })
+
+  it("resets the profile and says so when the daemons do not connect in time", {
+
+    skip_on_cran()
+
+    mirai::daemons(0)
+    withr::defer(mirai::daemons(0))
+    local_mocked_bindings(launch_local = function(...) invisible(NULL), .package = "mirai")
+
+    expect_false(with_deadline(start_inner_daemons(2L, seconds = 0.5), 10))
+    expect_false(mirai::daemons_set())
+
+  })
+
+})
+
+describe("watch_inner_daemons()", {
+
+  it("returns the configuration's value while its inner daemons stay, and the death's record once one has gone", {
+
+    skip_on_cran()
+    skip_on_os("windows")
+
+    mirai::daemons(0)
+    withr::defer(mirai::daemons(0))
+    expect_true(with_deadline(start_inner_daemons(2L), 30))
+
+    expect_identical(watch_inner_daemons("row", 2L, "cfg_001"), "row")
+
+    ## One inner daemon kills itself, and the configuration returns
+    kill_one <- function() {
+      mirai::mirai(tools::pskill(Sys.getpid(), tools::SIGKILL))
+      while (connected_daemons() > 1L) Sys.sleep(0.05)
+      "row"
+    }
+    died <- with_deadline(watch_inner_daemons(kill_one(), 2L, "cfg_001"), 30)
+
+    expect_s3_class(died, "horizons_inner_daemon_died")
+    expect_identical(died[c("id", "started", "connected")], list(id = "cfg_001", started = 2L, connected = 1L))
+
+    ## The same when the configuration's error is how the death showed
+    fail_after <- function() {
+      while (connected_daemons() > 1L) Sys.sleep(0.05)
+      rlang::abort("Argument 1 must be a data frame or a named atomic vector.")
+    }
+    expect_s3_class(watch_inner_daemons(fail_after(), 2L, "cfg_001"), "horizons_inner_daemon_died")
+
+  })
+
+  it("passes a configuration's error through while its inner daemons stay", {
+
+    local_mocked_bindings(connected_daemons = function() 2L)
+
+    expect_error(watch_inner_daemons(rlang::abort("its own", class = "test_own"), 2L, "cfg_001"),
+                 class = "test_own")
+
+  })
+
+})
+
+describe("dispatch_configs() and an inner daemon's death", {
+
+  it("stops as systemic with the rows so far, naming the configuration and the setting that turns inner daemons off", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), model = "plsr", feature_selection = "none")
+    died    <- structure(list(id = "cfg_002", started = 2L, connected = 1L), class = "horizons_inner_daemon_died")
+    values  <- list(tibble::tibble(config_id = "cfg_001", status = "success"), died)
+
+    local_mocked_bindings(connected_daemons = function() 3L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = values[[.args$config_i]])
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+
+    err <- expect_error(
+      dispatch_configs(configs, c(1, 1), "payload.rds", finished, function() dplyr::bind_rows(finished$rows),
+                       inner = c(1L, 2L)),
+      class = "horizons_error_systemic"
+    )
+
+    msg <- gsub("\\s+", " ", cli::ansi_strip(conditionMessage(err)))
+    expect_match(msg, "An inner mirai daemon running configuration \"cfg_002\"'s folds stopped while it ran", fixed = TRUE)
+    expect_match(msg, "1 of the 2 inner daemons `evaluate()` started on its daemon was gone after it.", fixed = TRUE)
+    expect_match(msg, "`control_horizons(inner_daemons = FALSE)` runs each configuration on one daemon.", fixed = TRUE)
+    expect_identical(err$results$config_id, "cfg_001")
+
+  })
+
+  it("sends each configuration's daemons with its task and keeps its row's record of them apart", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), model = "plsr", feature_selection = "none")
+    sent    <- list()
+
+    local_mocked_bindings(connected_daemons = function() 3L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      sent[[length(sent) + 1L]] <<- .args$inner
+      row <- tibble::tibble(config_id = configs$config_id[.args$config_i], status = "success")
+      attr(row, "inner_daemons") <- list(daemons = .args$inner, started = .args$inner > 1L, completed = 0L)
+      list(data = row)
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+
+    dispatch_configs(configs, c(1, 1), "payload.rds", finished, function() NULL, inner = c(1L, 2L))
+
+    expect_identical(unlist(sent), c(1L, 2L))
+    expect_null(attr(finished$rows[[2]], "inner_daemons"))
+    expect_identical(finished$inner$cfg_002$daemons, 2L)
+
+  })
+
+  it("takes as many of the window's slots for each configuration as its daemons", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002"), model = "plsr", feature_selection = "none")
+    seen    <- NULL
+
+    local_mocked_bindings(dispatch_units = function(..., slots, call) seen <<- vapply(1:2, slots, integer(1)))
+
+    dispatch_configs(configs, c(1, 1), "payload.rds", new.env(), function() NULL, inner = c(1L, 2L))
+
+    expect_identical(seen, c(1L, 2L))
+
+  })
+
+})
+
+## =========================================================================
 ## Isolated work: one call in a process of its own
 ## =========================================================================
 ## run_isolated() relies on mirai starting a new process for each mirai() sent

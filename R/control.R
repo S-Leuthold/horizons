@@ -191,6 +191,16 @@ CONTROL_FIELDS <- list(
     verbs   = c("evaluate", "fit", "select_training")
   ),
 
+  ### How the configs axis arranges its work within the daemons set; the
+  ### results do not depend on it, so evaluate() does not record it with a
+  ### checkpoint's settings. Read from an option, as isolate is
+  inner_daemons = list(
+    default = function() getOption("horizons.inner_daemons", TRUE),
+    option  = "horizons.inner_daemons",
+    check   = control_check_bool,
+    verbs   = "evaluate"
+  ),
+
   ### Changes what a run computes, as isolate does for cubist, so evaluate()
   ### records it with a checkpoint's settings
   no_improve = list(
@@ -285,6 +295,13 @@ CONTROL_FIELDS <- list(
 #'   never holds the library. `FALSE` runs both in the process that calls
 #'   them, and the run says so. Default `getOption("horizons.isolate", TRUE)`.
 #'   [evaluate()], [fit()], [select_training()].
+#' @param inner_daemons `logical(1)`. On [evaluate()]'s configs axis, let a
+#'   configuration whose share of the run's work is large run its folds on
+#'   inner daemons that `evaluate()` starts on that configuration's daemon,
+#'   taking as many of the daemons set, so the run does not wait on its
+#'   longest configurations; the results are the same either way. `FALSE`
+#'   runs every configuration on one daemon. Default
+#'   `getOption("horizons.inner_daemons", TRUE)`. [evaluate()].
 #' @param no_improve A whole number of at least 1, or `FALSE`. The Bayesian
 #'   iterations without improvement on the best after which a search stops:
 #'   [evaluate()]'s, and [fit()]'s re-tune. Each verb says how many of its
@@ -322,6 +339,7 @@ control_horizons <- function(...,
                              min_ad_rows          = NULL,
                              min_degradation_rows = NULL,
                              isolate              = NULL,
+                             inner_daemons        = NULL,
                              no_improve           = NULL,
                              min_resemblance_rows = NULL) {
 

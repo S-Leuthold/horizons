@@ -4,12 +4,16 @@
 ## ---------------------------------------------------------------------------
 ##
 ## The rule these implement: the user owns the mirai daemons; the package owns
-## only which axis of its work they are applied to. horizons never calls
-## mirai::daemons(), and never uses with(daemons()), with_daemons() or
-## local_daemons(), whose scope would send tune's own tasks to another
-## profile. It reads the pool with mirai::info() by name, never status(), and
-## every call on the pool names `.compute = NULL`, the current profile, which
-## is the one tune reads.
+## which axis of its work they are applied to, and how the work is arranged
+## across them. horizons never sets, resizes or resets the user's daemons. It
+## calls mirai::daemons() in one place, inside a configuration's task on one
+## of them (start_inner_daemons()): the inner daemons a long configuration
+## runs its folds on, set on that daemon's own default profile, which no
+## other process sees, and reset as the task ends. It never uses
+## with(daemons()), with_daemons() or local_daemons(), whose scope would send
+## tune's own tasks to another profile. It reads the pool with mirai::info()
+## by name, never status(), and every call on the pool names
+## `.compute = NULL`, the current profile, which is the one tune reads.
 
 ## ---------------------------------------------------------------------------
 ## resolve_parallel_axis
@@ -705,6 +709,38 @@ isolated_profile <- function() {
 
 }
 
+#' Set the environment a process about to start inherits
+#'
+#' @description
+#' A process mirai starts (an isolated call's, an inner daemon) reads its
+#' library paths from `R_LIBS` and its thread counts from the variables
+#' BLAS and OpenMP read as they load, not from settings made at run time in
+#' this one. So each start sets the variables it needs here, and they are put
+#' back as they were once the process has started.
+#'
+#' @param vars Named character: the variables and their values.
+#' @return A function of no arguments that puts every variable back as it
+#'   was, unset where it was unset.
+#' @keywords internal
+#' @noRd
+launch_env <- function(vars) {
+
+  was <- Sys.getenv(names(vars), unset = NA, names = TRUE)
+
+  do.call(Sys.setenv, as.list(vars))
+
+  function() {
+
+    for (v in names(was)) {
+      if (is.na(was[[v]])) Sys.unsetenv(v) else do.call(Sys.setenv, stats::setNames(list(was[[v]]), v))
+    }
+
+    invisible(NULL)
+
+  }
+
+}
+
 #' Run one call in a process of its own
 #'
 #' @description
@@ -772,9 +808,8 @@ run_isolated <- function(expr, args = list(), what, options = list(), libraries 
   ## object loads its package as the process reads the message, before the
   ## body runs. mirai starts the process inside mirai(), which it inherits
   ## this variable from.
-  libs_were <- Sys.getenv("R_LIBS", unset = NA)
-  Sys.setenv(R_LIBS = paste(libraries, collapse = .Platform$path.sep))
-  on.exit(if (is.na(libs_were)) Sys.unsetenv("R_LIBS") else Sys.setenv(R_LIBS = libs_were), add = TRUE)
+  restore_env <- launch_env(c(R_LIBS = paste(libraries, collapse = .Platform$path.sep)))
+  on.exit(restore_env(), add = TRUE)
 
   task <- mirai::mirai(
     .expr    = body,
@@ -1079,7 +1114,8 @@ isolated_deaths <- function(on_daemons) {
 #' `errorValue` 19 is the daemon's death ([abort_task_ended()]). A daemon
 #' that could not read a file the run wrote for it returns what went wrong
 #' instead of a value, and the window stops the run on it the same way
-#' ([abort_run_file_unread()]). Every task that finished in a pass is
+#' ([abort_run_file_unread()]), and so does a configuration whose inner
+#' daemons fell ([abort_inner_daemon_died()]). Every task that finished in a pass is
 #' collected before the first that ended in an error is raised, so a stop
 #' carries every row that came in with it. A pool left with no daemon stops
 #' the run here too ([abort_no_daemons()]).
@@ -1151,8 +1187,10 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
       tasks[[key]] <- NULL
 
       ### A miraiError is an error value too; a run file the daemon could not
-      ### read is neither, and stops the run as they do
-      if (mirai::is_error_value(value) || inherits(value, "horizons_run_file_unread")) {
+      ### read, and an inner daemon's death, are neither, and stop the run as
+      ### they do
+      if (mirai::is_error_value(value) ||
+          inherits(value, c("horizons_run_file_unread", "horizons_inner_daemon_died"))) {
         if (is.null(ended)) ended <- list(value = value, i = as.integer(key))
         next
       }
@@ -1165,6 +1203,9 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
     if (!is.null(ended)) {
       if (inherits(ended$value, "horizons_run_file_unread")) {
         abort_run_file_unread(ended$value, label(ended$i), rows_so_far(), output_dir, verb = verb, call = call)
+      }
+      if (inherits(ended$value, "horizons_inner_daemon_died")) {
+        abort_inner_daemon_died(ended$value, label(ended$i), rows_so_far(), output_dir, verb = verb, call = call)
       }
       task_value(ended$value, function(value) {
         abort_task_ended(value, label(ended$i), rows_so_far(), output_dir, verb = verb, call = call)
@@ -1215,7 +1256,9 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #' configuration's index and the path of the file `evaluate()` wrote the
 #' payload to, which its daemon reads, so this session holds the
 #' configurations and the path, and none of the data a running configuration
-#' was given. A row is appended to `finished$rows` as it finishes.
+#' was given. A row is appended to `finished$rows` as it finishes, and what
+#' it says of its inner daemons ([evaluate_config_worker()]) to
+#' `finished$inner`, by configuration.
 #'
 #' @param configs The configurations still to run, the payload's `configs`.
 #' @param costs Numeric: each configuration's cost ([config_costs()]), in
@@ -1226,7 +1269,8 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #' @param payload_path Character(1). The absolute path of the file holding
 #'   the payload every task reads ([evaluate_config_worker()]).
 #' @param finished An environment whose `rows` the window appends each row
-#'   to, in the order they finish.
+#'   to, in the order they finish, and `inner` each row's record of its
+#'   inner daemons, named by configuration.
 #' @param rows_so_far A function of no arguments returning the results table
 #'   a stop carries: the rows resumed and those in `finished$rows`.
 #' @param output_dir The run's `output_dir`, for a stop's message.
@@ -1239,16 +1283,22 @@ dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far
                              inner = rep(1L, nrow(configs)), call = rlang::caller_env()) {
 
   ### The task's call, quoted here: its names are the task's arguments
-  task_call <- quote(worker(config_i, payload_path))
+  task_call <- quote(worker(config_i, payload_path, inner))
 
   dispatch_units(
     n       = nrow(configs),
     order   = dispatch_order(costs),
     task    = function(i) {
       list(call = task_call,
-           args = list(worker = evaluate_config_worker, config_i = i, payload_path = payload_path))
+           args = list(worker = evaluate_config_worker, config_i = i, payload_path = payload_path,
+                       inner = inner[[i]]))
     },
-    collect = function(i, row) finished$rows <- c(finished$rows, list(row)),
+    ## What the row says of its inner daemons is kept apart from it
+    collect = function(i, row) {
+      finished$inner <- c(finished$inner, stats::setNames(list(attr(row, "inner_daemons")), configs$config_id[i]))
+      attr(row, "inner_daemons") <- NULL
+      finished$rows <- c(finished$rows, list(row))
+    },
     label   = function(i) list(what = "configuration", id = configs$config_id[i]),
     rows_so_far = rows_so_far,
     output_dir  = output_dir,
@@ -1342,6 +1392,124 @@ abort_run_file_unread <- function(unread, unit, results, output_dir = NULL, verb
     "The mirai daemon running {what} {.val {id}} could not read {file} from {.path {path}}, so {.fn {verb}} cannot go on.",
     "x" = "{reason}",
     "i" = "On the configs axis each daemon reads the configurations' data and their fold preparations from {.arg output_dir}, at the paths this session gives it, so daemons on another machine need {.arg output_dir} on a file system they share with it, at that path. {.code parallelize_over = \"resamples\"} runs without it. One {.arg output_dir} serves one run at a time, and a run started into it removes an earlier run's files.",
+    resume_hint(results, output_dir)
+  ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
+
+}
+
+## ---------------------------------------------------------------------------
+## Inner daemons: a long configuration's folds on daemons of its own
+## ---------------------------------------------------------------------------
+## A configuration the plan splits (split_plan()) starts its inner daemons
+## inside its task, on its daemon's default profile, which tune reads and no
+## other process sees (a daemon has no daemons of its own), and the window
+## holds that many of its slots, so the cores busy stay within the user's
+## daemons: the configuration's daemon waits in tune while its inner daemons
+## fit the folds. The task that starts them resets them on its exit, however
+## it ends; a daemon that dies takes them with it (mirai's autoexit).
+
+#' Start inner daemons on this daemon for its configuration's folds
+#'
+#' @description
+#' Resets any profile left set here first, so no daemons but these are taken
+#' for the folds. Each inner daemon starts with this process's library
+#' paths, so it loads the horizons this daemon runs, and with BLAS and
+#' OpenMP on `ENGINE_THREADS`, set before they load ([launch_env()]). Waits
+#' for all `n` to connect, polling, up to `seconds`; past it the profile is
+#' reset and the configuration runs its folds here instead. The caller
+#' registers the reset on its own exit before calling.
+#'
+#' @param n Integer(1). The inner daemons, at least 2.
+#' @param seconds Numeric(1). How long they have to connect.
+#' @return Logical(1): `TRUE` when all `n` connected.
+#' @keywords internal
+#' @noRd
+start_inner_daemons <- function(n, seconds = INNER_START_SECONDS) {
+
+  if (mirai::daemons_set(.compute = NULL)) mirai::daemons(0, .compute = NULL)
+
+  threads     <- as.character(ENGINE_THREADS)
+  restore_env <- launch_env(c(R_LIBS               = paste(.libPaths(), collapse = .Platform$path.sep),
+                              OMP_NUM_THREADS      = threads,
+                              OPENBLAS_NUM_THREADS = threads))
+  on.exit(restore_env(), add = TRUE)
+
+  mirai::daemons(url = mirai::local_url(), .compute = NULL)
+  mirai::launch_local(n, .compute = NULL)
+
+  until <- Sys.time() + seconds
+
+  while (connected_daemons() < n) {
+
+    if (Sys.time() >= until) {
+      mirai::daemons(0, .compute = NULL)
+      return(FALSE)
+    }
+
+    Sys.sleep(DISPATCH_POLL_SECONDS)
+
+  }
+
+  TRUE
+
+}
+
+#' Run a configuration on its inner daemons, reading their deaths
+#'
+#' @description
+#' tune does not raise an inner daemon's death: it binds the dead task's
+#' value, which fails the configuration with dplyr's "Argument 1 must be a
+#' data frame", or, inside a Bayesian iteration, ends the search quietly.
+#' So the inner daemons connected are read after the configuration, on its
+#' return and on its error, and fewer than `n` is a death: the value is then
+#' the death's record, which the window stops the run on in the session,
+#' where the rows so far are ([abort_inner_daemon_died()]).
+#'
+#' @param expr The configuration's work.
+#' @param n Integer(1). The inner daemons connected before it.
+#' @param id Character(1). The configuration's id.
+#' @return The value of `expr`, or a list of class
+#'   `horizons_inner_daemon_died` holding `id`, `started` (`n`) and
+#'   `connected` (those left).
+#' @keywords internal
+#' @noRd
+watch_inner_daemons <- function(expr, n, id) {
+
+  died <- function() {
+    structure(list(id = id, started = n, connected = connected_daemons()),
+              class = "horizons_inner_daemon_died")
+  }
+
+  value <- rlang::try_fetch(expr, error = function(e) if (connected_daemons() < n) died() else rlang::zap())
+
+  if (!inherits(value, "horizons_inner_daemon_died") && connected_daemons() < n) died() else value
+
+}
+
+#' Stop the call because a configuration's inner daemon died
+#'
+#' @param died The task's value, from [watch_inner_daemons()].
+#' @param unit The unit the task ran, a list with `what` and `id`.
+#' @param results The rows finished so far, carried as `results`.
+#' @param output_dir The run's `output_dir`, or `NULL`.
+#' @param verb Character(1). The verb that stops.
+#' @param call The frame the error reports.
+#' @return Does not return; aborts with class `horizons_error_systemic`
+#'   (kind `run`).
+#' @keywords internal
+#' @noRd
+abort_inner_daemon_died <- function(died, unit, results, output_dir = NULL, verb = "evaluate",
+                                    call = rlang::caller_env()) {
+
+  what <- unit$what
+  id   <- unit$id
+  n    <- died$started
+  left <- died$connected
+
+  abort_horizons(c(
+    "An inner mirai daemon running {what} {.val {id}}'s folds stopped while it ran, so {.fn {verb}} cannot go on.",
+    "i" = "{n - left} of the {n} inner daemon{?s} {.fn {verb}} started on its daemon {cli::qty(n - left)}{?was/were} gone after it.",
+    "i" = "{.fn {verb}} runs a long configuration's folds on daemons it starts on that configuration's daemon, within the daemons set; {.code control_horizons(inner_daemons = FALSE)} runs each configuration on one daemon.",
     resume_hint(results, output_dir)
   ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 

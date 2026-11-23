@@ -44,8 +44,8 @@
 #'   through `isolate` and `no_improve`, part of what it computes (see
 #'   [control_horizons()]). `evaluate()` reads `allow_par`,
 #'   `parallelize_over`, `output_dir`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `isolate` and `no_improve`, and refuses any other field
-#'   that is set. The control it ran with, defaults filled in, is recorded
+#'   `keep_traces`, `isolate`, `inner_daemons` and `no_improve`, and refuses
+#'   any other field that is set. The control it ran with, defaults filled in, is recorded
 #'   as `evaluation$control`.
 #'
 #' @section The Bayesian search's stopping rule:
@@ -1412,12 +1412,20 @@ evaluate <- function(x,
     ## which are checkpointed; a package missing on a daemon comes back as
     ## the worker's error, and is systemic here.
     ## The pending configurations' costs, from what their preparations kept,
-    ## which the window starts them longest first by
+    ## which the window starts them longest first by, and the daemons each
+    ## one's folds run on (split_plan()), from the daemons connected now,
+    ## unless control_horizons(inner_daemons = FALSE)
     pending_costs <- config_costs(pending_configs, n_train, config_kept(pending_configs, role_map, fold_stage))
+    inner_plan    <- if (isTRUE(control$inner_daemons)) {
+      split_plan(pending_costs, connected_daemons(), cv_folds)
+    } else {
+      rep(1L, nrow(pending_configs))
+    }
 
     stop_on_worker_death(
-      dispatch_configs(pending_configs, pending_costs, payload_path, finished, rows_so_far, output_dir,
-                       call = rlang::current_env()),
+      dispatch_configs(configs = pending_configs, costs = pending_costs, payload_path = payload_path,
+                       finished = finished, rows_so_far = rows_so_far, output_dir = output_dir,
+                       inner = inner_plan, call = rlang::current_env()),
       rows_so_far(), output_dir
     )
 
@@ -4023,23 +4031,31 @@ prepare_worker <- function(models, selections) {
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
 #'   `fold_cache_dir` (the run files' directory, absolute, where the fold
 #'   preparations are), `keep_traces`, `isolate` and `pkg_version`. There is
-#'   no `allow_par`: on
-#'   the configs axis tune always runs sequentially inside the worker. There
-#'   is no `debug` either, since a debug run never dispatches.
+#'   no `allow_par`: whether tune runs the folds on daemons is `inner`'s.
+#'   There is no `debug` either, since a debug run never dispatches.
+#' @param inner Integer(1). The daemons the configuration's folds run on
+#'   ([split_plan()]). With 1, tune runs them sequentially in this task.
+#'   With more, the task starts that many inner daemons on its own daemon
+#'   ([start_inner_daemons()]) once its folds are rebuilt, tune runs the
+#'   folds on them, and they are reset as the task ends, however it ends. A
+#'   pool that does not come up runs the folds here, and the row says so.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
 #'   records still on it for the parent to lift, any warning raised in the
 #'   worker's own steps before the unit rendered in its `warnings` with the
-#'   unit's, and, when its checkpoint could not be written, why, as the
-#'   attribute `"checkpoint_failed"`. When the file at `payload_path`, or one
-#'   of its fold preparations, cannot be read, instead, a list of class
-#'   `horizons_run_file_unread` holding the `path`, the `reason` (what base R
-#'   said, any warning before the error, or that the file holds another
-#'   preparation) and what the `file` holds.
+#'   unit's, when its checkpoint could not be written, why, as the attribute
+#'   `"checkpoint_failed"`, and its inner daemons as the attribute
+#'   `"inner_daemons"`: `daemons` (`inner`), `started` (whether they
+#'   connected) and `completed` (the tasks they ran). When the file at
+#'   `payload_path`, or one of its fold preparations, cannot be read,
+#'   instead, a list of class `horizons_run_file_unread` holding the `path`,
+#'   the `reason` (what base R said, any warning before the error, or that
+#'   the file holds another preparation) and what the `file` holds; when an
+#'   inner daemon died, the record [watch_inner_daemons()] returns.
 #' @keywords internal
 #' @noRd
 
-evaluate_config_worker <- function(config_i, payload_path) {
+evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
 
   ## -------------------------------------------------------------------------
   ## The payload, read from the file evaluate() wrote
@@ -4136,27 +4152,48 @@ evaluate_config_worker <- function(config_i, payload_path) {
 
   if (inherits(resamples$fold_entries, "horizons_run_file_unread")) return(resamples$fold_entries)
 
-  result_row <- evaluate_single_config(
-    config_row       = cfg,
-    split            = resamples$split,
-    cv_folds         = resamples$cv_folds,
-    role_map         = shared$role_map,
-    grid_size        = shared$grid_size,
-    bayesian_iter    = shared$bayesian_iter,
-    tune_ranges      = shared$tune_ranges,
-    no_improve       = shared$no_improve,
-    prune            = shared$prune,
-    prune_threshold  = shared$prune_threshold,
-    allow_par        = FALSE,     # configs axis: tune runs sequentially inside
-    seed             = shared$seed,
-    sg_window        = shared$sg_window,
-    pca_threshold    = shared$pca_threshold,
-    outcome_range    = shared$outcome_range,
-    keep_traces      = shared$keep_traces,
-    isolate          = shared$isolate,
-    outside_warnings = outside,
-    fold_entries     = resamples$fold_entries
-  )
+  ## -------------------------------------------------------------------------
+  ## The configuration, its folds on inner daemons when the plan splits it
+  ## -------------------------------------------------------------------------
+  ## The inner daemons are this daemon's own profile, which tune reads, and
+  ## are reset as the task ends, however it ends: the reset is registered
+  ## before they start. A pool that does not come up runs the folds here.
+  on_inner <- FALSE
+
+  if (inner > 1L) {
+    on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
+    on_inner <- start_inner_daemons(inner)
+  }
+
+  run <- function() {
+    evaluate_single_config(
+      config_row       = cfg,
+      split            = resamples$split,
+      cv_folds         = resamples$cv_folds,
+      role_map         = shared$role_map,
+      grid_size        = shared$grid_size,
+      bayesian_iter    = shared$bayesian_iter,
+      tune_ranges      = shared$tune_ranges,
+      no_improve       = shared$no_improve,
+      prune            = shared$prune,
+      prune_threshold  = shared$prune_threshold,
+      allow_par        = on_inner,
+      seed             = shared$seed,
+      sg_window        = shared$sg_window,
+      pca_threshold    = shared$pca_threshold,
+      outcome_range    = shared$outcome_range,
+      keep_traces      = shared$keep_traces,
+      isolate          = shared$isolate,
+      outside_warnings = outside,
+      fold_entries     = resamples$fold_entries
+    )
+  }
+
+  result_row <- if (on_inner) watch_inner_daemons(run(), inner, cfg$config_id) else run()
+
+  if (inherits(result_row, "horizons_inner_daemon_died")) return(result_row)
+
+  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
 
   ## Both provenance records are sent rather than rebuilt. The data
   ## fingerprint hashes the whole predictor matrix, which is a once-per-run
@@ -4175,6 +4212,9 @@ evaluate_config_worker <- function(config_i, payload_path) {
     if (!is.null(failed)) attr(result_row, "checkpoint_failed") <- failed
 
   }
+
+  ## Told the session, which keeps it apart from the row
+  attr(result_row, "inner_daemons") <- list(daemons = as.integer(inner), started = on_inner, completed = completed)
 
   result_row
 
