@@ -584,9 +584,10 @@ CONFIG_ROWS_REF <- 835
 
 # How a model's configuration time grows with the rows: the exponent of
 # rows / CONFIG_ROWS_REF. Fitted for the four models measured on both the
-# local grid and the library draw (8,272 rows) in 0.12.0, the mean over
-# their 32 configurations of the log ratio of their seconds; lightgbm takes
-# xgboost's, and the models with no such pair 1.
+# local grid and the library draw (8,272 rows) in 0.12.0: for each, the mean
+# over its configurations among the 32 of the log ratio of their seconds
+# divided by the log ratio of the rows; lightgbm takes xgboost's, and the
+# models with no such pair 1.
 CONFIG_ROW_EXPONENT <- c(
   rf = 1, cubist = 1.57, xgboost = 0.86, plsr = 1, elastic_net = 0.98,
   svm_rbf = 1.44, mlp = 1, lightgbm = 0.86, mars = 1

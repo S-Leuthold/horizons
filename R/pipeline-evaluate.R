@@ -45,8 +45,8 @@
 #'   [control_horizons()]). `evaluate()` reads `allow_par`,
 #'   `parallelize_over`, `output_dir`, `verbose`, `debug`, `breaker`,
 #'   `keep_traces`, `isolate`, `inner_daemons` and `no_improve`, and refuses
-#'   any other field that is set. The control it ran with, defaults filled in, is recorded
-#'   as `evaluation$control`.
+#'   any other field that is set. The control it ran with, defaults filled
+#'   in, is recorded as `evaluation$control`.
 #'
 #' @section The Bayesian search's stopping rule:
 #' Each configuration's Bayesian search stops once `no_improve` iterations in
@@ -277,11 +277,11 @@
 #' mid-write is either complete or absent. A run stopped while its fold
 #' preparations run cancels those still running the same way, on either
 #' axis; a cancelled one writes nothing, since this session writes each. A
-#' configuration on inner daemons ends them as its task is cancelled. A configuration in an isolated
-#' fit (each `cubist` fit; see "Isolated fits") stops at once, its fit's
-#' process ended with it. One inside another compiled fit (an xgboost fit,
-#' say) stops only when that fit returns, its daemon busy until then, and
-#' writes nothing. On the resamples
+#' configuration on inner daemons ends them as its task is cancelled. A
+#' configuration in an isolated fit (each `cubist` fit; see "Isolated fits")
+#' stops at once, its fit's process ended with it. One inside another
+#' compiled fit (an xgboost fit, say) stops only when that fit returns, its
+#' daemon busy until then, and writes nothing. On the resamples
 #' axis the folds' tasks are tune's, which `evaluate()` does not cancel: they
 #' run to their end on the daemons, and write nothing. The cancellation and
 #' the longest-first start both need mirai's dispatcher, which mirai keeps

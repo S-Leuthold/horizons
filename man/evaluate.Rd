@@ -57,8 +57,8 @@ through \code{isolate} and \code{no_improve}, part of what it computes (see
 \code{\link[=control_horizons]{control_horizons()}}). \code{evaluate()} reads \code{allow_par},
 \code{parallelize_over}, \code{output_dir}, \code{verbose}, \code{debug}, \code{breaker},
 \code{keep_traces}, \code{isolate}, \code{inner_daemons} and \code{no_improve}, and refuses
-any other field that is set. The control it ran with, defaults filled in, is recorded
-as \code{evaluation$control}.}
+any other field that is set. The control it ran with, defaults filled
+in, is recorded as \code{evaluation$control}.}
 }
 \value{
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with
@@ -327,11 +327,11 @@ checkpoint is written whole or not at all, so one the cancel reaches
 mid-write is either complete or absent. A run stopped while its fold
 preparations run cancels those still running the same way, on either
 axis; a cancelled one writes nothing, since this session writes each. A
-configuration on inner daemons ends them as its task is cancelled. A configuration in an isolated
-fit (each \code{cubist} fit; see "Isolated fits") stops at once, its fit's
-process ended with it. One inside another compiled fit (an xgboost fit,
-say) stops only when that fit returns, its daemon busy until then, and
-writes nothing. On the resamples
+configuration on inner daemons ends them as its task is cancelled. A
+configuration in an isolated fit (each \code{cubist} fit; see "Isolated fits")
+stops at once, its fit's process ended with it. One inside another
+compiled fit (an xgboost fit, say) stops only when that fit returns, its
+daemon busy until then, and writes nothing. On the resamples
 axis the folds' tasks are tune's, which \code{evaluate()} does not cancel: they
 run to their end on the daemons, and write nothing. The cancellation and
 the longest-first start both need mirai's dispatcher, which mirai keeps

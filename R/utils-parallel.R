@@ -355,8 +355,7 @@ await_round <- function(tasks, no_daemons) {
 #' ([await_round()]), and before a unit of work tune runs on the daemons
 #' with fewer than two connected (`stop_on_worker_death()`), the gate
 #' [check_parallel_backend()] applies before the run. The likely cause is a
-#' daemon's own limit, which mirai does not restart it from; horizons starts
-#' no daemons of its own.
+#' daemon's own limit, which neither mirai nor horizons restarts it from.
 #'
 #' @param results The rows finished so far, carried as `results`, or `NULL`
 #'   when the verb has none to carry.
