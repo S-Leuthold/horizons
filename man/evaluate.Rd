@@ -111,7 +111,10 @@ searched under another is not resumed.
 
 With \code{control_horizons(output_dir = )}, each config's result is
 written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
-a rerun into the same directory resumes from those files. Required when
+a rerun into the same directory resumes from those files. It raises
+again the warnings the resumed configs raised when they ran, and
+records them and their notes on the \code{log}, as a run from the start
+would; another package's warnings stay on each row's \code{warnings}. Required when
 configs are dispatched to workers, whose daemons also read the configs'
 data from it (see "Parallelism"). A resumed row must have been scored on
 this run's training data (the outcome, the sample ids, which columns hold

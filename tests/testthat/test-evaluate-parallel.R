@@ -1784,6 +1784,55 @@ describe("evaluate() - the configs axis on mirai", {
 
   })
 
+  it("raises a resumed configuration's warning again on the configs axis, once, with the log row the first run wrote (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+
+    ## As the test above: on the daemons, cfg_002's unit raises a horizons
+    ## warning, which reaches this session on its row's records
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("build_recipe", envir = ns)
+      utils::assignInNamespace("build_recipe", function(config_row, ...) {
+        if (config_row$config_id == "cfg_002") {
+          get("warn_in_unit", envir = ns)("substitution", "A test substitution on a daemon.")
+        }
+        real(config_row, ...)
+      }, ns = "horizons")
+    })[], 30)
+
+    dir <- withr::local_tempdir()
+    run <- function() {
+      collect_warnings(with_deadline(evaluate(plsr_object(3), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE)), 120),
+                       pattern = "A test substitution on a daemon.")
+    }
+    said <- function(ev) {
+      row <- ev$log[grepl("A test substitution on a daemon.", ev$log$message, fixed = TRUE), ]
+      row[setdiff(names(row), "time")]
+    }
+
+    first <- run()
+
+    ## Every configuration checkpointed, so the second run sends none
+    with_deadline(mirai::everywhere(
+      utils::assignInNamespace("evaluate_single_config", function(...) stop("a configuration ran"), ns = "horizons")
+    )[], 30)
+
+    again <- run()
+
+    expect_length(first$warnings, 1L)
+    expect_length(again$warnings, 1L)
+    expect_identical(said(again$value)$ids[[1]], "cfg_002")
+    expect_identical(said(again$value), said(first$value))
+
+  })
+
 })
 
 

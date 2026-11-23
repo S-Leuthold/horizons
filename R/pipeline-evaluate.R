@@ -62,7 +62,10 @@
 #' @section Checkpoints:
 #' With `control_horizons(output_dir = )`, each config's result is
 #'   written to `<output_dir>/checkpoints/<config_id>.rds` as it finishes, and
-#'   a rerun into the same directory resumes from those files. Required when
+#'   a rerun into the same directory resumes from those files. It raises
+#'   again the warnings the resumed configs raised when they ran, and
+#'   records them and their notes on the `log`, as a run from the start
+#'   would; another package's warnings stay on each row's `warnings`. Required when
 #'   configs are dispatched to workers, whose daemons also read the configs'
 #'   data from it (see "Parallelism"). A resumed row must have been scored on
 #'   this run's training data (the outcome, the sample ids, which columns hold
@@ -2010,7 +2013,8 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
 #' Write one result row to the per-config store
 #'
-#' @param row One-row result.
+#' @param row One-row result, its unit's records on it as the attribute
+#'   `"unit_records"`, which the checkpoint keeps.
 #' @param checkpoint_dir The `checkpoints/` directory.
 #' @return `NULL` when the row was written; otherwise why it could not be,
 #'   as [write_output_file()] reports it.
@@ -2018,10 +2022,8 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 #' @noRd
 write_checkpoint_row <- function(row, checkpoint_dir) {
 
-  ## A unit's records are lifted onto the call's log, not stored: a resumed
-  ## row's warnings are read on the row (lift_unit_records()).
-  attr(row, "unit_records") <- NULL
-
+  ## With its unit's records, so a run that resumes the row raises its
+  ## warnings again, as the run that evaluated it did (lift_unit_records())
   write_output_file(row, checkpoint_path(checkpoint_dir, row$config_id))
 
 }
@@ -2343,10 +2345,12 @@ log_unreadable_checkpoints <- function(collector, unreadable, output_dir) {
 #' attribute `"unit_records"`, since records are data and cross from a worker
 #' with the row. The horizons warnings among them go to the call's collector
 #' in one pass, with their notes ([log_unit_records()]), so a message several
-#' configurations raised is one event naming them all, and the attribute is dropped, so
-#' neither the results nor a checkpoint keeps it. Only rows evaluated in this
-#' call carry it: a row resumed from a checkpoint reports its warnings on the
-#' row.
+#' configurations raised is one event naming them all, and the attribute is
+#' dropped from the results. A row resumed from a checkpoint carries the
+#' records its checkpoint kept ([write_checkpoint_row()]), so a resumed run
+#' raises its earlier configurations' warnings again, every topic alike, as
+#' one event with the warnings of those it ran; a checkpoint with none lifts
+#' nothing.
 #'
 #' @param rows List of result rows.
 #' @param collector The call's collector, from [log_open()].

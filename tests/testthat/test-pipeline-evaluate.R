@@ -3272,24 +3272,31 @@ describe("evaluate() - plsr on PCA scores", {
 
 describe("evaluate() - the configurations' warnings and failures on the log", {
 
-  it("lifts a configuration's horizons warning onto the log once, naming the configurations, and stores no records", {
+  ## Each row as evaluate_single_config() returns it: its unit's records on
+  ## it, a substitution warning among them, and another package's warning,
+  ## which stays on the row
+  warning_runner <- function(template) {
+    function(config_row, ...) {
+      id  <- config_row$config_id
+      row <- mock_eval_row(template, id, "success", warnings = "Kept the grid's choice.")
+      attr(row, "unit_records") <- run_unit({
+        warn_in_unit("substitution", "Kept the grid's choice.")
+        warning("ranger warned")
+      }, "configuration", id)$records
+      row
+    }
+  }
+
+  ## The log's rows for a topic, their times aside
+  topic_rows <- function(ev, topic) {
+    rows <- ev$log[ev$log$topic %in% topic, ]
+    rows[setdiff(names(rows), "time")]
+  }
+
+  it("lifts a configuration's horizons warning onto the log once, naming the configurations, and keeps its records in the checkpoint", {
 
     template <- ev60()$evaluation$results[1, ]
-
-    ## Each row as evaluate_single_config() returns it: its unit's records
-    ## on it, a substitution warning among them, and another package's
-    ## warning, which stays on the row
-    local_mocked_bindings(
-      evaluate_single_config = function(config_row, ...) {
-        id  <- config_row$config_id
-        row <- mock_eval_row(template, id, "success", warnings = "Kept the grid's choice.")
-        attr(row, "unit_records") <- run_unit({
-          warn_in_unit("substitution", "Kept the grid's choice.")
-          warning("ranger warned")
-        }, "configuration", id)$records
-        row
-      }
-    )
+    local_mocked_bindings(evaluate_single_config = warning_runner(template))
 
     dir <- withr::local_tempdir()
     got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
@@ -3306,7 +3313,55 @@ describe("evaluate() - the configurations' warnings and failures on the log", {
     expect_match(row$message, "Kept the grid's choice. In 2 configurations", fixed = TRUE)
     expect_identical(subs[[1]]$log, row)
 
-    expect_null(attr(readRDS(file.path(dir, "checkpoints", "cfg_001.rds")), "unit_records"))
+    ## Not on the results, and in the checkpoint, for a resumed run to raise
+    expect_null(attr(ev$evaluation$results, "unit_records"))
+    expect_true("Kept the grid's choice." %in% attr(readRDS(file.path(dir, "checkpoints", "cfg_001.rds")), "unit_records")$message)
+
+  })
+
+  it("raises a resumed configuration's warnings again, once, naming it, with the log row the first run wrote", {
+
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = warning_runner(template))
+
+    dir   <- withr::local_tempdir()
+    obj   <- make_eval_object(n = 60, n_configs = 2)
+    first <- collect_warnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    ## Every configuration checkpointed, so nothing runs
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+    again <- collect_warnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    subs <- Filter(function(w) inherits(w, "horizons_warning_substitution"), again$warnings)
+    expect_length(subs, 1L)
+    expect_match(conditionMessage(subs[[1]]), "Kept the grid's choice.", fixed = TRUE)
+
+    expect_identical(topic_rows(again$value, "substitution"), topic_rows(first$value, "substitution"))
+    expect_identical(again$value$evaluation$results$warnings, first$value$evaluation$results$warnings)
+
+  })
+
+  it("resumes a checkpoint that keeps no records, raising nothing for it", {
+
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = warning_runner(template))
+
+    dir <- withr::local_tempdir()
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    ## cfg_002's checkpoint as one written without its records
+    path <- file.path(dir, "checkpoints", "cfg_002.rds")
+    row  <- readRDS(path)
+    attr(row, "unit_records") <- NULL
+    saveRDS(row, path)
+
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+    again <- collect_warnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    row <- topic_rows(again$value, "substitution")
+    expect_identical(row$ids[[1]], "cfg_001")
+    expect_length(Filter(function(w) inherits(w, "horizons_warning_substitution"), again$warnings), 1L)
 
   })
 
