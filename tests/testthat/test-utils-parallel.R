@@ -421,6 +421,100 @@ describe("dispatch_configs()", {
 
 })
 
+## The window on a clock of its own: mirai() is mocked to start a unit at
+## the clock's time and resolve it `dur` rounds later, and each wait moves
+## the clock one round, so which units start when, and how many slots are in
+## flight each round, follow from the window's rule alone.
+run_window <- function(slots, dur, width, order = seq_along(slots), .env = parent.frame()) {
+
+  clock <- new.env(parent = emptyenv())
+  clock$t     <- 0L
+  clock$start <- rep(NA_integer_, length(slots))
+  clock$busy  <- integer(0)
+
+  testthat::local_mocked_bindings(
+    connected_daemons = function() width,
+    await_round = function(tasks, no_daemons) {
+      running <- which(!is.na(clock$start) & clock$start <= clock$t & clock$t < clock$start + dur)
+      clock$busy <- c(clock$busy, sum(slots[running]))
+      clock$t <- clock$t + 1L
+    },
+    .env = .env
+  )
+  testthat::local_mocked_bindings(
+    mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      clock$start[.args$unit] <- clock$t
+      list(unit = .args$unit, data = .args$unit)
+    },
+    unresolved = function(x) clock$t < clock$start[x$unit] + dur[x$unit],
+    stop_mirai = function(x) invisible(NULL),
+    .package = "mirai", .env = .env
+  )
+
+  task_call <- quote(worker(unit))
+
+  with_deadline(dispatch_units(
+    n           = length(slots),
+    order       = order,
+    task        = function(i) list(call = task_call, args = list(worker = identity, unit = i)),
+    collect     = function(i, value) NULL,
+    label       = function(i) list(what = "unit", id = i),
+    rows_so_far = function() NULL,
+    slots       = function(i) slots[[i]]
+  ), 10)
+
+  list(start = clock$start, busy = clock$busy)
+
+}
+
+describe("dispatch_units() with slots", {
+
+  it("never has more slots in flight than daemons connected", {
+
+    got <- run_window(slots = c(3L, 1L, 1L, 2L, 1L, 1L), dur = c(4L, 1L, 2L, 3L, 1L, 2L), width = 4L)
+
+    expect_false(anyNA(got$start))
+    expect_lte(max(got$busy), 4L)
+
+  })
+
+  it("passes over a unit whose slots are not free for the next that fits, and starts it first once they are", {
+
+    ## On 4 daemons: A (1) and B (2) start; C needs 3, so D (1) starts in its
+    ## place. Once B and D are done C starts, ahead of F behind it, which
+    ## would also have fitted
+    got <- run_window(slots = c(A = 1L, B = 2L, C = 3L, D = 1L, E = 1L, F = 1L),
+                      dur   = c(10L, 2L, 5L, 1L, 1L, 1L), width = 4L)
+
+    expect_identical(got$start[[4]], 0L)
+    expect_lt(got$start[[4]], got$start[[3]])
+    expect_lt(got$start[[3]], got$start[[6]])
+    expect_lte(max(got$busy), 4L)
+
+  })
+
+  it("starts a unit wider than the daemons connected once nothing is in flight, alone", {
+
+    got <- run_window(slots = c(1L, 4L, 1L), dur = c(2L, 2L, 1L), width = 2L)
+
+    ## The third fits beside the first and starts; the wide one waits until
+    ## both are done, then runs alone, its 4 slots the only ones in flight
+    expect_identical(got$start, c(0L, 2L, 0L))
+    expect_identical(got$busy, c(2L, 1L, 4L, 4L))
+
+  })
+
+  it("starts units of one slot in their order, as many at once as daemons connected", {
+
+    got <- run_window(slots = rep(1L, 5), dur = c(1L, 3L, 1L, 1L, 1L), width = 2L, order = c(2L, 4L, 1L, 3L, 5L))
+
+    expect_identical(got$start, c(1L, 0L, 2L, 0L, 3L))
+    expect_lte(max(got$busy), 2L)
+
+  })
+
+})
+
 describe("daemon_reports()", {
 
   it("stops as systemic when a daemon dies during the check, with the verb's empty table, as the window does", {

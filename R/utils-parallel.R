@@ -1059,13 +1059,18 @@ isolated_deaths <- function(on_daemons) {
 #' The one window horizons runs its own tasks through: the configs axis's
 #' configurations ([dispatch_configs()]) and a run's fold preparations
 #' ([build_fold_stage()]). The units start in `order` (longest first, by a
-#' cost table): with mirai's dispatcher a task starts in the order it was
-#' submitted, so the short ones fill the daemons at the end. At most as many
-#' are in flight as there are daemons connected, read again each round, so
-#' the window narrows when a daemon leaves and widens when one joins. Each is
-#' collected as it finishes and the next submitted. Every wait goes through
-#' [await_round()], so a window left with no daemon stops the run rather
-#' than waiting for ever.
+#' cost estimate): with mirai's dispatcher a task starts in the order it was
+#' submitted, so the short ones fill the daemons at the end. Each unit takes
+#' `slots(i)` of the window's slots, one for a unit that is one task and
+#' more for a configuration that runs its folds on inner daemons
+#' ([split_plan()]), and the slots in flight are at most the daemons
+#' connected, read again each round, so the window narrows when a daemon
+#' leaves and widens when one joins. A unit whose slots are not free is
+#' passed over for the next in `order` that fits, and stays first in line;
+#' one wider than the daemons connected starts once nothing is in flight, so
+#' a pool that shrank cannot strand it. Each is collected as it finishes and
+#' the next submitted. Every wait goes through [await_round()], so a window
+#' left with no daemon stops the run rather than waiting for ever.
 #'
 #' What a task returns is read here ([task_value()]). A value is handed to
 #' `collect()`. A `miraiError` is the task's own error, raised again as the
@@ -1111,16 +1116,19 @@ isolated_deaths <- function(on_daemons) {
 #'   message ([abort_no_daemons()]): `evaluate()`'s configurations, or
 #'   `fit()`'s members; `NULL` counts the units not collected.
 #' @param verb Character(1). The verb, for a stop's message.
+#' @param slots A function of a unit's position giving the window's slots it
+#'   takes, each a daemon: 1 for every unit by default.
 #' @param call The frame a stop reports: the verb's.
 #' @return `NULL`, invisibly, once every unit's value has been collected.
 #' @keywords internal
 #' @noRd
 dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_dir = NULL,
-                           n_left = NULL, verb = "evaluate", call = rlang::caller_env()) {
+                           n_left = NULL, verb = "evaluate", slots = function(i) 1L,
+                           call = rlang::caller_env()) {
 
-  tasks  <- list()
-  next_i <- 1L
-  n_done <- 0L
+  tasks   <- list()
+  waiting <- order
+  n_done  <- 0L
 
   no_daemons <- function() {
     abort_no_daemons(rows_so_far(), n_left %||% (n - n_done), output_dir, verb = verb, call = call)
@@ -1165,14 +1173,23 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 
     if (n_done == n) return(invisible(NULL))
 
-    ## Submit while there are daemons free
+    ## Submit, in order, each unit whose slots are free: one that does not
+    ## fit is passed over and stays first in line, and one wider than the
+    ## pool starts once nothing is in flight
     width <- connected_daemons()
+    busy  <- sum(vapply(names(tasks), function(key) slots(as.integer(key)), integer(1)))
 
-    while (next_i <= n && length(tasks) < width) {
+    for (i in waiting) {
 
-      i      <- order[next_i]
-      next_i <- next_i + 1L
-      spec   <- task(i)
+      if (busy >= width && width > 0L) break
+
+      need <- slots(i)
+
+      if (width == 0L || (busy + need > width && busy > 0L)) next
+
+      waiting <- waiting[waiting != i]
+      busy    <- busy + need
+      spec    <- task(i)
 
       ### mirai() takes the call from a symbol bound to it; any other
       ### expression it would send as written
@@ -1193,15 +1210,19 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #'
 #' @description
 #' The configs axis's configurations through the window ([dispatch_units()]),
-#' longest first ([dispatch_order()]). Each task carries its configuration's
-#' index and the path of the file `evaluate()` wrote the payload to, which
-#' its daemon reads, so this session holds the configurations and the path,
-#' and none of the data a running configuration was given. A row is appended
-#' to `finished$rows` as it finishes.
+#' longest first ([dispatch_order()]), each taking as many of the window's
+#' slots as the daemons its folds run on (`inner`). Each task carries its
+#' configuration's index and the path of the file `evaluate()` wrote the
+#' payload to, which its daemon reads, so this session holds the
+#' configurations and the path, and none of the data a running configuration
+#' was given. A row is appended to `finished$rows` as it finishes.
 #'
 #' @param configs The configurations still to run, the payload's `configs`.
 #' @param costs Numeric: each configuration's cost ([config_costs()]), in
 #'   the order of `configs`.
+#' @param inner Integer: the daemons each configuration's folds run on
+#'   ([split_plan()]), in the order of `configs`, which are the window's
+#'   slots it takes.
 #' @param payload_path Character(1). The absolute path of the file holding
 #'   the payload every task reads ([evaluate_config_worker()]).
 #' @param finished An environment whose `rows` the window appends each row
@@ -1215,7 +1236,7 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #' @keywords internal
 #' @noRd
 dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far, output_dir = NULL,
-                             call = rlang::caller_env()) {
+                             inner = rep(1L, nrow(configs)), call = rlang::caller_env()) {
 
   ### The task's call, quoted here: its names are the task's arguments
   task_call <- quote(worker(config_i, payload_path))
@@ -1231,6 +1252,7 @@ dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far
     label   = function(i) list(what = "configuration", id = configs$config_id[i]),
     rows_so_far = rows_so_far,
     output_dir  = output_dir,
+    slots       = function(i) inner[[i]],
     call        = call
   )
 
