@@ -35,8 +35,9 @@
 #' rule is `n_configs >= cv_folds`. Dispatching configs needs a checkpoint
 #' directory, so `"auto"` chooses it only when there is one (#233).
 #'
-#' On the configs axis the worker runs tune sequentially: a daemon has no
-#' daemons of its own. `control_horizons()` refuses `"both"`.
+#' On the configs axis the worker runs tune sequentially, unless the run's
+#' plan gives its configuration inner daemons ([split_plan()]), which it
+#' starts on its own daemon. `control_horizons()` refuses `"both"`.
 #'
 #' @param parallelize_over One of `"auto"`, `"configs"`, `"resamples"`, as
 #'   `control_horizons()` checked it.
@@ -770,6 +771,109 @@ parallel_tree_lines <- function(axis, n_daemons, models, isolate, no_dispatcher 
   }
 
   c(parallel, isolation_tree_line(models, isolate))
+
+}
+
+#' The progress tree's line on the configurations run on inner daemons
+#'
+#' @description
+#' How many long configurations run their folds on inner daemons, and on how
+#' many each, with the setting that turns it off; or, when the plan would
+#' have split some, that the setting turned it off, or that the inner
+#' daemons would not fit in this machine's memory. No line when the plan
+#' splits nothing.
+#'
+#' @param planned Integer: the daemons [split_plan()] gave each
+#'   configuration.
+#' @param inner Integer: the daemons each runs on.
+#' @param setting Logical(1). `control_horizons(inner_daemons = )`.
+#' @return Character(1), without the tree's prefix, or `NULL`.
+#' @keywords internal
+#' @noRd
+inner_daemons_tree_line <- function(planned, inner, setting) {
+
+  n_planned <- sum(planned > 1L)
+  n_split   <- sum(inner > 1L)
+
+  if (n_split > 0L) {
+    counts <- inner[inner > 1L]
+    paste0("Inner daemons: ", n_split, " long configuration", if (n_split != 1L) "s",
+           " run", if (n_split == 1L) "s", " ", if (n_split == 1L) "its" else "their", " folds on ",
+           if (n_split == 1L) counts else paste0(paste(counts[-n_split], collapse = ", "), " and ", counts[n_split]),
+           " (control_horizons(inner_daemons = FALSE) turns it off)")
+  } else if (n_planned > 0L && !isTRUE(setting)) {
+    paste0("Inner daemons: off, as asked; ", n_planned, " long configuration", if (n_planned != 1L) "s",
+           " run", if (n_planned == 1L) "s", " on one daemon")
+  } else if (n_planned > 0L) {
+    "Inner daemons: none, since they would not fit in this machine's memory (see the log)"
+  }
+
+}
+
+#' Say on the log which configurations run their folds on inner daemons
+#'
+#' @description
+#' A note naming each split configuration and its inner daemons, its ids the
+#' configurations, and the setting that turns it off; or, when the setting
+#' is off and the plan would have split some, a note saying so, as the run
+#' notes isolation turned off. When the memory check emptied the plan it has
+#' said so itself ([check_split_memory()]).
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param ids Character: the configurations, in the plan's order.
+#' @param planned,inner,setting As [inner_daemons_tree_line()]'s.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+log_inner_daemons <- function(collector, ids, planned, inner, setting) {
+
+  split <- ids[inner > 1L]
+  n     <- length(split)
+
+  if (n > 0L) {
+
+    details <- paste0(split, " on ", inner[inner > 1L])
+
+    log_note(collector, c(
+      "{.fn evaluate} ran the folds of {n} long configuration{?s} on inner daemons it started on {?its/their} daemon{?s}, within the daemons set: {details}.",
+      "i" = "{.code control_horizons(inner_daemons = FALSE)} runs each configuration on one daemon."
+    ), ids = split)
+
+  } else if (!isTRUE(setting) && any(planned > 1L)) {
+
+    would <- ids[planned > 1L]
+    n     <- length(would)
+
+    log_note(collector,
+      "{.fn evaluate} ran each configuration on one daemon, as {.code control_horizons(inner_daemons = FALSE)} asked; it would have run the folds of {n} long configuration{?s} on inner daemons.",
+      ids = would)
+
+  }
+
+  invisible(NULL)
+
+}
+
+#' Say on the log which configurations' inner daemons did not connect
+#'
+#' @param collector The verb's collector, from `log_open()`.
+#' @param records Named list: each configuration's record of its inner
+#'   daemons, from its row ([evaluate_config_worker()]), by configuration.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+log_inner_unstarted <- function(collector, records) {
+
+  unstarted <- names(Filter(function(r) !is.null(r) && r$daemons > 1L && !isTRUE(r$started), records))
+  n         <- length(unstarted)
+
+  if (n == 0L) return(invisible(NULL))
+
+  log_note(collector,
+    "The inner daemons {.fn evaluate} started for {n} configuration{?s} did not connect within {INNER_START_SECONDS} seconds, so {cli::qty(n)}{?it/they} ran {?its/their} folds on {?its/their} own daemon: {.val {unstarted}}.",
+    ids = unstarted)
+
+  invisible(NULL)
 
 }
 

@@ -85,7 +85,7 @@ To run the whole pipeline on synthetic spectra, with no data of your own, see [`
 - Multiple approaches to cross-validation, including holding out whole sites or fields.
 - Modeling several soil properties at once, including compositional properties such as texture.
 - Training on local samples combined with a reference library.
-- Better parallelism, with lower memory use per worker and nested parallelism across configurations and folds.
+- Better parallelism, with lower memory use per worker.
 
 ## Contributing
 

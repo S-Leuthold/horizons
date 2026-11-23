@@ -763,48 +763,50 @@ describe("evaluate() - the daemons' memory", {
 
 })
 
-describe("evaluate() - inner daemons and this machine's memory", {
+## A configs-axis run whose plan splits its first configuration onto two of
+## its two daemons, both on this machine, with `available` bytes free; the
+## dispatch is mocked to run each configuration here and to keep the daemons
+## each was sent
+run_split <- function(available = 1e15, inner_daemons = TRUE, .env = parent.frame()) {
 
-  ## A configs-axis run whose plan splits its first configuration onto two of
-  ## its two daemons, both on this machine, with `available` bytes free; the
-  ## dispatch is mocked to run each configuration here and to keep the
-  ## daemons each was sent
-  run_split <- function(available) {
+  template <- allow_par_run()$result$evaluation$results[1, ]
+  sent     <- NULL
 
-    template <- allow_par_run()$result$evaluation$results[1, ]
-    sent     <- NULL
-
-    local_mocked_bindings(
-      running_under_load_all  = function() FALSE,
-      daemon_reports          = function(...) daemons_on(host = this_host()),
-      check_parallel_backend  = function(...) TRUE,
-      connected_daemons       = function() 2L,
-      daemons_dispatch        = function() TRUE,
-      memory_available        = function() available,
-      split_plan              = function(costs, n, folds) c(2L, rep(1L, length(costs) - 1L)),
-      evaluate_single_config  = function(config_row, ...) {
-        row <- template
-        row$config_id <- config_row$config_id
-        row
-      },
-      dispatch_configs        = function(configs, payload_path, finished, ..., inner) {
-        sent <<- inner
-        for (i in seq_len(nrow(configs))) {
-          finished$rows <- c(finished$rows, list(evaluate_config_worker(i, payload_path)))
-        }
+  local_mocked_bindings(
+    running_under_load_all  = function() FALSE,
+    daemon_reports          = function(...) daemons_on(host = this_host()),
+    check_parallel_backend  = function(...) TRUE,
+    connected_daemons       = function() 2L,
+    daemons_dispatch        = function() TRUE,
+    memory_available        = function() available,
+    split_plan              = function(costs, n, folds) c(2L, rep(1L, length(costs) - 1L)),
+    evaluate_single_config  = function(config_row, ...) {
+      row <- template
+      row$config_id <- config_row$config_id
+      row
+    },
+    dispatch_configs        = function(configs, payload_path, finished, ..., inner) {
+      sent <<- inner
+      for (i in seq_len(nrow(configs))) {
+        finished$rows <- c(finished$rows, list(evaluate_config_worker(i, payload_path)))
       }
-    )
+    },
+    .env = .env
+  )
 
-    got <- collect_warnings(
-      evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
-               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
-                                          output_dir = withr::local_tempdir(), verbose = FALSE))
-    )
+  out <- utils::capture.output(got <- collect_warnings(
+    evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+             control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                        output_dir = withr::local_tempdir(), verbose = TRUE,
+                                        inner_daemons = inner_daemons))
+  ))
 
-    list(inner = sent, log = got$value$log,
-         input = Filter(function(w) inherits(w, "horizons_warning_input"), got$warnings))
+  list(inner = sent, log = got$value$log, out = out,
+       input = Filter(function(w) inherits(w, "horizons_warning_input"), got$warnings))
 
-  }
+}
+
+describe("evaluate() - inner daemons and this machine's memory", {
 
   split_note <- function(log) log[grepl("inner daemons it would start", log$message, fixed = TRUE), ]
 
@@ -837,6 +839,41 @@ describe("evaluate() - inner daemons and this machine's memory", {
     expect_identical(got$inner, c(1L, 1L, 1L))
     expect_length(got$input, 1L)
     expect_match(gsub("\\s+", " ", conditionMessage(got$input[[1]])), "The 2 mirai daemons on this machine would need about",
+                 fixed = TRUE)
+
+  })
+
+})
+
+describe("evaluate() - saying which configurations run on inner daemons", {
+
+  it("says once, in the tree and as a note on the log naming them, which configurations run on inner daemons and on how many", {
+
+    got  <- run_split()
+    note <- got$log[grepl("on inner daemons it started", got$log$message, fixed = TRUE), ]
+
+    expect_identical(grep("Inner daemons:", got$out, value = TRUE, fixed = TRUE),
+                     "\u2502  Inner daemons: 1 long configuration runs its folds on 2 (control_horizons(inner_daemons = FALSE) turns it off)")
+    expect_identical(note$type, "note")
+    expect_identical(note$ids[[1]], "cfg_001")
+    expect_match(gsub("\\s+", " ", note$message),
+                 "`evaluate()` ran the folds of 1 long configuration on inner daemons it started on its daemon, within the daemons set: cfg_001 on 2.",
+                 fixed = TRUE)
+    expect_match(note$message, "`control_horizons(inner_daemons = FALSE)` runs each configuration on one daemon.", fixed = TRUE)
+
+  })
+
+  it("says, with inner daemons off, that a configuration that would have had them ran on one daemon", {
+
+    got  <- run_split(inner_daemons = FALSE)
+    note <- got$log[grepl("inner_daemons = FALSE)` asked", got$log$message, fixed = TRUE), ]
+
+    expect_identical(got$inner, c(1L, 1L, 1L))
+    expect_identical(grep("Inner daemons:", got$out, value = TRUE, fixed = TRUE),
+                     "\u2502  Inner daemons: off, as asked; 1 long configuration runs on one daemon")
+    expect_identical(note$type, "note")
+    expect_identical(note$ids[[1]], "cfg_001")
+    expect_match(gsub("\\s+", " ", note$message), "it would have run the folds of 1 long configuration on inner daemons.",
                  fixed = TRUE)
 
   })

@@ -174,7 +174,10 @@ With fewer than two daemons connected it runs sequentially and warns, with
 class \code{horizons_warning_substitution}, naming the call that would set
 them; the warning is also a row of the object's \code{log}. Without
 \code{allow_par}, \code{evaluate()} runs in the calling process and never reads the
-daemons. It never sets, resizes or resets them.
+daemons. It never sets, resizes or resets them; on the configs axis it can
+start daemons of its own for a long configuration's folds, on that
+configuration's daemon and within the count set (see "Inner daemons"
+below).
 
 The user owns the daemons; \code{evaluate()} owns only which axis they are
 applied to, through \code{control_horizons(parallelize_over = )}.
@@ -195,13 +198,15 @@ carries its rows. Without an \code{output_dir} they are held in this session
 for the call.
 \itemize{
 \item \code{"configs"}: one task per config on the daemons, with tune running
-sequentially inside each. The configs start longest first, by an
+sequentially inside each, but for a long config's inner daemons (see
+below). The configs start longest first, by an
 estimate of each one's time (the seconds its model and feature
 selection took on a measured grid, scaled to the run's rows and the
 predictors its preparation keeps), so the short ones fill the daemons
 at the end; the rows come back
 in configuration order whatever order they finish in. At most one
-config per connected daemon is in flight. The configs' data are written
+config per connected daemon is in flight, and a config with inner
+daemons holds as many. The configs' data are written
 once, to a file in \verb{<output_dir>/tmp/}, which each config's daemon
 reads, so this session holds no copy of a running config's data; the
 file is removed when \code{evaluate()} returns or stops. The daemons must
@@ -222,6 +227,25 @@ bounded by \code{cv_folds}, and always once it exceeds the worker count, so
 the worker count cancels. \code{"configs"} asked for explicitly without an
 \code{output_dir} is refused before anything runs (#233).
 }
+
+Inner daemons. On the configs axis a run waits on its longest config, so a
+config whose expected share of the run's work is more than 0.75 / n (n
+the daemons connected) runs its folds on inner daemons: \code{evaluate()}
+starts them inside that config's task, on its daemon, as many as the
+smallest divisor of \code{cv_folds}, at most n, that brings its share under
+that, else the largest, and keeps that many daemons from other configs
+while it runs, so no more than n cores are busy. Its daemon waits in tune
+while they fit the folds. With the default 5 folds nothing splits on
+fewer than 5 daemons. The inner daemons start with the daemon's library
+paths and one BLAS and OpenMP thread, and are reset when the config's
+task ends, however it ends; a daemon that dies takes them with it. Inner
+daemons that do not connect within a minute are reset, and the config
+runs its folds on its own daemon, with a note on the \code{log}. The configs
+that run on inner daemons, and on how many, are a line in the progress
+tree and a note on the \code{log}. The results are the same either way.
+\code{control_horizons(inner_daemons = FALSE)}, or \code{options(horizons.inner_daemons = FALSE)}, runs every config on one daemon, which the \code{log} notes when a
+config would have had inner daemons. A split is made only when its inner
+daemons fit in this machine's memory (see below).
 
 Results do not depend on the backend, the number of daemons, which daemon
 runs a configuration or the order the work finishes in: every draw is
@@ -263,6 +287,7 @@ whatever \code{allow_par} says.
 A daemon that dies stops the run with \code{horizons_error_systemic}, the rows
 finished so far as its \code{results} (and in \code{output_dir}): on the configs
 axis when its configuration's task comes back as mirai's \code{errorValue} 19,
+or fewer of its inner daemons are connected after it than before, and
 on the resamples axis when fewer daemons are connected after a
 configuration than before it, since tune reads a death as a failure of
 its own. That count cannot tell a death from a daemon exiting under
@@ -287,7 +312,8 @@ configuration still running stops before it writes its checkpoint; a
 checkpoint is written whole or not at all, so one the cancel reaches
 mid-write is either complete or absent. A run stopped while its fold
 preparations run cancels those still running the same way, on either
-axis; a cancelled one writes nothing, since this session writes each. A configuration in an isolated
+axis; a cancelled one writes nothing, since this session writes each. A
+configuration on inner daemons ends them as its task is cancelled. A configuration in an isolated
 fit (each \code{cubist} fit; see "Isolated fits") stops at once, its fit's
 process ended with it. One inside another compiled fit (an xgboost fit,
 say) stops only when that fit returns, its daemon busy until then, and
@@ -326,7 +352,11 @@ it on the \code{log}, and under \code{verbose} the tree's parallel line says "mo
 memory than available"; the run goes on. The memory available is
 \code{ps::ps_system_memory()}'s, which under a container's or \code{systemd-run}'s
 memory cap is the machine's, not the cap's. Daemons on another machine
-are not checked.
+are not checked. When a configuration is to run on inner daemons, they
+are counted too, each as a daemon of the run, with what its
+configuration's daemon holds while tune's fold tasks wait for them; when
+they would not fit beside the daemons, no configuration is split, and a
+note on the \code{log} gives the figures.
 }
 
 \section{Isolated fits}{

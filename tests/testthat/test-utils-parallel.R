@@ -865,6 +865,47 @@ describe("dispatch_configs() and an inner daemon's death", {
 
 })
 
+describe("inner_daemons_tree_line() and log_inner_unstarted()", {
+
+  it("words the tree's line for one configuration and several, for the setting off, and for memory", {
+
+    expect_identical(inner_daemons_tree_line(c(5L, 2L, 2L, 1L), c(5L, 2L, 2L, 1L), TRUE),
+                     "Inner daemons: 3 long configurations run their folds on 5, 2 and 2 (control_horizons(inner_daemons = FALSE) turns it off)")
+    expect_identical(inner_daemons_tree_line(c(1L, 2L), c(1L, 2L), TRUE),
+                     "Inner daemons: 1 long configuration runs its folds on 2 (control_horizons(inner_daemons = FALSE) turns it off)")
+    expect_identical(inner_daemons_tree_line(c(2L, 2L), c(1L, 1L), FALSE),
+                     "Inner daemons: off, as asked; 2 long configurations run on one daemon")
+    expect_identical(inner_daemons_tree_line(c(2L, 1L), c(1L, 1L), TRUE),
+                     "Inner daemons: none, since they would not fit in this machine's memory (see the log)")
+    expect_null(inner_daemons_tree_line(c(1L, 1L), c(1L, 1L), TRUE))
+
+  })
+
+  it("notes the configurations whose inner daemons did not connect, by name", {
+
+    collector <- log_open("evaluate")
+    log_inner_unstarted(collector, list(
+      cfg_001 = list(daemons = 2L, started = TRUE, completed = 6L),
+      cfg_002 = list(daemons = 2L, started = FALSE, completed = 0L),
+      cfg_003 = list(daemons = 1L, started = FALSE, completed = 0L),
+      cfg_004 = NULL
+    ))
+    rows <- log_close(collector)
+
+    expect_identical(rows$type, "note")
+    expect_identical(rows$ids[[1]], "cfg_002")
+    expect_match(gsub("\\s+", " ", rows$message),
+                 "for 1 configuration did not connect within 60 seconds, so it ran its folds on its own daemon",
+                 fixed = TRUE)
+
+    collector <- log_open("evaluate")
+    log_inner_unstarted(collector, list(cfg_001 = list(daemons = 2L, started = TRUE, completed = 6L)))
+    expect_identical(nrow(log_close(collector)), 0L)
+
+  })
+
+})
+
 ## =========================================================================
 ## Isolated work: one call in a process of its own
 ## =========================================================================
