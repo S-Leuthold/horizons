@@ -3136,7 +3136,7 @@ describe("evaluate() - the Bayesian search's stopping rule", {
     }
   }
 
-  line <- paste0("The Bayesian search stopped early in 1 of the 2 configurations it ran in, after 5 iterations ",
+  line <- paste0("The Bayesian search stopped early in 1 of the 2 configurations it ran in, after 10 iterations ",
                  "without improvement; `control_horizons(no_improve = FALSE)` runs every iteration, and a larger ",
                  "number waits longer.")
 
