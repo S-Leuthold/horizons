@@ -707,7 +707,7 @@ describe("start_inner_daemons()", {
     was  <- Sys.getenv(vars, unset = NA)
     withr::defer(mirai::daemons(0))
 
-    expect_true(with_deadline(start_inner_daemons(2L), 30))
+    expect_true(with_deadline(start_inner_daemons(2L, "rf", "none"), 30))
     expect_identical(connected_daemons(), 2L)
 
     seen <- with_deadline(mirai::collect_mirai(mirai::mirai(Sys.getenv(vars), vars = vars)), 30)
@@ -719,6 +719,27 @@ describe("start_inner_daemons()", {
 
   })
 
+  it("sets each inner daemon up as a configuration's daemon is: the engines' thread options, kept from task to task (installed build)", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+
+    mirai::daemons(0)
+    withr::defer(mirai::daemons(0))
+
+    expect_true(with_deadline(start_inner_daemons(2L, "rf", "none"), 30))
+
+    ## Read by a task on each, after the set-up's own: mirai's cleanup
+    ## restores a daemon's options after every task but what everywhere() set
+    wanted <- engine_thread_options()
+    seen   <- with_deadline(mirai::everywhere(lapply(stats::setNames(nm = names), getOption),
+                                              .args = list(names = names(wanted)))[], 30)
+
+    expect_length(seen, 2L)
+    for (s in seen) expect_identical(s, wanted)
+
+  })
+
   it("resets the profile and says so when the daemons do not connect in time", {
 
     skip_on_cran()
@@ -727,7 +748,7 @@ describe("start_inner_daemons()", {
     withr::defer(mirai::daemons(0))
     local_mocked_bindings(launch_local = function(...) invisible(NULL), .package = "mirai")
 
-    expect_false(with_deadline(start_inner_daemons(2L, seconds = 0.5), 10))
+    expect_false(with_deadline(start_inner_daemons(2L, "rf", "none", seconds = 0.5), 10))
     expect_false(mirai::daemons_set())
 
   })
@@ -743,7 +764,7 @@ describe("watch_inner_daemons()", {
 
     mirai::daemons(0)
     withr::defer(mirai::daemons(0))
-    expect_true(with_deadline(start_inner_daemons(2L), 30))
+    expect_true(with_deadline(start_inner_daemons(2L, "plsr", "none"), 30))
 
     expect_identical(watch_inner_daemons("row", 2L, "cfg_001"), "row")
 
@@ -847,42 +868,108 @@ describe("dispatch_configs() and an inner daemon's death", {
 
 })
 
-describe("inner_daemons_tree_line() and log_inner_unstarted()", {
+describe("inner_daemons_tree_line() and log_inner_daemons()", {
 
   it("words the tree's line for one configuration and several, for the setting off, and for memory", {
 
-    expect_identical(inner_daemons_tree_line(c(5L, 2L, 2L, 1L), c(5L, 2L, 2L, 1L), TRUE),
+    expect_identical(inner_daemons_tree_line(c(5L, 2L, 2L, 1L), c(5L, 2L, 2L, 1L), TRUE, TRUE),
                      "Inner daemons: 3 long configurations run their folds on 5, 2 and 2 (control_horizons(inner_daemons = FALSE) turns it off)")
-    expect_identical(inner_daemons_tree_line(c(1L, 2L), c(1L, 2L), TRUE),
+    expect_identical(inner_daemons_tree_line(c(1L, 2L), c(1L, 2L), TRUE, TRUE),
                      "Inner daemons: 1 long configuration runs its folds on 2 (control_horizons(inner_daemons = FALSE) turns it off)")
-    expect_identical(inner_daemons_tree_line(c(2L, 2L), c(1L, 1L), FALSE),
-                     "Inner daemons: off, as asked; 2 long configurations run on one daemon")
-    expect_identical(inner_daemons_tree_line(c(2L, 1L), c(1L, 1L), TRUE),
+    expect_identical(inner_daemons_tree_line(c(2L, 2L), c(1L, 1L), FALSE, TRUE),
+                     "Inner daemons: off, as asked; 2 long configurations run each on one daemon")
+    expect_identical(inner_daemons_tree_line(c(2L, 1L), c(1L, 1L), FALSE, TRUE),
+                     "Inner daemons: off, as asked; 1 long configuration runs on one daemon")
+    expect_identical(inner_daemons_tree_line(c(2L, 1L), c(1L, 1L), TRUE, TRUE),
                      "Inner daemons: none, since they would not fit in this machine's memory (see the log)")
-    expect_null(inner_daemons_tree_line(c(1L, 1L), c(1L, 1L), TRUE))
+    expect_null(inner_daemons_tree_line(c(1L, 1L), c(1L, 1L), TRUE, TRUE))
 
   })
 
-  it("notes the configurations whose inner daemons did not connect, by name", {
+  it("adds a line saying BLAS is not pinned, and how to pin it, when some are split and it cannot be", {
 
-    collector <- log_open("evaluate")
-    log_inner_unstarted(collector, list(
-      cfg_001 = list(daemons = 2L, started = TRUE, completed = 6L),
-      cfg_002 = list(daemons = 2L, started = FALSE, completed = 0L),
-      cfg_003 = list(daemons = 1L, started = FALSE, completed = 0L),
-      cfg_004 = NULL
+    lines <- inner_daemons_tree_line(c(1L, 2L), c(1L, 2L), TRUE, FALSE)
+
+    expect_length(lines, 2L)
+    expect_identical(lines[[2]], paste0(
+      "BLAS threads: not pinned, so a configuration on inner daemons can differ from an unsplit run in rounding ",
+      "(install RhpcBLASctl, or Sys.setenv(OPENBLAS_NUM_THREADS = 1) before mirai::daemons())"
     ))
-    rows <- log_close(collector)
 
-    expect_identical(rows$type, "note")
-    expect_identical(rows$ids[[1]], "cfg_002")
-    expect_match(gsub("\\s+", " ", rows$message),
-                 "for 1 configuration did not connect within 60 seconds, so it ran its folds on its own daemon",
+    ## Nothing split, nothing to say of it
+    expect_null(inner_daemons_tree_line(c(1L, 1L), c(1L, 1L), TRUE, FALSE))
+    expect_length(inner_daemons_tree_line(c(2L, 1L), c(1L, 1L), FALSE, FALSE), 1L)
+
+  })
+
+  ## Four configurations, the first three split on 2: the first's inner
+  ## daemons connected, the second's and third's did not, the fourth ran
+  ## whole
+  records <- list(
+    cfg_001 = list(daemons = 2L, started = TRUE, completed = 6L),
+    cfg_002 = list(daemons = 2L, started = FALSE, completed = 0L),
+    cfg_003 = list(daemons = 2L, started = FALSE, completed = 0L),
+    cfg_004 = list(daemons = 1L, started = FALSE, completed = 0L)
+  )
+  ids  <- names(records)
+  plan <- c(2L, 2L, 2L, 1L)
+
+  notes <- function(setting = TRUE, pinned = TRUE, inner = plan, recs = records) {
+    collector <- log_open("evaluate")
+    log_inner_daemons(collector, ids, plan, inner, setting, pinned, recs)
+    rows <- log_close(collector)
+    rows$message <- gsub("\\s+", " ", rows$message)
+    rows
+  }
+
+  it("notes, from what each task says, the configurations that ran on inner daemons and those whose inner daemons did not connect", {
+
+    rows <- notes()
+
+    expect_identical(rows$type, c("note", "note"))
+    expect_identical(rows$ids, list("cfg_001", c("cfg_002", "cfg_003")))
+    expect_match(rows$message[[1]],
+                 "ran the folds of 1 long configuration on inner daemons it started on its daemon, within the daemons set: cfg_001 on 2.",
+                 fixed = TRUE)
+    expect_match(rows$message[[2]],
+                 "for 2 configurations did not connect within 60 seconds, so they ran their folds on their own daemons",
                  fixed = TRUE)
 
-    collector <- log_open("evaluate")
-    log_inner_unstarted(collector, list(cfg_001 = list(daemons = 2L, started = TRUE, completed = 6L)))
-    expect_identical(nrow(log_close(collector)), 0L)
+    ## One that did not connect, alone
+    one <- notes(recs = records[c("cfg_001", "cfg_002")], inner = c(2L, 2L, 1L, 1L))
+    expect_match(one$message[[2]], "for 1 configuration did not connect within 60 seconds, so it ran its folds on its own daemon:",
+                 fixed = TRUE)
+
+    ## None split by the plan's end: nothing to say
+    expect_identical(nrow(notes(inner = c(1L, 1L, 1L, 1L))), 0L)
+
+  })
+
+  it("notes, when BLAS cannot be pinned, that the configurations run on inner daemons can differ in rounding, and how to pin it", {
+
+    rows <- notes(pinned = FALSE)
+    blas <- rows[grepl("could not pin BLAS", rows$message, fixed = TRUE), ]
+
+    expect_identical(blas$ids, list("cfg_001"))
+    expect_match(blas$message,
+                 "since RhpcBLASctl is not installed, so the 1 configuration run on inner daemons can differ in floating-point rounding from the same run without them",
+                 fixed = TRUE)
+    expect_match(blas$message, "or set `Sys.setenv(OPENBLAS_NUM_THREADS = 1)` before `mirai::daemons()`", fixed = TRUE)
+
+    ## Pinned, or none started on inner daemons: nothing of it
+    expect_false(any(grepl("could not pin BLAS", notes()$message, fixed = TRUE)))
+    started_none <- lapply(records, function(r) { r$started <- FALSE; r })
+    expect_false(any(grepl("could not pin BLAS", notes(pinned = FALSE, recs = started_none)$message, fixed = TRUE)))
+
+  })
+
+  it("with the setting off, notes from the plan the configurations that would have had inner daemons", {
+
+    rows <- notes(setting = FALSE, inner = c(1L, 1L, 1L, 1L), recs = list())
+
+    expect_identical(rows$ids, list(c("cfg_001", "cfg_002", "cfg_003")))
+    expect_match(rows$message, "as `control_horizons(inner_daemons = FALSE)` asked; it would have run the folds of 3 long configurations on inner daemons.",
+                 fixed = TRUE)
 
   })
 

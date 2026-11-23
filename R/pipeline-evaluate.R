@@ -184,23 +184,36 @@
 #' while it runs, so no more than n cores are busy. Its daemon waits in tune
 #' while they fit the folds. With the default 5 folds nothing splits on
 #' fewer than 5 daemons. The inner daemons start with the daemon's library
-#' paths and one BLAS and OpenMP thread, and are reset when the config's
-#' task ends, however it ends; a daemon that dies takes them with it. Inner
-#' daemons that do not connect within a minute are reset, and the config
-#' runs its folds on its own daemon, with a note on the `log`. The configs
-#' that run on inner daemons, and on how many, are a line in the progress
-#' tree and a note on the `log`. The results are the same either way.
+#' paths and one BLAS and OpenMP thread, are set up for the config as its
+#' daemon is (the engines' thread options and the config's packages), and
+#' are reset when the config's task ends, however it ends; a daemon that
+#' dies takes them with it. Inner daemons that do not connect within a
+#' minute are reset, and the config runs its folds on its own daemon, with a
+#' note on the `log`. The configs that run on inner daemons, and on how
+#' many, are a line in the progress tree and a note on the `log`.
 #' `control_horizons(inner_daemons = FALSE)`, or `options(horizons.inner_daemons
 #' = FALSE)`, runs every config on one daemon, which the `log` notes when a
 #' config would have had inner daemons. A split is made only when its inner
 #' daemons fit in this machine's memory (see below).
 #'
+#' Every process that fits runs BLAS and OpenMP on one thread, as is usual
+#' for a pool inside a pool: the inner daemons from their start, and each
+#' config's daemon while its task runs, set at run time through
+#' `RhpcBLASctl` and put back as the task ends. A config's results are then
+#' the same split or not. Without `RhpcBLASctl` a config's daemon keeps the
+#' threads it was started with, so when those are more than one a split
+#' config's results can differ from the unsplit run's in floating-point
+#' rounding; the run then says so once, in the progress tree and on the
+#' `log`, with how to pin them: install `RhpcBLASctl`, or call
+#' `Sys.setenv(OPENBLAS_NUM_THREADS = 1)` before `mirai::daemons()`.
+#'
 #' Results do not depend on the backend, the number of daemons, which daemon
 #' runs a configuration or the order the work finishes in: every draw is
 #' seeded from the run's `seed` and its own name, where it is made, and each
 #' `cubist` fit runs in a process of its own (see "Isolated fits" below),
-#' unless `control_horizons(isolate = FALSE)`. The daemons' own seed
-#' (`mirai::daemons(seed = )`) has no effect on them.
+#' unless `control_horizons(isolate = FALSE)`; without `RhpcBLASctl`, a
+#' config run on inner daemons can differ in rounding (above). The daemons'
+#' own seed (`mirai::daemons(seed = )`) has no effect on them.
 #'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
@@ -222,7 +235,9 @@
 #' (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`), not its in-process settings,
 #' so a thread count set in the session with `options()` or `RhpcBLASctl`
 #' does not reach them; on the configs axis each configuration's task sets
-#' data.table's and ranger's threads to one itself. On either axis the daemons load the
+#' data.table's and ranger's threads to one itself, and BLAS's and OpenMP's
+#' through `RhpcBLASctl` when it is installed, which it puts back as it
+#' ends (see "Inner daemons" above). On either axis the daemons load the
 #' *installed* package, so a parallel run refuses, before anything is drawn,
 #' under `devtools::load_all()`. Every daemon connected is then asked, one
 #' task each, which horizons it loads and whether it can load the packages
@@ -1439,15 +1454,18 @@ evaluate <- function(x,
 
     }
 
-    ## Which configurations run their folds on inner daemons, said once on
-    ## the log and in the tree, or that the setting kept them whole
-    log_inner_daemons(collector, pending_configs$config_id, planned, inner_plan, control$inner_daemons)
+    ## Which configurations run their folds on inner daemons, said in the
+    ## tree from the plan, or that the setting kept them whole; and whether
+    ## BLAS can be pinned on the daemons, without which a split can differ
+    ## from the unsplit run in rounding. The log says it once the window has
+    ## run, from what started.
+    blas_pinned <- blas_pinnable()
 
     if (verbose) {
 
-      inner_line <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons)
+      inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned)
 
-      if (!is.null(inner_line)) cat(paste0("\u2502  ", inner_line, "\n"))
+      for (line in inner_lines) cat(paste0("\u2502  ", line, "\n"))
 
       cat(paste0(
         "\u2502  Processing ", n_pending, " pending configs...\n"
@@ -1479,9 +1497,11 @@ evaluate <- function(x,
     results_list <- in_config_order(finished$rows, configs$config_id)
     not_saved    <- lapply(results_list, attr, "checkpoint_failed")
 
-    ## A configuration whose inner daemons did not connect ran its folds on
+    ## Which configurations ran their folds on inner daemons, from what each
+    ## task says; one whose inner daemons did not connect ran its folds on
     ## its own daemon, which costs time only
-    log_inner_unstarted(collector, finished$inner)
+    log_inner_daemons(collector, pending_configs$config_id, planned, inner_plan, control$inner_daemons,
+                      blas_pinned, finished$inner)
 
     results_list <- lapply(results_list, function(row) {
       attr(row, "checkpoint_failed") <- NULL
@@ -3992,11 +4012,12 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' Set a daemon up to run a unit: its threads, and the packages it needs
 #'
 #' @description
-#' Thread pinning that works happens in the session before dispatch
-#' (pin_parent_threads()): OpenBLAS reads its thread count when it loads, so
-#' setting OPENBLAS_NUM_THREADS on a daemon, after the library is loaded,
-#' changed nothing when measured (2026-09-15). What can be set at run time
-#' is set here: data.table's threads, and the thread options the model table
+#' OpenBLAS reads its thread count when it loads, so setting
+#' OPENBLAS_NUM_THREADS on a daemon, after the library is loaded, changed
+#' nothing when measured (2026-09-15); BLAS and OpenMP are pinned at run
+#' time through RhpcBLASctl instead, by the configuration's worker and on its
+#' inner daemons ([pin_blas_threads()]). What else can be set at run time is
+#' set here: data.table's threads, and the thread options the model table
 #' declares for its engines (ranger's, which Boruta's forests read too). A
 #' daemon starts with the session's environment variables from when
 #' daemons() was called, not its in-process settings.
@@ -4093,7 +4114,8 @@ prepare_worker <- function(models, selections) {
 #'   unit's, when its checkpoint could not be written, why, as the attribute
 #'   `"checkpoint_failed"`, and its inner daemons as the attribute
 #'   `"inner_daemons"`: `daemons` (`inner`), `started` (whether they
-#'   connected) and `completed` (the tasks they ran). When the file at
+#'   connected) and `completed` (the tasks they ran for it, past their
+#'   set-up). When the file at
 #'   `payload_path`, or one of its fold preparations, cannot be read,
 #'   instead, a list of class `horizons_run_file_unread` holding the `path`,
 #'   the `reason` (what base R said, any warning before the error, or that
@@ -4163,6 +4185,13 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
   ## transport changed the payload.
   check_worker_payload(shared, SHARED_ARG_NAMES)
 
+  ## BLAS and OpenMP on one thread while the configuration runs, as its inner
+  ## daemons run them, so its folds and its final fit compute alike whether
+  ## it is split or not; put back as the task ends, since the daemon is the
+  ## user's. Without RhpcBLASctl the daemon keeps the threads it started with.
+  unpin_blas <- pin_blas_threads()
+  on.exit(unpin_blas(), add = TRUE)
+
   ## mirai relays no condition from a task, so a warning raised in the
   ## worker's own steps before the configuration's unit runs (a package's
   ## while it loads, say) is caught here and rendered with the row's own
@@ -4209,8 +4238,12 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
 
   if (inner > 1L) {
     on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
-    on_inner <- start_inner_daemons(inner)
+    on_inner <- start_inner_daemons(inner, cfg$model, cfg$feature_selection)
   }
+
+  ## The tasks the inner daemons ran before the configuration (their set-up),
+  ## so its row counts only its own
+  completed_before <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
 
   run <- function() {
     evaluate_single_config(
@@ -4240,7 +4273,7 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
 
   if (inherits(result_row, "horizons_inner_daemon_died")) return(result_row)
 
-  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
+  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) - completed_before else 0L
 
   ## Both provenance records are sent rather than rebuilt. The data
   ## fingerprint hashes the whole predictor matrix, which is a once-per-run

@@ -236,22 +236,35 @@ that, else the largest, and keeps that many daemons from other configs
 while it runs, so no more than n cores are busy. Its daemon waits in tune
 while they fit the folds. With the default 5 folds nothing splits on
 fewer than 5 daemons. The inner daemons start with the daemon's library
-paths and one BLAS and OpenMP thread, and are reset when the config's
-task ends, however it ends; a daemon that dies takes them with it. Inner
-daemons that do not connect within a minute are reset, and the config
-runs its folds on its own daemon, with a note on the \code{log}. The configs
-that run on inner daemons, and on how many, are a line in the progress
-tree and a note on the \code{log}. The results are the same either way.
+paths and one BLAS and OpenMP thread, are set up for the config as its
+daemon is (the engines' thread options and the config's packages), and
+are reset when the config's task ends, however it ends; a daemon that
+dies takes them with it. Inner daemons that do not connect within a
+minute are reset, and the config runs its folds on its own daemon, with a
+note on the \code{log}. The configs that run on inner daemons, and on how
+many, are a line in the progress tree and a note on the \code{log}.
 \code{control_horizons(inner_daemons = FALSE)}, or \code{options(horizons.inner_daemons = FALSE)}, runs every config on one daemon, which the \code{log} notes when a
 config would have had inner daemons. A split is made only when its inner
 daemons fit in this machine's memory (see below).
+
+Every process that fits runs BLAS and OpenMP on one thread, as is usual
+for a pool inside a pool: the inner daemons from their start, and each
+config's daemon while its task runs, set at run time through
+\code{RhpcBLASctl} and put back as the task ends. A config's results are then
+the same split or not. Without \code{RhpcBLASctl} a config's daemon keeps the
+threads it was started with, so when those are more than one a split
+config's results can differ from the unsplit run's in floating-point
+rounding; the run then says so once, in the progress tree and on the
+\code{log}, with how to pin them: install \code{RhpcBLASctl}, or call
+\code{Sys.setenv(OPENBLAS_NUM_THREADS = 1)} before \code{mirai::daemons()}.
 
 Results do not depend on the backend, the number of daemons, which daemon
 runs a configuration or the order the work finishes in: every draw is
 seeded from the run's \code{seed} and its own name, where it is made, and each
 \code{cubist} fit runs in a process of its own (see "Isolated fits" below),
-unless \code{control_horizons(isolate = FALSE)}. The daemons' own seed
-(\code{mirai::daemons(seed = )}) has no effect on them.
+unless \code{control_horizons(isolate = FALSE)}; without \code{RhpcBLASctl}, a
+config run on inner daemons can differ in rounding (above). The daemons'
+own seed (\code{mirai::daemons(seed = )}) has no effect on them.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{# Laptop: four cores, parallelise the folds inside each config.
 mirai::daemons(4)
@@ -272,7 +285,9 @@ environment variables the session had when \code{mirai::daemons()} was called
 (\code{OMP_NUM_THREADS}, \code{OPENBLAS_NUM_THREADS}), not its in-process settings,
 so a thread count set in the session with \code{options()} or \code{RhpcBLASctl}
 does not reach them; on the configs axis each configuration's task sets
-data.table's and ranger's threads to one itself. On either axis the daemons load the
+data.table's and ranger's threads to one itself, and BLAS's and OpenMP's
+through \code{RhpcBLASctl} when it is installed, which it puts back as it
+ends (see "Inner daemons" above). On either axis the daemons load the
 \emph{installed} package, so a parallel run refuses, before anything is drawn,
 under \code{devtools::load_all()}. Every daemon connected is then asked, one
 task each, which horizons it loads and whether it can load the packages

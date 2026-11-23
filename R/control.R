@@ -299,9 +299,12 @@ CONTROL_FIELDS <- list(
 #'   configuration whose share of the run's work is large run its folds on
 #'   inner daemons that `evaluate()` starts on that configuration's daemon,
 #'   taking as many of the daemons set, so the run does not wait on its
-#'   longest configurations; the results are the same either way. `FALSE`
-#'   runs every configuration on one daemon. Default
-#'   `getOption("horizons.inner_daemons", TRUE)`. [evaluate()].
+#'   longest configurations. The results are the same either way where
+#'   BLAS runs on one thread, which `evaluate()` sets on its daemons through
+#'   `RhpcBLASctl` when it is installed; without it they can differ in
+#'   floating-point rounding, which the run says (see [evaluate()]'s
+#'   "Inner daemons"). `FALSE` runs every configuration on one daemon.
+#'   Default `getOption("horizons.inner_daemons", TRUE)`. [evaluate()].
 #' @param no_improve A whole number of at least 1, or `FALSE`. The Bayesian
 #'   iterations without improvement on the best after which a search stops:
 #'   [evaluate()]'s, and [fit()]'s re-tune. Each verb says how many of its

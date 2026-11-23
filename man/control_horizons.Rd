@@ -95,9 +95,12 @@ them, and the run says so. Default \code{getOption("horizons.isolate", TRUE)}.
 configuration whose share of the run's work is large run its folds on
 inner daemons that \code{evaluate()} starts on that configuration's daemon,
 taking as many of the daemons set, so the run does not wait on its
-longest configurations; the results are the same either way. \code{FALSE}
-runs every configuration on one daemon. Default
-\code{getOption("horizons.inner_daemons", TRUE)}. \code{\link[=evaluate]{evaluate()}}.}
+longest configurations. The results are the same either way where
+BLAS runs on one thread, which \code{evaluate()} sets on its daemons through
+\code{RhpcBLASctl} when it is installed; without it they can differ in
+floating-point rounding, which the run says (see \code{\link[=evaluate]{evaluate()}}'s
+"Inner daemons"). \code{FALSE} runs every configuration on one daemon.
+Default \code{getOption("horizons.inner_daemons", TRUE)}. \code{\link[=evaluate]{evaluate()}}.}
 
 \item{no_improve}{A whole number of at least 1, or \code{FALSE}. The Bayesian
 iterations without improvement on the best after which a search stops:
