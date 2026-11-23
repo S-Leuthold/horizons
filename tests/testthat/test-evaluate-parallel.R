@@ -2116,10 +2116,11 @@ describe("evaluate() - inner daemons", {
     local_split(1L)
 
     ## On the daemons, the split configuration fails as a bug would, once
-    ## its inner daemons are up
+    ## its inner daemons are up, saying how many its daemon had connected
     with_deadline(mirai::everywhere({
       utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
-        stop("a bug in the configuration's code")
+        stop(sprintf("a bug in the configuration's code, on %d inner daemons",
+                     as.integer(sum(mirai::info()[["connections"]]))))
       }, ns = "horizons")
     })[], 30)
 
@@ -2128,7 +2129,7 @@ describe("evaluate() - inner daemons", {
                                               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
                                                                          output_dir = withr::local_tempdir(),
                                                                          verbose = FALSE))), 120),
-      "a bug in the configuration's code"
+      "a bug in the configuration's code, on 2 inner daemons", fixed = TRUE
     )
 
     with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
@@ -2149,9 +2150,10 @@ describe("evaluate() - inner daemons", {
     signals <- withr::local_tempdir()
 
     ## The second configuration is split onto two inner daemons and, once
-    ## they are up, waits in R code a cancellation interrupts; the first
-    ## runs once it is waiting, so the interrupt, as the window's first wait
-    ## ends, finds the split one in flight
+    ## they are up, writes how many its daemon has connected and waits in R
+    ## code a cancellation interrupts; the first runs once it is waiting, so
+    ## the interrupt, as the window's first wait ends, finds the split one in
+    ## flight
     local_split(2L)
     with_deadline(mirai::everywhere({
       ns   <- asNamespace("horizons")
@@ -2159,7 +2161,7 @@ describe("evaluate() - inner daemons", {
       utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
         until <- Sys.time() + 30
         if (config_row$config_id == "cfg_002") {
-          file.create(file.path(signals, "cfg_002-waiting"))
+          writeLines(as.character(sum(mirai::info()[["connections"]])), file.path(signals, "cfg_002-waiting"))
           Sys.sleep(10)
         }
         if (config_row$config_id == "cfg_001") {
@@ -2190,6 +2192,9 @@ describe("evaluate() - inner daemons", {
     )
 
     expect_identical(got, "interrupted")
+
+    ## The split configuration was in flight on its two inner daemons
+    expect_identical(readLines(file.path(signals, "cfg_002-waiting")), "2")
 
     with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
     expect_identical(list.files(store), "cfg_001.rds")
