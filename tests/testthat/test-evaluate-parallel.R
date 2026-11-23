@@ -2930,6 +2930,37 @@ pca_object <- function() {
 
 describe("evaluate() - the fold preparations on the daemons", {
 
+  it("runs a fold preparation's task on one BLAS thread where its daemon started on more, and puts its threads back", {
+
+    skip_if_not_installed("RhpcBLASctl")
+
+    ## In process: the worker body stands in for a daemon the user started
+    ## with BLAS on two threads, and the prep reads the count it runs at
+    old <- RhpcBLASctl::blas_get_num_procs()
+    withr::defer(RhpcBLASctl::blas_set_num_threads(old))
+    RhpcBLASctl::blas_set_num_threads(2L)
+    skip_if_not(RhpcBLASctl::blas_get_num_procs() == 2, "BLAS here runs on one thread whatever is asked")
+
+    shared <- worker_payload()
+    shared$configs$feature_selection <- "pca"
+    rebuilt <- rebuild_resamples(shared$data, shared$resample_idx)
+    units   <- fold_prep_units(shared$configs, rebuilt$cv_folds, shared$role_map, "evaluate",
+                               shared$data_fp$data_fields, shared$seed, shared$sg_window, shared$pca_threshold)
+
+    inside <- NULL
+    testthat::local_mocked_bindings(
+      prep_fold_entry = function(...) {
+        inside <<- RhpcBLASctl::blas_get_num_procs()
+        "the entry"
+      },
+      .package = "horizons"
+    )
+
+    expect_identical(fold_prep_worker(units[[1]], worker_payload_file(shared)), "the entry")
+    expect_equal(c(inside = inside, after = RhpcBLASctl::blas_get_num_procs()), c(inside = 1, after = 2))
+
+  })
+
   it("reads its configuration's fold preparations in the worker, and returns one it cannot read as what went wrong, raising nothing", {
 
     ## In process: the worker body is an ordinary function. The payload's

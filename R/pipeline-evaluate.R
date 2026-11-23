@@ -198,13 +198,13 @@
 #'
 #' Every process that fits runs BLAS and OpenMP on one thread, as is usual
 #' for a pool inside a pool: the inner daemons from their start, and each
-#' config's daemon while its task runs, set at run time through
-#' `RhpcBLASctl` and put back as the task ends. A config's results are then
-#' the same split or not. Without `RhpcBLASctl` a config's daemon keeps the
-#' threads it was started with, so when those are more than one a split
-#' config's results can differ from the unsplit run's in floating-point
-#' rounding; the run then says so once, in the progress tree and on the
-#' `log`, with how to pin them: install `RhpcBLASctl`, or call
+#' daemon while a config's task or a fold preparation's runs on it, set at
+#' run time through `RhpcBLASctl` and put back as the task ends. A config's
+#' results are then the same split or not. Without `RhpcBLASctl` a config's
+#' daemon keeps the threads it was started with, so when those are more
+#' than one a split config's results can differ from the unsplit run's in
+#' floating-point rounding; the run then says so once, in the progress tree
+#' and on the `log`, with how to pin them: install `RhpcBLASctl`, or call
 #' `Sys.setenv(OPENBLAS_NUM_THREADS = 1)` before `mirai::daemons()`.
 #'
 #' Results do not depend on the backend, the number of daemons, which daemon
@@ -234,10 +234,11 @@
 #' environment variables the session had when `mirai::daemons()` was called
 #' (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`), not its in-process settings,
 #' so a thread count set in the session with `options()` or `RhpcBLASctl`
-#' does not reach them; on the configs axis each configuration's task sets
-#' data.table's and ranger's threads to one itself, and BLAS's and OpenMP's
-#' through `RhpcBLASctl` when it is installed, which it puts back as it
-#' ends (see "Inner daemons" above). On either axis the daemons load the
+#' does not reach them; each configuration's task on the configs axis, and
+#' each fold preparation's on either axis, sets data.table's and ranger's
+#' threads to one itself, and BLAS's and OpenMP's through `RhpcBLASctl` when
+#' it is installed, which it puts back as it ends (see "Inner daemons"
+#' above). On either axis the daemons load the
 #' *installed* package, so a parallel run refuses, before anything is drawn,
 #' under `devtools::load_all()`. Every daemon connected is then asked, one
 #' task each, which horizons it loads and whether it can load the packages
@@ -4012,15 +4013,17 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' Set a daemon up to run a unit: its threads, and the packages it needs
 #'
 #' @description
-#' OpenBLAS reads its thread count when it loads, so setting
-#' OPENBLAS_NUM_THREADS on a daemon, after the library is loaded, changed
-#' nothing when measured (2026-09-15); BLAS and OpenMP are pinned at run
-#' time through RhpcBLASctl instead, by the configuration's worker and on its
-#' inner daemons ([pin_blas_threads()]). What else can be set at run time is
-#' set here: data.table's threads, and the thread options the model table
-#' declares for its engines (ranger's, which Boruta's forests read too). A
-#' daemon starts with the session's environment variables from when
-#' daemons() was called, not its in-process settings.
+#' Every process that fits runs one thread. OpenBLAS reads its thread count
+#' when it loads, so setting OPENBLAS_NUM_THREADS on a daemon, after the
+#' library is loaded, changed nothing when measured (2026-09-15): BLAS and
+#' OpenMP are pinned here at run time through RhpcBLASctl instead
+#' ([pin_blas_threads()]), and the function that puts them back is
+#' returned, for the worker to call as its task ends, since the daemon is
+#' the user's. Without RhpcBLASctl the daemon keeps the threads it started
+#' with. Also set here: data.table's threads, and the thread options the
+#' model table declares for its engines (ranger's, which Boruta's forests
+#' read too). A daemon starts with the session's environment variables from
+#' when daemons() was called, not its in-process settings.
 #'
 #' Then the packages the unit needs are loaded, as the verb's door check
 #' loaded them in the session. A daemon is a fresh process, and some of them
@@ -4029,14 +4032,18 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' workflow creation on a daemon.
 #'
 #' Called by both workers once the daemon's horizons is known to be this
-#' session's version ([evaluate_config_worker()], [fold_prep_worker()]).
+#' session's version ([evaluate_config_worker()], [fold_prep_worker()]), and
+#' on a split configuration's inner daemons ([start_inner_daemons()]).
 #'
 #' @param models,selections The unit's models and feature selections
 #'   ([needed_packages()]).
-#' @return `NULL`, invisibly.
+#' @return A function of no arguments that puts BLAS's and OpenMP's threads
+#'   back as they were ([pin_blas_threads()]), invisibly.
 #' @keywords internal
 #' @noRd
 prepare_worker <- function(models, selections) {
+
+  unpin_blas <- pin_blas_threads()
 
   if (requireNamespace("data.table", quietly = TRUE)) data.table::setDTthreads(1L)
 
@@ -4044,7 +4051,7 @@ prepare_worker <- function(models, selections) {
 
   for (pkg in names(needed_packages(models, selections))) requireNamespace(pkg, quietly = TRUE)
 
-  invisible(NULL)
+  invisible(unpin_blas)
 
 }
 
@@ -4185,11 +4192,11 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
   ## transport changed the payload.
   check_worker_payload(shared, SHARED_ARG_NAMES)
 
-  ## BLAS and OpenMP on one thread while the configuration runs, as its inner
-  ## daemons run them, so its folds and its final fit compute alike whether
-  ## it is split or not; put back as the task ends, since the daemon is the
-  ## user's. Without RhpcBLASctl the daemon keeps the threads it started with.
-  unpin_blas <- pin_blas_threads()
+  ## BLAS and OpenMP go on one thread as the daemon is set up below, as the
+  ## inner daemons run them, so the configuration's folds and its final fit
+  ## compute alike whether it is split or not; put back as the task ends.
+  ## The put-back is registered first and bound once the pin is made.
+  unpin_blas <- function() invisible(NULL)
   on.exit(unpin_blas(), add = TRUE)
 
   ## mirai relays no condition from a task, so a warning raised in the
@@ -4205,7 +4212,7 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
     cfg <- shared$configs[config_i, ]
 
     ## The daemon's threads pinned, and the configuration's packages loaded
-    prepare_worker(cfg$model, cfg$feature_selection)
+    unpin_blas <- prepare_worker(cfg$model, cfg$feature_selection)
 
     ## Reconstruct the split and folds from indices. Fold membership is
     ## reproduced by construction, not by replaying the RNG.

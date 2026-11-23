@@ -249,13 +249,13 @@ daemons fit in this machine's memory (see below).
 
 Every process that fits runs BLAS and OpenMP on one thread, as is usual
 for a pool inside a pool: the inner daemons from their start, and each
-config's daemon while its task runs, set at run time through
-\code{RhpcBLASctl} and put back as the task ends. A config's results are then
-the same split or not. Without \code{RhpcBLASctl} a config's daemon keeps the
-threads it was started with, so when those are more than one a split
-config's results can differ from the unsplit run's in floating-point
-rounding; the run then says so once, in the progress tree and on the
-\code{log}, with how to pin them: install \code{RhpcBLASctl}, or call
+daemon while a config's task or a fold preparation's runs on it, set at
+run time through \code{RhpcBLASctl} and put back as the task ends. A config's
+results are then the same split or not. Without \code{RhpcBLASctl} a config's
+daemon keeps the threads it was started with, so when those are more
+than one a split config's results can differ from the unsplit run's in
+floating-point rounding; the run then says so once, in the progress tree
+and on the \code{log}, with how to pin them: install \code{RhpcBLASctl}, or call
 \code{Sys.setenv(OPENBLAS_NUM_THREADS = 1)} before \code{mirai::daemons()}.
 
 Results do not depend on the backend, the number of daemons, which daemon
@@ -284,10 +284,11 @@ on exit. Daemons are processes of their own: they start with the
 environment variables the session had when \code{mirai::daemons()} was called
 (\code{OMP_NUM_THREADS}, \code{OPENBLAS_NUM_THREADS}), not its in-process settings,
 so a thread count set in the session with \code{options()} or \code{RhpcBLASctl}
-does not reach them; on the configs axis each configuration's task sets
-data.table's and ranger's threads to one itself, and BLAS's and OpenMP's
-through \code{RhpcBLASctl} when it is installed, which it puts back as it
-ends (see "Inner daemons" above). On either axis the daemons load the
+does not reach them; each configuration's task on the configs axis, and
+each fold preparation's on either axis, sets data.table's and ranger's
+threads to one itself, and BLAS's and OpenMP's through \code{RhpcBLASctl} when
+it is installed, which it puts back as it ends (see "Inner daemons"
+above). On either axis the daemons load the
 \emph{installed} package, so a parallel run refuses, before anything is drawn,
 under \code{devtools::load_all()}. Every daemon connected is then asked, one
 task each, which horizons it loads and whether it can load the packages

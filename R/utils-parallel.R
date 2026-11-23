@@ -1648,9 +1648,9 @@ abort_run_file_unread <- function(unread, unit, results, output_dir = NULL, verb
 #' `ENGINE_THREADS`, set before they load ([launch_env()]). Waits for all
 #' `n` to connect, polling, up to `seconds`; past it the profile is reset and
 #' the configuration runs its folds here instead. Once they are connected,
-#' each is set up as a daemon is for a unit ([prepare_worker()]: the
-#' engines' thread options and the configuration's packages), with BLAS and
-#' OpenMP pinned at run time too ([pin_blas_threads()]), through
+#' each is set up as a daemon is for a unit ([prepare_worker()]: BLAS and
+#' OpenMP pinned at run time too, the engines' thread options and the
+#' configuration's packages), through
 #' `mirai::everywhere()`, whose settings outlast a daemon's cleanup and
 #' which tune's tasks wait behind; this waits for it, so what the inner
 #' daemons have completed is their set-up alone. The caller registers the
@@ -1687,13 +1687,13 @@ start_inner_daemons <- function(n, models, selections, seconds = INNER_START_SEC
 
   }
 
-  ### everywhere() takes the call from a symbol bound to it, as mirai() does
+  ### everywhere() takes the call from a symbol bound to it, as mirai() does;
+  ### the pin is kept, since the inner daemons end with the task
   setup <- quote({
-    pin()
     prepare(models, selections)
+    NULL
   })
-  mirai::everywhere(setup, .args = list(pin = pin_blas_threads, prepare = prepare_worker,
-                                        models = models, selections = selections),
+  mirai::everywhere(setup, .args = list(prepare = prepare_worker, models = models, selections = selections),
                     .compute = NULL)[]
 
   TRUE
@@ -1827,10 +1827,11 @@ pin_parent_threads <- function() {
 #'
 #' @description
 #' The one runtime pin of BLAS and OpenMP, for every process that fits: the
-#' session before dispatch ([pin_parent_threads()]), a configs-axis
-#' configuration's daemon while its task runs, and its inner daemons
-#' ([start_inner_daemons()]), so a configuration computes alike wherever its
-#' folds and its final fit run. `RhpcBLASctl` makes the call and is a
+#' session before dispatch ([pin_parent_threads()]), and each daemon set up
+#' for a unit ([prepare_worker()]): a configs-axis configuration's daemon and
+#' a fold preparation's while its task runs, and a split configuration's
+#' inner daemons ([start_inner_daemons()]), so a configuration computes alike
+#' wherever its folds and its final fit run. `RhpcBLASctl` makes the call and is a
 #' Suggests; without it nothing is pinned here, and a process keeps the
 #' threads it started with ([blas_pinnable()]).
 #'
