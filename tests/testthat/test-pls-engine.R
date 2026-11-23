@@ -319,8 +319,10 @@ describe("pls_fit() - the stop at the components that carry information", {
 
     d <- make_pls_spectra()
 
+    ### One predictor in units 1e12 times smaller, so the predictors' norm the
+    ### stop measures against holds only when it is taken after scaling
     rescaled <- function(x, k) {
-      x[, k] <- x[, k] * 1e3
+      x[, k] <- x[, k] * 1e12
       x
     }
 
@@ -448,6 +450,30 @@ describe("multi_predict() for a plsr fit", {
 
     expect_equal(at(1L), y)
     expect_equal(at(2L), y)
+
+  })
+
+  it("stops where the first component fits the outcome to rounding but not exactly, on the residual's norm alone", {
+
+    ## An outcome along the first singular direction of the scaled
+    ## predictors: the first component fits it, and what is left is rounding
+    ## but not zero. The second weight is then finite, and its score, a real
+    ## direction of the predictors, covaries with that residual as any
+    ## direction would, so only the test on the residual's norm stops here.
+    withr::local_seed(6)
+    x  <- matrix(stats::rnorm(40 * 6), 40) %*% matrix(stats::rnorm(36), 6)
+    xs <- scale(x)
+    y  <- 2 + drop(xs %*% svd(xs)$v[, 1])
+
+    full <- pls_plsr(x, y, 6L, pls_scale(x)$sds)
+    expect_true(all(is.finite(unclass(full$loading.weights))))
+    expect_gt(sqrt(sum(full$residuals[, 1, 1]^2)), 0)
+
+    expect_warning(fit <- pls_fit(x, y, ncomp = 6L),
+                   "PLS fitted 1 component, not the 6 asked for: the first already fits",
+                   class = "horizons_warning_substitution")
+    expect_identical(fit$horizons_ncomp, 1L)
+    expect_equal(pls_predict(fit, x), y)
 
   })
 
