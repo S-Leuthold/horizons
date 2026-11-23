@@ -772,22 +772,46 @@ search_budget <- function(iter, n_params, grid_size) {
 
 }
 
+#' The points fit()'s warm-started re-tune starts from
+#'
+#' @description
+#' `evaluate()`'s point and one neighbour per tuned parameter
+#' ([build_warmstart_grid()]): the fewest starting points with which
+#' `tune_bayes()` does not warn that it has too few for the parameters, and
+#' at least the two its Gaussian process needs. A cold start, with no point
+#' to start from, grids `grid_size` points instead.
+#'
+#' @param n_params Integer. The parameters the model tunes.
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+warm_start_size <- function(n_params) {
+
+  as.integer(n_params) + 1L
+
+}
+
 #' The tree's words for the models whose search the budget raises
 #'
 #' @param models Character. The configured models, or the members'.
 #' @param iter,grid_size As [search_budget()] takes them.
+#' @param warm Logical(1). Whether the searches start from `evaluate()`'s
+#'   point and its neighbours ([warm_start_size()]) rather than a grid of
+#'   `grid_size`: fit()'s re-tune on the `evaluate()` path. Default `FALSE`.
 #' @return Character(1), e.g. `"raised to 20 for cubist, 50 for xgboost: at
 #'   least 10 points a tuned parameter"`, or `NULL` when no model's is.
 #' @keywords internal
 #' @noRd
-raised_budgets <- function(models, iter, grid_size) {
+raised_budgets <- function(models, iter, grid_size, warm = FALSE) {
 
   ### A model that tunes only its submodel is gridded whole, one fit a fold,
   ### and never searches (exhaustive_grid()), so its budget is not said
   models  <- Filter(function(m) length(setdiff(MODEL_SPECS[[m]]$tuned, MODEL_SPECS[[m]]$submodel)) > 0,
                     unique(models))
-  budgets <- vapply(models, function(m) search_budget(iter, length(MODEL_SPECS[[m]]$tuned), grid_size),
-                    integer(1))
+  budgets <- vapply(models, function(m) {
+    n_params <- length(MODEL_SPECS[[m]]$tuned)
+    search_budget(iter, n_params, if (warm) warm_start_size(n_params) else grid_size)
+  }, integer(1))
   raised  <- budgets > iter
 
   if (!any(raised)) return(NULL)

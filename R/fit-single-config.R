@@ -2,9 +2,12 @@
 #'
 #' @description
 #' Inner-loop function for `fit()`. Takes a single config row from the
-#' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization,
-#' generates OOF predictions, fits a final deployable model, evaluates on
-#' the held-out test set, and detects performance degradation.
+#' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
+#' from evaluate()'s hyperparameters and one neighbour per tuned parameter,
+#' keeping evaluate()'s unless a candidate beats them by the margin
+#' (`choose_member_params()`), generates OOF predictions, fits a final
+#' deployable model, evaluates on the held-out test set, and detects
+#' performance degradation.
 #'
 #' This function is the **capture layer** — it runs silently and returns a
 #' structured list. All console output (tree rendering, progress messages) is
@@ -41,12 +44,15 @@
 #'   or NULL (`fit()`'s cold start), in which case the re-tune starts from a
 #'   space-filling grid.
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning, at
-#'   least: raised as `evaluate_single_config()`'s are (`search_budget()`).
-#'   When every tuned parameter is a whole number and the space costs no
-#'   more fits than the grid and those iterations together (a submodel's
-#'   values sharing one fit), the grid is every point and no Bayesian search
-#'   runs (`exhaustive_grid()`).
-#' @param grid_size Integer. Grid size for warm-start exploration.
+#'   least: raised as `evaluate_single_config()`'s are (`search_budget()`),
+#'   counting the points the re-tune starts from. When every tuned parameter
+#'   is a whole number and the space costs no more fits than the start and
+#'   those iterations together (a submodel's values sharing one fit), the
+#'   grid is every point and no Bayesian search runs (`exhaustive_grid()`).
+#' @param grid_size Integer. The space-filling grid's size on a cold start
+#'   (`best_params_eval` `NULL` or unusable). A warm start begins from
+#'   `evaluate()`'s parameters and one neighbour per tuned parameter
+#'   (`warm_start_size()`), whatever `grid_size` is.
 #' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
 #'   dials' units: the ranges the re-tune searches, set before the data cap
 #'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
@@ -109,8 +115,9 @@
 #'   `"unit_records"`, for `fit()` to lift its horizons warnings and notes
 #'   onto the log.
 #'   `warm_start` is `TRUE` when `best_params_eval` was usable, so the
-#'   re-tune's grid is centred on it or is the whole space when that fits
-#'   the budget (`exhaustive_grid()`), `FALSE` when it fell back to a
+#'   re-tune starts from it and one neighbour per tuned parameter, or from
+#'   the whole space when that fits the budget (`exhaustive_grid()`), `FALSE`
+#'   when it fell back to a
 #'   space-filling grid, and `NA` (both) when the config failed before
 #'   tuning. `start_grid_size` is the starting grid's points. `bayes_iter`
 #'   and `bayes_stop` are the iterations the re-tune's Bayesian search began
@@ -306,24 +313,26 @@ fit_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## Step 4: Warm-start re-tuning
     ## -----------------------------------------------------------------------
-    ## The grid is centred on evaluate()'s parameters, or space-filling when
+    ## The search starts from evaluate()'s parameters and one neighbour per
+    ## tuned parameter, or from a space-filling grid of grid_size points when
     ## there are none to use; how it started is recorded before it runs, so a
-    ## re-tune that fails still says. A search space that costs no more fits
-    ## than the grid and the Bayesian search would make together (plsr's
-    ## num_comp, one fit a fold) is gridded whole, with no Bayesian stage, as
-    ## evaluate() grids it:
+    ## re-tune that fails still says. The budget counts that start. A search
+    ## space that costs no more fits than the start and the Bayesian search
+    ## would make together (plsr's num_comp, one fit a fold) is gridded whole,
+    ## with no Bayesian stage, as evaluate() grids it:
     ## tune's search errors inside its loop once it has no value left to
     ## propose, which would read as a failed search although every value was
     ## tried.
 
-    iters           <- search_budget(final_bayesian_iter, nrow(param_set), grid_size)
-    whole_space     <- exhaustive_grid(param_set, grid_size + iters, MODEL_SPECS[[config_row$model]]$submodel)
+    warm_start      <- usable_best_params(best_params_eval, param_set)
+    start           <- if (warm_start) warm_start_size(nrow(param_set)) else grid_size
+    iters           <- search_budget(final_bayesian_iter, nrow(param_set), start)
+    whole_space     <- exhaustive_grid(param_set, start + iters, MODEL_SPECS[[config_row$model]]$submodel)
     search_iter     <- if (is.null(whole_space)) iters else 0L
     initial_grid    <- unit_step("warm_start_tune", whole_space %||% with_unit_seed(
       seed, stage("warmstart-grid"),
-      build_warmstart_grid(best_params_eval, param_set, max_points = grid_size)
+      build_warmstart_grid(best_params_eval, param_set, max_points = start)
     ))
-    warm_start      <- usable_best_params(best_params_eval, param_set)
     start_grid_size <- nrow(initial_grid)
 
     ## evaluate()'s point, clamped, is the incumbent on the search and on the

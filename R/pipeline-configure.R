@@ -199,8 +199,10 @@
 #'   Minimum 2.
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
 #'   Default 10. Minimum 1, and at least 2 when `bayesian_iter` or
-#'   `final_bayesian_iter` is above 0, since both Bayesian searches start
-#'   from the grid.
+#'   `final_bayesian_iter` is above 0, since `evaluate()`'s Bayesian search
+#'   starts from the grid, and so does `fit()`'s re-tune on a cold start.
+#'   `fit()`'s re-tune of `evaluate()`'s members starts instead from each
+#'   member's hyperparameters and one neighbour per tuned parameter.
 #' @param bayesian_iter `integer`. Bayesian optimization iterations, at
 #'   least: a model tuning more parameters runs more, so that its grid and its
 #'   search together try at least ten points a tuned parameter (`10 * d -
@@ -215,9 +217,14 @@
 #'   fits a fold. Default 15. Minimum 0: 0 turns the search off for every
 #'   model.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
-#'   the final fit on the selected configuration, at least, raised as
-#'   `bayesian_iter` is (25 up to three tuned parameters at the defaults, 30
-#'   for lightgbm, 50 for xgboost). Default 25. Minimum 0.
+#'   `fit()`'s re-tune of each member, at least, raised as `bayesian_iter`
+#'   is, counting the points the re-tune starts from. From `evaluate()`'s
+#'   hyperparameters and one neighbour per tuned parameter that is 25 up to
+#'   two tuned parameters, 26 for cubist and mlp, 35 for lightgbm and 53 for
+#'   xgboost; on a cold start, from the grid, 25 up to three tuned parameters
+#'   at the defaults, 30 for lightgbm and 50 for xgboost. Each re-tune stops
+#'   once `control_horizons(no_improve = )` iterations in a row have not
+#'   improved on its best. Default 25. Minimum 0.
 #' @param sg_window `integer`. Savitzky-Golay window in grid points, applied
 #'   to every configuration. Default 9. Must be odd, at least 5, and (checked
 #'   by `evaluate()`) smaller than the number of spectral columns. For
@@ -381,10 +388,10 @@ configure <- function(x,
   check_arg(rlang::check_number_whole, bayesian_iter, min = 0)
   check_arg(rlang::check_number_whole, final_bayesian_iter, min = 0)
 
-  ## Both Bayesian searches start from a grid of grid_size points: evaluate()'s
-  ## from its grid, fit()'s warm start capped at it. tune_bayes() needs at
-  ## least two of them to fit its Gaussian process, so on a grid of one neither
-  ## search could run (#209).
+  ## evaluate()'s Bayesian search starts from a grid of grid_size points, and
+  ## so does fit()'s re-tune on a cold start. tune_bayes() needs at least two
+  ## of them to fit its Gaussian process, so on a grid of one neither could
+  ## run (#209).
   if (grid_size < 2 && (bayesian_iter > 0 || final_bayesian_iter > 0)) {
 
     searches <- c(
@@ -395,7 +402,7 @@ configure <- function(x,
     abort_horizons(c(
       "{.arg grid_size} must be at least 2 when a Bayesian search runs.",
       "x" = "Got {.code grid_size = {grid_size}}, with {.code {searches}}.",
-      "i" = "The Bayesian searches start from the grid and need at least two of its points; raise {.arg grid_size}, or set {.arg bayesian_iter} and {.arg final_bayesian_iter} to 0."
+      "i" = "The Bayesian searches that start from the grid, evaluate()'s and fit()'s on a cold start, need at least two of its points; raise {.arg grid_size}, or set {.arg bayesian_iter} and {.arg final_bayesian_iter} to 0."
     ), kind = "input")
 
   }

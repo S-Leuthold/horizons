@@ -849,7 +849,7 @@ fit <- function(x,
 
     }
 
-    raised <- raised_budgets(member_configs$model, final_bayesian_iter, tuning$grid_size)
+    raised <- raised_budgets(member_configs$model, final_bayesian_iter, tuning$grid_size, warm = !cold_start)
 
     cat(paste0("\u2502  ", if (cold_start) {
       paste0("Bayesian: ", final_bayesian_iter, " iterations from a space-filling grid",
@@ -1476,7 +1476,7 @@ member_row <- function(res) {
 retune_header_line <- function(iter, raised, no_improve) {
 
   paste0(
-    "Re-tune: from a grid centred on evaluate()'s hyperparameters, ", iter, " iterations",
+    "Re-tune: from evaluate()'s hyperparameters and one neighbour per tuned parameter, ", iter, " iterations",
     if (!is.null(raised)) paste0(" (", raised, ")"),
     if (!isFALSE(no_improve)) paste0(", stopping after ", no_improve, " without improvement"),
     "; evaluate()'s are kept unless a candidate is better by more than its standard error"

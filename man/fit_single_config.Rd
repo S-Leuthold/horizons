@@ -53,13 +53,16 @@ or NULL (\code{fit()}'s cold start), in which case the re-tune starts from a
 space-filling grid.}
 
 \item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning, at
-least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}).
-When every tuned parameter is a whole number and the space costs no
-more fits than the grid and those iterations together (a submodel's
-values sharing one fit), the grid is every point and no Bayesian search
-runs (\code{exhaustive_grid()}).}
+least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}),
+counting the points the re-tune starts from. When every tuned parameter
+is a whole number and the space costs no more fits than the start and
+those iterations together (a submodel's values sharing one fit), the
+grid is every point and no Bayesian search runs (\code{exhaustive_grid()}).}
 
-\item{grid_size}{Integer. Grid size for warm-start exploration.}
+\item{grid_size}{Integer. The space-filling grid's size on a cold start
+(\code{best_params_eval} \code{NULL} or unusable). A warm start begins from
+\code{evaluate()}'s parameters and one neighbour per tuned parameter
+(\code{warm_start_size()}), whatever \code{grid_size} is.}
 
 \item{tune_ranges}{Named list of \code{c(lower, upper)} by parameter id, in
 dials' units: the ranges the re-tune searches, set before the data cap
@@ -138,8 +141,9 @@ warnings and notes, ride on the list as the attribute
 \code{"unit_records"}, for \code{fit()} to lift its horizons warnings and notes
 onto the log.
 \code{warm_start} is \code{TRUE} when \code{best_params_eval} was usable, so the
-re-tune's grid is centred on it or is the whole space when that fits
-the budget (\code{exhaustive_grid()}), \code{FALSE} when it fell back to a
+re-tune starts from it and one neighbour per tuned parameter, or from
+the whole space when that fits the budget (\code{exhaustive_grid()}), \code{FALSE}
+when it fell back to a
 space-filling grid, and \code{NA} (both) when the config failed before
 tuning. \code{start_grid_size} is the starting grid's points. \code{bayes_iter}
 and \code{bayes_stop} are the iterations the re-tune's Bayesian search began
@@ -154,9 +158,12 @@ own standard errors (\code{choose_member_params()}), for the tree.
 }
 \description{
 Inner-loop function for \code{fit()}. Takes a single config row from the
-evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization,
-generates OOF predictions, fits a final deployable model, evaluates on
-the held-out test set, and detects performance degradation.
+evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
+from evaluate()'s hyperparameters and one neighbour per tuned parameter,
+keeping evaluate()'s unless a candidate beats them by the margin
+(\code{choose_member_params()}), generates OOF predictions, fits a final
+deployable model, evaluates on the held-out test set, and detects
+performance degradation.
 
 This function is the \strong{capture layer} — it runs silently and returns a
 structured list. All console output (tree rendering, progress messages) is

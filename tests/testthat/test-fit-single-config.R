@@ -772,7 +772,11 @@ describe("fit_single_config() - a warm-start search that fails (#209)", {
 
     shared <- fsc()
 
-    ## A starting grid of one point: the warm-start search cannot start.
+    ## The search errors before its first iteration, as tune_bayes() does on
+    ## a starting grid of one point
+    local_mocked_bindings(tune_bayes = function(...) stop("The GP model requires 2+ initial points."),
+                          .package = "tune")
+
     result <- suppressWarnings(fit_single_config(
       config_row          = make_fit_config(),
       split_F             = shared$setup$split_F,
@@ -781,7 +785,7 @@ describe("fit_single_config() - a warm-start search that fails (#209)", {
       role_map            = shared$setup$role_map,
       best_params_eval    = make_fit_best_params(),
       final_bayesian_iter = 2L,
-      grid_size           = 1L,
+      grid_size           = 2L,
       compute_uq          = FALSE,
       compute_ad          = FALSE,
       allow_par           = FALSE,
@@ -1267,7 +1271,7 @@ describe("fit_single_config() - the ranges searched (tune_ranges)", {
 
 describe("fit_single_config() - the Bayesian budget per tuned parameter", {
 
-  it("gives the re-tune ten points a tuned parameter less the grid when that is more than asked", {
+  it("gives the re-tune ten points a tuned parameter less the points it starts from when that is more than asked", {
 
     seen <- NULL
     local_mocked_bindings(tune_warmstart_bayes = function(..., bayesian_iter) {
@@ -1287,8 +1291,66 @@ describe("fit_single_config() - the Bayesian budget per tuned parameter", {
       seed                = 42L
     )
 
-    ## rf tunes two: 20 points less the grid of 2
-    expect_identical(seen, 18L)
+    ## rf tunes two: 20 points less the start of evaluate()'s point and its
+    ## two neighbours, not the grid of 2
+    expect_identical(seen, 17L)
+
+  })
+
+})
+
+
+## =========================================================================
+## The points the re-tune starts from
+## =========================================================================
+
+describe("fit_single_config() - the points the re-tune starts from", {
+
+  ## The re-tune is stopped once it has its starting grid
+  start_of <- function(model, best_params_eval, setup = make_fit_setup(), grid_size = 7L) {
+
+    seen <- NULL
+    local_mocked_bindings(tune_warmstart_bayes = function(..., initial_grid) {
+      seen <<- initial_grid
+      stop("stopped after the starting grid")
+    })
+
+    member <- fit_single_config(
+      config_row          = make_fit_config(model = model),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = best_params_eval,
+      final_bayesian_iter = 3L,
+      grid_size           = grid_size,
+      seed                = 42L,
+      isolate             = FALSE
+    )
+
+    list(member = member, grid = seen)
+
+  }
+
+  it("starts from evaluate()'s point and one neighbour per tuned parameter, whatever grid_size is", {
+
+    rf <- start_of("rf", make_fit_best_params())
+
+    expect_identical(rf$member$start_grid_size, 3L)
+    expect_identical(nrow(rf$grid), 3L)
+    expect_true(point_in_grid(tibble::tibble(mtry = 2L, min_n = 5L), rf$grid))
+
+    skip_if_not_installed("Cubist")
+
+    cubist <- start_of("cubist", tibble::tibble(committees = 5L, neighbors = 3L, max_rules = 20L),
+                       setup = make_fit_setup(n_wn = 12))
+
+    expect_identical(cubist$member$start_grid_size, 4L)
+
+  })
+
+  it("starts a cold start from a space-filling grid of grid_size points", {
+
+    expect_identical(start_of("rf", NULL)$member$start_grid_size, 7L)
 
   })
 

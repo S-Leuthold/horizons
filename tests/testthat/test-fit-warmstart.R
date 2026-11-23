@@ -1054,6 +1054,13 @@ describe("search_budget()", {
                      "raised to 15 for rf: at least 10 points a tuned parameter")
     expect_null(raised_budgets("plsr", 3L, 5L))
 
+    ## fit()'s re-tune of evaluate()'s members starts from each member's point
+    ## and one neighbour per tuned parameter, whatever the grid
+    expect_identical(raised_budgets(c("rf", "cubist", "lightgbm", "xgboost", "mlp"), 25L, 10L, warm = TRUE),
+                     "raised to 26 for cubist and mlp, 35 for lightgbm, 53 for xgboost: at least 10 points a tuned parameter")
+    expect_identical(raised_budgets("cubist", 25L, 2L, warm = TRUE), raised_budgets("cubist", 25L, 10L, warm = TRUE))
+    expect_identical(warm_start_size(3L), 4L)
+
   })
 
 })
