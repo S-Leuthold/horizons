@@ -4,7 +4,7 @@
 \alias{build_warmstart_grid}
 \title{Warm-Start Grid Construction and Bayesian Optimization for fit()}
 \usage{
-build_warmstart_grid(best_params, param_set, max_points = 25L)
+build_warmstart_grid(best_params, param_set, max_points)
 }
 \arguments{
 \item{best_params}{Single-row tibble of best hyperparameters from
@@ -14,7 +14,7 @@ evaluate() (output of \code{tune::select_best()}). Can be NULL for fallback.}
 \code{workflows::extract_parameter_set_dials()}. Must be finalized (e.g.,
 mtry upper bound set).}
 
-\item{max_points}{Integer. Maximum number of grid points. Default 25.}
+\item{max_points}{Integer. Maximum number of grid points.}
 }
 \value{
 A tibble of hyperparameter combinations.

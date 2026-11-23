@@ -580,7 +580,7 @@ describe("tune_warmstart_bayes() - return contract", {
 
   it("is a list with tune_results, a single-row best_params tibble, the grid it started from and the dropped count", {
 
-    grid <- build_warmstart_grid(best_params, ts$param_set)
+    grid <- build_warmstart_grid(best_params, ts$param_set, max_points = 25L)
 
     result <- expect_no_warning(tune_warmstart_bayes(
       workflow      = ts$wf,

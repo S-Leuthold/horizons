@@ -25,12 +25,12 @@
 #' @param param_set A `parameters` object from
 #'   `workflows::extract_parameter_set_dials()`. Must be finalized (e.g.,
 #'   mtry upper bound set).
-#' @param max_points Integer. Maximum number of grid points. Default 25.
+#' @param max_points Integer. Maximum number of grid points.
 #'
 #' @return A tibble of hyperparameter combinations.
 #'
 #' @keywords internal
-build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
+build_warmstart_grid <- function(best_params, param_set, max_points) {
 
   ## --- Fallback: if best_params is unusable, return space-filling grid ------
 
@@ -63,19 +63,8 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
   )
 
   ## Always include the best point, clamped into this range as its candidates
-  ## are: fit()'s range can be narrower than the one evaluate() searched (a
-  ## PLS num_comp capped by fewer training rows), and an out-of-range point
-  ## would be fitted at the engine's own cap, tying it with the clamp.
-  best_row <- tibble::as_tibble(
-    best_params[, param_set$name, drop = FALSE]
-  )
-
-  for (i in seq_len(nrow(param_set))) {
-
-    p_name <- param_set$name[i]
-    best_row[[p_name]] <- clamp_to_range(best_row[[p_name]], param_set$object[[i]])
-
-  }
+  ## are (clamp_best_params())
+  best_row <- clamp_best_params(best_params, param_set)
 
   if (nrow(full_grid) > max_points) {
 
@@ -230,6 +219,34 @@ clamp_to_range <- function(value, param_obj) {
   clamped <- if (is.null(trans)) t_value else trans$inverse(t_value)
 
   if (isTRUE(param_obj$type == "integer")) as.integer(round(clamped)) else clamped
+
+}
+
+#' evaluate()'s best point, clamped into fit()'s range
+#'
+#' Each tuned parameter's value clamped into its range ([clamp_to_range()]).
+#' fit()'s range can be narrower than the one evaluate() searched (a PLS
+#' `num_comp` capped by fewer training rows), and an out-of-range point would
+#' be fitted at the engine's own cap, tying it with the clamp.
+#'
+#' @param best_params Single-row data frame holding a value of every tuned
+#'   parameter ([usable_best_params()]).
+#' @param param_set A finalized `parameters` object.
+#' @return Single-row tibble of the tuned parameters, in `param_set`'s order.
+#' @keywords internal
+#' @noRd
+clamp_best_params <- function(best_params, param_set) {
+
+  point <- tibble::as_tibble(best_params[, param_set$name, drop = FALSE])
+
+  for (i in seq_len(nrow(param_set))) {
+
+    p_name <- param_set$name[i]
+    point[[p_name]] <- clamp_to_range(point[[p_name]], param_set$object[[i]])
+
+  }
+
+  point
 
 }
 

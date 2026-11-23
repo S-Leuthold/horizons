@@ -327,7 +327,6 @@ UQ_QUANTILE_TREES        <- 500L
 ### uq_min_node_size().
 UQ_QUANTILE_MIN_NODE     <- 5L
 UQ_QUANTILE_NODE_DIVISOR <- 250L
-WARMSTART_GRID_SIZE      <- 25L
 
 ### The degradation check bootstraps the test RPD and flags a config only when
 ### the whole DEGRADATION_LEVEL interval lies below the CV mean RPD. Below
