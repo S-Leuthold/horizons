@@ -187,3 +187,25 @@ local_hand_scored_grid <- function(rmse, .env = parent.frame()) {
 ## LEAD_BASE + k * LEAD_SE trails one at LEAD_BASE by k of its standard errors
 LEAD_BASE <- c(1.0, 1.2, 1.4)
 LEAD_SE   <- 0.2 / sqrt(3)
+
+#' A scorer for set_fold_rmse() that puts the best candidate `lead` of its
+#' standard errors ahead of `incumbent` (evaluate()'s point, clamped): the
+#' incumbent at LEAD_BASE + lead * LEAD_SE, the first other candidate the
+#' scorer is asked for at LEAD_BASE, and the rest far behind. `$score` is the
+#' scorer; `$other()` returns that first other candidate's tuned parameters
+#' once the grid has been scored.
+lead_scores <- function(incumbent, lead) {
+
+  other <- NULL
+
+  list(
+    score = function(row) {
+      point <- row[names(incumbent)]
+      if (point_matches(incumbent, point)) return(LEAD_BASE + lead * LEAD_SE)
+      if (is.null(other)) other <<- point
+      if (point_matches(other, point)) LEAD_BASE else LEAD_BASE + 10
+    },
+    other = function() other
+  )
+
+}

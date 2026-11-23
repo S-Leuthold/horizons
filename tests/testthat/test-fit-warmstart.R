@@ -672,12 +672,7 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
     ## grid's results alone, which it marks as iteration 0. The grid's fold
     ## RMSEs are set so that another candidate leads evaluate()'s point by
     ## half of its standard error, and the rest trail.
-    first_other <- NULL
-    local_hand_scored_grid(function(row) {
-      if (point_matches(incumbent, row[names(incumbent)])) return(LEAD_BASE + 0.5 * LEAD_SE)
-      if (is.null(first_other)) first_other <<- row[names(incumbent)]
-      if (point_matches(first_other, row[names(incumbent)])) LEAD_BASE else LEAD_BASE + 10
-    })
+    local_hand_scored_grid(lead_scores(incumbent, 0.5)$score)
     local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) {
       initial$.iter <- 0L
       initial

@@ -1442,23 +1442,17 @@ describe("fit_single_config() - the re-tune off", {
 
 describe("fit_single_config() - a kept or moved member's out-of-fold predictions", {
 
-  ## The re-tune's choice made on hand-set scores (as in the margin's tests
-  ## above), against the same member with the re-tune off, started from the
-  ## parameters chosen: its out-of-fold predictions are fit_resamples() at
-  ## those parameters under the `oof` stage on either path
+  ## The re-tune's choice made on hand-set scores (lead_scores(), as in the
+  ## margin's tests below), against the same member with the re-tune off,
+  ## started from the parameters chosen: its out-of-fold predictions are
+  ## fit_resamples() at those parameters under the `oof` stage on either path
   member_at <- function(lead = NULL, best_params_eval = make_fit_best_params()) {
 
     setup     <- fsc()$setup
     incumbent <- tibble::tibble(mtry = 2L, min_n = 5L)
-    other     <- NULL
 
     if (!is.null(lead)) {
-      local_hand_scored_grid(function(row) {
-        point <- row[names(incumbent)]
-        if (point_matches(incumbent, point)) return(LEAD_BASE + lead * LEAD_SE)
-        if (is.null(other)) other <<- point
-        if (point_matches(other, point)) LEAD_BASE else LEAD_BASE + 10
-      })
+      local_hand_scored_grid(lead_scores(incumbent, lead)$score)
       local_mocked_bindings(bayes_search = function(...) {
         list(results = list(...)$initial, n_dropped = 0L, n_iter = 1L, stop = "budget")
       })
@@ -1581,14 +1575,9 @@ describe("fit_single_config() - the re-tune keeps evaluate()'s hyperparameters u
     setup     <- fsc()$setup
     ## evaluate()'s mtry of 5, clamped to the two predictors the raw step keeps
     incumbent <- tibble::tibble(mtry = 2L, min_n = 5L)
-    other     <- NULL
+    scores    <- lead_scores(incumbent, lead)
 
-    local_hand_scored_grid(function(row) {
-      point <- row[names(incumbent)]
-      if (point_matches(incumbent, point)) return(LEAD_BASE + lead * LEAD_SE)
-      if (is.null(other)) other <<- point
-      if (point_matches(other, point)) LEAD_BASE else LEAD_BASE + 10
-    })
+    local_hand_scored_grid(scores$score)
     local_mocked_bindings(bayes_search = function(...) {
       list(results = list(...)$initial, n_dropped = 0L, n_iter = 1L, stop = "budget")
     })
@@ -1604,7 +1593,7 @@ describe("fit_single_config() - the re-tune keeps evaluate()'s hyperparameters u
       seed                = 42L
     )
 
-    list(result = result, incumbent = incumbent, other = other)
+    list(result = result, incumbent = incumbent, other = scores$other())
 
   }
 
