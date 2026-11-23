@@ -927,6 +927,23 @@ describe("fit() - a PCA member stores only the components it uses", {
                                        dimnames = list(NULL, names(obj$data$analysis)[1:40])))
   new_rows$sample_id <- sprintf("N%02d", 1:25)
 
+  it("fits plsr on the scores at one component, the least-squares fit on them, not a count fitted to rounding", {
+
+    ## Scaled, the PCA scores are uncorrelated with one variance, so the
+    ## first PLS component already fits the outcome by least squares on
+    ## them, and every count from 2 on holds that one component (#278)
+    cut <- fit_pca_cut()
+
+    expect_identical(cut$models$results$best_params[[1]]$num_comp, 1L)
+    expect_false(cut$models$results$degraded)
+    expect_identical(workflows::extract_fit_engine(cut$models$workflows[[1]])$horizons_ncomp, 1L)
+
+    test_rows <- rsample::testing(rebuild_split(cut)$split)
+    expect_no_warning(predict(cut, test_rows, interval = TRUE), class = "horizons_warning_applicability")
+    expect_no_warning(predict(cut, new_rows, interval = TRUE), class = "horizons_warning_applicability")
+
+  })
+
   it("keeps num_comp columns of the rotation, as extract_recipe() sees it", {
 
     cut  <- fit_pca_cut()

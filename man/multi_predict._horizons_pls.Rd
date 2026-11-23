@@ -36,6 +36,6 @@ fits a grid stage's counts once, with \code{\link[=pls_fit]{pls_fit()}} at the l
 predicts every count of the stage from that fit, in one call to the fit's
 \code{predict()}. A count above the components the fit holds
 (\code{horizons_ncomp}) is predicted at that many, as \code{\link[=pls_predict]{pls_predict()}} predicts
-a fit \code{\link[=pls_fit]{pls_fit()}} capped; the fit's own warning says so.
+a fit \code{\link[=pls_fit]{pls_fit()}} capped or stopped; the fit's own warning says so.
 }
 \keyword{internal}
