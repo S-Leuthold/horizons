@@ -206,6 +206,40 @@ describe("dispatch_order()", {
 
 })
 
+describe("split_plan()", {
+
+  it("gives each configuration the daemons the rule does, case by case", {
+
+    ## Each case: the costs, the daemons, the folds, and the plan. The
+    ## share is SPLIT_SHARE x total / n.
+    cases <- list(
+      list(what  = "nothing above the share", costs = rep(1, 10), n = 4L, folds = 10L,
+           plan  = rep(1L, 10)),
+      list(what  = "the smallest divisor that brings it under: 15 of 100 on 8, where 2 and 5 both do",
+           costs = c(15, rep(1, 85)), n = 8L, folds = 10L, plan = c(2L, rep(1L, 85))),
+      list(what  = "the largest divisor at most n when none does: 10 is past 8",
+           costs = c(100, rep(1, 20)), n = 8L, folds = 10L, plan = c(5L, rep(1L, 20))),
+      list(what  = "5 folds on 4 daemons have no divisor to split onto",
+           costs = c(100, 1, 1), n = 4L, folds = 5L, plan = c(1L, 1L, 1L)),
+      list(what  = "10 folds on 3 daemons split onto 2, never 3 or 5",
+           costs = c(100, 1, 1), n = 3L, folds = 10L, plan = c(2L, 1L, 1L)),
+      list(what  = "a configuration at 0.8 of its fair share is split",
+           costs = c(2, rep(1, 8)), n = 4L, folds = 10L, plan = c(2L, rep(1L, 8))),
+      list(what  = "one configuration alone", costs = 5, n = 4L, folds = 10L, plan = 2L),
+      list(what  = "equal costs, each above the share", costs = rep(1, 4), n = 4L, folds = 10L,
+           plan  = rep(2L, 4)),
+      list(what  = "one daemon", costs = c(100, 1), n = 1L, folds = 10L, plan = c(1L, 1L)),
+      list(what  = "no configurations", costs = numeric(0), n = 4L, folds = 10L, plan = integer(0))
+    )
+
+    for (case in cases) {
+      expect_identical(split_plan(case$costs, case$n, case$folds), case$plan, label = case$what)
+    }
+
+  })
+
+})
+
 ## =========================================================================
 ## The daemons
 ## =========================================================================

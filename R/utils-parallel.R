@@ -218,6 +218,48 @@ dispatch_order <- function(costs) {
 
 }
 
+#' How many daemons each configuration's folds run on
+#'
+#' @description
+#' With one configuration a daemon, a run finishes no sooner than its
+#' longest configuration. A configuration whose share of the run's work is
+#' more than `SPLIT_SHARE / n` therefore runs its folds on inner daemons
+#' started on its own daemon, taking that many of the window's `n` slots
+#' ([dispatch_units()]), so no more than `n` cores are busy. It gets the
+#' smallest divisor of the fold count, at most `n`, that brings its cost
+#' under `SPLIT_SHARE` times the run's work over `n`, else the largest such
+#' divisor: tune sends a call's folds out at once, so a count that divides
+#' them leaves no daemon idle in the last round. With no divisor between 1
+#' and `n` (the default 5 folds on fewer than 5 daemons) nothing is split.
+#' The plan is made once, from the configurations still to run, and holds
+#' for the run: a daemon that joins or leaves changes the window, not the
+#' plan.
+#'
+#' @param costs Numeric: the configurations' costs ([config_costs()]).
+#' @param n Integer(1). The daemons connected.
+#' @param folds Integer(1). The cross-validation folds.
+#' @return Integer, one per cost: the daemons each configuration's folds
+#'   run on, 1 for a configuration that runs as one task.
+#' @keywords internal
+#' @noRd
+split_plan <- function(costs, n, folds) {
+
+  share    <- SPLIT_SHARE * sum(costs) / n
+  divisors <- seq_len(folds)[folds %% seq_len(folds) == 0L]
+  divisors <- divisors[divisors > 1L & divisors <= n]
+
+  vapply(costs, function(cost) {
+
+    if (length(divisors) == 0L || cost <= share) return(1L)
+
+    under <- divisors[cost / divisors <= share]
+
+    as.integer(if (length(under) > 0L) min(under) else max(divisors))
+
+  }, integer(1), USE.NAMES = FALSE)
+
+}
+
 ## ---------------------------------------------------------------------------
 ## The daemons
 ## ---------------------------------------------------------------------------

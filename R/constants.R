@@ -580,6 +580,15 @@ CONFIG_ROW_EXPONENT <- c(
 # (snv_deriv1, no transformation) kept, as the fold stage counts it.
 CONFIG_KEPT_REF <- c(none = 1701, pca = 52, correlation = 316, boruta = 1686, cars = 1018)
 
+# The share of a run's work over its daemons above which a configuration
+# runs its folds on inner daemons (split_plan(), R/utils-parallel.R): split
+# when its expected time is more than SPLIT_SHARE x total / n. Chosen by
+# replaying measured grids' configuration times at 5 and 10 folds and 2 to
+# 30 daemons, with estimates off by up to a factor of two: below 1, so a
+# configuration near its fair share is split, since leaving the longest one
+# whole costs more than splitting one that did not need it.
+SPLIT_SHARE <- 0.75
+
 # Vocabulary of control_horizons(parallelize_over = ). "both" is deliberately
 # absent for v1; control_horizons() refuses it with a hint.
 PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
