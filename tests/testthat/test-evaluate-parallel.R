@@ -763,6 +763,86 @@ describe("evaluate() - the daemons' memory", {
 
 })
 
+describe("evaluate() - inner daemons and this machine's memory", {
+
+  ## A configs-axis run whose plan splits its first configuration onto two of
+  ## its two daemons, both on this machine, with `available` bytes free; the
+  ## dispatch is mocked to run each configuration here and to keep the
+  ## daemons each was sent
+  run_split <- function(available) {
+
+    template <- allow_par_run()$result$evaluation$results[1, ]
+    sent     <- NULL
+
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      daemon_reports          = function(...) daemons_on(host = this_host()),
+      check_parallel_backend  = function(...) TRUE,
+      connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE,
+      memory_available        = function() available,
+      split_plan              = function(costs, n, folds) c(2L, rep(1L, length(costs) - 1L)),
+      evaluate_single_config  = function(config_row, ...) {
+        row <- template
+        row$config_id <- config_row$config_id
+        row
+      },
+      dispatch_configs        = function(configs, payload_path, finished, ..., inner) {
+        sent <<- inner
+        for (i in seq_len(nrow(configs))) {
+          finished$rows <- c(finished$rows, list(evaluate_config_worker(i, payload_path)))
+        }
+      }
+    )
+
+    got <- collect_warnings(
+      evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+               control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                          output_dir = withr::local_tempdir(), verbose = FALSE))
+    )
+
+    list(inner = sent, log = got$value$log,
+         input = Filter(function(w) inherits(w, "horizons_warning_input"), got$warnings))
+
+  }
+
+  split_note <- function(log) log[grepl("inner daemons it would start", log$message, fixed = TRUE), ]
+
+  it("splits as planned when the daemons and their inner daemons fit", {
+
+    got <- run_split(1e15)
+
+    expect_identical(got$inner, c(2L, 1L, 1L))
+    expect_identical(nrow(split_note(got$log)), 0L)
+    expect_length(got$input, 0L)
+
+  })
+
+  it("splits nothing, with a note, when the daemons fit and their inner daemons would not", {
+
+    ## Two daemons need about 4.1 GB for this run, each with a cubist fit's
+    ## process, and a split onto two inner daemons as much again
+    got <- run_split(5e9)
+
+    expect_identical(got$inner, c(1L, 1L, 1L))
+    expect_identical(split_note(got$log)$type, "note")
+    expect_length(got$input, 0L)
+
+  })
+
+  it("splits nothing when the daemons alone do not fit, which the check at the door warns of once", {
+
+    got <- run_split(1e9)
+
+    expect_identical(got$inner, c(1L, 1L, 1L))
+    expect_length(got$input, 1L)
+    expect_match(gsub("\\s+", " ", conditionMessage(got$input[[1]])), "The 2 mirai daemons on this machine would need about",
+                 fixed = TRUE)
+
+  })
+
+})
+
 describe("evaluate() - output_dir and the configs axis (#233)", {
 
   it("refuses an explicit configs axis without an output_dir before anything runs", {

@@ -565,6 +565,70 @@ describe("daemon_need() and daemon_processes()", {
 
 })
 
+describe("split_need()", {
+
+  it("adds each split configuration in flight at once: its inner daemons as daemons, and what its own daemon queues", {
+
+    ## Four configurations, started in the order 3, 1, 4, 2 on 8 daemons:
+    ## 3 (on 5) and 1 (on 2) fit together, 4 (on 2) does not beside them,
+    ## and 2 is not split
+    inner     <- c(2L, 1L, 5L, 2L)
+    kept      <- c(100, 10, 50, 20)
+    processes <- c(daemon = 1L, isolated = 1L)
+    daemon    <- daemon_need(processes, 1000, 200)
+    queue     <- function(k) DAEMON_MEMORY$queue[["base"]] + DAEMON_MEMORY$queue[["per_byte"]] * 10 * 8 * 800 * k
+
+    expect_equal(split_need(inner, c(3L, 1L, 4L, 2L), 8L, processes, n_rows = 1000, n_predictors = 200,
+                            n_train = 800, kept = kept, folds = 10L),
+                 7 * daemon + queue(50) + queue(100))
+
+    expect_identical(split_need(rep(1L, 4), 1:4, 8L, processes, 1000, 200, 800, kept, 10L), 0)
+
+  })
+
+})
+
+describe("check_split_memory()", {
+
+  processes <- c(daemon = 1L, isolated = 0L)
+  need_two  <- 2 * daemon_need(processes, 1000, 200)
+
+  check <- function(available, extra) {
+    collector <- log_open("evaluate")
+    local_mocked_bindings(memory_available = function() available)
+    fits <- check_split_memory(daemons_on(pids = 1:2, host = this_host()), extra, processes, 1000, 200,
+                               n_split = 1L, collector = collector, verb = "evaluate")
+    list(fits = fits, rows = log_close(collector))
+  }
+
+  it("leaves the plan when the daemons and the split fit", {
+
+    got <- check(need_two + 2e9, 1e9)
+
+    expect_true(got$fits)
+    expect_identical(nrow(got$rows), 0L)
+
+  })
+
+  it("splits nothing, with a note naming the figures, when the daemons fit and the split does not, or neither does", {
+
+    got <- check(need_two + 0.5e9, 1e9)
+    msg <- gsub("\\s+", " ", got$rows$message)
+
+    expect_false(got$fits)
+    expect_identical(got$rows$type, "note")
+    expect_match(msg, "`evaluate()` ran each configuration on one daemon: the inner daemons it would start for 1 long configuration would need about 1.0 GB on this machine",
+                 fixed = TRUE)
+    gb <- function(bytes) format(round(bytes / 1e9, 1), nsmall = 1)
+    expect_match(msg, sprintf("beside the %s GB its 2 daemons need, and %s GB is available.",
+                              gb(need_two), gb(need_two + 0.5e9)), fixed = TRUE)
+
+    expect_false(check(need_two / 2, 1e9)$fits)
+
+  })
+
+})
+
 describe("memory_available()", {
 
   it("reads what ps says the system can give processes", {

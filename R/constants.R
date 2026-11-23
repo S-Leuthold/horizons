@@ -486,12 +486,22 @@ FOLD_PREP_ARG_NAMES <- c(
 #   at 100 committees: 0.64 GB on a 750-row fold of 1,691 predictors and
 #   1.25 GB on a 7,444-row fold after correlation selection (about 360
 #   predictors).
+# - What a daemon whose configuration runs its folds on inner daemons holds
+#   while tune's fold tasks wait for them (split_need()), per byte of the
+#   configuration's fold frames (the training rows by the predictors it
+#   keeps, one frame a fold): tune sends a call's folds out at once, and the
+#   daemon keeps each one's message until an inner daemon takes it. Measured
+#   at 1.2 to 1.8 times the folds' frames on 8,272 rows by 360 and 1,701
+#   predictors, at 5 and 10 folds and 2 to 10 inner daemons, and rounded up.
+#   The inner daemons themselves are counted at the daemon's line, which is
+#   above what one holds (one fold's frame, not the run's data).
 #
 # A run of other models, selections or committees can need more or less, so
 # the warning calls the estimate approximate.
 DAEMON_MEMORY <- list(
   daemon   = c(base = 1.45e9, per_byte = 12),
-  isolated = c(base = 0.6e9, per_byte = 5)
+  isolated = c(base = 0.6e9, per_byte = 5),
+  queue    = c(base = 0, per_byte = 2)
 )
 
 # How the message starts when a process horizons started for one call

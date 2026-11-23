@@ -1415,11 +1415,30 @@ evaluate <- function(x,
     ## which the window starts them longest first by, and the daemons each
     ## one's folds run on (split_plan()), from the daemons connected now,
     ## unless control_horizons(inner_daemons = FALSE)
-    pending_costs <- config_costs(pending_configs, n_train, config_kept(pending_configs, role_map, fold_stage))
+    pending_kept  <- config_kept(pending_configs, role_map, fold_stage)
+    pending_costs <- config_costs(pending_configs, n_train, pending_kept)
+    n_now         <- connected_daemons()
     inner_plan    <- if (isTRUE(control$inner_daemons)) {
-      split_plan(pending_costs, connected_daemons(), cv_folds)
+      split_plan(pending_costs, n_now, cv_folds)
     } else {
       rep(1L, nrow(pending_configs))
+    }
+
+    ## A split is made only when its inner daemons fit in this machine's
+    ## memory beside the daemons, which the log notes when they do not
+    if (any(inner_plan > 1L)) {
+
+      processes <- daemon_processes(configs$model, control$isolate)
+      extra     <- split_need(inner_plan, dispatch_order(pending_costs), n_now, processes,
+                              n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
+                              n_train = n_train, kept = pending_kept, folds = cv_folds)
+
+      if (!check_split_memory(reports, extra, processes, n_rows = nrow(analysis),
+                              n_predictors = sum(role_map$role == "predictor"),
+                              n_split = sum(inner_plan > 1L), collector = collector, verb = "evaluate")) {
+        inner_plan[] <- 1L
+      }
+
     }
 
     stop_on_worker_death(

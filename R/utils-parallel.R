@@ -546,12 +546,14 @@ memory_available <- function() {
 #' @description
 #' The daemon, and an isolated fit's process beside it while it fits a model
 #' whose fits are isolated (each daemon fits one at a time). The one place a
-#' daemon's processes are counted, so work that starts more of them adds its
-#' count here.
+#' daemon's processes are counted, so work that starts more of them counts
+#' them in its units: a split configuration's inner daemons are each counted
+#' as one of these ([split_need()]).
 #'
 #' @param models Character. The models the run fits.
 #' @param isolate Logical(1). `control_horizons(isolate = )`.
-#' @return Named integer: one count per row of `DAEMON_MEMORY`.
+#' @return Named integer: one count per process of `DAEMON_MEMORY`, the
+#'   `daemon` and its `isolated` fit.
 #' @keywords internal
 #' @noRd
 daemon_processes <- function(models, isolate) {
@@ -640,6 +642,98 @@ check_daemon_memory <- function(reports, models, isolate, n_rows, n_predictors, 
   ))
 
   TRUE
+
+}
+
+#' The memory a run's inner daemons add on this machine
+#'
+#' @description
+#' What the split adds to its daemons' own need ([daemon_need()]), for the
+#' split configurations that can be in flight at once: taken in start
+#' order, each while its daemons fit in `n` beside those taken, as the
+#' window takes them. For each, its inner daemons, each counted as a daemon
+#' of the run with its isolated fit's process ([daemon_processes()]), and
+#' what its own daemon holds while tune's fold tasks wait for them: the
+#' `queue` line of `DAEMON_MEMORY` per byte of its folds' frames, `folds`
+#' frames of the training rows by the predictors it keeps.
+#'
+#' @param inner Integer: each configuration's daemons ([split_plan()]).
+#' @param order Integer: the configurations' start order ([dispatch_order()]).
+#' @param n Integer(1). The daemons connected.
+#' @param processes Named integer, from [daemon_processes()].
+#' @param n_rows,n_predictors The run's data: its rows and predictors.
+#' @param n_train Numeric(1). The training rows the folds are cut from.
+#' @param kept Numeric: the predictors each configuration keeps
+#'   ([config_kept()]).
+#' @param folds Integer(1). The cross-validation folds.
+#' @return Numeric(1), in bytes.
+#' @keywords internal
+#' @noRd
+split_need <- function(inner, order, n, processes, n_rows, n_predictors, n_train, kept, folds) {
+
+  taken <- integer(0)
+  used  <- 0L
+
+  for (i in order[inner[order] > 1L]) {
+    if (used + inner[[i]] <= n) {
+      taken <- c(taken, i)
+      used  <- used + inner[[i]]
+    }
+  }
+
+  daemon <- daemon_need(processes, n_rows, n_predictors)
+  queue  <- DAEMON_MEMORY$queue[["base"]] +
+    DAEMON_MEMORY$queue[["per_byte"]] * folds * 8 * as.numeric(n_train) * as.numeric(kept[taken])
+
+  sum(inner[taken] * daemon + queue)
+
+}
+
+#' Split nothing when the inner daemons would not fit in this machine's memory
+#'
+#' @description
+#' A split is horizons' choice, not the user's, so it is made only when it
+#' fits: when the daemons on this machine ([check_daemon_memory()]) and what
+#' the split adds ([split_need()]) together need more than the memory
+#' available, no configuration is split, with a note naming the figures. When
+#' the daemons alone already need more, the check at the door has warned,
+#' and nothing is split either. A reading that cannot be made leaves the
+#' plan, as the door's check does, which noted it.
+#'
+#' @param reports The daemons' reports, one per task.
+#' @param extra Numeric(1). What the split adds, in bytes ([split_need()]).
+#' @param processes Named integer, from [daemon_processes()].
+#' @param n_rows,n_predictors The run's data.
+#' @param n_split Integer(1). The configurations the plan splits.
+#' @param collector The verb's collector.
+#' @param verb Character(1).
+#' @return Logical(1): `TRUE` when the split fits, `FALSE` when the plan is
+#'   to be emptied, which the note says.
+#' @keywords internal
+#' @noRd
+check_split_memory <- function(reports, extra, processes, n_rows, n_predictors, n_split, collector, verb) {
+
+  here    <- Sys.info()[["nodename"]]
+  local   <- Filter(function(r) identical(r$host, here), reports)
+  n_local <- length(unique(vapply(local, function(r) r$pid, integer(1))))
+
+  if (n_local == 0L) return(TRUE)
+
+  available <- memory_available()
+
+  if (!is.finite(available)) return(TRUE)
+
+  need <- n_local * daemon_need(processes, n_rows, n_predictors)
+
+  if (need + extra <= available) return(TRUE)
+
+  gb <- function(bytes) format(round(bytes / 1e9, 1), nsmall = 1)
+
+  log_note(collector, c(
+    "{.fn {verb}} ran each configuration on one daemon: the inner daemons it would start for {n_split} long configuration{?s} would need about {gb(extra)} GB on this machine beside the {gb(need)} GB its {n_local} daemon{?s} need, and {gb(available)} GB is available."
+  ))
+
+  FALSE
 
 }
 
