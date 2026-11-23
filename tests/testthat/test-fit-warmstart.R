@@ -580,7 +580,7 @@ describe("tune_warmstart_bayes() - return contract", {
 
   it("is a list with tune_results, a single-row best_params tibble, the grid it started from and the dropped count", {
 
-    grid <- build_warmstart_grid(best_params, ts$param_set)
+    grid <- build_warmstart_grid(best_params, ts$param_set, max_points = 25L)
 
     result <- expect_no_warning(tune_warmstart_bayes(
       workflow      = ts$wf,
@@ -615,6 +615,10 @@ describe("tune_warmstart_bayes() - return contract", {
     expect_identical(result$n_dropped, 0L)
     expect_identical(result$bayes_iter, NA_integer_)
     expect_identical(result$bayes_stop, NA_character_)
+
+    ## No incumbent was given, so there was nothing to keep
+    expect_identical(result$moved, NA)
+    expect_identical(result$gain, NA_real_)
 
   })
 
@@ -658,12 +662,17 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
 
   })
 
-  it("keeps the grid's choice and says why when the search returns no iteration", {
+  it("keeps the grid's choice and says why when the search returns no iteration, keeping evaluate()'s point there by the margin", {
 
-    ts <- make_tune_setup()
+    ts        <- make_tune_setup()
+    best      <- tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L)
+    incumbent <- clamp_best_params(best, ts$param_set)
 
     ## What tune_bayes() returns when every candidate fails: the starting
-    ## grid's results alone, which it marks as iteration 0
+    ## grid's results alone, which it marks as iteration 0. The grid's fold
+    ## RMSEs are set so that another candidate leads evaluate()'s point by
+    ## half of its standard error, and the rest trail.
+    local_hand_scored_grid(lead_scores(incumbent, 0.5)$score)
     local_mocked_bindings(tune_bayes = function(object, resamples, initial, ...) {
       initial$.iter <- 0L
       initial
@@ -673,9 +682,9 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
       result <- tune_warmstart_bayes(
         workflow      = ts$wf,
         cv_resamples  = ts$folds,
-        initial_grid  = build_warmstart_grid(tibble::tibble(mtry = 5L, trees = 100L, min_n = 5L),
-                                             ts$param_set, max_points = 3L),
+        initial_grid  = build_warmstart_grid(best, ts$param_set, max_points = 3L),
         param_set     = ts$param_set,
+        incumbent     = incumbent,
         bayesian_iter = 2L,
         metric_set    = ts$metric_set,
         allow_par     = FALSE,
@@ -689,6 +698,12 @@ describe("tune_warmstart_bayes() - a Bayesian search that fails (#209)", {
                  "The warm-start Bayesian search produced no results, so the hyperparameters were chosen from its starting grid alone.",
                  fixed = TRUE)
     expect_equal(nrow(result$best_params), 1)
+
+    ## The grid's choice is the margin's: evaluate()'s point, not the
+    ## candidate that leads it by less than its standard error
+    expect_true(point_matches(incumbent, result$best_params[names(incumbent)]))
+    expect_false(result$moved)
+    expect_equal(result$gain, 0.5)
 
   })
 
@@ -917,6 +932,85 @@ describe("tune_warmstart_bayes() - Bayesian stage", {
 })
 
 
+describe("choose_member_params()", {
+
+  ## A four-candidate glmnet grid on three folds, its fold RMSEs then set by
+  ## hand: candidate i is penalty i / 10, scored as `scores[[i]]` gives. The
+  ## best is penalty 0.2; evaluate()'s point, the incumbent, is penalty 0.1.
+  scored <- function(incumbent_rmse) {
+    wf     <- workflows::workflow(mpg ~ ., parsnip::linear_reg(penalty = tune::tune()) |>
+                                    parsnip::set_engine("glmnet"))
+    folds  <- withr::with_seed(1, rsample::vfold_cv(mtcars, v = 3))
+    grid   <- tibble::tibble(penalty = (1:4) / 10)
+    scores <- list(incumbent_rmse, LEAD_BASE, LEAD_BASE + 10, LEAD_BASE + 20)
+    res    <- tune::tune_grid(wf, folds, grid = grid, metrics = yardstick::metric_set(yardstick::rmse))
+    set_fold_rmse(res, function(row) scores[[match(row$penalty, grid$penalty)]])
+  }
+
+  incumbent <- tibble::tibble(penalty = 0.1)
+  choose    <- function(incumbent_rmse, ...) choose_member_params(scored(incumbent_rmse), incumbent, 3L, ...)
+
+  it("keeps evaluate()'s point unless the best candidate leads it by more than one of the best's standard errors", {
+
+    stays <- choose(LEAD_BASE + 0.9 * LEAD_SE)
+    expect_identical(stays$best_params$penalty, 0.1)
+    expect_false(stays$moved)
+    expect_equal(stays$gain, 0.9)
+    expect_named(stays$best_params, c("penalty", ".config"))
+
+    moves <- choose(LEAD_BASE + 1.1 * LEAD_SE)
+    expect_identical(moves$best_params$penalty, 0.2)
+    expect_true(moves$moved)
+    expect_equal(moves$gain, 1.1)
+
+    ## A tie stays, whichever of the two tune ranks first
+    tie <- choose(LEAD_BASE)
+    expect_identical(tie$best_params$penalty, 0.1)
+    expect_false(tie$moved)
+    expect_identical(tie$gain, 0)
+
+  })
+
+  it("measures the lead in the best candidate's standard errors, so an incumbent whose error sits in one fold moves", {
+
+    ## The incumbent equals the best on two folds and is 0.6 worse on the
+    ## third. Its own standard error grows with that one fold (0.31, against
+    ## the best's 0.12), so in its own errors the best would lead it by 0.65
+    ## and it would stay; in the best's the lead is 1.7, and it moves.
+    one_fold <- LEAD_BASE + c(0, 0, 0.6)
+    got      <- choose(one_fold)
+
+    expect_true(got$moved)
+    expect_identical(got$best_params$penalty, 0.2)
+    expect_equal(got$gain, 0.2 / LEAD_SE)
+    expect_lt(0.2 / (stats::sd(one_fold) / sqrt(3)), 1)
+
+  })
+
+  it("takes the best candidate, with no gain, when evaluate()'s point was not scored on every fold (#101)", {
+
+    got <- choose(c(LEAD_BASE[1:2], NA))
+
+    expect_identical(got$best_params$penalty, 0.2)
+    expect_true(got$moved)
+    expect_identical(got$gain, NA_real_)
+
+  })
+
+  it("chooses as select_complete() does, recording no move, with no incumbent", {
+
+    res <- scored(LEAD_BASE + 0.5 * LEAD_SE)
+    got <- choose_member_params(res, NULL, 3L)
+
+    expect_identical(got$best_params, select_complete(res, "rmse", 3L))
+    expect_identical(got$moved, NA)
+    expect_identical(got$gain, NA_real_)
+
+  })
+
+})
+
+
 describe("search_budget()", {
 
   it("raises the iterations asked for to ten points a tuned parameter, grid included, and never lowers them", {
@@ -954,6 +1048,34 @@ describe("search_budget()", {
     expect_identical(raised_budgets(c("plsr", "rf"), 3L, 5L),
                      "raised to 15 for rf: at least 10 points a tuned parameter")
     expect_null(raised_budgets("plsr", 3L, 5L))
+
+    ## fit()'s re-tune of evaluate()'s members starts from each member's point
+    ## and d points drawn around it for d tuned parameters, whatever the grid
+    expect_identical(raised_budgets(c("rf", "cubist", "lightgbm", "xgboost", "mlp"), 25L, 10L, warm = TRUE),
+                     "raised to 26 for cubist and mlp, 35 for lightgbm, 53 for xgboost: at least 10 points a tuned parameter")
+    expect_identical(raised_budgets("cubist", 25L, 2L, warm = TRUE), raised_budgets("cubist", 25L, 10L, warm = TRUE))
+    expect_identical(warm_start_size(3L), 4L)
+
+  })
+
+  it("names the models whose re-tune grids its space whole, from their ranges before the data", {
+
+    skip_if_not_installed("earth")
+
+    ## plsr's components are one fit a fold, and mars's space at the defaults
+    ## two (num_terms is its submodel), so both are gridded whole at any
+    ## budget a re-tune runs; rf's mtry has no range until the data set one
+    expect_identical(whole_space_models(c("rf", "plsr", "mars", "plsr"), 25L, 10L, TUNE_RANGES, warm = TRUE),
+                     c("plsr", "mars"))
+    expect_identical(whole_space_models(c("rf", "plsr", "mars"), 1L, 10L, TUNE_RANGES), c("plsr", "mars"))
+    expect_identical(whole_space_models("rf", 25L, 10L, TUNE_RANGES, warm = TRUE), character(0))
+
+    ## A cold start of one point with no search is a budget of one fit: plsr's
+    ## whole range, not mars's two fits
+    expect_identical(whole_space_models(c("plsr", "mars"), 0L, 1L, TUNE_RANGES), "plsr")
+
+    ## The ranges are the configured ones: a narrower num_comp is still one fit
+    expect_identical(whole_space_models("plsr", 25L, 10L, list(num_comp = c(1, 5)), warm = TRUE), "plsr")
 
   })
 

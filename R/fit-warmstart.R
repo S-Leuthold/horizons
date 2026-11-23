@@ -25,12 +25,12 @@
 #' @param param_set A `parameters` object from
 #'   `workflows::extract_parameter_set_dials()`. Must be finalized (e.g.,
 #'   mtry upper bound set).
-#' @param max_points Integer. Maximum number of grid points. Default 25.
+#' @param max_points Integer. Maximum number of grid points.
 #'
 #' @return A tibble of hyperparameter combinations.
 #'
 #' @keywords internal
-build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
+build_warmstart_grid <- function(best_params, param_set, max_points) {
 
   ## --- Fallback: if best_params is unusable, return space-filling grid ------
 
@@ -63,19 +63,8 @@ build_warmstart_grid <- function(best_params, param_set, max_points = 25L) {
   )
 
   ## Always include the best point, clamped into this range as its candidates
-  ## are: fit()'s range can be narrower than the one evaluate() searched (a
-  ## PLS num_comp capped by fewer training rows), and an out-of-range point
-  ## would be fitted at the engine's own cap, tying it with the clamp.
-  best_row <- tibble::as_tibble(
-    best_params[, param_set$name, drop = FALSE]
-  )
-
-  for (i in seq_len(nrow(param_set))) {
-
-    p_name <- param_set$name[i]
-    best_row[[p_name]] <- clamp_to_range(best_row[[p_name]], param_set$object[[i]])
-
-  }
+  ## are (clamp_best_params())
+  best_row <- clamp_best_params(best_params, param_set)
 
   if (nrow(full_grid) > max_points) {
 
@@ -233,6 +222,34 @@ clamp_to_range <- function(value, param_obj) {
 
 }
 
+#' evaluate()'s best point, clamped into fit()'s range
+#'
+#' Each tuned parameter's value clamped into its range ([clamp_to_range()]).
+#' fit()'s range can be narrower than the one evaluate() searched (a PLS
+#' `num_comp` capped by fewer training rows), and an out-of-range point would
+#' be fitted at the engine's own cap, tying it with the clamp.
+#'
+#' @param best_params Single-row data frame holding a value of every tuned
+#'   parameter ([usable_best_params()]).
+#' @param param_set A finalized `parameters` object.
+#' @return Single-row tibble of the tuned parameters, in `param_set`'s order.
+#' @keywords internal
+#' @noRd
+clamp_best_params <- function(best_params, param_set) {
+
+  point <- tibble::as_tibble(best_params[, param_set$name, drop = FALSE])
+
+  for (i in seq_len(nrow(param_set))) {
+
+    p_name <- param_set$name[i]
+    point[[p_name]] <- clamp_to_range(point[[p_name]], param_set$object[[i]])
+
+  }
+
+  point
+
+}
+
 #' Check if a single-row tibble exists in a grid
 #' @keywords internal
 point_in_grid <- function(point, grid) {
@@ -298,8 +315,10 @@ point_matches <- function(point, grid) {
 #' `with_unit_seed()`), with its seed given to the engine and to the search,
 #' so the search does not depend on what the grid stage drew, nor on the
 #' axis it ran on (#151).
-#' 3. Choose the hyperparameters by RMSE among the candidates scored on every
-#'    fold (`select_complete()`).
+#' 3. Choose the hyperparameters among the candidates scored on every fold:
+#'    `incumbent`, `evaluate()`'s point, unless the best candidate's CV RMSE
+#'    is lower than its by more than the best's standard error, and with no
+#'    incumbent the best by RMSE (`choose_member_params()`).
 #'
 #' @param workflow A tidymodels workflow, not fitted: the member's model
 #'   alone, as [fit_single_config()] gives it, over prepped folds.
@@ -307,6 +326,9 @@ point_matches <- function(point, grid) {
 #'   once.
 #' @param initial_grid The starting grid, from [build_warmstart_grid()].
 #' @param param_set Finalized `parameters` object.
+#' @param incumbent Single-row tibble of `evaluate()`'s tuned parameters,
+#'   clamped into `param_set`'s ranges and among `initial_grid`'s points, or
+#'   `NULL` (a cold start, or parameters that were unusable). Default `NULL`.
 #' @param bayesian_iter Integer. Bayesian iterations after grid. 0 = grid only.
 #' @param no_improve A whole number, or `FALSE`: the Bayesian search's
 #'   stopping rule (`bayes_search()`).
@@ -318,18 +340,20 @@ point_matches <- function(point, grid) {
 #'   its phases' units.
 #'
 #' @return List with `tune_results` (the result the hyperparameters were
-#'   chosen from), `best_params` (single-row tibble, with `.config`), `grid`
-#'   (`initial_grid`, which the member reads its notes through, #109),
-#'   `n_dropped` (the candidates the Bayesian search proposed and tune
-#'   dropped, scored on no fold), and `bayes_iter` and `bayes_stop`, the
-#'   iterations the search began and why it ended (`bayes_search()`'s
-#'   `n_iter` and `stop`; `NA` with no Bayesian search).
+#'   chosen from), `best_params` (single-row tibble, with `.config`), `moved`
+#'   and `gain` (`choose_member_params()`'s), `grid` (`initial_grid`, which
+#'   the member reads its notes through, #109), `n_dropped` (the candidates
+#'   the Bayesian search proposed and tune dropped, scored on no fold), and
+#'   `bayes_iter` and `bayes_stop`, the iterations the search began and why
+#'   it ended (`bayes_search()`'s `n_iter` and `stop`; `NA` with no Bayesian
+#'   search).
 #'
 #' @keywords internal
 tune_warmstart_bayes <- function(workflow,
                                  cv_resamples,
                                  initial_grid,
                                  param_set,
+                                 incumbent = NULL,
                                  bayesian_iter,
                                  no_improve = BAYES_NO_IMPROVE_DEFAULT,
                                  metric_set,
@@ -405,16 +429,79 @@ tune_warmstart_bayes <- function(workflow,
 
   }
 
-  ## --- Phase 3: Select best -----------------------------------------------
+  ## --- Phase 3: evaluate()'s point, or a candidate past the margin --------
+
+  choice <- unit_step("select_best", choose_member_params(tune_results, incumbent, n_folds, debug))
 
   list(
     tune_results = tune_results,
-    best_params  = unit_step("select_best", select_complete(tune_results, "rmse", n_folds, debug)),
+    best_params  = choice$best_params,
+    moved        = choice$moved,
+    gain         = choice$gain,
     grid         = initial_grid,
     n_dropped    = n_dropped,
     bayes_iter   = bayes_iter,
     bayes_stop   = bayes_stop
   )
+
+}
+
+
+#' The re-tune's choice: evaluate()'s point, unless the best candidate beats it
+#'
+#' @description
+#' With `evaluate()`'s point (`incumbent`) among the candidates scored on
+#' every fold, it is kept unless the best of them has a CV RMSE lower than
+#' the point's by more than `margin` of the best's standard errors:
+#' `tune::select_by_one_std_err()`'s bound, the best's mean plus its
+#' `std_err`, with the point in the place of the simplest model
+#' (`RETUNE_MARGIN_SE`). The point is found among them by its tuned
+#' parameters ([point_matches()]), on the search and on a space gridded
+#' whole alike. With no incumbent (a cold start, or parameters that were
+#' unusable), or one not scored on every fold (#101), the best candidate is
+#' chosen, as [select_complete()] chooses it.
+#'
+#' @param results The tune result the hyperparameters are chosen from.
+#' @param incumbent Single-row tibble of `evaluate()`'s tuned parameters,
+#'   clamped ([clamp_best_params()]), or `NULL`.
+#' @param n_folds Integer(1). The folds drawn.
+#' @param debug Logical(1).
+#' @param margin Numeric(1). How many of the best candidate's standard
+#'   errors its lead must exceed.
+#' @return List: `best_params` (single-row tibble of the chosen candidate's
+#'   parameters and `.config`, as [select_complete()] returns it), `moved`
+#'   (`FALSE` when the incumbent is kept, `TRUE` when another candidate is
+#'   chosen, `NA` with no incumbent) and `gain` (the best candidate's lead
+#'   over the incumbent in the best's standard errors, 0 when the incumbent
+#'   is the best; `NA` with no incumbent, and with one not scored on every
+#'   fold, which `moved` `TRUE` tells apart).
+#' @keywords internal
+#' @noRd
+choose_member_params <- function(results, incumbent, n_folds, debug = FALSE,
+                                 margin = RETUNE_MARGIN_SE) {
+
+  if (is.null(incumbent)) {
+
+    return(list(best_params = select_complete(results, "rmse", n_folds, debug),
+                moved = NA, gain = NA_real_))
+
+  }
+
+  ranked <- rank_complete(results, "rmse", n_folds, debug)
+  params <- c(tune::.get_tune_parameter_names(results), ".config")
+  best   <- ranked[1, , drop = FALSE]
+  at     <- which(point_matches(incumbent, ranked[names(incumbent)]))
+
+  ## Not scored on every fold, so no part of the choice (#101)
+  if (length(at) == 0) return(list(best_params = best[params], moved = TRUE, gain = NA_real_))
+
+  kept  <- ranked[at[1], , drop = FALSE]
+  lead  <- kept$mean - best$mean
+  moved <- lead > margin * best$std_err
+
+  list(best_params = if (moved) best[params] else kept[params],
+       moved       = moved,
+       gain        = if (lead == 0) 0 else lead / best$std_err)
 
 }
 
@@ -685,22 +772,47 @@ search_budget <- function(iter, n_params, grid_size) {
 
 }
 
+#' The points fit()'s warm-started re-tune starts from
+#'
+#' @description
+#' `evaluate()`'s point and, for `n_params` tuned parameters, as many points
+#' drawn at random from the local grid around it ([build_warmstart_grid()]),
+#' each parameter's value and its nearby values crossed: the fewest starting
+#' points with which `tune_bayes()` does not warn that it has too few for the
+#' parameters, and at least the two its Gaussian process needs. A cold start, with no point
+#' to start from, grids `grid_size` points instead.
+#'
+#' @param n_params Integer. The parameters the model tunes.
+#' @return Integer.
+#' @keywords internal
+#' @noRd
+warm_start_size <- function(n_params) {
+
+  as.integer(n_params) + 1L
+
+}
+
 #' The tree's words for the models whose search the budget raises
 #'
 #' @param models Character. The configured models, or the members'.
 #' @param iter,grid_size As [search_budget()] takes them.
+#' @param warm Logical(1). Whether the searches start from `evaluate()`'s
+#'   point and its neighbours ([warm_start_size()]) rather than a grid of
+#'   `grid_size`: fit()'s re-tune on the `evaluate()` path. Default `FALSE`.
 #' @return Character(1), e.g. `"raised to 20 for cubist, 50 for xgboost: at
 #'   least 10 points a tuned parameter"`, or `NULL` when no model's is.
 #' @keywords internal
 #' @noRd
-raised_budgets <- function(models, iter, grid_size) {
+raised_budgets <- function(models, iter, grid_size, warm = FALSE) {
 
   ### A model that tunes only its submodel is gridded whole, one fit a fold,
   ### and never searches (exhaustive_grid()), so its budget is not said
   models  <- Filter(function(m) length(setdiff(MODEL_SPECS[[m]]$tuned, MODEL_SPECS[[m]]$submodel)) > 0,
                     unique(models))
-  budgets <- vapply(models, function(m) search_budget(iter, length(MODEL_SPECS[[m]]$tuned), grid_size),
-                    integer(1))
+  budgets <- vapply(models, function(m) {
+    n_params <- length(MODEL_SPECS[[m]]$tuned)
+    search_budget(iter, n_params, if (warm) warm_start_size(n_params) else grid_size)
+  }, integer(1))
   raised  <- budgets > iter
 
   if (!any(raised)) return(NULL)
@@ -711,6 +823,37 @@ raised_budgets <- function(models, iter, grid_size) {
          paste(vapply(names(by_budget), function(b) paste(b, "for", paste(by_budget[[b]], collapse = " and ")),
                       character(1)), collapse = ", "),
          ": at least ", BAYES_POINTS_PER_PARAM, " points a tuned parameter")
+
+}
+
+#' The models whose re-tune grids its space whole
+#'
+#' @description
+#' The models whose search space [exhaustive_grid()] grids whole on its
+#' ranges before the data are seen, at the budget their re-tune runs: plsr,
+#' whose components one fit scores, and at the defaults mars, two fits a
+#' fold. The data only narrow a range that is known before them
+#' ([finalize_bound()]), so these are gridded whole whatever the rows; a
+#' space the rows make small enough is gridded whole too, which only its
+#' member can see. `fit()`'s tree names them in place of a search they never
+#' run.
+#'
+#' @param models Character. The members' models.
+#' @param iter,grid_size,warm As [raised_budgets()] takes them.
+#' @param ranges Named list of `c(lower, upper)` by parameter id: the ranges
+#'   the re-tune searches (`config$tuning$ranges`).
+#' @return Character: the models gridded whole, each once.
+#' @keywords internal
+#' @noRd
+whole_space_models <- function(models, iter, grid_size, ranges, warm = FALSE) {
+
+  Filter(function(m) {
+    param_set <- apply_tune_ranges(hardhat::extract_parameter_set_dials(define_model_spec(m, isolate = FALSE)),
+                                   ranges)
+    n_params  <- nrow(param_set)
+    start     <- if (warm) warm_start_size(n_params) else grid_size
+    !is.null(exhaustive_grid(param_set, start + search_budget(iter, n_params, start), MODEL_SPECS[[m]]$submodel))
+  }, unique(models))
 
 }
 

@@ -2,7 +2,10 @@
 #'
 #' @description
 #' Re-tunes the top N configurations from `evaluate()` with warm-start
-#' Bayesian optimization, generates out-of-fold (OOF) CV predictions for
+#' Bayesian optimization, keeping each one's hyperparameters from
+#' `evaluate()` unless the re-tune's best candidate is better by more than its
+#' standard error (see "The re-tune"), generates out-of-fold (OOF) CV
+#' predictions for
 #' downstream stacking, fits final deployable models, scores them on
 #' `evaluate()`'s held-out test rows, and optionally trains uncertainty
 #' quantification (UQ) components.
@@ -63,6 +66,40 @@
 #' per-member results travel on the condition as `results`, and
 #' `models$results` keeps each member's `error_message` when some succeed.
 #'
+#' @section The re-tune:
+#' Each member's re-tune starts from `evaluate()`'s hyperparameters, clamped
+#' into the range `fit()`'s data allow (a `num_comp` above the cap of fewer
+#' rows, say), and, for a model tuning d parameters, d points drawn at random
+#' from a local grid around them, each parameter's value and its nearby
+#' values crossed. It then runs a Bayesian search with a budget of at least
+#' `final_bayesian_iter` iterations ([configure()]), raised so that the start
+#' and the search try ten points a tuned parameter, which stops once
+#' `control_horizons(no_improve = )` iterations in a row have not improved on
+#' its best. A space small enough is gridded whole
+#' instead (see "Cold start from one configuration"). The member then keeps
+#' `evaluate()`'s hyperparameters unless the best candidate scored on every
+#' fold has a CV RMSE lower than theirs by more than that candidate's
+#' standard error: `tune::select_by_one_std_err()`'s bound, with
+#' `evaluate()`'s choice in the place of the simplest model. That choice was
+#' made on `evaluate()`'s folds and is scored once on `fit()`'s, a fresh
+#' draw, while the best candidate is the best of many tried on `fit()`'s
+#' folds, so it beats the choice by the selection alone even where nothing
+#' is better. The draw is fresh but the rows are not: `evaluate()` chose on
+#' its training rows, which hold `fit()`'s and, with UQ or AD on, the
+#' calibration rows, so a member that keeps the choice is fitted at
+#' hyperparameters the calibration rows took part in choosing, as they took
+#' part in choosing the members (#44).
+#' Hyperparameters of `evaluate()`'s that were not scored on every fold take
+#' no part, and the best candidate is taken, which the member's `warnings`
+#' say. The member's out-of-fold predictions are made at the hyperparameters
+#' it keeps, and `models$results$retune_moved` records which it kept:
+#' `FALSE` for `evaluate()`'s, `TRUE` for another candidate, `NA` with none
+#' to keep (a cold start, or parameters that were unusable). The tree says
+#' per member which, and by how many of the best candidate's standard errors
+#' it led. `final_bayesian_iter = 0` turns the re-tune off: each member
+#' keeps `evaluate()`'s hyperparameters, clamped, scored by its out-of-fold
+#' predictions alone, as `tune::fit_best()` refits a choice.
+#'
 #' @section What fit() reports:
 #' `fit()` warns once per kind at its end, after writing each warning to the
 #' object's `log`: a stratified draw (the calibration split, the folds, a
@@ -92,7 +129,9 @@
 #' (`control_horizons(no_improve = )`: a search stops once that many
 #' iterations in a row have not improved on its best, and `FALSE` runs every
 #' iteration), each member recording the iterations its search began
-#' (`bayes_iter`) and why it ended (`bayes_stop`). The folds are
+#' (`bayes_iter`) and why it ended (`bayes_stop`); and how many members kept
+#' `evaluate()`'s hyperparameters, or, with `final_bayesian_iter = 0`, that
+#' the re-tune was off (see "The re-tune"). The folds are
 #' drawn from the rows the members are fitted on, which must outnumber the
 #' folds, or `fit()` refuses, as `evaluate()` does.
 #'
@@ -141,7 +180,9 @@
 #' the grid and the Bayesian iterations together, is gridded whole with no
 #' Bayesian search, as `evaluate()` grids it: a submodel's values share one
 #' fit, so that is every plsr member, each `num_comp` up to its cap tried
-#' from one fit a fold. The degradation check needs
+#' from one fit a fold. On the `evaluate()` path that holds unless
+#' `final_bayesian_iter` is 0, which turns the re-tune off. The degradation
+#' check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
 #'
@@ -283,10 +324,12 @@
 #'   `predict()` reads when asked for conformal intervals). Called on a
 #'   `horizons_ensemble`, it returns a `horizons_fit` whose `ensemble` slot
 #'   is empty again, since the ensemble was built on the members it replaces.
-#'   `models$results` records how each member's re-tune started:
-#'   `warm_start` (`TRUE` when `evaluate()`'s parameters were usable, so the
-#'   grid is centred on them or is the whole space, `FALSE` for a
-#'   space-filling grid) and `start_grid_size`, the starting grid's points.
+#'   `models$results` records how each member's re-tune started and what it
+#'   kept: `warm_start` (`TRUE` when `evaluate()`'s parameters were usable,
+#'   so the re-tune starts from them and the points drawn around them or
+#'   from the whole space, `FALSE` for a space-filling grid), `start_grid_size`, the points
+#'   it started from (`NA` with the re-tune off), and `retune_moved` (see
+#'   "The re-tune").
 #'
 #' @export
 fit <- function(x,
@@ -849,13 +892,26 @@ fit <- function(x,
 
     }
 
-    raised <- raised_budgets(member_configs$model, final_bayesian_iter, tuning$grid_size)
+    ## A model gridded whole runs no search, so the header names it rather
+    ## than giving it a search's words or budget
+    whole    <- whole_space_models(member_configs$model, final_bayesian_iter, tuning$grid_size, tuning$ranges,
+                                   warm = !cold_start)
+    searched <- setdiff(unique(member_configs$model), whole)
+    raised   <- raised_budgets(searched, final_bayesian_iter, tuning$grid_size, warm = !cold_start)
 
-    cat(paste0(
-      "\u2502  Bayesian: ", final_bayesian_iter,
-      if (cold_start) " iterations from a space-filling grid" else " iterations with warm-start",
-      if (!is.null(raised)) paste0(" (", raised, ")"), "\n"
-    ))
+    cat(paste0("\u2502  ", if (cold_start) {
+      paste0("Bayesian: ", paste(c(
+        if (length(searched) > 0) {
+          paste0(final_bayesian_iter, " iterations from a space-filling grid",
+                 if (!is.null(raised)) paste0(" (", raised, ")"))
+        } else {
+          "none"
+        },
+        gridded_whole_text(whole)
+      ), collapse = "; "))
+    } else {
+      retune_header_line(final_bayesian_iter, raised, searched, whole)
+    }, "\n"))
 
     ## A parallel fit runs the members' folds on the daemons
     for (line in parallel_tree_lines(if (allow_par) "resamples" else "sequential", n_daemons,
@@ -1008,6 +1064,14 @@ fit <- function(x,
         ))
 
       }
+
+      ## Whether the re-tune kept evaluate()'s parameters, and by how much
+      ## its best candidate led them; with the re-tune off the header says
+      retune_text <- if (final_bayesian_iter > 0) {
+        retune_member_line(config_result$retune_moved, config_result$retune_gain)
+      }
+
+      if (!is.null(retune_text)) cat(paste0("\u2502  ", cont, "\u251C\u2500 ", retune_text, "\n"))
 
       if (config_result$status == "success") {
 
@@ -1282,6 +1346,20 @@ fit <- function(x,
 
   if (!is.null(stop_line)) log_note(collector, "{stop_line}")
 
+  ## How many members kept evaluate()'s parameters: a note, and a line below.
+  ## With the re-tune off every member with them keeps them, which one note
+  ## says, as the header does.
+  kept_line <- if (final_bayesian_iter > 0) retune_kept_line(results_tibble$retune_moved)
+
+  if (!is.null(kept_line)) log_note(collector, "{kept_line}")
+
+  if (final_bayesian_iter == 0 && any(results_tibble$warm_start %in% TRUE)) {
+
+    off_line <- paste0("The re-tune is ", retune_off_text(), ".")
+    log_note(collector, "{off_line}")
+
+  }
+
   ## What the run reported goes on the object's log before it is certified
   x$log <- log_close(collector, x$log)
 
@@ -1308,6 +1386,7 @@ fit <- function(x,
     ))
 
     if (!is.null(stop_line)) cat(paste0("\u2502  \u251C\u2500 ", stop_line, "\n"))
+    if (!is.null(kept_line)) cat(paste0("\u2502  \u251C\u2500 ", kept_line, "\n"))
 
     if (n_degraded > 0) {
 
@@ -1437,11 +1516,127 @@ member_row <- function(res) {
     start_grid_size = as.integer(res$start_grid_size %||% NA_integer_),
     bayes_iter      = as.integer(res$bayes_iter %||% NA_integer_),
     bayes_stop      = as.character(res$bayes_stop %||% NA_character_),
+    retune_moved    = as.logical(res$retune_moved %||% NA),
     error_message   = res$error_message %||% NA_character_,
     class           = res$class %||% NA_character_,
     trace           = list(res$trace),
     warnings        = list(res$warnings),
     runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
+  )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## The re-tune's lines in the tree and the log
+## ---------------------------------------------------------------------------
+
+#' The tree header's line for the re-tune on the evaluate() path
+#'
+#' The search's words for the members that search, and the models gridded
+#' whole named apart ([whole_space_models()]). The stopping rule is said
+#' where it stops a search, in the summary and the log
+#' ([early_stop_line()]), as `evaluate()`'s tree says it.
+#'
+#' @param iter Integer. `final_bayesian_iter`, 0 for the re-tune off.
+#' @param raised Character(1) or `NULL`: [raised_budgets()]'s words, for the
+#'   models that search.
+#' @param searched,whole Character: the members' models that search, and
+#'   those gridded whole.
+#' @return Character(1).
+#' @keywords internal
+#' @noRd
+retune_header_line <- function(iter, raised, searched, whole) {
+
+  if (iter == 0) return(paste0("Re-tune: ", retune_off_text()))
+
+  search <- if (length(searched) > 0) {
+    paste0("from evaluate()'s hyperparameters and d points drawn around them for d tuned parameters, ", iter,
+           " iterations", if (!is.null(raised)) paste0(" (", raised, ")"))
+  }
+
+  paste0(
+    "Re-tune: ", paste(c(search, gridded_whole_text(whole)), collapse = "; "),
+    "; evaluate()'s are kept unless the best candidate is better by more than its standard error"
+  )
+
+}
+
+#' The tree's words for the models gridded whole
+#'
+#' @param whole Character: [whole_space_models()]'s.
+#' @return Character(1), e.g. `"plsr and mars gridded whole"`, or `NULL`
+#'   when there are none.
+#' @keywords internal
+#' @noRd
+gridded_whole_text <- function(whole) {
+
+  if (length(whole) == 0) return(NULL)
+
+  paste(paste(whole, collapse = " and "), "gridded whole")
+
+}
+
+#' What fit() says when its re-tune is off
+#'
+#' @return Character(1): the words the tree's header and the log's note share.
+#' @keywords internal
+#' @noRd
+retune_off_text <- function() {
+
+  "off (`final_bayesian_iter = 0`), so each member keeps evaluate()'s hyperparameters; `configure(final_bayesian_iter = )` above 0 turns it on"
+
+}
+
+#' A member's tree line on what its re-tune kept
+#'
+#' The lead is rounded to two significant digits, except that a moved
+#' member's never reads at or below the margin (`RETUNE_MARGIN_SE`): one
+#' that rounds there reads "more than" the margin. A kept member's lead is at
+#' most the margin, and so is its rounding.
+#'
+#' @param moved,gain The member's `retune_moved` and `retune_gain`.
+#' @return Character(1), or `NULL` with nothing to keep (`moved` missing or
+#'   `NA`).
+#' @keywords internal
+#' @noRd
+retune_member_line <- function(moved, gain) {
+
+  if (is.null(moved) || is.na(moved)) return(NULL)
+
+  gain  <- gain %||% NA_real_
+  shown <- signif(gain, 2)
+
+  if (moved && !is.na(gain) && shown <= RETUNE_MARGIN_SE) shown <- paste("more than", RETUNE_MARGIN_SE)
+
+  by <- if (!is.na(gain)) paste0(" by ", shown, " of its standard errors")
+
+  if (moved) {
+    return(paste0("Re-tune: moved to ", if (is.null(by)) "its best candidate" else paste0("a candidate better", by)))
+  }
+
+  if (isTRUE(gain == 0)) return("Re-tune: kept evaluate()'s hyperparameters, which no candidate beat")
+
+  paste0("Re-tune: kept evaluate()'s hyperparameters", if (!is.null(by)) paste0("; the best candidate was better", by))
+
+}
+
+#' The run's line on how many members kept evaluate()'s hyperparameters
+#'
+#' @param moved Logical: each member's `retune_moved`, `NA` where its
+#'   re-tune had no parameters of `evaluate()`'s to keep.
+#' @return Character(1), or `NULL` when no member kept them.
+#' @keywords internal
+#' @noRd
+retune_kept_line <- function(moved) {
+
+  n_ran  <- sum(!is.na(moved))
+  n_kept <- sum(moved %in% FALSE)
+
+  if (n_kept == 0) return(NULL)
+
+  cli::format_inline(
+    "The re-tune kept evaluate()'s hyperparameters for {n_kept} of {n_ran} member{?s}: the best candidate replaces them only when its CV RMSE is lower by more than its standard error, or when they were not scored on every fold."
   )
 
 }

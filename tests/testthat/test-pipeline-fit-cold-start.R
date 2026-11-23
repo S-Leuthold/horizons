@@ -107,12 +107,18 @@ describe("fit() - cold start from one configuration (#45)", {
     expect_false(cold$models$results$warm_start)
     expect_identical(cold$models$results$start_grid_size, 2L)
 
+    ## No parameters of evaluate()'s to keep: the best candidate, and no
+    ## record of a move
+    expect_identical(cold$models$results$retune_moved, NA)
+    expect_false(any(grepl("Re-tune:", cold_out, fixed = TRUE)))
+
   })
 
   it("records a warm start on the evaluate() path and prints no space-filling note", {
 
     expect_true(warm$models$results$warm_start)
     expect_false(any(grepl("space-filling", warm_out, fixed = TRUE)))
+    expect_false(is.na(warm$models$results$retune_moved))
 
   })
 
@@ -186,6 +192,33 @@ describe("fit() - cold start from one configuration (#45)", {
 
     expect_true(any(grepl("Bayesian: 1 iterations", out, fixed = TRUE)))
     expect_false(any(grepl("Bayesian: 0 iterations", out, fixed = TRUE)))
+
+  })
+
+  it("names a member gridded whole in its header, in place of a search it never runs", {
+
+    whole <- obj
+    whole$config$configs$model <- "plsr"
+
+    ## Stop at the first member: only the header is under test
+    out <- utils::capture.output(
+      testthat::with_mocked_bindings(
+        tryCatch(
+          suppressWarnings(
+            fit(whole, compute_uq = FALSE, compute_ad = FALSE, control = control_horizons(verbose = TRUE))
+          ),
+          horizons_error_all_members_failed = function(e) NULL
+        ),
+        fit_single_config = function(...) {
+          list(config_id = "cfg_001", status = "failed", error_message = "mocked",
+               runtime_secs = 0)
+        },
+        .package = "horizons"
+      )
+    )
+
+    expect_true("\u2502  Bayesian: none; plsr gridded whole" %in% out)
+    expect_false(any(grepl("iterations from a space-filling grid", out, fixed = TRUE)))
 
   })
 

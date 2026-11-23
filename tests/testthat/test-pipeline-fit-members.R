@@ -460,6 +460,123 @@ describe("fit() - each member is one unit", {
 
   })
 
+  it("says per member whether its re-tune kept evaluate()'s hyperparameters, and counts those that did among the members with them to keep", {
+
+    ## Three members: one kept evaluate()'s parameters, one moved off them,
+    ## and one had none to keep (its re-tune chose with no incumbent)
+    obj   <- four_members()
+    calls <- 0L
+    out   <- utils::capture.output(
+      fitted <- testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 3L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(verbose = TRUE))),
+        fit_single_config = function(config_row, ...) {
+          calls  <<- calls + 1L
+          member <- fitted_member(config_row)
+          member$retune_moved <- c(FALSE, TRUE, NA)[calls]
+          member$retune_gain  <- c(0.4, 1.8, NA)[calls]
+          member
+        },
+        .package = "horizons"
+      )
+    )
+
+    expect_identical(fitted$models$results$retune_moved, c(FALSE, TRUE, NA))
+
+    expect_identical(sum(grepl("Re-tune: kept evaluate()'s hyperparameters; the best candidate was better by 0.4 of its standard errors",
+                               out, fixed = TRUE)), 1L)
+    expect_identical(sum(grepl("Re-tune: moved to a candidate better by 1.8 of its standard errors",
+                               out, fixed = TRUE)), 1L)
+    expect_identical(sum(grepl("\u251C\u2500 Re-tune:", out, fixed = TRUE)), 2L)
+
+    line <- paste0("The re-tune kept evaluate()'s hyperparameters for 1 of 2 members: the best candidate replaces ",
+                   "them only when its CV RMSE is lower by more than its standard error, or when they were not ",
+                   "scored on every fold.")
+    expect_true(paste0("\u2502  \u251C\u2500 ", line) %in% out)
+    expect_true(line %in% fitted$log$message[fitted$log$verb == "fit" & fitted$log$type == "note"])
+
+  })
+
+  it("names the members gridded whole in its header, in place of a search they never run", {
+
+    skip_if_not_installed("earth")
+
+    ## rf searches; plsr's components are gridded whole, one fit a fold, and
+    ## so is mars's space, two fits. At one iteration the floor raises rf's
+    ## budget and would raise mars's, which never searches.
+    obj <- four_members(c("rf", "plsr"))
+    obj$config$configs$model[obj$config$configs$config_id == "cfg_004"] <- "mars"
+    obj$config$tuning$final_bayesian_iter <- 1L
+    out <- utils::capture.output(
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 4L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(verbose = TRUE))),
+        fit_single_config = function(config_row, ...) fitted_member(config_row),
+        .package = "horizons"
+      )
+    )
+
+    expect_identical(
+      grep("Re-tune: ", out, value = TRUE, fixed = TRUE)[1],
+      paste0("\u2502  Re-tune: from evaluate()'s hyperparameters and d points drawn around them for d tuned ",
+             "parameters, 1 iterations (raised to 17 for rf: at least 10 points a tuned parameter); ",
+             "plsr and mars gridded whole; ",
+             "evaluate()'s are kept unless the best candidate is better by more than its standard error")
+    )
+
+    ## Every member gridded whole: no search's words at all
+    expect_identical(retune_header_line(25L, NULL, character(0), "plsr"),
+                     paste0("Re-tune: plsr gridded whole; evaluate()'s are kept unless the best candidate is ",
+                            "better by more than its standard error"))
+
+  })
+
+  it("never prints a moved member's lead at or below the margin, nor a kept member's above it", {
+
+    ## A lead just past one standard error rounds to 1 at two digits, which
+    ## would read as a lead the margin keeps
+    expect_identical(retune_member_line(TRUE, 1.004),
+                     "Re-tune: moved to a candidate better by more than 1 of its standard errors")
+    expect_identical(retune_member_line(TRUE, 1.8),
+                     "Re-tune: moved to a candidate better by 1.8 of its standard errors")
+    expect_identical(retune_member_line(FALSE, 0.996),
+                     "Re-tune: kept evaluate()'s hyperparameters; the best candidate was better by 1 of its standard errors")
+    expect_identical(retune_member_line(FALSE, 1),
+                     "Re-tune: kept evaluate()'s hyperparameters; the best candidate was better by 1 of its standard errors")
+
+  })
+
+  it("says once, in its header and on its log, that the re-tune is off at final_bayesian_iter = 0, and counts no member as kept", {
+
+    obj <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 0L
+
+    out <- utils::capture.output(
+      fitted <- testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(verbose = TRUE))),
+        fit_single_config = function(config_row, ...) {
+          member <- fitted_member(config_row)
+          member$retune_moved <- FALSE
+          member
+        },
+        .package = "horizons"
+      )
+    )
+
+    off <- paste0("off (`final_bayesian_iter = 0`), so each member keeps evaluate()'s hyperparameters; ",
+                  "`configure(final_bayesian_iter = )` above 0 turns it on")
+
+    expect_true(paste0("\u2502  Re-tune: ", off) %in% out)
+    expect_false(any(grepl("\u251C\u2500 Re-tune:", out, fixed = TRUE)))
+    expect_false(any(grepl("The re-tune kept", out, fixed = TRUE)))
+
+    notes <- fitted$log$message[fitted$log$verb == "fit" & fitted$log$type == "note"]
+    expect_identical(sum(notes == paste0("The re-tune is ", off, ".")), 1L)
+    expect_false(any(grepl("The re-tune kept", notes, fixed = TRUE)))
+
+  })
+
   it("records each member's failure class, backtrace and warnings, and warns partial_failure once", {
 
     obj <- fit_obj(2L)

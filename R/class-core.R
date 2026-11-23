@@ -1039,8 +1039,9 @@ config_findings <- function(x) {
 
   }
 
-  ### And configure()'s rule on the three together: both Bayesian searches
-  ### start from the grid, and tune_bayes() needs two of its points (#209)
+  ### And configure()'s rule on the three together: evaluate()'s Bayesian
+  ### search, and fit()'s on a cold start, start from the grid, and
+  ### tune_bayes() needs two of its points (#209)
   if (tuning_ok && tuning$grid_size < 2 &&
       (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
 
@@ -2725,6 +2726,7 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
                    start_grid_size = "integer",
                    bayes_iter      = "integer",
                    bayes_stop      = "character",
+                   retune_moved    = "logical",
                    error_message   = "character",
                    class           = "character",
                    trace           = "list",

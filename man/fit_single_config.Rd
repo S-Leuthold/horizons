@@ -53,13 +53,20 @@ or NULL (\code{fit()}'s cold start), in which case the re-tune starts from a
 space-filling grid.}
 
 \item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning, at
-least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}).
-When every tuned parameter is a whole number and the space costs no
-more fits than the grid and those iterations together (a submodel's
-values sharing one fit), the grid is every point and no Bayesian search
-runs (\code{exhaustive_grid()}).}
+least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}),
+counting the points the re-tune starts from. When every tuned parameter
+is a whole number and the space costs no more fits than the start and
+those iterations together (a submodel's values sharing one fit), the
+grid is every point and no Bayesian search runs (\code{exhaustive_grid()}).
+0 turns the re-tune off for a member with usable \code{best_params_eval}: it
+keeps them, clamped into its range, scored by the out-of-fold pass
+alone. A cold start at 0 still grids \code{grid_size} points.}
 
-\item{grid_size}{Integer. Grid size for warm-start exploration.}
+\item{grid_size}{Integer. The space-filling grid's size on a cold start
+(\code{best_params_eval} \code{NULL} or unusable). A warm start begins from
+\code{evaluate()}'s parameters and, for d tuned parameters, d points drawn
+around them from a local grid (\code{warm_start_size()}), whatever
+\code{grid_size} is.}
 
 \item{tune_ranges}{Named list of \code{c(lower, upper)} by parameter id, in
 dials' units: the ranges the re-tune searches, set before the data cap
@@ -127,7 +134,8 @@ built them, shaped as \code{\link[=evaluate_single_config]{evaluate_single_confi
 \value{
 List with fields: config_id, status, degraded (\code{NA} when the
 check could not run), degraded_reason, fitted_workflow, best_params,
-warm_start, start_grid_size, cv_predictions, test_metrics, cv_metrics,
+warm_start, start_grid_size, bayes_iter, bayes_stop, retune_moved,
+retune_gain, cv_predictions, test_metrics, cv_metrics,
 uq, ad, warnings, error_message (the failed step and the cause), class
 (the failure's root class), trace (the backtrace as text under
 \code{keep_traces}, else \code{NULL}), runtime_secs. \code{uq}, when present, carries
@@ -137,19 +145,33 @@ warnings and notes, ride on the list as the attribute
 \code{"unit_records"}, for \code{fit()} to lift its horizons warnings and notes
 onto the log.
 \code{warm_start} is \code{TRUE} when \code{best_params_eval} was usable, so the
-re-tune's grid is centred on it or is the whole space when that fits
-the budget (\code{exhaustive_grid()}), \code{FALSE} when it fell back to a
+re-tune starts from it and d points drawn around it, or from
+the whole space when that fits the budget (\code{exhaustive_grid()}), \code{FALSE}
+when it fell back to a
 space-filling grid, and \code{NA} (both) when the config failed before
-tuning. \code{start_grid_size} is the starting grid's points. \code{bayes_iter}
+tuning. \code{start_grid_size} is the starting grid's points, \code{NA} with
+\code{warm_start} \code{TRUE} when the re-tune is off. \code{bayes_iter}
 and \code{bayes_stop} are the iterations the re-tune's Bayesian search began
 and why it ended (\code{"no_improve"}, \code{"budget"} or \code{"failed"}), both \code{NA}
-when no search ran.
+when no search ran. \code{retune_moved} is \code{FALSE} when the member kept
+\code{evaluate()}'s parameters, clamped into its range, \code{TRUE} when the
+re-tune chose another candidate (one past the margin, or any when
+\code{evaluate()}'s were not scored on every fold), and \code{NA} with none to
+keep (a cold start, unusable parameters, or a member that failed before
+the choice); \code{retune_gain} is the best candidate's lead over them in its
+own standard errors (\code{choose_member_params()}), for the tree, kept as
+\code{retune_moved} is by a member that fails after the choice, so its line
+does not read as a member whose parameters missed a fold.
 }
 \description{
 Inner-loop function for \code{fit()}. Takes a single config row from the
-evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization,
-generates OOF predictions, fits a final deployable model, evaluates on
-the held-out test set, and detects performance degradation.
+evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
+from evaluate()'s hyperparameters and d points drawn around them from a
+local grid (\code{build_warmstart_grid()}), for d tuned parameters,
+keeping evaluate()'s unless the best candidate beats them by the margin
+(\code{choose_member_params()}), generates OOF predictions, fits a final
+deployable model, evaluates on the held-out test set, and detects
+performance degradation.
 
 This function is the \strong{capture layer} — it runs silently and returns a
 structured list. All console output (tree rendering, progress messages) is

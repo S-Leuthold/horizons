@@ -2,9 +2,13 @@
 #'
 #' @description
 #' Inner-loop function for `fit()`. Takes a single config row from the
-#' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization,
-#' generates OOF predictions, fits a final deployable model, evaluates on
-#' the held-out test set, and detects performance degradation.
+#' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
+#' from evaluate()'s hyperparameters and d points drawn around them from a
+#' local grid (`build_warmstart_grid()`), for d tuned parameters,
+#' keeping evaluate()'s unless the best candidate beats them by the margin
+#' (`choose_member_params()`), generates OOF predictions, fits a final
+#' deployable model, evaluates on the held-out test set, and detects
+#' performance degradation.
 #'
 #' This function is the **capture layer** — it runs silently and returns a
 #' structured list. All console output (tree rendering, progress messages) is
@@ -41,12 +45,19 @@
 #'   or NULL (`fit()`'s cold start), in which case the re-tune starts from a
 #'   space-filling grid.
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning, at
-#'   least: raised as `evaluate_single_config()`'s are (`search_budget()`).
-#'   When every tuned parameter is a whole number and the space costs no
-#'   more fits than the grid and those iterations together (a submodel's
-#'   values sharing one fit), the grid is every point and no Bayesian search
-#'   runs (`exhaustive_grid()`).
-#' @param grid_size Integer. Grid size for warm-start exploration.
+#'   least: raised as `evaluate_single_config()`'s are (`search_budget()`),
+#'   counting the points the re-tune starts from. When every tuned parameter
+#'   is a whole number and the space costs no more fits than the start and
+#'   those iterations together (a submodel's values sharing one fit), the
+#'   grid is every point and no Bayesian search runs (`exhaustive_grid()`).
+#'   0 turns the re-tune off for a member with usable `best_params_eval`: it
+#'   keeps them, clamped into its range, scored by the out-of-fold pass
+#'   alone. A cold start at 0 still grids `grid_size` points.
+#' @param grid_size Integer. The space-filling grid's size on a cold start
+#'   (`best_params_eval` `NULL` or unusable). A warm start begins from
+#'   `evaluate()`'s parameters and, for d tuned parameters, d points drawn
+#'   around them from a local grid (`warm_start_size()`), whatever
+#'   `grid_size` is.
 #' @param tune_ranges Named list of `c(lower, upper)` by parameter id, in
 #'   dials' units: the ranges the re-tune searches, set before the data cap
 #'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
@@ -98,7 +109,8 @@
 #'
 #' @return List with fields: config_id, status, degraded (`NA` when the
 #'   check could not run), degraded_reason, fitted_workflow, best_params,
-#'   warm_start, start_grid_size, cv_predictions, test_metrics, cv_metrics,
+#'   warm_start, start_grid_size, bayes_iter, bayes_stop, retune_moved,
+#'   retune_gain, cv_predictions, test_metrics, cv_metrics,
 #'   uq, ad, warnings, error_message (the failed step and the cause), class
 #'   (the failure's root class), trace (the backtrace as text under
 #'   `keep_traces`, else `NULL`), runtime_secs. `uq`, when present, carries
@@ -108,13 +120,23 @@
 #'   `"unit_records"`, for `fit()` to lift its horizons warnings and notes
 #'   onto the log.
 #'   `warm_start` is `TRUE` when `best_params_eval` was usable, so the
-#'   re-tune's grid is centred on it or is the whole space when that fits
-#'   the budget (`exhaustive_grid()`), `FALSE` when it fell back to a
+#'   re-tune starts from it and d points drawn around it, or from
+#'   the whole space when that fits the budget (`exhaustive_grid()`), `FALSE`
+#'   when it fell back to a
 #'   space-filling grid, and `NA` (both) when the config failed before
-#'   tuning. `start_grid_size` is the starting grid's points. `bayes_iter`
+#'   tuning. `start_grid_size` is the starting grid's points, `NA` with
+#'   `warm_start` `TRUE` when the re-tune is off. `bayes_iter`
 #'   and `bayes_stop` are the iterations the re-tune's Bayesian search began
 #'   and why it ended (`"no_improve"`, `"budget"` or `"failed"`), both `NA`
-#'   when no search ran.
+#'   when no search ran. `retune_moved` is `FALSE` when the member kept
+#'   `evaluate()`'s parameters, clamped into its range, `TRUE` when the
+#'   re-tune chose another candidate (one past the margin, or any when
+#'   `evaluate()`'s were not scored on every fold), and `NA` with none to
+#'   keep (a cold start, unusable parameters, or a member that failed before
+#'   the choice); `retune_gain` is the best candidate's lead over them in its
+#'   own standard errors (`choose_member_params()`), for the tree, kept as
+#'   `retune_moved` is by a member that fails after the choice, so its line
+#'   does not read as a member whose parameters missed a fold.
 #'
 #' @keywords internal
 fit_single_config <- function(config_row,
@@ -200,6 +222,11 @@ fit_single_config <- function(config_row,
   ## How far the re-tune's Bayesian search went, once it has run
   bayes_iter <- NA_integer_
   bayes_stop <- NA_character_
+
+  ## Whether the re-tune's choice left evaluate()'s parameters, once it has
+  ## chosen, and by how much the best candidate led them
+  retune_moved <- NA
+  retune_gain  <- NA_real_
 
   unit <- run_unit({
 
@@ -294,71 +321,103 @@ fit_single_config <- function(config_row,
     ## -----------------------------------------------------------------------
     ## Step 4: Warm-start re-tuning
     ## -----------------------------------------------------------------------
-    ## The grid is centred on evaluate()'s parameters, or space-filling when
-    ## there are none to use; how it started is recorded before it runs, so a
-    ## re-tune that fails still says. A search space that costs no more fits
-    ## than the grid and the Bayesian search would make together (plsr's
-    ## num_comp, one fit a fold) is gridded whole, with no Bayesian stage, as
-    ## evaluate() grids it:
+    ## The search starts from evaluate()'s parameters and, for d tuned
+    ## parameters, d points drawn around them from a local grid
+    ## (build_warmstart_grid()), or from a space-filling grid of grid_size
+    ## points when there are none to use; how it started is recorded before
+    ## it runs, so a re-tune that fails still says. The budget counts that start. A search
+    ## space that costs no more fits than the start and the Bayesian search
+    ## would make together (plsr's num_comp, one fit a fold) is gridded whole,
+    ## with no Bayesian stage, as evaluate() grids it:
     ## tune's search errors inside its loop once it has no value left to
     ## propose, which would read as a failed search although every value was
-    ## tried.
+    ## tried. final_bayesian_iter = 0 turns the re-tune off for a member with
+    ## evaluate()'s parameters to keep, the whole space included, as
+    ## tune::fit_best() refits a choice; a cold start still grids.
 
-    iters           <- search_budget(final_bayesian_iter, nrow(param_set), grid_size)
-    whole_space     <- exhaustive_grid(param_set, grid_size + iters, MODEL_SPECS[[config_row$model]]$submodel)
-    search_iter     <- if (is.null(whole_space)) iters else 0L
-    initial_grid    <- unit_step("warm_start_tune", whole_space %||% with_unit_seed(
-      seed, stage("warmstart-grid"),
-      build_warmstart_grid(best_params_eval, param_set, max_points = grid_size)
-    ))
-    warm_start      <- usable_best_params(best_params_eval, param_set)
-    start_grid_size <- nrow(initial_grid)
+    warm_start <- usable_best_params(best_params_eval, param_set)
 
-    retune <- unit_step("warm_start_tune", tune_warmstart_bayes(
-      workflow      = model_wflow,
-      cv_resamples  = prepped_folds$folds,
-      initial_grid  = initial_grid,
-      param_set     = param_set,
-      bayesian_iter = search_iter,
-      no_improve    = no_improve,
-      metric_set    = tune_metrics,
-      allow_par     = allow_par,
-      debug         = debug,
-      seed          = seed,
-      config_id     = config_id
-    ))
+    if (warm_start && final_bayesian_iter == 0) {
 
-    best_params <- retune$best_params
-    bayes_iter  <- as.integer(retune$bayes_iter)
-    bayes_stop  <- retune$bayes_stop
+      ## The re-tune off: evaluate()'s parameters, clamped, scored by the
+      ## out-of-fold pass alone, with no starting grid and no search, so
+      ## start_grid_size, bayes_iter and bayes_stop stay NA. Their .config is
+      ## evaluate()'s, a record of where they came from.
+      point        <- clamp_best_params(best_params_eval, param_set)
+      best_params  <- dplyr::bind_cols(point, best_params_eval[setdiff(names(best_params_eval), names(point))])
+      retune_moved <- FALSE
 
-    ## The warnings tune kept for the chosen candidate (#109), as
-    ## evaluate_single_config() reads them: the re-tune returns the grid
-    ## tune_grid() ran, which tune numbers its notes' model stages by, and a
-    ## Bayesian result carries that grid's notes as iteration 0
-    candidate <- unit_step("select_best", candidate_of(retune$tune_results, best_params,
-                                                       retune$grid, model_wflow))
+    } else {
 
-    ## The PLS engine's cap is left off the re-tune's notes: one fit serves
-    ## every count of a grid stage, so they name the stage's largest count.
-    ## The out-of-fold fits below are at the chosen count, and their own
-    ## notes say where a fold capped it (pls_cap_records()).
-    warning_log <- dplyr::bind_rows(
-      warning_log,
-      drop_pls_caps(tune_note_records(retune$tune_results, type = "warning", scope = "cv",
-                                      candidate = candidate))
-    )
+      start           <- if (warm_start) warm_start_size(nrow(param_set)) else grid_size
+      iters           <- search_budget(final_bayesian_iter, nrow(param_set), start)
+      whole_space     <- exhaustive_grid(param_set, start + iters, MODEL_SPECS[[config_row$model]]$submodel)
+      search_iter     <- if (is.null(whole_space)) iters else 0L
+      initial_grid    <- unit_step("warm_start_tune", whole_space %||% with_unit_seed(
+        seed, stage("warmstart-grid"),
+        build_warmstart_grid(best_params_eval, param_set, max_points = start)
+      ))
+      start_grid_size <- nrow(initial_grid)
 
-    unmapped <- unmapped_line(candidate)
+      ## evaluate()'s point, clamped, is the incumbent on the search and on the
+      ## whole space alike: kept unless a candidate beats it by the margin
+      retune <- unit_step("warm_start_tune", tune_warmstart_bayes(
+        workflow      = model_wflow,
+        cv_resamples  = prepped_folds$folds,
+        initial_grid  = initial_grid,
+        param_set     = param_set,
+        incumbent     = if (warm_start) clamp_best_params(best_params_eval, param_set),
+        bayesian_iter = search_iter,
+        no_improve    = no_improve,
+        metric_set    = tune_metrics,
+        allow_par     = allow_par,
+        debug         = debug,
+        seed          = seed,
+        config_id     = config_id
+      ))
 
-    if (!is.null(unmapped)) pin(unmapped)
+      best_params  <- retune$best_params
+      bayes_iter   <- as.integer(retune$bayes_iter)
+      bayes_stop   <- retune$bayes_stop
+      retune_moved <- as.logical(retune$moved %||% NA)
+      retune_gain  <- as.numeric(retune$gain %||% NA_real_)
 
-    ## The candidates left out of the choice for a missing fold, the Bayesian
-    ## search's dropped ones among them, as evaluate()'s row says (#101)
-    left_out <- unit_step("select_best", incomplete_note(retune$tune_results, n_folds,
-                                                         nrow(retune$grid), retune$n_dropped))
+      ## The warnings tune kept for the chosen candidate (#109), as
+      ## evaluate_single_config() reads them: the re-tune returns the grid
+      ## tune_grid() ran, which tune numbers its notes' model stages by, and a
+      ## Bayesian result carries that grid's notes as iteration 0
+      candidate <- unit_step("select_best", candidate_of(retune$tune_results, best_params,
+                                                         retune$grid, model_wflow))
 
-    if (!is.null(left_out)) pin(left_out)
+      ## The PLS engine's cap is left off the re-tune's notes: one fit serves
+      ## every count of a grid stage, so they name the stage's largest count.
+      ## The out-of-fold fits below are at the chosen count, and their own
+      ## notes say where a fold capped it (pls_cap_records()).
+      warning_log <- dplyr::bind_rows(
+        warning_log,
+        drop_pls_caps(tune_note_records(retune$tune_results, type = "warning", scope = "cv",
+                                        candidate = candidate))
+      )
+
+      unmapped <- unmapped_line(candidate)
+
+      if (!is.null(unmapped)) pin(unmapped)
+
+      ## The candidates left out of the choice for a missing fold, the Bayesian
+      ## search's dropped ones among them, as evaluate()'s row says (#101)
+      left_out <- unit_step("select_best", incomplete_note(retune$tune_results, n_folds,
+                                                           nrow(retune$grid), retune$n_dropped))
+
+      if (!is.null(left_out)) pin(left_out)
+
+      ## evaluate()'s point missed a fold of fit()'s, so it took no part (#101)
+      if (isTRUE(retune_moved) && is.na(retune_gain)) {
+
+        pin("evaluate()'s hyperparameters were not scored on every fold of fit()'s, so the re-tune's best candidate was taken.")
+
+      }
+
+    }
 
     ## -----------------------------------------------------------------------
     ## Step 5: Finalize workflow and generate OOF predictions
@@ -628,6 +687,8 @@ fit_single_config <- function(config_row,
       start_grid_size  = start_grid_size,
       bayes_iter       = bayes_iter,
       bayes_stop       = bayes_stop,
+      retune_moved     = retune_moved,
+      retune_gain      = retune_gain,
       cv_predictions   = cv_predictions,
       test_metrics     = test_metrics,
       cv_metrics       = cv_metrics,
@@ -666,6 +727,8 @@ fit_single_config <- function(config_row,
       start_grid_size  = start_grid_size,
       bayes_iter       = bayes_iter,
       bayes_stop       = bayes_stop,
+      retune_moved     = retune_moved,
+      retune_gain      = retune_gain,
       cv_predictions   = NULL,
       test_metrics     = NULL,
       cv_metrics       = NULL,

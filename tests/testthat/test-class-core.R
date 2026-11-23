@@ -2216,6 +2216,7 @@ test_that("validate_horizons_fit refuses a results column of the wrong type, nam
   obj$models$results$degraded        <- c(FALSE, NA_integer_)
   obj$models$results$start_grid_size <- c(9, NA_real_)
   obj$models$results$config_id       <- c(1, 2)
+  obj$models$results$retune_moved    <- c("FALSE", NA)
 
   for (col in c("cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")) {
     obj$models$results[[col]] <- c(1L, NA_integer_)
@@ -2228,6 +2229,7 @@ test_that("validate_horizons_fit refuses a results column of the wrong type, nam
   expect_match(msg, "degraded is integer, not logical", fixed = TRUE)
   expect_match(msg, "start_grid_size is double, not integer", fixed = TRUE)
   expect_match(msg, "config_id is double, not character", fixed = TRUE)
+  expect_match(msg, "retune_moved is character, not logical", fixed = TRUE)
 
   for (col in c("cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")) {
     expect_match(msg, paste0(col, " is integer, not double"), fixed = TRUE, info = col)
@@ -2237,6 +2239,7 @@ test_that("validate_horizons_fit refuses a results column of the wrong type, nam
   obj$models$results$degraded        <- c(FALSE, NA)
   obj$models$results$start_grid_size <- c(9L, NA_integer_)
   obj$models$results$config_id       <- c("cfg_a", "cfg_b")
+  obj$models$results$retune_moved    <- c(FALSE, NA)
 
   for (col in c("cv_rmse_mean", "cv_rmse_se", "cv_rpd_mean", "cv_rpd_se")) {
     obj$models$results[[col]] <- c(1.1, NA_real_)
