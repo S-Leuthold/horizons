@@ -1687,11 +1687,14 @@ start_inner_daemons <- function(n, models, selections, seconds = INNER_START_SEC
 
   }
 
-  mirai::everywhere({
+  ### everywhere() takes the call from a symbol bound to it, as mirai() does
+  setup <- quote({
     pin()
     prepare(models, selections)
-  }, .args = list(pin = pin_blas_threads, prepare = prepare_worker, models = models, selections = selections),
-  .compute = NULL)[]
+  })
+  mirai::everywhere(setup, .args = list(pin = pin_blas_threads, prepare = prepare_worker,
+                                        models = models, selections = selections),
+                    .compute = NULL)[]
 
   TRUE
 

@@ -1992,9 +1992,12 @@ describe("evaluate() - inner daemons", {
     split   <- with_deadline(evaluate_config_worker(1L, path, inner = 2L), 120)
     unsplit <- with_deadline(evaluate_config_worker(1L, path, inner = 1L), 120)
 
-    ## Three folds a call, the grid's at least
+    ## Three folds a call, the grid's at least, and only its folds: tune
+    ## sends a call's folds together, so the count is a multiple of three,
+    ## which the inner daemons' two set-up tasks would not leave it
     expect_true(attr(split, "inner_daemons")$started)
     expect_gte(attr(split, "inner_daemons")$completed, 3L)
+    expect_identical(attr(split, "inner_daemons")$completed %% 3L, 0L)
     expect_identical(attr(unsplit, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
     expect_false(mirai::daemons_set())
 
