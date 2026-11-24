@@ -568,6 +568,29 @@ describe("split_need()", {
 
   })
 
+  it("counts what a split configuration's own daemon held while its folds ran elsewhere, as measured", {
+
+    ## The queue line alone: one configuration on 2, no process of the
+    ## daemon's own counted
+    queue_at <- function(n_train, kept, folds) {
+      split_need(2L, 1L, 2L, c(daemon = 0L, isolated = 0L), n_rows = n_train, n_predictors = kept,
+                 n_train = n_train, kept = kept, folds = folds)
+    }
+    mib <- 2^20
+
+    ## At a known frame: 10 folds of 1,000 rows by 100 predictors, 8 MB of
+    ## frames in all, a fixed 0.5 GB and 2 a byte
+    expect_equal(queue_at(1000, 100, 10L), 0.5e9 + 2 * 8e6)
+
+    ## Above what was measured: local-real at seed 307 (835 training rows,
+    ## about 242 predictors kept a fold, 10 folds), where a split daemon held
+    ## up to 478 MiB; and the largest with a model that fits nothing, 1,937
+    ## MiB on 8,272 rows of 1,701 predictors at 10 folds
+    expect_gte(queue_at(835, 242.5, 10L), 478 * mib)
+    expect_gte(queue_at(8272, 1701, 10L), 1937 * mib)
+
+  })
+
 })
 
 describe("check_split_memory()", {

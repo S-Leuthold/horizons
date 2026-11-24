@@ -487,21 +487,31 @@ FOLD_PREP_ARG_NAMES <- c(
 #   1.25 GB on a 7,444-row fold after correlation selection (about 360
 #   predictors).
 # - What a daemon whose configuration runs its folds on inner daemons holds
-#   while tune's fold tasks wait for them (split_need()), per byte of the
-#   configuration's fold frames (the training rows by the predictors it
-#   keeps, one frame a fold): tune sends a call's folds out at once, and the
-#   daemon keeps each one's message until an inner daemon takes it. Measured
-#   at 1.2 to 1.8 times the folds' frames on 8,272 rows by 360 and 1,701
-#   predictors, at 5 and 10 folds and 2 to 10 inner daemons, and rounded up.
+#   above its size at the configuration's start while they run
+#   (split_need()): a fixed part, and a part per byte of the configuration's
+#   fold frames (the training rows by the predictors it keeps, one frame a
+#   fold), since tune sends a call's folds out at once and the daemon keeps
+#   each one's message until an inner daemon takes it. The per-byte part is
+#   2, above the 1.2 to 1.8 times the folds' frames measured with a model
+#   that fits nothing on 8,272 rows by 360 and 1,701 predictors, at 5 and 10
+#   folds and 2 to 10 inner daemons (up to 1,937 MiB, at 1,701 predictors,
+#   10 folds and 2 inner daemons). At small frames the fixed part dominates:
+#   on local-real at seed 307 (835 training rows, a correlation selection
+#   keeping about 242 predictors a fold, 10 folds, 16 MB of folds' frames)
+#   the split daemons held up to 478 MiB (cubist on 2 inner daemons; 317
+#   MiB xgboost on 5, 91 and 7 MiB svm_rbf and elastic net on 2), so the
+#   fixed part is that, less the per-byte part, rounded up to 0.05 GB.
 #   The inner daemons themselves are counted at the daemon's line, which is
-#   above what one holds (one fold's frame, not the run's data).
+#   above what one holds (one fold's frame, not the run's data): on that
+#   run they peaked at 0.38 to 0.71 GB against its 1.62 GB, which the
+#   release benchmark recalibrates at library scale.
 #
 # A run of other models, selections or committees can need more or less, so
 # the warning calls the estimate approximate.
 DAEMON_MEMORY <- list(
   daemon   = c(base = 1.45e9, per_byte = 12),
   isolated = c(base = 0.6e9, per_byte = 5),
-  queue    = c(base = 0, per_byte = 2)
+  queue    = c(base = 0.5e9, per_byte = 2)
 )
 
 # How the message starts when a process horizons started for one call

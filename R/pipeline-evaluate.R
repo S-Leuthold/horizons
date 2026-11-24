@@ -319,7 +319,7 @@
 #' memory cap is the machine's, not the cap's. Daemons on another machine
 #' are not checked. When a configuration is to run on inner daemons, they
 #' are counted too, each as a daemon of the run, with what its
-#' configuration's daemon holds while tune's fold tasks wait for them; when
+#' configuration's daemon holds while they run its folds; when
 #' they would not fit beside the daemons, no configuration is split, and a
 #' note on the `log` gives the figures.
 #'

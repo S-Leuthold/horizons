@@ -670,9 +670,9 @@ config_kept <- function(configs, role_map, record = NULL) {
 #' order, each while its daemons fit in `n` beside those taken, as the
 #' window takes them. For each, its inner daemons, each counted as a daemon
 #' of the run with its isolated fit's process ([daemon_processes()]), and
-#' what its own daemon holds while tune's fold tasks wait for them: the
-#' `queue` line of `DAEMON_MEMORY` per byte of its folds' frames, `folds`
-#' frames of the training rows by the predictors it keeps.
+#' what its own daemon holds while they run its folds: the `queue` line of
+#' `DAEMON_MEMORY`, a fixed part and a part per byte of its folds' frames,
+#' `folds` frames of the training rows by the predictors it keeps.
 #'
 #' @param inner Integer: each configuration's daemons ([split_plan()]).
 #' @param order Integer: the configurations' start order ([dispatch_order()]).
