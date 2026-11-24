@@ -773,6 +773,11 @@ average <- function(x,
 #'     against the others QC could correlate, from the first round, before
 #'     any removal; a tie goes to the earlier replicate. `integer(0)` when
 #'     fewer than two could be correlated
+#'   * `mean_cors`: Numeric, one per replicate (in original indexing): its
+#'     mean correlation with the other active replicates in the last round
+#'     it took part in, so for a removed one the round that removed it. `NA`
+#'     for one QC could not correlate, for one whose partners had all been
+#'     removed, and for every one when no round ran
 #'
 #' @noRd
 compute_replicate_quality <- function(predictor_matrix, threshold) {
@@ -787,7 +792,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
       uncorrelatable = integer(0),
       outliers       = integer(0),
       all_fail       = FALSE,
-      best           = integer(0)
+      best           = integer(0),
+      mean_cors      = rep(NA_real_, n)
     ))
 
   }
@@ -817,6 +823,7 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
   active_idx <- which(correlate)
   outliers   <- integer(0)
   best       <- integer(0)
+  mean_cors  <- rep(NA_real_, n)
 
   ## Fewer than two left to correlate: no QC possible ------------------------
 
@@ -826,7 +833,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
       uncorrelatable = uncorrelatable,
       outliers       = integer(0),
       all_fail       = FALSE,
-      best           = integer(0)
+      best           = integer(0),
+      mean_cors      = mean_cors
     ))
 
   }
@@ -856,6 +864,12 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 
     diag(cor_matrix) <- NA
     mean_cors_active <- rowMeans(cor_matrix, na.rm = TRUE)
+
+    ### Each active replicate's value this round, kept as its last; one with
+    ### no correlation left has none
+    mean_cors[active_idx] <- mean_cors_active
+    mean_cors[active_idx][is.nan(mean_cors_active)] <- NA_real_
+
     mean_cors_active[is.nan(mean_cors_active)] <- -Inf
 
     ## The first round compares every replicate QC could correlate with all
@@ -895,7 +909,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
     uncorrelatable = uncorrelatable,
     outliers       = as.integer(outliers),
     all_fail       = all_fail,
-    best           = as.integer(best)
+    best           = as.integer(best),
+    mean_cors      = mean_cors
   )
 
 }

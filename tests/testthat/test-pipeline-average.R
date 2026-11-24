@@ -1196,6 +1196,82 @@ test_that("compute_replicate_quality() returns empty for n=1", {
 
   expect_length(qc$outliers, 0)
   expect_false(qc$all_fail)
+  expect_identical(qc$mean_cors, NA_real_)
+
+})
+
+## Each replicate's mean correlation with the others, by hand
+mean_cor_by_hand <- function(spectra) {
+
+  cm <- stats::cor(t(spectra), use = "pairwise.complete.obs")
+  diag(cm) <- NA
+  unname(rowMeans(cm, na.rm = TRUE))
+
+}
+
+test_that("compute_replicate_quality() keeps each replicate's mean correlation from the last round it took part in", {
+
+  ## Three scans that agree and one inverted: the inverted one is removed in
+  ## the first round, and the three pass in the second
+  set.seed(123)
+  base <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+  good <- rbind(base + rnorm(10, 0, 0.001), base + rnorm(10, 0, 0.001), base + rnorm(10, 0, 0.001))
+  all  <- rbind(good, rev(base) + rnorm(10, 0, 0.001))
+
+  qc <- horizons:::compute_replicate_quality(all, threshold = 0.99)
+
+  expect_identical(qc$outliers, 4L)
+  expect_equal(qc$mean_cors[4], mean_cor_by_hand(all)[4])
+  expect_equal(qc$mean_cors[1:3], mean_cor_by_hand(good))
+
+})
+
+test_that("compute_replicate_quality() keeps a removed replicate's mean correlation from the round that removed it", {
+
+  ## A and B correlate well, C with A alone: their first round's means are
+  ## 0.713, 0.661 and 0.387. At the default threshold every round fails: C
+  ## goes first, then A (the pair ties, and the earlier goes), leaving B
+  p <- 50
+  set.seed(1)
+  z1 <- rnorm(p); z2 <- rnorm(p); z3 <- rnorm(p)
+  A  <- z1 + 0.10 * z2
+  B  <- z1 + 0.10 * z3
+  C  <- z1 * 0.4 + 0.9 * (0.9 * z2 + 0.1 * rnorm(p))
+  scans <- rbind(A, B, C)
+
+  qc <- horizons:::compute_replicate_quality(scans, threshold = 0.996)
+
+  expect_identical(qc$outliers, c(3L, 1L))
+  expect_true(qc$all_fail)
+
+  ### C's from the first round; A's, and B's as the last left, from the pair's
+  first <- mean_cor_by_hand(scans)
+  pair  <- stats::cor(A, B)
+  expect_equal(qc$mean_cors, c(pair, pair, first[3]))
+  expect_false(isTRUE(all.equal(qc$mean_cors[1], first[1])))
+
+})
+
+test_that("compute_replicate_quality() gives no mean correlation to a replicate it cannot correlate", {
+
+  ## Replicate 3 shares no band with the other two
+  set.seed(625)
+  base <- c(1, 3, 2, 5, 4, 6, 8, 7, 10, 9)
+  spectra <- rbind(base + stats::rnorm(10, 0, 0.01),
+                   base + stats::rnorm(10, 0, 0.01),
+                   base + stats::rnorm(10, 0, 0.01))
+  spectra[1:2, 7:10] <- NA
+  spectra[3, 1:6]    <- NA
+
+  qc <- horizons:::compute_replicate_quality(spectra, threshold = 0.9)
+
+  expect_identical(qc$uncorrelatable, 3L)
+  expect_true(is.na(qc$mean_cors[3]))
+  expect_equal(qc$mean_cors[1:2], rep(stats::cor(spectra[1, 1:6], spectra[2, 1:6]), 2))
+
+  ## And none to any when fewer than two can be correlated
+  qc <- horizons:::compute_replicate_quality(spectra[c(1, 3), ], threshold = 0.9)
+  expect_identical(qc$mean_cors, c(NA_real_, NA_real_))
 
 })
 
