@@ -1,14 +1,12 @@
 #' Fit Top Model Configurations
 #'
 #' @description
-#' Re-tunes the top N configurations from `evaluate()` with warm-start
-#' Bayesian optimization, keeping each one's hyperparameters from
-#' `evaluate()` unless the re-tune's best candidate is better by more than its
-#' standard error (see "The re-tune"), generates out-of-fold (OOF) CV
-#' predictions for
-#' downstream stacking, fits final deployable models, scores them on
-#' `evaluate()`'s held-out test rows, and optionally trains uncertainty
-#' quantification (UQ) components.
+#' Takes the top N configurations from `evaluate()` at the hyperparameters
+#' `evaluate()` chose for them, which by default it keeps (an optional
+#' warm-start Bayesian re-tune can replace them; see "The re-tune"),
+#' generates out-of-fold (OOF) CV predictions for downstream stacking, fits
+#' final deployable models, scores them on `evaluate()`'s held-out test rows,
+#' and optionally trains uncertainty quantification (UQ) components.
 #'
 #' This is the render layer — it owns all console output. The capture layer
 #' (`fit_single_config()`) runs silently and returns structured results.
@@ -67,38 +65,48 @@
 #' `models$results` keeps each member's `error_message` when some succeed.
 #'
 #' @section The re-tune:
-#' Each member's re-tune starts from `evaluate()`'s hyperparameters, clamped
-#' into the range `fit()`'s data allow (a `num_comp` above the cap of fewer
-#' rows, say), and, for a model tuning d parameters, d points drawn at random
-#' from a local grid around them, each parameter's value and its nearby
-#' values crossed. It then runs a Bayesian search with a budget of at least
-#' `final_bayesian_iter` iterations ([configure()]), raised so that the start
-#' and the search try ten points a tuned parameter, which stops once
+#' By default `fit()` does not re-tune: [configure()]'s `final_bayesian_iter`
+#' defaults to 0, so each member keeps `evaluate()`'s hyperparameters,
+#' clamped into the range `fit()`'s data allow (a `num_comp` above the cap of
+#' fewer rows, say), and is scored by its out-of-fold predictions alone, as
+#' `tune::fit_best()` refits a choice. A member whose parameters are unusable
+#' is tuned instead on a space-filling grid of `grid_size` points, followed by
+#' `final_bayesian_iter` Bayesian iterations when it is above 0. On a
+#' library-scale and a local benchmark the re-tune never moved a member past
+#' its margin (below): every member kept `evaluate()`'s hyperparameters, the
+#' best candidate leading them by at most 0.2 of its standard errors, while
+#' the re-tune took most of `fit()`'s run time.
+#' `configure(final_bayesian_iter = )` above 0 turns it on; the tree's header
+#' says whether it ran. `evaluate()` chose the hyperparameters on its training
+#' rows, which hold `fit()`'s and, with UQ or AD on, the calibration rows, so
+#' a member that keeps them is fitted at hyperparameters the calibration rows
+#' took part in choosing, as they took part in choosing the members (#44).
+#'
+#' With the re-tune on, each member's re-tune starts from `evaluate()`'s
+#' hyperparameters, clamped, and, for a model tuning d parameters, d points
+#' drawn at random from a local grid around them, each parameter's value and
+#' its nearby values crossed. It then runs a Bayesian search with a budget of
+#' at least `final_bayesian_iter` iterations, raised so that the start and
+#' the search try ten points a tuned parameter, which stops once
 #' `control_horizons(no_improve = )` iterations in a row have not improved on
-#' its best. A space small enough is gridded whole
-#' instead (see "Cold start from one configuration"). The member then keeps
-#' `evaluate()`'s hyperparameters unless the best candidate scored on every
-#' fold has a CV RMSE lower than theirs by more than that candidate's
-#' standard error: `tune::select_by_one_std_err()`'s bound, with
-#' `evaluate()`'s choice in the place of the simplest model. That choice was
-#' made on `evaluate()`'s folds and is scored once on `fit()`'s, a fresh
-#' draw, while the best candidate is the best of many tried on `fit()`'s
-#' folds, so it beats the choice by the selection alone even where nothing
-#' is better. The draw is fresh but the rows are not: `evaluate()` chose on
-#' its training rows, which hold `fit()`'s and, with UQ or AD on, the
-#' calibration rows, so a member that keeps the choice is fitted at
-#' hyperparameters the calibration rows took part in choosing, as they took
-#' part in choosing the members (#44).
+#' its best. A space small enough is gridded whole instead (see "Cold start
+#' from one configuration"). The member then keeps `evaluate()`'s
+#' hyperparameters unless the best candidate scored on every fold has a CV
+#' RMSE lower than theirs by more than that candidate's standard error:
+#' `tune::select_by_one_std_err()`'s bound, with `evaluate()`'s choice in the
+#' place of the simplest model. That choice was made on `evaluate()`'s folds
+#' and is scored once on `fit()`'s, a fresh draw, while the best candidate is
+#' the best of many tried on `fit()`'s folds, so it beats the choice by the
+#' selection alone even where nothing is better.
 #' Hyperparameters of `evaluate()`'s that were not scored on every fold take
 #' no part, and the best candidate is taken, which the member's `warnings`
 #' say. The member's out-of-fold predictions are made at the hyperparameters
 #' it keeps, and `models$results$retune_moved` records which it kept:
-#' `FALSE` for `evaluate()`'s, `TRUE` for another candidate, `NA` with none
-#' to keep (a cold start, or parameters that were unusable). The tree says
-#' per member which, and by how many of the best candidate's standard errors
-#' it led. `final_bayesian_iter = 0` turns the re-tune off: each member
-#' keeps `evaluate()`'s hyperparameters, clamped, scored by its out-of-fold
-#' predictions alone, as `tune::fit_best()` refits a choice.
+#' `FALSE` for `evaluate()`'s (with the re-tune off, every member whose
+#' parameters were usable), `TRUE` for another candidate, `NA` with none to
+#' keep (a cold start, or parameters that were unusable). The tree says per
+#' member which, and by how many of the best candidate's standard errors it
+#' led.
 #'
 #' @section What fit() reports:
 #' `fit()` warns once per kind at its end, after writing each warning to the
@@ -129,9 +137,12 @@
 #' (`control_horizons(no_improve = )`: a search stops once that many
 #' iterations in a row have not improved on its best, and `FALSE` runs every
 #' iteration), each member recording the iterations its search began
-#' (`bayes_iter`) and why it ended (`bayes_stop`); and how many members kept
-#' `evaluate()`'s hyperparameters, or, with `final_bayesian_iter = 0`, that
-#' the re-tune was off (see "The re-tune"). The folds are
+#' (`bayes_iter`) and why it ended (`bayes_stop`); how many members kept
+#' `evaluate()`'s hyperparameters, or that the re-tune was off, as it is by
+#' default (see "The re-tune"); and, on a cold start, what its Bayesian
+#' search ran (see "Cold start from one configuration"), warning with class
+#' `horizons_warning_input` when a `final_bayesian_iter` above 0, which a
+#' cold start does not read, was set. The folds are
 #' drawn from the rows the members are fitted on, which must outnumber the
 #' folds, or `fit()` refuses, as `evaluate()` does.
 #'
@@ -172,16 +183,25 @@
 #' itself, by the draw `evaluate()` uses, so at the same `seed` it holds out
 #' exactly the rows `evaluate()` would have, and applies a response trim
 #' `validate()` requested as `evaluate()` does, on fences from the training
-#' partition alone. With no parameters from
-#' `evaluate()` to warm-start from, the re-tune starts from a space-filling
-#' grid of `grid_size` points; the console tree says so, and
-#' `models$results$warm_start` is `FALSE`. On either path, a search space
+#' partition alone. With no parameters from `evaluate()` to keep, `fit()`
+#' tunes the configuration as `evaluate()` would, since this is its only
+#' tuning: a space-filling grid of `grid_size` points, then a Bayesian search
+#' of `bayesian_iter` iterations ([configure()]), raised to ten points a
+#' tuned parameter and stopped by `control_horizons(no_improve = )` as in
+#' `evaluate()`, keeping the candidate with the lowest CV RMSE. At
+#' `bayesian_iter = 0` it grids only, as `evaluate()` does. A cold start does
+#' not read `final_bayesian_iter`, the budget of the re-tune of `evaluate()`'s
+#' members: one above 0 is ignored, with a warning of class
+#' `horizons_warning_input`. The console tree's header and a note on the log
+#' say what the search ran, and `models$results$warm_start` is `FALSE`. On
+#' either path, a search space
 #' whose tuned parameters are all whole numbers, costing no more fits than
 #' the grid and the Bayesian iterations together, is gridded whole with no
 #' Bayesian search, as `evaluate()` grids it: a submodel's values share one
 #' fit, so that is every plsr member, each `num_comp` up to its cap tried
-#' from one fit a fold. On the `evaluate()` path that holds unless
-#' `final_bayesian_iter` is 0, which turns the re-tune off. The degradation
+#' from one fit a fold. On the `evaluate()` path that holds only with the
+#' re-tune on; off, as it is by default, each member keeps `evaluate()`'s
+#' hyperparameters (see "The re-tune"). The degradation
 #' check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
@@ -201,7 +221,7 @@
 #' @param x A `horizons_eval` object (output of `evaluate()`), or a
 #'   configured `horizons_data` with exactly one configuration, which `fit()`
 #'   starts cold (see "Cold start from one configuration").
-#' @param n_best Integer. Number of top configurations to re-tune. Default 5.
+#' @param n_best Integer. Number of top configurations to fit. Default 5.
 #'   A cold start has one.
 #' @param metric Character or NULL. Metric for ranking the candidate
 #'   configs, by bare name: one of `"rpd"`, `"rsq"`, `"rmse"`, `"rrmse"`,
@@ -252,8 +272,8 @@
 #' warning a row of the object's `log` and "no dispatcher" on the progress
 #' tree's parallel line. A pool left with no daemon while they run stops the
 #' call with `horizons_error_no_daemons`, every member still to fit. Then
-#' tune runs the CV folds inside each member's re-tune and OOF pass on the
-#' [mirai](https://mirai.r-lib.org) daemons the caller has set
+#' tune runs the CV folds inside each member's re-tune, when it runs, and its
+#' OOF pass on the [mirai](https://mirai.r-lib.org) daemons the caller has set
 #' (`mirai::daemons(4)` before the call); a
 #' `future::plan()` is not used, and `fit()` never sets, resizes or resets
 #' the daemons. With fewer than two connected, `fit()` runs sequentially and
@@ -586,9 +606,29 @@ fit <- function(x,
 
   ## configure() stores the screening and the final re-tune budgets
   ## separately; fit() used to pass the screening one to the re-tune, so the
-  ## user-facing `final_bayesian_iter` did nothing (#46). The tree header
-  ## prints this budget, the one that runs.
+  ## user-facing `final_bayesian_iter` did nothing (#46). It is the budget of
+  ## the re-tune of evaluate()'s members. A cold start's tuning is the only
+  ## tuning its configuration gets and stands in for evaluate()'s (#45), so it
+  ## runs evaluate()'s budget, bayesian_iter, and does not read
+  ## final_bayesian_iter, which it says when one above 0 was set. The tree
+  ## header prints the budget that runs.
   final_bayesian_iter <- tuning$final_bayesian_iter
+  tune_iter           <- if (cold_start) tuning$bayesian_iter else final_bayesian_iter
+
+  if (cold_start && final_bayesian_iter > 0) {
+
+    log_warning(collector, "input",
+      "{.arg final_bayesian_iter} is ignored on a cold start, which tunes its one configuration as {.fn evaluate} would, by {.arg bayesian_iter} ({tune_iter}); {.arg final_bayesian_iter} sets the re-tune of {.fn evaluate}'s members only."
+    )
+
+  }
+
+  ## What a cold start's Bayesian search runs, for the log's note and the
+  ## tree's header
+  cold_text <- if (cold_start) {
+    words <- search_words(member_configs$model, tune_iter, tuning, warm = FALSE)
+    cold_tuning_text(tune_iter, words$raised, words$searched, words$whole)
+  }
 
   ## The recipe settings evaluate() ran with, or on a cold start the ones
   ## cold_start_evaluation() checked against the spectrum.
@@ -799,7 +839,7 @@ fit <- function(x,
     } else {
 
       cat(paste0(
-        "\u2502  Re-tuning top ", n_best, " of ",
+        "\u2502  Fitting top ", n_best, " of ",
         nrow(eval_results), " configurations\n"
       ))
 
@@ -894,23 +934,11 @@ fit <- function(x,
 
     ## A model gridded whole runs no search, so the header names it rather
     ## than giving it a search's words or budget
-    whole    <- whole_space_models(member_configs$model, final_bayesian_iter, tuning$grid_size, tuning$ranges,
-                                   warm = !cold_start)
-    searched <- setdiff(unique(member_configs$model), whole)
-    raised   <- raised_budgets(searched, final_bayesian_iter, tuning$grid_size, warm = !cold_start)
-
     cat(paste0("\u2502  ", if (cold_start) {
-      paste0("Bayesian: ", paste(c(
-        if (length(searched) > 0) {
-          paste0(final_bayesian_iter, " iterations from a space-filling grid",
-                 if (!is.null(raised)) paste0(" (", raised, ")"))
-        } else {
-          "none"
-        },
-        gridded_whole_text(whole)
-      ), collapse = "; "))
+      paste0("Bayesian: ", cold_text)
     } else {
-      retune_header_line(final_bayesian_iter, raised, searched, whole)
+      words <- search_words(member_configs$model, final_bayesian_iter, tuning, warm = TRUE)
+      retune_header_line(final_bayesian_iter, words$raised, words$searched, words$whole)
     }, "\n"))
 
     ## A parallel fit runs the members' folds on the daemons
@@ -1022,7 +1050,7 @@ fit <- function(x,
       train_data          = train_Fit,
       role_map            = role_map,
       best_params_eval    = best_params_eval,
-      final_bayesian_iter = final_bayesian_iter,
+      final_bayesian_iter = tune_iter,
       grid_size           = tuning$grid_size,
       tune_ranges         = tuning$ranges,
       no_improve          = control$no_improve,
@@ -1342,9 +1370,18 @@ fit <- function(x,
   ## How many of the re-tunes' Bayesian searches the stopping rule ended: a
   ## note on the log, and a line in the summary below
   stop_line <- early_stop_line(results_tibble$bayes_stop, control$no_improve,
-                               "The re-tune's Bayesian search", "member")
+                               if (cold_start) "The cold start's Bayesian search" else "The re-tune's Bayesian search",
+                               "member")
 
   if (!is.null(stop_line)) log_note(collector, "{stop_line}")
+
+  ## A cold start's Bayesian search, by bayesian_iter, as the header says it
+  if (cold_start) {
+
+    cold_line <- paste0("The cold start's Bayesian search, as evaluate()'s: ", cold_text, ".")
+    log_note(collector, "{cold_line}")
+
+  }
 
   ## How many members kept evaluate()'s parameters: a note, and a line below.
   ## With the re-tune off every member with them keeps them, which one note
@@ -1579,12 +1616,74 @@ gridded_whole_text <- function(whole) {
 
 #' What fit() says when its re-tune is off
 #'
+#' Off is the default, which the words say, so a run left at the defaults
+#' does not read as one set up to skip the re-tune.
+#'
 #' @return Character(1): the words the tree's header and the log's note share.
 #' @keywords internal
 #' @noRd
 retune_off_text <- function() {
 
-  "off (`final_bayesian_iter = 0`), so each member keeps evaluate()'s hyperparameters; `configure(final_bayesian_iter = )` above 0 turns it on"
+  setting <- paste0("(`final_bayesian_iter = 0`", if (DEFAULT_FINAL_BAYES_ITER == 0L) ", the default", ")")
+
+  paste0("off ", setting, ", so each member keeps evaluate()'s hyperparameters; ",
+         "`configure(final_bayesian_iter = )` above 0 turns it on")
+
+}
+
+#' The members' models gridded whole, those that search, and their raised budgets
+#'
+#' What the tree's header and a cold start's note say of the search: a model
+#' gridded whole runs none ([whole_space_models()]), and the budgets of those
+#' that search are raised to ten points a tuned parameter
+#' ([raised_budgets()]).
+#'
+#' @param models Character: the members' models.
+#' @param iter Integer: the budget the members' tuning runs.
+#' @param tuning List: `config$tuning`.
+#' @param warm Logical(1): whether the searches start from `evaluate()`'s
+#'   point and its neighbours (the re-tune), not from the grid.
+#' @return List: `whole` and `searched` (character), `raised` (character(1)
+#'   or `NULL`).
+#' @keywords internal
+#' @noRd
+search_words <- function(models, iter, tuning, warm) {
+
+  whole    <- whole_space_models(models, iter, tuning$grid_size, tuning$ranges, warm = warm)
+  searched <- setdiff(unique(models), whole)
+
+  list(whole = whole, searched = searched,
+       raised = raised_budgets(searched, iter, tuning$grid_size, warm = warm))
+
+}
+
+#' What fit() says of a cold start's Bayesian search
+#'
+#' A cold start tunes its one configuration as `evaluate()` would, by
+#' `bayesian_iter`, so its words name that budget; a model gridded whole
+#' runs no search ([whole_space_models()]).
+#'
+#' @param iter Integer. `bayesian_iter`.
+#' @param raised Character(1) or `NULL`: [raised_budgets()]'s words.
+#' @param searched,whole Character: the member's model when it searches, or
+#'   when it is gridded whole.
+#' @return Character(1): the words the tree's header (after "Bayesian: ") and
+#'   the log's note share.
+#' @keywords internal
+#' @noRd
+cold_tuning_text <- function(iter, raised, searched, whole) {
+
+  search <- if (length(searched) == 0) {
+    "none"
+  } else if (iter > 0) {
+    paste0(iter, " iterations (`bayesian_iter`) from a space-filling grid",
+           if (!is.null(raised)) paste0(" (", raised, ")"))
+  } else {
+    paste0("none (`bayesian_iter = 0`), so the member keeps the grid's best; ",
+           "`configure(bayesian_iter = )` above 0 searches from the grid")
+  }
+
+  paste(c(search, gridded_whole_text(whole)), collapse = "; ")
 
 }
 

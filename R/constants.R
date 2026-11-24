@@ -329,7 +329,11 @@ SELECTION_MIN_BANDS <- c(step_select_cars        = 2L,
 
 ## fit() Parameters ------------------------------------------------------------
 
-DEFAULT_FINAL_BAYES_ITER <- 25L
+### configure()'s default for final_bayesian_iter: fit()'s re-tune is off, so
+### each member keeps evaluate()'s hyperparameters. On the library-scale and
+### local benchmarks the re-tune never moved a member past its margin
+### (RETUNE_MARGIN_SE) and was most of fit()'s run time.
+DEFAULT_FINAL_BAYES_ITER <- 0L
 N_CALIB_MIN              <- 30L
 DEFAULT_UQ_LEVEL         <- 0.90
 UQ_QUANTILE_TREES        <- 500L

@@ -122,8 +122,9 @@
 #'
 #' **Tuning ranges:**
 #'
-#' `evaluate()` and `fit()` search each tuned parameter over a range: its
-#' engine's, or horizons' where it sets one, or one given in `tune_ranges`.
+#' `evaluate()` and `fit()`'s re-tune search each tuned parameter over a
+#' range: its engine's, or horizons' where it sets one, or one given in
+#' `tune_ranges`.
 #' horizons sets two: Cubist's `committees` 1 to 25, since a fit's time grows
 #' linearly with its committees and more of them seldom lowered the
 #' cross-validated error by much, and plsr's `num_comp` 1 to 30. A range is
@@ -155,9 +156,10 @@
 #' the engines of the models they fit). An engine's own limits are not
 #' checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
 #' range past them fails those candidates' fits, which the row reports. The
-#' ranges are recorded as `config$tuning$ranges`, so `fit()` re-tunes over
-#' the space `evaluate()` searched, and a checkpoint tuned over other ranges
-#' is not resumed. `ensemble()`'s meta-learners keep their own grids.
+#' ranges are recorded as `config$tuning$ranges`, so `fit()`'s re-tune, when
+#' it runs, searches the space `evaluate()` searched, and a checkpoint tuned
+#' over other ranges is not resumed. `ensemble()`'s meta-learners keep their
+#' own grids.
 #'
 #' **Outcome range:**
 #'
@@ -210,13 +212,16 @@
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
 #'   Default 10. Minimum 1, and at least 2 when `bayesian_iter` or
 #'   `final_bayesian_iter` is above 0, since `evaluate()`'s Bayesian search
-#'   starts from the grid, and so does `fit()`'s re-tune on a cold start.
-#'   `fit()`'s re-tune of `evaluate()`'s members starts instead from each
-#'   member's hyperparameters and, for d tuned parameters, d points drawn
-#'   around them.
-#' @param bayesian_iter `integer`. Bayesian optimization iterations, at
-#'   least: a model tuning more parameters runs more, so that its grid and its
-#'   search together try at least ten points a tuned parameter (`10 * d -
+#'   starts from the grid, as do `fit()`'s on a cold start and its re-tune of
+#'   a member whose hyperparameters from `evaluate()` are unusable. `fit()`'s
+#'   re-tune of `evaluate()`'s members starts instead from each member's
+#'   hyperparameters and, for d tuned parameters, d points drawn around
+#'   them.
+#' @param bayesian_iter `integer`. Bayesian optimization iterations of
+#'   `evaluate()`'s search, and of `fit()`'s on a cold start, which tunes its
+#'   one configuration as `evaluate()` would (see [fit()]), at least: a model
+#'   tuning more parameters runs more, so that its grid and its search
+#'   together try at least ten points a tuned parameter (`10 * d -
 #'   grid_size` iterations for `d` parameters, when that is more). At the
 #'   defaults that is 15 for rf, elastic_net and svm_rbf, 20 for cubist and
 #'   mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
@@ -226,20 +231,23 @@
 #'   share one fit, so plsr's components are gridded whole, every count
 #'   scored from one fit a fold, and at the defaults so is mars's space, two
 #'   fits a fold. Default 15. Minimum 0: 0 turns the search off for every
-#'   model.
+#'   model, and a cold start then keeps the best of its grid.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
-#'   `fit()`'s re-tune of each member, at least, raised as `bayesian_iter`
-#'   is, counting the points the re-tune starts from. From `evaluate()`'s
-#'   hyperparameters and d points drawn around them, for d tuned parameters,
-#'   that is 25 up to two tuned parameters, 26 for cubist and mlp, 35 for
-#'   lightgbm and 53 for xgboost; on a cold start, from the grid, 25 up to
-#'   three tuned parameters at the defaults, 30 for lightgbm and 50 for
-#'   xgboost. Each re-tune stops
-#'   once `control_horizons(no_improve = )` iterations in a row have not
-#'   improved on its best. Default 25. Minimum 0: 0 turns the re-tune off,
-#'   so each member keeps `evaluate()`'s hyperparameters, clamped into
-#'   `fit()`'s range and scored by its out-of-fold predictions alone; a cold
-#'   start still grids `grid_size` points.
+#'   `fit()`'s re-tune of each of `evaluate()`'s members, at least. Default 0,
+#'   which turns the re-tune off: each member keeps `evaluate()`'s
+#'   hyperparameters, clamped into `fit()`'s range and scored by its
+#'   out-of-fold predictions alone. A cold start does not read it: it tunes by
+#'   `bayesian_iter`, and warns that a `final_bayesian_iter` above 0 is
+#'   ignored. The re-tune is off by default because on a library-scale and a
+#'   local benchmark it never moved a member past its margin, so the members
+#'   kept `evaluate()`'s hyperparameters either way, while it took most of
+#'   `fit()`'s run time (see "The re-tune" in [fit()]). Above 0 the re-tune
+#'   runs, its budget raised as `bayesian_iter`'s is, counting the points it
+#'   starts from: from `evaluate()`'s hyperparameters and d points drawn
+#'   around them, for d tuned parameters, 25 iterations run 25 up to two
+#'   tuned parameters, 26 for cubist and mlp, 35 for lightgbm and 53 for
+#'   xgboost. Each re-tune stops once `control_horizons(no_improve = )`
+#'   iterations in a row have not improved on its best. Minimum 0.
 #' @param sg_window `integer`. Savitzky-Golay window in grid points, applied
 #'   to every configuration. Default 9. Must be odd, at least 5, and (checked
 #'   by `evaluate()`) smaller than the number of spectral columns. For
@@ -325,7 +333,7 @@ configure <- function(x,
                       cv_folds              = 5L,
                       grid_size             = 10L,
                       bayesian_iter         = 15L,
-                      final_bayesian_iter   = 25L,
+                      final_bayesian_iter   = 0L,
                       sg_window             = 9L,
                       pca_threshold         = 0.995,
                       tune_ranges           = NULL,
@@ -404,9 +412,10 @@ configure <- function(x,
   check_arg(rlang::check_number_whole, final_bayesian_iter, min = 0)
 
   ## evaluate()'s Bayesian search starts from a grid of grid_size points, and
-  ## so does fit()'s re-tune on a cold start. tune_bayes() needs at least two
-  ## of them to fit its Gaussian process, so on a grid of one neither could
-  ## run (#209).
+  ## so do fit()'s on a cold start (bayesian_iter, as evaluate()'s) and its
+  ## re-tune of a member whose parameters from evaluate() are unusable
+  ## (final_bayesian_iter). tune_bayes() needs at least two of them to fit its
+  ## Gaussian process, so on a grid of one none could run (#209).
   if (grid_size < 2 && (bayesian_iter > 0 || final_bayesian_iter > 0)) {
 
     searches <- c(
@@ -417,7 +426,7 @@ configure <- function(x,
     abort_horizons(c(
       "{.arg grid_size} must be at least 2 when a Bayesian search runs.",
       "x" = "Got {.code grid_size = {grid_size}}, with {.code {searches}}.",
-      "i" = "The Bayesian searches that start from the grid, evaluate()'s and fit()'s on a cold start, need at least two of its points; raise {.arg grid_size}, or set {.arg bayesian_iter} and {.arg final_bayesian_iter} to 0."
+      "i" = "The Bayesian searches that start from the grid, evaluate()'s and fit()'s on a cold start and fit()'s re-tune of a member whose parameters from evaluate() are unusable, need at least two of its points; raise {.arg grid_size}, or set {.arg bayesian_iter} and {.arg final_bayesian_iter} to 0."
     ), kind = "input")
 
   }

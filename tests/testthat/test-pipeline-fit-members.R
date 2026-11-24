@@ -429,6 +429,7 @@ describe("fit() - each member is one unit", {
   it("passes no_improve to every member's re-tune, keeps each member's search record, and says how many stopped early", {
 
     obj  <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 25L
     seen <- list()
     out  <- utils::capture.output(
       fitted <- testthat::with_mocked_bindings(
@@ -465,6 +466,7 @@ describe("fit() - each member is one unit", {
     ## Three members: one kept evaluate()'s parameters, one moved off them,
     ## and one had none to keep (its re-tune chose with no incumbent)
     obj   <- four_members()
+    obj$config$tuning$final_bayesian_iter <- 25L
     calls <- 0L
     out   <- utils::capture.output(
       fitted <- testthat::with_mocked_bindings(
@@ -546,7 +548,7 @@ describe("fit() - each member is one unit", {
 
   })
 
-  it("says once, in its header and on its log, that the re-tune is off at final_bayesian_iter = 0, and counts no member as kept", {
+  it("says once, in its header and on its log, that the re-tune is off at final_bayesian_iter = 0, the default, and counts no member as kept", {
 
     obj <- fit_obj(2L)
     obj$config$tuning$final_bayesian_iter <- 0L
@@ -564,8 +566,8 @@ describe("fit() - each member is one unit", {
       )
     )
 
-    off <- paste0("off (`final_bayesian_iter = 0`), so each member keeps evaluate()'s hyperparameters; ",
-                  "`configure(final_bayesian_iter = )` above 0 turns it on")
+    off <- paste0("off (`final_bayesian_iter = 0`, the default), so each member keeps evaluate()'s ",
+                  "hyperparameters; `configure(final_bayesian_iter = )` above 0 turns it on")
 
     expect_true(paste0("\u2502  Re-tune: ", off) %in% out)
     expect_false(any(grepl("\u251C\u2500 Re-tune:", out, fixed = TRUE)))
@@ -820,6 +822,7 @@ describe("fit() - each member is one unit", {
     ## the second member's search returns its initial grid as the daemons
     ## fall, and the member is never kept.
     obj    <- fit_obj(2L)
+    obj$config$tuning$final_bayesian_iter <- 25L
     calls  <- 0L
     fallen <- FALSE
 
@@ -860,6 +863,7 @@ describe("fit() - each member is one unit", {
     ## predicts a constant, their scores tie, and tune's search stops before
     ## its first iteration.
     obj          <- fit_obj(1L)
+    obj$config$tuning$final_bayesian_iter <- 25L
     obj$evaluation$results$best_params[[1]]$min_n <- 5L
     real_pred_gp <- tune:::pred_gp
     calls        <- 0L

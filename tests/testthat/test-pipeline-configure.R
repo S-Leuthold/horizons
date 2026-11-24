@@ -267,7 +267,8 @@ describe("configure() validation", {
       class = "horizons_error_input"
     )
 
-    ## fit()'s re-tune starts from the grid on a cold start
+    ## fit()'s re-tune starts from the grid when evaluate()'s parameters are
+    ## unusable
     expect_error(
       capture.output(configure(hd, grid_size = 1, bayesian_iter = 0, final_bayesian_iter = 25)),
       "`grid_size` must be at least 2 when a Bayesian search runs", fixed = TRUE,
@@ -576,6 +577,25 @@ describe("configure() storage", {
 
     expect_identical(fm$sg_window, DEFAULT_SG_WINDOW)
     expect_identical(fm$pca_threshold, DEFAULT_PCA_THRESHOLD)
+
+  })
+
+  test_that("final_bayesian_iter defaults to 0, so fit()'s re-tune is off unless asked for", {
+
+    ## configure()'s default is the constant the constructor and the
+    ## single-member runner take, so an object built either way runs the
+    ## same fit()
+    expect_identical(formals(configure)$final_bayesian_iter, DEFAULT_FINAL_BAYES_ITER)
+    expect_identical(DEFAULT_FINAL_BAYES_ITER, 0L)
+    expect_identical(formals(fit_single_config)$final_bayesian_iter, quote(DEFAULT_FINAL_BAYES_ITER))
+    expect_identical(new_horizons_data()$config$tuning$final_bayesian_iter, 0L)
+
+    result <- quiet_configure(make_single_response_hd())
+    expect_identical(result$config$tuning$final_bayesian_iter, 0L)
+
+    ## With fit()'s re-tune off by default, a grid of one needs only
+    ## evaluate()'s search off (#209)
+    expect_no_error(capture.output(configure(make_single_response_hd(), grid_size = 1, bayesian_iter = 0)))
 
   })
 

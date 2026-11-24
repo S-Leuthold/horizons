@@ -2,11 +2,12 @@
 #'
 #' @description
 #' Inner-loop function for `fit()`. Takes a single config row from the
-#' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
-#' from evaluate()'s hyperparameters and d points drawn around them from a
-#' local grid (`build_warmstart_grid()`), for d tuned parameters,
+#' evaluate() leaderboard at evaluate()'s hyperparameters or, with
+#' `final_bayesian_iter` above 0 (by default it is 0), re-tunes it with
+#' warm-start Bayesian optimization from them and d points drawn around them
+#' from a local grid (`build_warmstart_grid()`), for d tuned parameters,
 #' keeping evaluate()'s unless the best candidate beats them by the margin
-#' (`choose_member_params()`), generates OOF predictions, fits a final
+#' (`choose_member_params()`); then generates OOF predictions, fits a final
 #' deployable model, evaluates on the held-out test set, and detects
 #' performance degradation.
 #'
@@ -45,8 +46,11 @@
 #'   or NULL (`fit()`'s cold start), in which case the re-tune starts from a
 #'   space-filling grid.
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning, at
-#'   least: raised as `evaluate_single_config()`'s are (`search_budget()`),
-#'   counting the points the re-tune starts from. When every tuned parameter
+#'   least: `fit()` passes `configure()`'s `final_bayesian_iter` on the
+#'   `evaluate()` path and `bayesian_iter` on a cold start, which tunes as
+#'   `evaluate()` would. Raised as `evaluate_single_config()`'s are
+#'   (`search_budget()`), counting the points the re-tune starts from. When
+#'   every tuned parameter
 #'   is a whole number and the space costs no more fits than the start and
 #'   those iterations together (a submodel's values sharing one fit), the
 #'   grid is every point and no Bayesian search runs (`exhaustive_grid()`).

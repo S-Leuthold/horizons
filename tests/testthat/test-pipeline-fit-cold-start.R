@@ -104,6 +104,17 @@ describe("fit() - cold start from one configuration (#45)", {
 
     expect_true(any(grepl("Cold start: no warm-start parameters; grid of 2 points",
                           cold_out, fixed = TRUE)))
+
+    ## At bayesian_iter = 0 the cold start grids only, as evaluate() does, and
+    ## the header and one note say no search ran and how to run one, rather
+    ## than "0 iterations"
+    none <- paste0("none (`bayesian_iter = 0`), so the member keeps the grid's best; ",
+                   "`configure(bayesian_iter = )` above 0 searches from the grid")
+    expect_true(paste0("\u2502  Bayesian: ", none) %in% cold_out)
+    expect_false(any(grepl("0 iterations", cold_out, fixed = TRUE)))
+
+    notes <- cold$log$message[cold$log$verb == "fit" & cold$log$type == "note"]
+    expect_identical(sum(notes == paste0("The cold start's Bayesian search, as evaluate()'s: ", none, ".")), 1L)
     expect_false(cold$models$results$warm_start)
     expect_identical(cold$models$results$start_grid_size, 2L)
 
@@ -167,31 +178,94 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
-  it("prints the Bayesian budget the re-tune runs, not the screening one", {
+  ## A cold start's tuning is its configuration's only tuning and stands in
+  ## for evaluate()'s, so it runs evaluate()'s budget, bayesian_iter; a
+  ## final_bayesian_iter, the re-tune's budget, is not read
+  cold_member <- function(config_row, ...) {
+    list(
+      config_id = config_row$config_id, status = "success", degraded = FALSE,
+      degraded_reason = NA_character_, fitted_workflow = "fitted workflow",
+      best_params = tibble::tibble(mtry = 2L, min_n = 5L), warm_start = FALSE, start_grid_size = 2L,
+      cv_predictions = NULL,
+      test_metrics = tibble::tibble(rmse = 0.5, rrmse = 20, rsq = 0.6, ccc = 0.7, rpd = 1.5, mae = 0.4),
+      cv_metrics = tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.45, 1.6), std_err = c(0.03, 0.1)),
+      uq = NULL, ad = NULL, warnings = NULL, error_message = NA_character_,
+      class = NA_character_, trace = NULL, runtime_secs = 1
+    )
+  }
+
+  it("runs bayesian_iter, as evaluate() would, and prints it as the budget, not final_bayesian_iter", {
 
     budget <- obj
-    budget$config$tuning$bayesian_iter       <- 0L
-    budget$config$tuning$final_bayesian_iter <- 1L
+    budget$config$tuning$bayesian_iter       <- 1L
+    budget$config$tuning$final_bayesian_iter <- 0L
+    seen   <- NULL
 
-    ## Stop at the first member: only the header is under test
     out <- utils::capture.output(
-      testthat::with_mocked_bindings(
-        tryCatch(
-          suppressWarnings(
-            fit(budget, compute_uq = FALSE, compute_ad = FALSE, control = control_horizons(verbose = TRUE))
-          ),
-          horizons_error_all_members_failed = function(e) NULL
+      got <- testthat::with_mocked_bindings(
+        collect_warnings(
+          fit(budget, compute_uq = FALSE, compute_ad = FALSE, seed = 42L, control = control_horizons(verbose = TRUE)),
+          class = "horizons_warning_input"
         ),
-        fit_single_config = function(...) {
-          list(config_id = "cfg_001", status = "failed", error_message = "mocked",
-               runtime_secs = 0)
+        fit_single_config = function(config_row, ..., final_bayesian_iter) {
+          seen   <<- final_bayesian_iter
+          member <- cold_member(config_row)
+          member$bayes_iter <- 1L
+          member$bayes_stop <- "no_improve"
+          member
         },
         .package = "horizons"
       )
     )
 
-    expect_true(any(grepl("Bayesian: 1 iterations", out, fixed = TRUE)))
-    expect_false(any(grepl("Bayesian: 0 iterations", out, fixed = TRUE)))
+    ## The member is handed bayesian_iter, which the budget raises to ten
+    ## points a tuned parameter as in evaluate(): rf's two from a grid of two
+    expect_identical(seen, 1L)
+    search <- paste0("1 iterations (`bayesian_iter`) from a space-filling grid ",
+                     "(raised to 18 for rf: at least 10 points a tuned parameter)")
+    expect_true(paste0("\u2502  Bayesian: ", search) %in% out)
+
+    notes <- got$value$log$message[got$value$log$verb == "fit" & got$value$log$type == "note"]
+    expect_identical(sum(notes == paste0("The cold start's Bayesian search, as evaluate()'s: ", search, ".")), 1L)
+
+    ## A search the stopping rule ended is the cold start's, not a re-tune's
+    expect_true(any(startsWith(notes, "The cold start's Bayesian search stopped early in 1 of the 1 member it ran in")))
+    expect_false(any(grepl("re-tune", notes, fixed = TRUE)))
+
+    ## final_bayesian_iter at 0 is not set, so nothing is ignored
+    expect_length(got$warnings, 0L)
+
+  })
+
+  it("ignores a final_bayesian_iter above 0, saying so once with an input warning on the log", {
+
+    budget <- obj
+    budget$config$tuning$bayesian_iter       <- 0L
+    budget$config$tuning$final_bayesian_iter <- 7L
+    seen   <- NULL
+
+    got <- testthat::with_mocked_bindings(
+      collect_warnings(
+        fit(budget, compute_uq = FALSE, compute_ad = FALSE, seed = 42L),
+        class = "horizons_warning_input"
+      ),
+      fit_single_config = function(config_row, ..., final_bayesian_iter) {
+        seen <<- final_bayesian_iter
+        cold_member(config_row)
+      },
+      .package = "horizons"
+    )
+
+    expect_identical(seen, 0L)
+    expect_length(got$warnings, 1L)
+
+    msg <- paste0("`final_bayesian_iter` is ignored on a cold start, which tunes its one configuration as ",
+                  "`evaluate()` would, by `bayesian_iter` (0); `final_bayesian_iter` sets the re-tune of ",
+                  "`evaluate()`'s members only.")
+    expect_match(gsub("\\s+", " ", conditionMessage(got$warnings[[1]])), msg, fixed = TRUE)
+
+    log <- got$value$log
+    expect_identical(log$message[log$verb == "fit" & log$type == "warning" & log$topic %in% "input"], msg)
 
   })
 
