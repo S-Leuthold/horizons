@@ -67,6 +67,22 @@ log_events_added <- function(before, after) {
 
 }
 
+#' The note one data verb call wrote recording itself
+#'
+#' The call's last row, checked as [log_events_added()] checks it.
+#'
+#' @inheritParams log_rows_added
+#'
+#' @return The record's row of `after$log`.
+log_record_added <- function(before, after) {
+
+  rows   <- log_rows_added(before, after)
+  events <- log_events_added(before, after)
+
+  rows[nrow(events) + 1L, , drop = FALSE]
+
+}
+
 #' A log without its time column
 #'
 #' Two calls that write the same rows are stamped at different times, so logs

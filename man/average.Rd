@@ -57,10 +57,11 @@ disagree are refused together, not a silent pick
 varies within any sample dropped
 \item \code{data$role_map}: Updated to remove dropped columns and to point the
 \code{id} role at the new \code{sample_id}
-\item \code{log}: The samples whose replicates all failed QC, and the metadata
-columns dropped, then a note recording the call: \code{by}, the scans in
-and samples out, the quality check and the replicates it removed, and
-any flagged replicates left out
+\item \code{log}: The samples whose replicates all failed QC, the metadata
+columns dropped, and the scans QC removed, as a table in the note's
+\code{detail}, then a note recording the call: \code{by}, the scans in and
+samples out, the quality check and the replicates it removed, and any
+flagged replicates left out
 }
 }
 \description{
@@ -143,6 +144,33 @@ Every sample whose replicates all failed QC is named on the object's
 log, whatever \code{on_all_outliers} is: under \code{"warn"} as the
 \code{horizons_warning_quality} it raises, under \code{"keep_best"} and \code{"drop"}
 as a note, since either is your explicit choice.
+
+\strong{Which scans QC removed:} when the quality check removes any scan, one
+note on the log names the samples that lost one, and its \code{detail} is a
+table with one row per scan removed:
+\itemize{
+\item \code{sample_id}: the averaged sample it belonged to (with a custom \code{by}, the
+\code{by} value, as the result's \code{sample_id} is)
+\item \code{scan}: the scan's \code{filename} when the input has one (OPUS scans), else
+its row number as text
+\item \code{row}: its row in the data \code{average()} was given
+\item \code{reason}: \code{"below_threshold"}, removed because its mean correlation fell
+below \code{correlation_threshold}, every scan of a sample
+\code{on_all_outliers = "drop"} dropped among them; \code{"uncorrelatable"}, a
+scan QC could not correlate with the others, such as a flat one; or
+\code{"not_best"}, a scan of a sample whose replicates all failed, left out
+when \code{on_all_outliers = "keep_best"} kept the best
+\item \code{mean_correlation}: its mean correlation with the sample's other scans
+in the last round of the removal it took part in, \code{NA} when it had none
+}
+
+\code{dplyr::bind_rows(x$log$detail[x$log$verb == "average"])} gathers it,
+to join to a sample table by \code{sample_id}. Nothing resets the log, so the
+table stays on the object through every later verb. Under
+\code{on_all_outliers = "warn"} a sample whose replicates all failed keeps them
+all, so none of its scans is in the table. Flagged replicates are left out
+of QC rather than removed by it, and are counted in the call's note
+instead.
 }
 \examples{
 \dontrun{

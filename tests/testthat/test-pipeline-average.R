@@ -163,6 +163,15 @@ make_test_hd_average <- function(n_samples      = 3,
 
 }
 
+## Each replicate's mean correlation with the others, by hand
+mean_cor_by_hand <- function(spectra) {
+
+  cm <- stats::cor(t(spectra), use = "pairwise.complete.obs")
+  diag(cm) <- NA
+  unname(rowMeans(cm, na.rm = TRUE))
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## average() — Basic functionality
@@ -231,7 +240,7 @@ test_that("average() removes outlier replicate when QC enabled", {
   expect_equal(nrow(result$data$analysis), 2)
 
   ## The note counts 1 dropped replicate (the outlier from sample 1)
-  expect_match(log_rows_added(hd, result)$message, "; 1 replicate removed by the quality check.", fixed = TRUE)
+  expect_match(log_record_added(hd, result)$message, "; 1 replicate removed by the quality check.", fixed = TRUE)
 
 })
 
@@ -313,9 +322,12 @@ test_that("average() names every sample whose replicates all failed, on the log,
   for (mode in c("warn", "keep_best", "drop")) {
 
     result <- suppressWarnings(average(hd, on_all_outliers = mode, verbose = FALSE))
-    row    <- log_events_added(hd, result)
+    events <- log_events_added(hd, result)
+    row    <- events[1, ]
 
-    expect_identical(nrow(row), 1L, info = mode)
+    ### Under "keep_best" and "drop" the scans the check removed follow, in
+    ### a note of their own (#255); under "warn" it removed none
+    expect_identical(nrow(events), if (mode == "warn") 1L else 2L, info = mode)
     expect_setequal(row$ids[[1]], c("S1", "S2"))
     expect_identical(row$type, if (mode == "warn") "warning" else "note", info = mode)
 
@@ -345,7 +357,7 @@ test_that("average() on_all_outliers='drop' removes sample", {
 
   ## Dropped as asked: a note naming it, not a warning (#231)
   expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE))
-  row <- log_events_added(hd, result)
+  row <- log_events_added(hd, result)[1, ]
   expect_identical(row$type, "note")
   expect_identical(row$ids[[1]], "S1")
   expect_match(row$message, 'on_all_outliers = "drop"` dropped', fixed = TRUE)
@@ -368,11 +380,11 @@ test_that("average() on_all_outliers='keep_best' keeps the replicate with the hi
   expect_true("S1" %in% result$data$analysis$sample_id)
 
   ## Should have dropped 2 replicates from S1
-  expect_match(log_rows_added(hd, result)$message[2], "; 2 replicates removed by the quality check.", fixed = TRUE)
+  expect_match(log_record_added(hd, result)$message, "; 2 replicates removed by the quality check.", fixed = TRUE)
 
   ## Kept as asked: a note naming the sample, not a warning (#231)
   expect_no_warning(average(hd, quality_check = TRUE, on_all_outliers = "keep_best", verbose = FALSE))
-  row <- log_events_added(hd, result)
+  row <- log_events_added(hd, result)[1, ]
   expect_identical(row$type, "note")
   expect_identical(row$ids[[1]], "S1")
 
@@ -810,7 +822,7 @@ test_that("average() counts a dropped sample's flagged replicate once, as left o
 
   ## Assert — S1 is gone, and its flagged scan is not also counted as QC's
   expect_identical(result$data$analysis$sample_id, "S2")
-  expect_match(log_rows_added(hd, result)$message[2],
+  expect_match(log_record_added(hd, result)$message,
                "; 2 replicates removed by the quality check; 1 flagged (.flag) replicate left out.",
                fixed = TRUE)
   out <- capture.output(average(hd, on_all_outliers = "drop", verbose = TRUE))
@@ -940,14 +952,225 @@ test_that("average() records the call as its last row, a note with by, the count
   expect_identical(log_rows_added(hd, result)$message,
                    "Averaged 6 scans into 2 samples by project: quality check off.")
 
-  ### After the events: a sample dropped as asked, then the record
+  ### After the events: a sample dropped as asked, the scans the check
+  ### removed, then the record
   hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, all_outliers = TRUE)
   result <- average(hd, quality_check = TRUE, on_all_outliers = "drop", verbose = FALSE)
   rows   <- log_rows_added(hd, result)
-  expect_identical(rows$type, c("note", "note"))
+  expect_identical(rows$type, c("note", "note", "note"))
   expect_identical(rows$ids[[1]], "S1")
-  expect_match(rows$message[2], "Averaged 6 scans into 1 sample by sample_id", fixed = TRUE)
-  expect_match(rows$message[2], "; 3 replicates removed by the quality check.", fixed = TRUE)
+  expect_match(rows$message[2], "The quality check removed 3 replicates from 1 sample.", fixed = TRUE)
+  expect_match(rows$message[3], "Averaged 6 scans into 1 sample by sample_id", fixed = TRUE)
+  expect_match(rows$message[3], "; 3 replicates removed by the quality check.", fixed = TRUE)
+
+})
+
+
+## ---------------------------------------------------------------------------
+## average() — The scans QC removed, on the log (#255)
+## ---------------------------------------------------------------------------
+## One note names the samples that lost a scan, and its detail is a table of
+## every scan the check removed: which sample, which scan, its row, why, and
+## its mean correlation.
+
+#' Three samples of three scans: S1's first is inverted, S2's last is flat,
+#' and S3's three are unrelated, so every one of them fails
+make_qc_record_hd <- function() {
+
+  hd <- make_test_hd_average(n_samples = 3, n_reps = 3, add_outlier = TRUE)
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+
+  hd$data$analysis[6, wn] <- 1
+  set.seed(7)
+  for (col in wn) hd$data$analysis[[col]][7:9] <- stats::runif(3, 0, 2)
+
+  hd
+
+}
+
+#' The table on the call's note of removed scans, or NULL when it wrote none
+removed_detail <- function(before, after) {
+
+  rows <- log_rows_added(before, after)
+  dplyr::bind_rows(rows$detail)
+
+}
+
+test_that("average() records which scans its quality check removed, why, and each one's mean correlation", {
+
+  hd <- make_qc_record_hd()
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+
+  result <- suppressWarnings(average(hd, verbose = FALSE))
+  rows   <- log_rows_added(hd, result)
+
+  ## One note with the table, just before the call's record; the other rows
+  ## carry none
+  has_detail <- lengths(rows$detail) > 0
+  expect_identical(which(has_detail), nrow(rows) - 1L)
+  note <- rows[has_detail, ]
+  expect_identical(note$type, "note")
+  expect_identical(note$ids[[1]], c("S1", "S2"))
+  expect_identical(note$n, 2L)
+  expect_match(note$message, "The quality check removed 2 replicates from 2 samples.", fixed = TRUE)
+
+  ## Under "warn" S3 keeps every scan, so the table holds S1's inverted scan
+  ## and S2's flat one
+  detail <- note$detail[[1]]
+  expect_named(detail, c("sample_id", "scan", "row", "reason", "mean_correlation"))
+  expect_identical(detail$sample_id, c("S1", "S2"))
+  expect_identical(detail$scan, c("S1_rep1", "S2_rep3"))
+  expect_identical(detail$row, c(1L, 6L))
+  expect_identical(detail$reason, c("below_threshold", "uncorrelatable"))
+
+  ### The inverted scan's mean correlation with S1's other two, by hand
+  s1 <- as.matrix(hd$data$analysis[1:3, wn])
+  expect_equal(detail$mean_correlation[1], mean_cor_by_hand(s1)[1])
+  expect_true(detail$mean_correlation[1] < 0.996)
+  expect_true(is.na(detail$mean_correlation[2]))
+
+})
+
+test_that("average() records every scan a sample whose replicates all failed lost, under keep_best and drop", {
+
+  hd <- make_qc_record_hd()
+  wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+
+  ### What the check computes of S3's scans, in their own rows
+  qc <- compute_replicate_quality(as.matrix(hd$data$analysis[7:9, wn]), 0.996)
+
+  ## keep_best: the two S3 scans that are not its best, each with its value
+  ## from the last round it took part in
+  kept   <- average(hd, on_all_outliers = "keep_best", verbose = FALSE)
+  detail <- removed_detail(hd, kept)
+  s3     <- detail[detail$sample_id == "S3", ]
+
+  expect_identical(s3$row, setdiff(7:9, 6L + qc$best))
+  expect_identical(s3$reason, c("not_best", "not_best"))
+  expect_equal(s3$mean_correlation, qc$mean_cors[s3$row - 6L])
+  expect_identical(detail$reason[detail$sample_id != "S3"], c("below_threshold", "uncorrelatable"))
+
+  ## drop: all three of S3's, each below the threshold, though S3 is not in
+  ## the result
+  dropped <- average(hd, on_all_outliers = "drop", verbose = FALSE)
+  detail  <- removed_detail(hd, dropped)
+  s3      <- detail[detail$sample_id == "S3", ]
+
+  expect_false("S3" %in% dropped$data$analysis$sample_id)
+  expect_identical(s3$row, 7:9)
+  expect_identical(s3$reason, rep("below_threshold", 3))
+  expect_equal(s3$mean_correlation, qc$mean_cors)
+  expect_true(all(s3$mean_correlation < 0.996))
+
+})
+
+test_that("average()'s record of removed scans counts what its note counts, in every mode", {
+
+  hd <- make_qc_record_hd()
+
+  for (mode in c("warn", "keep_best", "drop")) {
+
+    result <- suppressWarnings(average(hd, on_all_outliers = mode, verbose = FALSE))
+    detail <- removed_detail(hd, result)
+    record <- log_record_added(hd, result)$message
+    count  <- as.integer(sub(".*; ([0-9]+) replicates? removed by the quality check.*", "\\1", record))
+
+    expect_identical(nrow(detail), count, info = mode)
+
+  }
+
+})
+
+test_that("average() names a removed scan by its row when the input has no filename, and by the by value's sample", {
+
+  ## No filename: the scan is its row in the table given
+  hd <- make_qc_record_hd()
+  hd$data$analysis$filename <- NULL
+  hd$data$role_map <- hd$data$role_map[hd$data$role_map$variable != "filename", ]
+
+  detail <- removed_detail(hd, suppressWarnings(average(hd, verbose = FALSE)))
+  expect_identical(detail$scan, c("1", "6"))
+  expect_identical(detail$row, c(1L, 6L))
+
+  ## A custom by: the sample is the by value, which becomes the sample_id
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_outlier = TRUE,
+                             add_meta = TRUE, uniform_meta = TRUE)
+  result <- average(hd, by = "project", verbose = FALSE)
+  detail <- removed_detail(hd, result)
+
+  expect_identical(detail$sample_id, "PROJ1")
+  expect_true(detail$sample_id %in% result$data$analysis$sample_id)
+  expect_identical(detail$scan, "S1_rep1")
+
+})
+
+test_that("average() records no removed scans when none was removed or the check is off", {
+
+  ## A flagged scan is left out of the check, not removed by it
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+  hd$data$analysis$.flag <- c("standardize", rep(NA, 5))
+  hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+  result <- average(hd, verbose = FALSE)
+  expect_identical(lengths(log_rows_added(hd, result)$detail), 0L)
+
+  hd     <- make_qc_record_hd()
+  result <- average(hd, quality_check = FALSE, verbose = FALSE)
+  expect_identical(lengths(log_rows_added(hd, result)$detail), 0L)
+
+})
+
+test_that("average()'s record of removed scans stays on the log through every later verb, a reset and a second average()", {
+
+  ## Thirty samples of three scans with an outcome they carry; the first
+  ## sample's first scan inverted
+  set.seed(11)
+  sim   <- make_signal_spectra(30)
+  scans <- sim$spectra[rep(seq_len(30), each = 3), ] +
+    matrix(stats::rnorm(90 * ncol(sim$spectra), sd = 1e-4), nrow = 90)
+  scans[1, ] <- rev(scans[1, ])
+
+  df <- tibble::as_tibble(scans)
+  df$sample_id <- rep(sprintf("S%02d", seq_len(30)), each = 3)
+  df$SOC       <- rep(sim$outcome, each = 3)
+  hd <- new_horizons_data(analysis = df[c("sample_id", colnames(scans), "SOC")],
+                          role_map = tibble::tibble(variable = c("sample_id", colnames(scans), "SOC"),
+                                                    role     = c("id", rep("predictor", ncol(scans)), "response")))
+
+  averaged <- average(hd, verbose = FALSE)
+  record   <- removed_detail(hd, averaged)
+  expect_identical(record$row, 1L)
+
+  ## The same table, wherever the object goes next
+  still_there <- function(obj, step) {
+    expect_identical(dplyr::bind_rows(obj$log$detail), record, info = step)
+  }
+
+  configured <- configure(averaged, outcome = "SOC", models = "plsr", cv_folds = 3L,
+                          grid_size = 2L, bayesian_iter = 0L, verbose = FALSE)
+  still_there(configured, "configure()")
+
+  ### A second average() is allowed before evaluate(); each sample now has
+  ### one scan, so it removes none and the first table stays
+  again <- average(configured, verbose = FALSE)
+  still_there(again, "a second average()")
+
+  evaluated <- suppressWarnings(evaluate(again, seed = 1L, control = control_horizons(verbose = FALSE)))
+  still_there(evaluated, "evaluate()")
+
+  fitted <- suppressWarnings(fit(evaluated, n_best = 1L, compute_uq = FALSE, seed = 1L,
+                                 control = control_horizons(verbose = FALSE)))
+  still_there(fitted, "fit()")
+
+  ### configure() on a fitted object resets the evaluation and the fit
+  reset <- suppressWarnings(configure(fitted, outcome = "SOC", models = "plsr", cv_folds = 3L,
+                                      grid_size = 2L, bayesian_iter = 0L, verbose = FALSE))
+  expect_identical(class(reset), c("horizons_data", "list"))
+  still_there(reset, "a re-configure")
+
+  ### average() after evaluate() is refused by design, so it cannot write
+  ### over the record
+  expect_error(average(fitted, verbose = FALSE), class = "horizons_error_input")
 
 })
 
@@ -1199,15 +1422,6 @@ test_that("compute_replicate_quality() returns empty for n=1", {
   expect_identical(qc$mean_cors, NA_real_)
 
 })
-
-## Each replicate's mean correlation with the others, by hand
-mean_cor_by_hand <- function(spectra) {
-
-  cm <- stats::cor(t(spectra), use = "pairwise.complete.obs")
-  diag(cm) <- NA
-  unname(rowMeans(cm, na.rm = TRUE))
-
-}
 
 test_that("compute_replicate_quality() keeps each replicate's mean correlation from the last round it took part in", {
 

@@ -339,7 +339,10 @@ check_reserved_columns <- function(columns,
 #' call that writes none is `standardize()`'s early return on spectra
 #' already standardized, whose `skipped` warning is its row. Notes are never
 #' raised. Every row carries the `time` its call ended, so the first row's
-#' is when the spectra were read (on a training set, the library's).
+#' is when the spectra were read (on a training set, the library's). A row
+#' can carry a table of what it is about, one row per thing, in its
+#' `detail`: [average()]'s note on the scans its quality check removed is
+#' one; every other row's is `NULL`.
 #' `predict()`, which changes no object,
 #' carries each warning's record as the field `log`.
 #'

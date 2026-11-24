@@ -5,7 +5,8 @@
 ## ?horizons_conditions): each warning a verb raised, one row per topic per
 ## call, and each note, an event a verb reports without warning (samples
 ## dropped as the user asked, a cache rebuilt) or a data verb's record of its
-## call, one row each. A verb collects both in a per-call collector as it
+## call, one row each. A row can carry a table of what it is about, in
+## `detail`. A verb collects both in a per-call collector as it
 ## runs; at its end log_close() writes the rows, and only then does
 ## signal_log() raise each warning row, once. No site
 ## raises a warning itself, and signal_log() raises only what log_close()
@@ -34,8 +35,10 @@ LOG_TOPICS <- c("substitution", "quality", "skipped", "flagged",
 #'   shown in verbose output but not raised), `topic` (one of `LOG_TOPICS`
 #'   for a warning, `NA` for a note), `message` (the text on one line), `ids`
 #'   (a list of the configurations, members, samples, files or properties it
-#'   is about), `n` (how many times it arose) and `time` (when the call that
-#'   wrote it ended, the same for every row of a call).
+#'   is about), `n` (how many times it arose), `detail` (a list column: a
+#'   table of what the row is about, one row per thing, such as the scans
+#'   `average()`'s quality check removed, or `NULL`) and `time` (when the
+#'   call that wrote it ended, the same for every row of a call).
 #' @keywords internal
 #' @noRd
 new_log <- function() {
@@ -47,6 +50,7 @@ new_log <- function() {
     message = character(0),
     ids     = list(),
     n       = integer(0),
+    detail  = list(),
     time    = as.POSIXct(character(0))
   )
 
@@ -88,6 +92,9 @@ log_open <- function(verb) {
 #' @param ids Character. What the warning is about, by id.
 #' @param n Integer(1). How many times it arose; `length(ids)` by default,
 #'   or 1 when there are no ids.
+#' @param detail A data frame of what the event is about, one row per thing,
+#'   kept on the row as its `detail`, or `NULL`. A warning added several
+#'   times keeps its events' tables bound into one.
 #' @param .envir The environment the message is interpolated in.
 #'
 #' @return `collector`, invisibly.
@@ -98,11 +105,12 @@ log_warning <- function(collector,
                         message,
                         ids    = character(0),
                         n      = max(length(ids), 1L),
+                        detail = NULL,
                         .envir = rlang::caller_env()) {
 
   check_log_topic(topic)
 
-  log_event(collector, "warning", topic, message, ids, n, .envir)
+  log_event(collector, "warning", topic, message, ids, n, detail, .envir)
 
 }
 
@@ -148,9 +156,10 @@ log_note <- function(collector,
                      message,
                      ids    = character(0),
                      n      = max(length(ids), 1L),
+                     detail = NULL,
                      .envir = rlang::caller_env()) {
 
-  log_event(collector, "note", NA_character_, message, ids, n, .envir)
+  log_event(collector, "note", NA_character_, message, ids, n, detail, .envir)
 
 }
 
@@ -162,12 +171,21 @@ log_note <- function(collector,
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_event <- function(collector, type, topic, message, ids, n, .envir) {
+log_event <- function(collector, type, topic, message, ids, n, detail, .envir) {
 
   if (isTRUE(collector$closed)) {
 
     abort_horizons(
       "An event was added to {.fn {collector$verb}}'s collector after it was closed.",
+      kind = "internal"
+    )
+
+  }
+
+  if (!is.null(detail) && !is.data.frame(detail)) {
+
+    abort_horizons(
+      "An event's {.arg detail} must be a data frame or {.code NULL}, not {.obj_type_friendly {detail}}.",
       kind = "internal"
     )
 
@@ -187,7 +205,8 @@ log_event <- function(collector, type, topic, message, ids, n, .envir) {
     topic   = topic,
     message = rendered,
     ids     = unique(as.character(ids)),
-    n       = as.integer(n)
+    n       = as.integer(n),
+    detail  = if (!is.null(detail)) tibble::as_tibble(detail)
   )
 
   invisible(collector)
@@ -230,8 +249,9 @@ log_append <- function(collector, events) {
 #' Warnings are one row per topic, in the order each topic first arose: a
 #' topic added once keeps its message, and a topic added several times is
 #' one warning whose message lists each, so the row and the warning say the
-#' same thing. Notes are one row each. Rows keep the order in which their
-#' first event arose.
+#' same thing, and whose `detail` binds the tables its events carried
+#' (`NULL` when none did). Notes are one row each. Rows keep the order in
+#' which their first event arose.
 #'
 #' @param collector From [log_open()].
 #' @return Rows shaped like [new_log()]'s, with the cli message of each row
@@ -279,6 +299,11 @@ log_rows <- function(collector) {
     message = vapply(messages, flatten_message, character(1)),
     ids     = lapply(group, function(g) unique(unlist(lapply(g, `[[`, "ids")))),
     n       = vapply(group, function(g) sum(vapply(g, `[[`, integer(1), "n")), integer(1)),
+    detail  = lapply(group, function(g) {
+      tables <- lapply(g, `[[`, "detail")
+      tables <- tables[!vapply(tables, is.null, logical(1))]
+      if (length(tables) > 0) dplyr::bind_rows(tables)
+    }),
     time    = as.POSIXct(rep(NA_real_, length(group)))
   )
 

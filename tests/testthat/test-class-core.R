@@ -2917,7 +2917,7 @@ test_that("the committed ensemble fixture carries the current contract and valid
   expect_false("artifacts" %in% names(fx))
   expect_false("schema_version" %in% names(fx))
   expect_false("provenance" %in% names(fx))
-  expect_true("time" %in% names(fx$log))
+  expect_true(all(c("time", "detail") %in% names(fx$log)))
   expect_true("sample_id" %in% names(fx$models$cv_predictions))
 
   expect_identical(validate_horizons_eval(fx), fx)
@@ -3890,6 +3890,19 @@ describe("the log and flagged rows in the base validator", {
     obj <- configured_object()
     obj$log <- tibble::tibble(verb = character(0))
     expect_true(any(grepl("has no log", finding_of(validate_horizons_data(obj)), fixed = TRUE)))
+
+  })
+
+  it("refuses a log saved before its detail column, with the remedy of rebuilding the object", {
+
+    obj <- configured_object()
+    expect_true("detail" %in% names(obj$log))
+
+    obj$log$detail <- NULL
+    err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
+
+    expect_true(any(grepl("its log is not the table the verbs write", err$findings, fixed = TRUE)))
+    expect_match(cli::ansi_strip(conditionMessage(err)), "rebuild it with the verbs that wrote it", fixed = TRUE)
 
   })
 
