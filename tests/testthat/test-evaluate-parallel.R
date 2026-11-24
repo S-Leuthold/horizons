@@ -1964,22 +1964,26 @@ describe("evaluate() - the circuit breaker on the configs axis", {
     skip_on_cran()
     skip_if_dev_package()
 
+    ## rf's three start first; cubist's start as they finish, two at a time,
+    ## so when the first of cubist's comes in at least one is still to come
     local_test_daemons(2)
     dir   <- withr::local_tempdir()
     marks <- withr::local_tempdir()
-    local_breaker_daemons(fail = sprintf("cfg_%03d", 1:4), marks = marks)
+    local_breaker_daemons(fail = sprintf("cfg_%03d", 1:6), marks = marks)
 
-    err <- expect_error(breaker_run(4, dir), class = "horizons_error_systemic")
+    err <- expect_error(breaker_run(6, dir), class = "horizons_error_systemic")
 
-    expect_match(gsub("\\s+", " ", conditionMessage(err)),
-                 "The first 3 configurations to run all failed the same way, across 2 models, so `evaluate()` stopped rather than run the other 1.",
-                 fixed = TRUE)
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "The first [3-5] configurations to run all failed the same way, across 2 models, so `evaluate\\(\\)` stopped rather than run the other [1-3]\\.")
 
-    ## The three it read, both models among them, and none checkpointed,
-    ## then or once the daemons are idle
-    expect_length(err$results$config_id, 3L)
+    ## Those it read, both models among them (the row that tripped it may
+    ## have come in with another, which is among them unread), and none
+    ## checkpointed, then or once the daemons are idle
+    n_read <- length(err$results$config_id)
+    n_held <- as.integer(sub("^.*The first ([0-9]+) configurations.*$", "\\1", msg))
+    expect_true(n_held >= 3L && n_held <= n_read && n_read < 6L)
     expect_identical(unique(err$results$status), "failed")
-    expect_setequal(make_eval_object(n = 60, n_configs = 4)$config$configs$model[match(err$results$config_id, sprintf("cfg_%03d", 1:4))],
+    expect_setequal(make_eval_object(n = 60, n_configs = 6)$config$configs$model[match(err$results$config_id, sprintf("cfg_%03d", 1:6))],
                     c("rf", "cubist"))
     with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
     expect_length(list.files(file.path(dir, "checkpoints")), 0L)

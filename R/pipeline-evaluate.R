@@ -1487,7 +1487,8 @@ evaluate <- function(x,
     ## releases, and a trip or a write that fails stops the run with the
     ## rows so far, the configurations in flight cancelled. The
     ## configurations still to run are those not yet collected, in flight or
-    ## waiting.
+    ## waiting; the window collects every row that came in together before
+    ## it finishes any, those that did not fail first (dispatch_configs()).
     breaker  <- new_breaker(control$breaker, pending_configs)
     eval_env <- rlang::current_env()
 

@@ -343,6 +343,38 @@ describe("dispatch_configs()", {
 
   })
 
+  it("collects every row of a pass before it finishes any, then hands those that did not fail first, so a stop carries the whole pass", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003", "cfg_004"),
+                              model = "plsr", feature_selection = "none")
+    status  <- c("failed", "failed", "success", "pruned")
+
+    ## Three daemons: the first three come in together, the fourth after
+    local_mocked_bindings(connected_daemons = function() 3L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = tibble::tibble(config_id = configs$config_id[.args$config_i], status = status[.args$config_i]))
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+    handed        <- list()
+
+    ## The first row handed stops the run, as a trip does
+    finish <- function(i, row) {
+      handed[[length(handed) + 1L]] <<- list(id = row$config_id, in_rows = length(finished$rows))
+      if (length(handed) == 2L) rlang::abort("The breaker tripped.", class = "test_finish_stop")
+    }
+
+    expect_error(dispatch_configs(configs, rep(1, 4), "payload.rds", finished, function() NULL, finish = finish),
+                 class = "test_finish_stop")
+
+    ## The success first, then the failures in the order collected, each once
+    ## all three were in finished$rows
+    expect_identical(handed, list(list(id = "cfg_003", in_rows = 3L), list(id = "cfg_001", in_rows = 3L)))
+    expect_identical(vapply(finished$rows, `[[`, character(1), "config_id"), c("cfg_001", "cfg_002", "cfg_003"))
+
+  })
+
   it("stops as systemic, naming the file and why, with the rows so far, when a daemon cannot read the configurations' data", {
 
     configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"),
