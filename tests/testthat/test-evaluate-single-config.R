@@ -646,10 +646,10 @@ describe("evaluate_single_config() - tuning on the original scale", {
   ## the split/fold row membership from make_eval_setup(). The signal is the
   ## peak's apex and its flanks (bands 15 to 17 of 30, make_signal_spectra()),
   ## interior wavenumbers the SG window (9) does not trim away, centred so
-  ## log1p(SOC) spreads about 1.5 with a standard deviation near 0.5. plsr is
-  ## linear in log space, so original-scale test RPD lands around 8 when the
-  ## grid is scored honestly; scored cross-scale the same grid reads below 1
-  ## and the config is pruned.
+  ## log1p(SOC) spreads about 1.5 with a standard deviation near 0.5. The
+  ## elastic net is linear in log space, so original-scale test RPD lands
+  ## around 8 when the grid is scored honestly; scored cross-scale the same
+  ## grid reads below 1 and the config is pruned.
   set.seed(4902)
   wn_names <- paste0("wn_", seq(4000, by = -2, length.out = 30))
   signal   <- rowMeans(as.matrix(setup$data[, wn_names[15:17]]))

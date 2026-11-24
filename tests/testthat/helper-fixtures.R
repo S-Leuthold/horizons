@@ -183,15 +183,21 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
 ## ---------------------------------------------------------------------------
 
 #' `obj` (an evaluated object) with its configurations ranked in the order of
-#' `ids`, best first, for a test of fit() whose point is the order its
-#' members run or print in, whatever the fixture's fits scored. Only the
-#' cross-validated column of the evaluation's rank metric changes, set to 1
-#' to `length(ids)` in the metric's direction, and best_config with it.
+#' `ids`, which names every one of them, best first, for a test of fit()
+#' whose point is the order its members run or print in, whatever the
+#' fixture's fits scored. Only the cross-validated column of the
+#' evaluation's rank metric changes, set to 1 to `length(ids)` in the
+#' metric's direction, and best_config with it.
 rank_configs_as <- function(obj, ids) {
 
   res    <- obj$evaluation$results
   metric <- obj$evaluation$rank_metric
   score  <- seq_along(ids)
+
+  ## A configuration left out would keep its own score and could rank ahead
+  ## of best_config
+  stopifnot(setequal(ids, res$config_id), !anyDuplicated(ids))
+
   if (metric %in% HIGHER_BETTER_METRICS) score <- rev(score)
 
   res[[paste0("cv_", metric)]][match(ids, res$config_id)] <- score

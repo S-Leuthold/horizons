@@ -381,11 +381,9 @@ describe("fit() - member failures", {
 
 describe("fit() - each member is one unit", {
 
-  ## make_fit_object() with four evaluated configurations on two models, the
-  ## copies tied with their originals, so ranking orders them as `models`
-  ## repeated: rf, cubist, rf, cubist
-  ## Four members, ranked in config_id order, whose models are `models` in
-  ## that order
+  ## make_fit_object() with four evaluated configurations, ranked in
+  ## config_id order, whose models are `models` repeated in that order: rf,
+  ## cubist, rf, cubist by default
   four_members <- function(models = c("rf", "cubist")) {
 
     obj  <- fit_obj(2L)
