@@ -63,17 +63,14 @@
 #'   `rsample::training(split)`, or, with `calib`, from the fit rows.
 #' @param calib `NULL`, or `fit()`'s calibration split: an `rsplit` over
 #'   [calibration_pool()]'s rows.
-#' @param trimmed_ids Character. The training rows a response trim left out,
-#'   which the fit rows drop ([calibration_parts()]); empty without `calib`.
 #'
 #' @return A list with `train_idx`, `n_rows`, `fold_idx`, `fold_ids`,
 #'   `fold_class`, `split_args`, and `calib` (`NULL`, or the calibration
-#'   split's `in_id`, `n_rows` and `split_class`, with `trimmed_ids`).
-#'   Carries no data.
+#'   split's `in_id`, `n_rows` and `split_class`). Carries no data.
 #' @keywords internal
 #' @noRd
 
-resample_indices <- function(split, cv_folds, calib = NULL, trimmed_ids = character(0)) {
+resample_indices <- function(split, cv_folds, calib = NULL) {
 
   ## -------------------------------------------------------------------------
   ## Guard the two assumptions the reconstruction rests on
@@ -122,8 +119,7 @@ resample_indices <- function(split, cv_folds, calib = NULL, trimmed_ids = charac
     calib       = if (!is.null(calib)) {
       list(in_id       = calib$in_id,
            n_rows      = nrow(calib$data),
-           split_class = class(calib),
-           trimmed_ids = as.character(trimmed_ids))
+           split_class = class(calib))
     }
   )
 
@@ -151,7 +147,8 @@ resample_indices <- function(split, cv_folds, calib = NULL, trimmed_ids = charac
 #' @param data The analysis data frame — the same table `split` was built from.
 #' @param idx The list returned by `resample_indices()`.
 #' @param trimmed `NULL`, or the training rows a response trim left out of
-#'   `data`, which `fit()`'s calibration pool takes back in.
+#'   `data`, which `fit()`'s calibration pool takes back in and its fit rows
+#'   drop ([calibration_parts()]).
 #' @param id_col Character(1). The id column, which the fit rows' trimmed
 #'   rows are found by; read only with a calibration split.
 #'
@@ -183,16 +180,21 @@ rebuild_resamples <- function(data, idx, trimmed = NULL, id_col = NULL) {
 
   }
 
-  ## `class` is passed so the rebuilt splits keep their subclass. Without it
-  ## make_splits() returns a bare rsplit, and rsample::internal_calibration_split()
-  ## — the very function split_args is transported for — dispatches on the split
-  ## subclass with a hard-aborting default method.
-  split <- rsample::make_splits(
-    x     = list(analysis   = idx$train_idx,
-                 assessment = setdiff(seq_len(idx$n_rows), idx$train_idx)),
-    data  = data,
-    class = setdiff(idx$split_class, "rsplit")
-  )
+  ## Each split rebuilt from its analysis rows over the table it was cut
+  ## from, the rest its assessment rows, keeping its subclass: without it
+  ## make_splits() returns a bare rsplit, and
+  ## rsample::internal_calibration_split() (the very function split_args is
+  ## transported for) dispatches on the split subclass with a hard-aborting
+  ## default method
+  complement_split <- function(in_id, d, class) {
+    rsample::make_splits(
+      x     = list(analysis = in_id, assessment = setdiff(seq_len(nrow(d)), in_id)),
+      data  = d,
+      class = setdiff(class, "rsplit")
+    )
+  }
+
+  split <- complement_split(idx$train_idx, data, idx$split_class)
 
   ## The rows the folds were cut from: the training part, or fit()'s fit rows
   ## once its calibration rows are carved out of it
@@ -212,14 +214,9 @@ rebuild_resamples <- function(data, idx, trimmed = NULL, id_col = NULL) {
 
     }
 
-    calib_split <- rsample::make_splits(
-      x     = list(analysis   = idx$calib$in_id,
-                   assessment = setdiff(seq_len(idx$calib$n_rows), idx$calib$in_id)),
-      data  = pool,
-      class = setdiff(idx$calib$split_class, "rsplit")
-    )
+    calib_split <- complement_split(idx$calib$in_id, pool, idx$calib$split_class)
 
-    parts      <- calibration_parts(calib_split, idx$calib$trimmed_ids, id_col)
+    parts      <- calibration_parts(calib_split, trimmed, id_col)
     train_data <- parts$train
     calib_data <- parts$calib
 
@@ -236,16 +233,7 @@ rebuild_resamples <- function(data, idx, trimmed = NULL, id_col = NULL) {
 
   }
 
-  fold_splits <- lapply(idx$fold_idx, function(i) {
-
-    rsample::make_splits(
-      x     = list(analysis   = i,
-                   assessment = setdiff(seq_len(n_train), i)),
-      data  = train_data,
-      class = setdiff(idx$fold_split_class, "rsplit")
-    )
-
-  })
+  fold_splits <- lapply(idx$fold_idx, complement_split, d = train_data, class = idx$fold_split_class)
 
   cv_folds <- rsample::manual_rset(fold_splits, ids = idx$fold_ids)
 
@@ -290,22 +278,23 @@ calibration_pool <- function(train, trimmed) {
 #' @description
 #' The calibration rows are the split's assessment rows. The fit rows are its
 #' analysis rows less the rows a response trim left out, which calibrate but
-#' never train. The one place both are cut, in `fit()` and in a members-axis
-#' task ([rebuild_resamples()]).
+#' never train, found by their ids. The one place both are cut, in `fit()` and
+#' in a members-axis task ([rebuild_resamples()]), from the same trimmed rows
+#' the pool took in, so a task carries them once.
 #'
 #' @param split The calibration split, over [calibration_pool()]'s rows.
-#' @param trimmed_ids Character. The trimmed rows' ids.
+#' @param trimmed The trimmed training rows, or `NULL`.
 #' @param id_col Character(1). The id column.
 #' @return List with `train` (the fit rows) and `calib` (the calibration
 #'   rows).
 #' @keywords internal
 #' @noRd
 
-calibration_parts <- function(split, trimmed_ids, id_col) {
+calibration_parts <- function(split, trimmed, id_col) {
 
   train <- rsample::training(split)
 
-  if (length(trimmed_ids) > 0) train <- train[!train[[id_col]] %in% trimmed_ids, , drop = FALSE]
+  if (!is.null(trimmed)) train <- train[!train[[id_col]] %in% trimmed[[id_col]], , drop = FALSE]
 
   list(train = train, calib = rsample::testing(split))
 

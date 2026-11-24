@@ -199,10 +199,9 @@ describe("resample_indices() / rebuild_resamples() with fit()'s calibration spli
 
     set.seed(11)
     split_C <- rsample::initial_split(calibration_pool(train, trimmed), prop = 0.8)
-    parts   <- calibration_parts(split_C, if (n_trim > 0) trimmed$sample_id else character(0), "sample_id")
+    parts   <- calibration_parts(split_C, trimmed, "sample_id")
     folds   <- rsample::vfold_cv(parts$train, v = 3)
-    idx     <- resample_indices(fx$split, folds, calib = split_C,
-                                trimmed_ids = if (n_trim > 0) trimmed$sample_id else character(0))
+    idx     <- resample_indices(fx$split, folds, calib = split_C)
 
     list(fx = fx, trimmed = trimmed, parts = parts, folds = folds, idx = idx,
          rebuilt = rebuild_resamples(fx$split$data, idx, trimmed = trimmed, id_col = "sample_id"))

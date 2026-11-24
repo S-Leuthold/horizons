@@ -1137,8 +1137,8 @@ build_member_task <- function() {
     }
   )
 
-  shared  <- member_payload(seen$inputs$split_F, NULL, character(0), seen$inputs$cv_resamples, split_C,
-                            seen$inputs$role_map, seen$settings)
+  shared  <- member_payload(seen$inputs$split_F, NULL, seen$inputs$cv_resamples, split_C, seen$inputs$role_map,
+                            seen$settings)
   payload <- unserialize(serialize(member_task_payload(shared, seen$config_row, seen$best_params,
                                                        seen$fold_entries), NULL))
 

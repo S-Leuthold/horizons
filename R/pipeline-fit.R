@@ -759,7 +759,7 @@ fit <- function(x,
 
     ## The fit rows less the trimmed ones, by the code a members-axis task
     ## rebuilds them with (rebuild_resamples())
-    parts      <- calibration_parts(split_C, trimmed_ids, id_col)
+    parts      <- calibration_parts(split_C, trimmed_rows, id_col)
     train_Fit  <- parts$train
     calib_data <- parts$calib
 
@@ -1203,8 +1203,7 @@ fit <- function(x,
 
     ## What every task carries, built once; each task adds its member's own
     ## part, its fold preps read from the call's stage as it is sent
-    shared    <- member_payload(split_F, trimmed_rows, trimmed_ids, cv_resamples, split_C, role_map,
-                                member_settings)
+    shared    <- member_payload(split_F, trimmed_rows, cv_resamples, split_C, role_map, member_settings)
     task_call <- quote(worker(payload, inner))
 
     stop_on_worker_death(dispatch_units(
@@ -1681,8 +1680,9 @@ fit_member <- function(config_row, best_params_eval, fold_entries, inputs, setti
 #' ([member_task_payload()]).
 #'
 #' @param split_F `fit()`'s split, pointed at the modelled rows.
-#' @param trimmed_rows The training rows a response trim left out, or `NULL`.
-#' @param trimmed_ids Character. Their ids.
+#' @param trimmed_rows The training rows a response trim left out, or `NULL`:
+#'   carried once, for the calibration pool to take in and the fit rows to
+#'   drop ([calibration_parts()]).
 #' @param cv_resamples `fit()`'s folds.
 #' @param split_C `fit()`'s calibration split, or `NULL` when no calibration
 #'   set was drawn or it was too small to use.
@@ -1691,15 +1691,14 @@ fit_member <- function(config_row, best_params_eval, fold_entries, inputs, setti
 #' @return List with the keys `FIT_ARG_NAMES` less the member's own.
 #' @keywords internal
 #' @noRd
-member_payload <- function(split_F, trimmed_rows, trimmed_ids, cv_resamples, split_C, role_map, settings) {
+member_payload <- function(split_F, trimmed_rows, cv_resamples, split_C, role_map, settings) {
 
   calibrated <- !is.null(split_C)
 
   list(
     data         = split_F$data,
     trimmed      = if (calibrated) trimmed_rows,
-    resample_idx = resample_indices(split_F, cv_resamples, calib = split_C,
-                                    trimmed_ids = if (calibrated) trimmed_ids else character(0)),
+    resample_idx = resample_indices(split_F, cv_resamples, calib = split_C),
     role_map     = role_map,
     settings     = settings,
     pkg_version  = as.character(utils::packageVersion("horizons"))
