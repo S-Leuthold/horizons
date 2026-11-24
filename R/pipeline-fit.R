@@ -1743,9 +1743,10 @@ member_task_payload <- function(shared, config_row, best_params, fold_entries) {
 #' member's own, where mirai would drop it.
 #'
 #' With `inner` above one the task starts that many inner daemons on its own
-#' daemon ([start_inner_daemons()]), tune runs the member's folds on them,
-#' and they are reset as the task ends, however it ends; a pool that does not
-#' come up runs the folds here. Then the member is fitted as this session
+#' daemon, tune runs the member's folds on them, and they are reset as the
+#' member returns, however it ends; a pool that does not come up runs the
+#' folds here ([run_on_inner_daemons()], the bracket both verbs' workers
+#' share). Then the member is fitted as this session
 #' fits one ([fit_member()]), its prediction intervals and applicability
 #' domain among it: they need the workflow before it is slimmed, and their
 #' draws are units named by the member, so they give the same numbers on any
@@ -1814,38 +1815,16 @@ fit_member_worker <- function(payload, inner = 1L) {
   ## The member, its folds on inner daemons when the plan splits it
   ## -------------------------------------------------------------------------
   ## The inner daemons are this daemon's own profile, which tune reads, and
-  ## are reset as the task ends, however it ends: the reset is registered
-  ## before they start.
-
-  on_inner <- FALSE
-
-  if (inner > 1L) {
-    on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
-    on_inner <- start_inner_daemons(inner, cfg$model, cfg$feature_selection)
-  }
-
-  ## The tasks the inner daemons ran before the member (their set-up), so its
-  ## record counts only its own
-  completed_before <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
+  ## are reset as the bracket returns (run_on_inner_daemons()). What they did
+  ## is told the session, which keeps it apart from the member.
 
   inputs <- list(split_F = rows$split, cv_resamples = rows$cv_folds, calib_data = rows$calib,
                  train_data = rows$train, role_map = payload$role_map)
 
-  run <- function() {
+  run_on_inner_daemons(function(on_inner) {
     fit_member(cfg, payload$best_params, payload$fold_entries, inputs, payload$settings,
                allow_par = on_inner, threads = ENGINE_THREADS, outside_warnings = outside)
-  }
-
-  result <- if (on_inner) watch_inner_daemons(run(), inner, cfg$config_id) else run()
-
-  if (inherits(result, "horizons_inner_daemon_died")) return(result)
-
-  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) - completed_before else 0L
-
-  ## Told the session, which keeps it apart from the member
-  attr(result, "inner_daemons") <- list(daemons = as.integer(inner), started = on_inner, completed = completed)
-
-  result
+  }, inner, cfg)
 
 }
 

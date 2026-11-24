@@ -4122,8 +4122,9 @@ prepare_worker <- function(models, selections) {
 #' @param inner Integer(1). The daemons the configuration's folds run on
 #'   ([split_plan()]). With 1, tune runs them sequentially in this task.
 #'   With more, the task starts that many inner daemons on its own daemon
-#'   ([start_inner_daemons()]) once its folds are rebuilt, tune runs the
-#'   folds on them, and they are reset as the task ends, however it ends. A
+#'   once its folds are rebuilt, tune runs the folds on them, and they are
+#'   reset as the configuration returns, however it ends
+#'   ([run_on_inner_daemons()], the bracket both verbs' workers share). A
 #'   pool that does not come up runs the folds here, and the row says so.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
@@ -4249,21 +4250,15 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
   ## The configuration, its folds on inner daemons when the plan splits it
   ## -------------------------------------------------------------------------
   ## The inner daemons are this daemon's own profile, which tune reads, and
-  ## are reset as the task ends, however it ends: the reset is registered
-  ## before they start. A pool that does not come up runs the folds here.
-  on_inner <- FALSE
-
-  if (inner > 1L) {
-    on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
-    on_inner <- start_inner_daemons(inner, cfg$model, cfg$feature_selection)
-  }
-
-  ## The tasks the inner daemons ran before the configuration (their set-up),
-  ## so its row counts only its own
-  completed_before <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
-
-  run <- function() {
-    evaluate_single_config(
+  ## are reset as the bracket returns (run_on_inner_daemons()). A pool that
+  ## does not come up runs the folds here.
+  ##
+  ## Both provenance records are sent rather than rebuilt. The data
+  ## fingerprint hashes the whole predictor matrix, which is a once-per-run
+  ## cost, not a per-config one; and a setting added to the list in
+  ## evaluate() reaches the worker's rows with no change here.
+  run <- function(on_inner) {
+    result_row <- evaluate_single_config(
       config_row       = cfg,
       split            = resamples$split,
       cv_folds         = resamples$cv_folds,
@@ -4284,24 +4279,12 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
       outside_warnings = outside,
       fold_entries     = resamples$fold_entries
     )
+    result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
+    stamp_eval_settings(result_row, shared$settings)
   }
 
-  result_row <- if (on_inner) watch_inner_daemons(run(), inner, cfg$config_id) else run()
-
-  if (inherits(result_row, "horizons_inner_daemon_died")) return(result_row)
-
-  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) - completed_before else 0L
-
-  ## Both provenance records are sent rather than rebuilt. The data
-  ## fingerprint hashes the whole predictor matrix, which is a once-per-run
-  ## cost, not a per-config one; and a setting added to the list in
-  ## evaluate() reaches the worker's rows with no change here.
-  result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
-  result_row <- stamp_eval_settings(result_row, shared$settings)
-
-  ## Told the session, which keeps it apart from the row
-  attr(result_row, "inner_daemons") <- list(daemons = as.integer(inner), started = on_inner, completed = completed)
-
-  result_row
+  ## The row, and what its inner daemons did, told the session, which keeps
+  ## it apart from the row
+  run_on_inner_daemons(run, inner, cfg)
 
 }

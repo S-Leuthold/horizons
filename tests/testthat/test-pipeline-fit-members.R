@@ -1103,9 +1103,50 @@ describe("fit() - the members' packages", {
 ## A member's fit as a task: fit_member_worker()
 ## =========================================================================
 ## What the members axis sends a daemon for each member (#60), called here in
-## this session: it needs no daemon, so these run under load_all() too. The
+## this session: it needs no daemon, so these run under load_all() too, but
+## for the split member, whose inner daemons load the installed horizons. The
 ## task carries its member's data, as fit()'s fold preparations' tasks do,
 ## since fit() has no output_dir to write a payload file to.
+
+## One member, rf on PCA, so the task carries fold preparations and the
+## training part's that bounds mtry, with UQ and AD on, so it carries the
+## calibration split's positions too: what fit() hands it and what it
+## returns, recorded as it is fitted in this session, its calibration split,
+## and the task fit() would send for it, through a serialization round trip
+## as mirai sends it
+build_member_task <- function() {
+
+  obj <- make_fit_object(n = 100, n_configs = 1, feature_selection = "pca")
+
+  seen       <- NULL
+  split_C    <- NULL
+  real_fit   <- fit_member
+  real_parts <- calibration_parts
+
+  fitted <- testthat::with_mocked_bindings(
+    suppressWarnings(fit(obj, n_best = 1L, seed = 42L, control = control_horizons(min_calib_rows = 10))),
+    fit_member = function(config_row, best_params_eval, fold_entries, inputs, settings, ...) {
+      value <- real_fit(config_row, best_params_eval, fold_entries, inputs, settings, ...)
+      seen  <<- list(config_row = config_row, best_params = best_params_eval, fold_entries = fold_entries,
+                     inputs = inputs, settings = settings, value = value)
+      value
+    },
+    calibration_parts = function(split, ...) {
+      split_C <<- split
+      real_parts(split, ...)
+    }
+  )
+
+  shared  <- member_payload(seen$inputs$split_F, NULL, character(0), seen$inputs$cv_resamples, split_C,
+                            seen$inputs$role_map, seen$settings)
+  payload <- unserialize(serialize(member_task_payload(shared, seen$config_row, seen$best_params,
+                                                       seen$fold_entries), NULL))
+
+  list(fitted = fitted, seen = seen, split_C = split_C, payload = payload)
+
+}
+
+member_task <- function() memo_fixture("member_task", build_member_task)
 
 describe("fit_member_worker() - a member's fit as a task", {
 
@@ -1118,44 +1159,13 @@ describe("fit_member_worker() - a member's fit as a task", {
 
   it("fits its member as this session fits it, its intervals and its domain among them, and keeps a warning raised outside the member's unit", {
 
-    ## rf on PCA, so the task carries fold preparations and the training
-    ## part's that bounds mtry; UQ and AD on, so it carries the calibration
-    ## split's positions too
-    obj <- make_fit_object(n = 100, n_configs = 1, feature_selection = "pca")
+    member <- member_task()
+    seen   <- member$seen
 
-    ## What fit() hands its one member, and its calibration split, recorded
-    ## as the member is fitted in this session
-    seen       <- NULL
-    split_C    <- NULL
-    real_fit   <- fit_member
-    real_parts <- calibration_parts
-
-    fitted <- with_mocked_bindings(
-      suppressWarnings(fit(obj, n_best = 1L, seed = 42L, control = control_horizons(min_calib_rows = 10))),
-      fit_member = function(config_row, best_params_eval, fold_entries, inputs, settings, ...) {
-        value <- real_fit(config_row, best_params_eval, fold_entries, inputs, settings, ...)
-        seen  <<- list(config_row = config_row, best_params = best_params_eval, fold_entries = fold_entries,
-                       inputs = inputs, settings = settings, value = value)
-        value
-      },
-      calibration_parts = function(split, ...) {
-        split_C <<- split
-        real_parts(split, ...)
-      }
-    )
-
-    expect_fits_nontrivial(fitted)
+    expect_fits_nontrivial(member$fitted)
     expect_false(is.null(seen$fold_entries))
-    expect_false(is.null(split_C))
-
-    ## The task fit() sends, through a serialization round trip as mirai
-    ## sends it
-    shared  <- member_payload(seen$inputs$split_F, NULL, character(0), seen$inputs$cv_resamples, split_C,
-                              seen$inputs$role_map, seen$settings)
-    payload <- unserialize(serialize(member_task_payload(shared, seen$config_row, seen$best_params,
-                                                         seen$fold_entries), NULL))
-
-    expect_setequal(names(payload), FIT_ARG_NAMES)
+    expect_false(is.null(member$split_C))
+    expect_setequal(names(member$payload), FIT_ARG_NAMES)
 
     ## A package's warning as the daemon loads the member's packages, which
     ## mirai would drop
@@ -1165,7 +1175,7 @@ describe("fit_member_worker() - a member's fit as a task", {
       real_prepare(...)
     })
 
-    task <- fit_member_worker(payload)
+    task <- fit_member_worker(member$payload)
 
     expect_identical(attr(task, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
     expect_true(any(grepl("a package warned as it loaded", task$warnings, fixed = TRUE)))
@@ -1179,6 +1189,40 @@ describe("fit_member_worker() - a member's fit as a task", {
 
     test_rows <- rsample::testing(seen$inputs$split_F)
     expect_identical(predict(task$fitted_workflow, test_rows), predict(seen$value$fitted_workflow, test_rows))
+
+  })
+
+  it("fits a split member's folds on its inner daemons as an unsplit one's on its own, and counts their tasks (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## The worker in this session, which stands in for its daemon
+    mirai::daemons(0)
+    member <- member_task()
+
+    split   <- with_deadline(fit_member_worker(member$payload, inner = 3L), 120)
+    unsplit <- with_deadline(fit_member_worker(member$payload, inner = 1L), 120)
+
+    ## The member's folds went to its inner daemons, tune sending a call's
+    ## three folds together, so the count is a multiple of three, which the
+    ## inner daemons' three set-up tasks would not leave it
+    expect_true(attr(split, "inner_daemons")$started)
+    expect_gte(attr(split, "inner_daemons")$completed, 3L)
+    expect_identical(attr(split, "inner_daemons")$completed %% 3L, 0L)
+    expect_identical(attr(unsplit, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
+    expect_false(mirai::daemons_set())
+
+    same <- setdiff(names(unsplit), c("fitted_workflow", "uq", "ad", "runtime_secs"))
+    attr(split, "inner_daemons") <- attr(unsplit, "inner_daemons") <- NULL
+
+    expect_identical(split[same], unsplit[same])
+    expect_equal(split$uq, unsplit$uq)
+    expect_equal(split$ad, unsplit$ad)
+
+    test_rows <- rsample::testing(member$seen$inputs$split_F)
+    expect_identical(predict(split$fitted_workflow, test_rows), predict(unsplit$fitted_workflow, test_rows))
 
   })
 

@@ -1849,6 +1849,58 @@ watch_inner_daemons <- function(expr, n, id) {
 
 }
 
+#' Run a unit's work in its task, its folds on inner daemons when the plan
+#' splits it
+#'
+#' @description
+#' The bracket both verbs' workers put around their unit
+#' ([evaluate_config_worker()], [fit_member_worker()]). With `inner` above
+#' one it starts that many inner daemons on this daemon's own profile
+#' ([start_inner_daemons()]), the reset registered before they start, so
+#' they are reset as this returns, however it ends; a pool that does not
+#' come up runs the folds here. It runs `run(on_inner)`, with `on_inner`
+#' whether they connected, which the unit passes to tune as `allow_par`,
+#' reading an inner daemon's death ([watch_inner_daemons()]), and counts
+#' the tasks the inner daemons ran for the unit past their set-up. The one
+#' writer of the record [log_inner_daemons()] reads for both verbs.
+#'
+#' @param run A function of one logical, `on_inner`: the unit's work.
+#' @param inner Integer(1). The daemons the unit's folds run on
+#'   ([split_plan()]).
+#' @param config_row The unit's configuration, a one-row data frame: its
+#'   `model`, `feature_selection` and `config_id`.
+#' @return The value of `run()`, with the attribute `"inner_daemons"`:
+#'   `daemons` (`inner`), `started` (whether they connected) and
+#'   `completed` (the tasks they ran for it, past their set-up); or, when an
+#'   inner daemon died, the record [watch_inner_daemons()] returns.
+#' @keywords internal
+#' @noRd
+run_on_inner_daemons <- function(run, inner, config_row) {
+
+  on_inner <- FALSE
+
+  if (inner > 1L) {
+    on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
+    on_inner <- start_inner_daemons(inner, config_row$model, config_row$feature_selection)
+  }
+
+  ## The tasks the inner daemons ran before the unit (their set-up), so its
+  ## record counts only its own
+  inner_completed <- function() as.integer(mirai::info(.compute = NULL)[["completed"]])
+  before          <- if (on_inner) inner_completed() else 0L
+
+  value <- if (on_inner) watch_inner_daemons(run(TRUE), inner, config_row$config_id) else run(FALSE)
+
+  if (inherits(value, "horizons_inner_daemon_died")) return(value)
+
+  attr(value, "inner_daemons") <- list(daemons   = as.integer(inner),
+                                       started   = on_inner,
+                                       completed = if (on_inner) inner_completed() - before else 0L)
+
+  value
+
+}
+
 #' Stop the call because a configuration's inner daemon died
 #'
 #' @param died The task's value, from [watch_inner_daemons()].
