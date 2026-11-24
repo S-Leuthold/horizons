@@ -265,9 +265,11 @@ daemons_dispatch <- function() {
 #' starts the longest first and cancels those in flight when it stops, both
 #' through mirai's dispatcher: without it the work runs as asked, but loses
 #' both, which the run says once, as an `input` warning, and on the tree's
-#' parallel line. Said wherever the window runs: the configs axis's
-#' configurations, `evaluate()`'s fold preparations on the resamples axis,
-#' and `fit()`'s.
+#' parallel line. A stopped run's tasks then run on to their end, and since
+#' this session writes what each returns once it is collected (the configs
+#' axis's checkpoints among it), their work is not kept. Said wherever the
+#' window runs: the configs axis's configurations, `evaluate()`'s fold
+#' preparations on the resamples axis, and `fit()`'s.
 #'
 #' @param collector The verb's collector, from `log_open()`.
 #' @param what Character(1). What the window runs, e.g. `"configurations"`.
@@ -278,7 +280,7 @@ daemons_dispatch <- function() {
 log_no_dispatcher <- function(collector, what, verb) {
 
   log_warning(collector, "input", c(
-    "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn {verb}} cannot start the longest {what} first or cancel the ones still running when it stops.",
+    "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn {verb}} cannot start the longest {what} first or cancel the ones still running when it stops: those run on to their end, and what they return is not kept.",
     "i" = "mirai keeps its dispatcher unless {.code dispatcher = FALSE} is set; set the daemons again without it."
   ))
 
@@ -399,8 +401,9 @@ abort_no_daemons <- function(results, n_left = NULL, output_dir = NULL, verb = "
 #' @return A named character vector of cli lines (`"i"`), empty when there is
 #'   nothing to point to, interpolated where the caller's `output_dir` and
 #'   `verb` are: the checkpoints when the run has an `output_dir`, and the
-#'   `results` field whenever it holds rows, since a row whose checkpoint
-#'   could not be written is there and not on disk.
+#'   `results` field whenever it holds rows, since a row can be there and not
+#'   on disk: one the circuit breaker held, or one whose checkpoint this
+#'   session could not write.
 #' @keywords internal
 #' @noRd
 resume_hint <- function(results, output_dir) {
@@ -1354,15 +1357,16 @@ isolated_deaths <- function(on_daemons) {
 #' ([abort_no_daemons()]).
 #'
 #' When the window exits by an error, an interrupt or a stop of its own, it
-#' cancels every task still in flight (`mirai::stop_mirai()`), so a unit
-#' still running stops before it writes anything. It is an `on.exit()`, not
-#' a calling handler, so it runs on all three. A configuration in an
-#' isolated fit stops at once, since its daemon waits on the fit's process in
-#' R, and the process is ended as the wait is left ([run_isolated()]). One
-#' inside another compiled fit stops only when that fit returns, and writes
-#' nothing, since the interrupt is raised once R checks for it, long before
-#' the checkpoint. Cancelling needs mirai's dispatcher: without it
-#' `stop_mirai()` does nothing and the task runs to its end, which the verb
+#' cancels every task still in flight (`mirai::stop_mirai()`). It is an
+#' `on.exit()`, not a calling handler, so it runs on all three. A daemon
+#' writes nothing (this session writes what each unit returns), so a unit
+#' cancelled or still running leaves nothing behind and its value is never
+#' read. A configuration in an isolated fit stops at once, since its daemon
+#' waits on the fit's process in R, and the process is ended as the wait is
+#' left ([run_isolated()]); one inside another compiled fit stops only when
+#' that fit returns, since the interrupt is raised once R checks for it.
+#' Cancelling needs mirai's dispatcher: without it `stop_mirai()` does
+#' nothing and the task runs to its end, its value never read, which the verb
 #' warns of ([daemons_dispatch()]).
 #'
 #' Each task sends a worker function and its arguments, not a closure: the

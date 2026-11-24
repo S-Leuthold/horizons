@@ -88,6 +88,10 @@ describe("control_horizons()", {
                         class = "horizons_error_input")
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "`control_horizons(threads = 4)` is for a run in this session", fixed = TRUE)
+    ## The rule, which holds wherever the run goes (under debug, or on fewer
+    ## than two daemons, it runs in this session)
+    expect_match(msg, "with `allow_par = TRUE` every engine fits on one thread, since the cores a parallel run uses are the mirai daemons set.",
+                 fixed = TRUE)
     expect_match(msg, "set more daemons with `mirai::daemons(n)`", fixed = TRUE)
 
     expect_null(check_threads_sequential(resolve_control(control_horizons(threads = 4), "evaluate")))

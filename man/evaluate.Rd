@@ -180,7 +180,8 @@ daemons; there \code{rf}, \code{xgboost} and \code{lightgbm} fit on
 \code{control_horizons(threads = )} threads, one by default, and the results
 are the same on any number. On the daemons each fits on one thread, so the
 cores a parallel run uses are the daemons set, and \code{threads} above one
-with \code{allow_par} is refused. It never sets, resizes or resets them; on the configs axis it can
+with \code{allow_par} is refused. It never sets, resizes or resets the
+daemons; on the configs axis it can
 start daemons of its own for a long configuration's folds, on that
 configuration's daemon and within the count set (see "Inner daemons"
 below).
@@ -347,8 +348,10 @@ the longest-first start both need mirai's dispatcher, which mirai keeps
 unless \code{dispatcher = FALSE} is set. On daemons set that way the configs
 axis runs as asked, but each configuration goes to the next daemon in
 turn as it is sent, free or not, and those running when the run stops go
-on to their end, while those queued behind them end as they start, since
-the configs' data are gone. \code{evaluate()} warns of it once, with class
+on to their end, their rows not kept (no checkpoint is written for them,
+so a resumed run evaluates them again), while those queued behind them
+end as they start, since the configs' data are gone. \code{evaluate()} warns
+of it once, with class
 \code{horizons_warning_input}; the warning is also a row of the object's
 \code{log}, and under \code{verbose} the progress tree's parallel line says "no
 dispatcher" before any configuration runs, so a run that is stopped

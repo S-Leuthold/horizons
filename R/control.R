@@ -485,10 +485,10 @@ resolve_control <- function(control, verb, call = rlang::caller_env()) {
 #' Refuse threads above one on a parallel run
 #'
 #' @description
-#' On the daemons each engine fits on one thread, so the cores a parallel
-#' run uses are the daemons set (DECISIONS 2026-11-13); `threads` is the
-#' count for a run in this session. Asking for both is refused at the verb's
-#' door, before anything is drawn.
+#' The rule: with `allow_par = TRUE` every engine fits on one thread,
+#' wherever the run then goes, since the cores a parallel run uses are the
+#' daemons set; `threads` is the count for a run in this session. Asking for
+#' both is refused at the verb's door, before anything is drawn.
 #'
 #' @param control The verb's resolved control ([resolve_control()]).
 #' @param call The frame the refusal reports: the verb's.
@@ -502,7 +502,7 @@ check_threads_sequential <- function(control, call = rlang::caller_env()) {
   if (isTRUE(control$allow_par) && threads > 1) {
 
     abort_horizons(c(
-      "{.code control_horizons(threads = {threads})} is for a run in this session, and {.code allow_par = TRUE} runs on the mirai daemons, each fitting on one thread.",
+      "{.code control_horizons(threads = {threads})} is for a run in this session, and with {.code allow_par = TRUE} every engine fits on one thread, since the cores a parallel run uses are the mirai daemons set.",
       "i" = "To use more cores in parallel, set more daemons with {.code mirai::daemons(n)}; to fit on {threads} threads here, leave {.arg allow_par} off."
     ), kind = "input", call = call)
 

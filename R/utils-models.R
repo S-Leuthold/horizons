@@ -38,12 +38,12 @@ define_model_spec <- function(model, isolate = TRUE, threads = ENGINE_THREADS) {
 
   ## The engine's thread argument at the count given, which an engine left
   ## to its own default may set to every core (bonsai's lightgbm does)
-  threads <- if (!is.null(row$threads$argument)) stats::setNames(list(as.integer(threads)), row$threads$argument)
+  thread_arg <- if (!is.null(row$threads$argument)) stats::setNames(list(as.integer(threads)), row$threads$argument)
 
   ## The model's call is put together from the row and evaluated here, so
   ## parsnip captures every argument as the expression the row holds
   spec <- eval(rlang::call2(row$fn, !!!row$fixed, !!!tuned, .ns = "parsnip"))
-  spec <- parsnip::set_engine(spec, model_engine(model, isolate), !!!row$engine_args, !!!threads)
+  spec <- parsnip::set_engine(spec, model_engine(model, isolate), !!!row$engine_args, !!!thread_arg)
 
   parsnip::set_mode(spec, "regression")
 

@@ -1366,8 +1366,9 @@ describe("evaluate() - the configs axis on mirai", {
     skip_if_dev_package()
 
     ## The daemons start in one directory and the run goes on from another,
-    ## its output_dir relative to it: each daemon reads the payload and
-    ## writes its checkpoint where this session's store is
+    ## its output_dir relative to it: each daemon reads the payload and its
+    ## fold preps where this session wrote them, and this session writes the
+    ## checkpoints
     launch <- withr::local_tempdir()
     work   <- withr::local_tempdir()
 
@@ -1660,6 +1661,10 @@ describe("evaluate() - the configs axis on mirai", {
     expect_length(got$warnings, 1L)
     msg <- gsub("\\s+", " ", conditionMessage(got$warnings[[1]]))
     expect_match(msg, "set with `dispatcher = FALSE`, so `evaluate()` cannot start the longest configurations first",
+                 fixed = TRUE)
+    ## A stopped run's configurations run on, and their rows are not kept:
+    ## this session writes each checkpoint as it collects the row
+    expect_match(msg, "or cancel the ones still running when it stops: those run on to their end, and what they return is not kept.",
                  fixed = TRUE)
 
     ## The hint holds for a remote pool too: it names the setting, not a
