@@ -81,7 +81,7 @@
     Condition
       Error:
       ! SOC lies outside `outcome_range`, c(0, Inf), so `evaluate()` would score it against predictions clamped to that range.
-      x 60 of 60 values below the lower bound 0 (minimum -27.64)
+      x 60 of 60 values below the lower bound 0 (minimum -25.64)
       i `outcome_range` is the outcome's physical range, set by `configure()`. The default, `c(0, Inf)`, is for non-negative properties.
       i Re-run `configure()` with the property's physical bounds as `outcome_range`: `c(-Inf, Inf)` for a signed property.
 
