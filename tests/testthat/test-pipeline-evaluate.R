@@ -3844,9 +3844,10 @@ describe("evaluate() - threads on a run in this session (#114)", {
   spec_threads <- function(obj, control) {
     seen <- list()
     real <- define_model_spec
-    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS,
+                                                         max_weights = DEFAULT_MAX_WEIGHTS) {
       seen[[length(seen) + 1L]] <<- list(threads = threads, option = getOption("ranger.num.threads"))
-      real(model, isolate, threads)
+      real(model, isolate, threads, max_weights)
     })
     suppressWarnings(evaluate(obj, seed = 42L, control = control))
     seen
@@ -3890,9 +3891,10 @@ describe("evaluate() - threads on a run in this session (#114)", {
 
     seen <- NULL
     real <- define_model_spec
-    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS,
+                                                         max_weights = DEFAULT_MAX_WEIGHTS) {
       seen <<- c(threads = threads, omp = RhpcBLASctl::omp_get_max_threads(), blas = RhpcBLASctl::blas_get_num_procs())
-      real(model, isolate, threads)
+      real(model, isolate, threads, max_weights)
     })
 
     suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
