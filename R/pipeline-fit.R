@@ -1178,36 +1178,16 @@ fit <- function(x,
     ## other axes; their rows are on the error.
 
     member_costs <- config_costs(member_rows, nrow(train_Fit))
-    n_now        <- connected_daemons()
-    planned      <- split_plan(member_costs, n_now, cv_folds)
-    inner_plan   <- planned
-
-    if (!isTRUE(control$inner_daemons)) {
-
-      inner_plan[] <- 1L
-
-    } else if (any(inner_plan > 1L)) {
-
-      ## A split is made only when its inner daemons fit in this machine's
-      ## memory beside the daemons, which the log notes when they do not
-      processes <- daemon_processes(member_rows$model, control$isolate)
-      extra     <- split_need(inner_plan, dispatch_order(member_costs), n_now, processes,
-                              n_rows = nrow(x$data$analysis), n_predictors = sum(role_map$role == "predictor"),
-                              n_train = nrow(train_Fit), kept = config_kept(member_rows, role_map, fold_stage),
-                              folds = cv_folds)
-
-      if (!check_split_memory(reports, extra, processes, n_rows = nrow(x$data$analysis),
-                              n_predictors = sum(role_map$role == "predictor"),
-                              n_split = sum(inner_plan > 1L), collector = collector, verb = "fit")) {
-        inner_plan[] <- 1L
-      }
-
-    }
+    plan         <- inner_daemon_plan(member_costs, member_rows$model, cv_folds, control, reports,
+                                      n_rows = nrow(x$data$analysis), n_predictors = sum(role_map$role == "predictor"),
+                                      n_train = nrow(train_Fit), kept = config_kept(member_rows, role_map, fold_stage),
+                                      collector = collector, verb = "fit")
+    planned      <- plan$planned
+    inner_plan   <- plan$inner
+    blas_pinned  <- plan$pinned
 
     ## Which members run their folds on inner daemons, said in the tree from
     ## the plan, and on the log once the window has run, from what started
-    blas_pinned <- blas_pinnable()
-
     inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned)
 
     if (verbose && length(inner_lines) > 0) {

@@ -1431,42 +1431,22 @@ evaluate <- function(x,
     ## tests of what a task carries in test-evaluate-parallel.R guard both.
 
     ## The pending configurations' costs, which the window starts them
-    ## longest first by, and the daemons each one's folds run on
-    ## (split_plan()), from the daemons connected now
+    ## longest first by, and the daemons each one's folds run on, from the
+    ## daemons connected now (inner_daemon_plan())
     pending_costs <- config_costs(pending_configs, n_train)
-    n_now         <- connected_daemons()
-    planned       <- split_plan(pending_costs, n_now, cv_folds)
-    inner_plan    <- planned
-
-    if (!isTRUE(control$inner_daemons)) {
-
-      inner_plan[] <- 1L
-
-    } else if (any(inner_plan > 1L)) {
-
-      ## A split is made only when its inner daemons fit in this machine's
-      ## memory beside the daemons, which the log notes when they do not
-      processes <- daemon_processes(configs$model, control$isolate)
-      extra     <- split_need(inner_plan, dispatch_order(pending_costs), n_now, processes,
-                              n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
-                              n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
-                              folds = cv_folds)
-
-      if (!check_split_memory(reports, extra, processes, n_rows = nrow(analysis),
-                              n_predictors = sum(role_map$role == "predictor"),
-                              n_split = sum(inner_plan > 1L), collector = collector, verb = "evaluate")) {
-        inner_plan[] <- 1L
-      }
-
-    }
+    plan          <- inner_daemon_plan(pending_costs, configs$model, cv_folds, control, reports,
+                                       n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
+                                       n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
+                                       collector = collector, verb = "evaluate")
+    planned       <- plan$planned
+    inner_plan    <- plan$inner
+    blas_pinned   <- plan$pinned
 
     ## Which configurations run their folds on inner daemons, said in the
     ## tree from the plan, or that the setting kept them whole; and whether
     ## BLAS can be pinned on the daemons, without which a split can differ
     ## from the unsplit run in rounding. The log says it once the window has
     ## run, from what started.
-    blas_pinned <- blas_pinnable()
-
     if (verbose) {
 
       inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned)

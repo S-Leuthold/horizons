@@ -221,6 +221,66 @@ split_plan <- function(costs, n, folds) {
 
 }
 
+#' The daemons each unit's folds run on, under the run's settings
+#'
+#' @description
+#' The one place both verbs' windows plan their inner daemons: `evaluate()`'s
+#' configurations on its configs axis and `fit()`'s members on its members
+#' axis. The plan [split_plan()] makes from the daemons connected now; every
+#' unit on one daemon when `control_horizons(inner_daemons = FALSE)` asks it;
+#' and, when the plan splits some, every unit on one daemon again when their
+#' inner daemons would not fit in this machine's memory beside the daemons
+#' ([split_need()], [check_split_memory()], which notes it). The plan holds
+#' for the run.
+#'
+#' @param costs Numeric: the units' costs ([config_costs()]), in their order.
+#' @param models Character. The models whose isolated fits the daemons hold
+#'   ([daemon_processes()]).
+#' @param folds Integer(1). The cross-validation folds.
+#' @param control The run's `horizons_control`: `inner_daemons` and
+#'   `isolate`.
+#' @param reports The daemons' reports, from the check at the door.
+#' @param n_rows,n_predictors The run's data: its rows and predictors.
+#' @param n_train Numeric(1). The training rows the folds are cut from.
+#' @param kept Numeric: the predictors each unit keeps ([config_kept()]).
+#'   Read only when the plan splits some.
+#' @param collector The verb's collector.
+#' @param verb Character(1). The verb that runs them.
+#' @return List: `planned` (the daemons [split_plan()] gave each unit),
+#'   `inner` (the daemons each runs on) and `pinned` (whether BLAS and
+#'   OpenMP can be pinned on the daemons, [blas_pinnable()]).
+#' @keywords internal
+#' @noRd
+inner_daemon_plan <- function(costs, models, folds, control, reports, n_rows, n_predictors, n_train,
+                              kept, collector, verb) {
+
+  n       <- connected_daemons()
+  planned <- split_plan(costs, n, folds)
+  inner   <- planned
+
+  if (!isTRUE(control$inner_daemons)) {
+
+    inner[] <- 1L
+
+  } else if (any(inner > 1L)) {
+
+    ## A split is made only when its inner daemons fit in this machine's
+    ## memory beside the daemons, which the log notes when they do not
+    processes <- daemon_processes(models, control$isolate)
+    extra     <- split_need(inner, dispatch_order(costs), n, processes, n_rows = n_rows,
+                            n_predictors = n_predictors, n_train = n_train, kept = kept, folds = folds)
+
+    if (!check_split_memory(reports, extra, processes, n_rows = n_rows, n_predictors = n_predictors,
+                            n_split = sum(inner > 1L), collector = collector, verb = verb)) {
+      inner[] <- 1L
+    }
+
+  }
+
+  list(planned = planned, inner = inner, pinned = blas_pinnable())
+
+}
+
 ## ---------------------------------------------------------------------------
 ## The daemons
 ## ---------------------------------------------------------------------------
