@@ -61,6 +61,23 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 
 }
 
+#' make_eval_object() on the grid the circuit breaker's rule is read on: the
+#' three models with a thread argument (lightgbm, rf, xgboost), two
+#' preprocessing methods and two feature selections (CARS and none), twelve
+#' configurations in configure()'s order, each named by its parts
+make_breaker_grid_object <- function(n = 60) {
+
+  obj  <- make_eval_object(n = n, n_configs = 12)
+  grid <- tidyr::crossing(model = c("lightgbm", "rf", "xgboost"), transformation = "none",
+                          preprocessing = c("raw", "snv"), feature_selection = c("cars", "none"))
+
+  grid$config_id     <- paste(grid$model, grid$preprocessing, grid$feature_selection, sep = "_")
+  obj$config$configs <- grid[, c("config_id", "model", "transformation", "preprocessing", "feature_selection")]
+
+  obj
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## Fit Test Object: a minimal horizons_eval object ready for fit()

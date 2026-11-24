@@ -265,9 +265,11 @@ daemons_dispatch <- function() {
 #' starts the longest first and cancels those in flight when it stops, both
 #' through mirai's dispatcher: without it the work runs as asked, but loses
 #' both, which the run says once, as an `input` warning, and on the tree's
-#' parallel line. Said wherever the window runs: the configs axis's
-#' configurations, `evaluate()`'s fold preparations on the resamples axis,
-#' and `fit()`'s.
+#' parallel line. A stopped run's tasks then run on to their end, and since
+#' this session writes what each returns once it is collected (the configs
+#' axis's checkpoints among it), their work is not kept. Said wherever the
+#' window runs: the configs axis's configurations, `evaluate()`'s fold
+#' preparations on the resamples axis, and `fit()`'s.
 #'
 #' @param collector The verb's collector, from `log_open()`.
 #' @param what Character(1). What the window runs, e.g. `"configurations"`.
@@ -278,7 +280,7 @@ daemons_dispatch <- function() {
 log_no_dispatcher <- function(collector, what, verb) {
 
   log_warning(collector, "input", c(
-    "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn {verb}} cannot start the longest {what} first or cancel the ones still running when it stops.",
+    "The mirai daemons were set with {.code dispatcher = FALSE}, so {.fn {verb}} cannot start the longest {what} first or cancel the ones still running when it stops: those run on to their end, and what they return is not kept.",
     "i" = "mirai keeps its dispatcher unless {.code dispatcher = FALSE} is set; set the daemons again without it."
   ))
 
@@ -399,8 +401,9 @@ abort_no_daemons <- function(results, n_left = NULL, output_dir = NULL, verb = "
 #' @return A named character vector of cli lines (`"i"`), empty when there is
 #'   nothing to point to, interpolated where the caller's `output_dir` and
 #'   `verb` are: the checkpoints when the run has an `output_dir`, and the
-#'   `results` field whenever it holds rows, since a row whose checkpoint
-#'   could not be written is there and not on disk.
+#'   `results` field whenever it holds rows, since a row can be there and not
+#'   on disk: one the circuit breaker held, or one whose checkpoint this
+#'   session could not write.
 #' @keywords internal
 #' @noRd
 resume_hint <- function(results, output_dir) {
@@ -1347,21 +1350,23 @@ isolated_deaths <- function(on_daemons) {
 #' that could not read a file the run wrote for it returns what went wrong
 #' instead of a value, and the window stops the run on it the same way
 #' ([abort_run_file_unread()]), and so does a configuration whose inner
-#' daemons fell ([abort_inner_daemon_died()]). Every task that finished in a pass is
-#' collected before the first that ended in an error is raised, so a stop
-#' carries every row that came in with it. A pool left with no daemon stops
-#' the run here too ([abort_no_daemons()]).
+#' daemons fell ([abort_inner_daemon_died()]). Every task that finished in a
+#' pass is collected, and `pass()` then given them all, before the first that
+#' ended in an error is raised, so a stop carries every row that came in with
+#' it. A pool left with no daemon stops the run here too
+#' ([abort_no_daemons()]).
 #'
 #' When the window exits by an error, an interrupt or a stop of its own, it
-#' cancels every task still in flight (`mirai::stop_mirai()`), so a unit
-#' still running stops before it writes anything. It is an `on.exit()`, not
-#' a calling handler, so it runs on all three. A configuration in an
-#' isolated fit stops at once, since its daemon waits on the fit's process in
-#' R, and the process is ended as the wait is left ([run_isolated()]). One
-#' inside another compiled fit stops only when that fit returns, and writes
-#' nothing, since the interrupt is raised once R checks for it, long before
-#' the checkpoint. Cancelling needs mirai's dispatcher: without it
-#' `stop_mirai()` does nothing and the task runs to its end, which the verb
+#' cancels every task still in flight (`mirai::stop_mirai()`). It is an
+#' `on.exit()`, not a calling handler, so it runs on all three. A daemon
+#' writes nothing (this session writes what each unit returns), so a unit
+#' cancelled or still running leaves nothing behind and its value is never
+#' read. A configuration in an isolated fit stops at once, since its daemon
+#' waits on the fit's process in R, and the process is ended as the wait is
+#' left ([run_isolated()]); one inside another compiled fit stops only when
+#' that fit returns, since the interrupt is raised once R checks for it.
+#' Cancelling needs mirai's dispatcher: without it `stop_mirai()` does
+#' nothing and the task runs to its end, its value never read, which the verb
 #' warns of ([daemons_dispatch()]).
 #'
 #' Each task sends a worker function and its arguments, not a closure: the
@@ -1375,6 +1380,9 @@ isolated_deaths <- function(on_daemons) {
 #'   `args` (the worker as `worker`, and the arguments).
 #' @param collect A function of a unit's position and the value its task
 #'   returned.
+#' @param pass A function of the positions of the units collected in one
+#'   pass, in the order they were collected, called once the pass's values
+#'   are all collected and before any stop the pass raises; `NULL` for none.
 #' @param label A function of a unit's position giving it for a stop's
 #'   message: a list with `what` (e.g. `"configuration"`) and `id`.
 #' @param rows_so_far A function of no arguments returning the results table
@@ -1391,7 +1399,7 @@ isolated_deaths <- function(on_daemons) {
 #' @keywords internal
 #' @noRd
 dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_dir = NULL,
-                           n_left = NULL, verb = "evaluate", slots = function(i) 1L,
+                           n_left = NULL, verb = "evaluate", slots = function(i) 1L, pass = NULL,
                            call = rlang::caller_env()) {
 
   tasks   <- list()
@@ -1409,7 +1417,8 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
   repeat {
 
     ## Collect what has finished, the whole pass before any stop
-    ended <- NULL
+    ended     <- NULL
+    collected <- integer(0)
 
     for (key in names(tasks)) {
 
@@ -1428,9 +1437,12 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
       }
 
       collect(as.integer(key), value)
-      n_done <- n_done + 1L
+      collected <- c(collected, as.integer(key))
+      n_done    <- n_done + 1L
 
     }
+
+    if (length(collected) > 0L && !is.null(pass)) pass(collected)
 
     if (!is.null(ended)) {
       if (inherits(ended$value, "horizons_run_file_unread")) {
@@ -1488,9 +1500,15 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #' configuration's index and the path of the file `evaluate()` wrote the
 #' payload to, which its daemon reads, so this session holds the
 #' configurations and the path, and none of the data a running configuration
-#' was given. A row is appended to `finished$rows` as it finishes, and what
-#' it says of its inner daemons ([evaluate_config_worker()]) to
-#' `finished$inner`, by configuration.
+#' was given. A row is appended to `finished$rows` as it is collected, and
+#' what it says of its inner daemons ([evaluate_config_worker()]) to
+#' `finished$inner`, by configuration. Once a pass has collected every row
+#' that came in, each is handed to `finish`, which writes its checkpoint
+#' here, in this session, and may stop the run, the window cancelling what
+#' is in flight as it exits: so a stop carries every row of the pass. Those
+#' that did not fail are handed first, so a success that came in with
+#' failures disarms the circuit breaker before they can trip it, and what
+#' the breaker reads does not depend on the order within a pass.
 #'
 #' @param configs The configurations still to run, the payload's `configs`.
 #' @param costs Numeric: each configuration's cost ([config_costs()]), in
@@ -1505,13 +1523,16 @@ dispatch_units <- function(n, order, task, collect, label, rows_so_far, output_d
 #'   inner daemons, named by configuration.
 #' @param rows_so_far A function of no arguments returning the results table
 #'   a stop carries: the rows resumed and those in `finished$rows`.
+#' @param finish A function of a configuration's position in `configs` and
+#'   its row, called once every row of its pass is in `finished$rows`:
+#'   `evaluate()`'s [finish_row()].
 #' @param output_dir The run's `output_dir`, for a stop's message.
 #' @param call The frame a stop reports: the verb's.
 #' @return `NULL`, invisibly, once every configuration's row is in
 #'   `finished$rows`.
 #' @keywords internal
 #' @noRd
-dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far, output_dir = NULL,
+dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far, finish, output_dir = NULL,
                              inner = rep(1L, nrow(configs)), call = rlang::caller_env()) {
 
   ### The task's call, quoted here: its names are the task's arguments
@@ -1530,6 +1551,12 @@ dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far
       finished$inner <- c(finished$inner, stats::setNames(list(attr(row, "inner_daemons")), configs$config_id[i]))
       attr(row, "inner_daemons") <- NULL
       finished$rows <- c(finished$rows, list(row))
+    },
+    ## The pass's rows are the last collected; those that did not fail first
+    pass    = function(collected) {
+      rows   <- utils::tail(finished$rows, length(collected))
+      failed <- vapply(rows, function(row) identical(row$status, "failed"), logical(1))
+      for (k in order(failed)) finish(collected[[k]], rows[[k]])
     },
     label   = function(i) list(what = "configuration", id = configs$config_id[i]),
     rows_so_far = rows_so_far,

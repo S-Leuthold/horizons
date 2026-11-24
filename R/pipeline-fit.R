@@ -157,11 +157,13 @@
 #' the member's and stops the call: before any member is fitted, `fit()`
 #' refuses members whose model's engine or feature-selection step needs a
 #' package that is not installed, naming each (`horizons_error_missing_package`). When the first members fail the same
-#' way across at least two models, `fit()` stops with
-#' `horizons_error_systemic` and the members so far as `results`
-#' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
-#' member), and it stops the same way when a daemon dies (see
-#' "Parallelism"). A daemon lacking a package the members need is refused
+#' way (3 of them by default, `control_horizons(breaker = )`, `FALSE` to
+#' fit every member), and between them span two of the members' models,
+#' transformations, preprocessing methods and feature selections, each of
+#' these the members have more than one of, `fit()` stops with
+#' `horizons_error_systemic` and the members so far as `results`, as
+#' [evaluate()] does ("Failed configurations" there); and it stops the same
+#' way when a daemon dies (see "Parallelism"). A daemon lacking a package the members need is refused
 #' before the run (`horizons_error_missing_package`); one found lacking it
 #' later fails the members it runs with tune's error. With
 #' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
@@ -253,9 +255,9 @@
 #' @param control A [control_horizons()] object: how the run goes, and,
 #'   through `isolate` and `no_improve`, part of what it computes (see
 #'   [control_horizons()]). `fit()` reads `allow_par`, `verbose`, `debug`,
-#'   `breaker`, `keep_traces`, `isolate`, `no_improve`, `min_calib_rows`,
-#'   `min_ad_rows` and `min_degradation_rows`, and refuses any other field
-#'   that is set. The control it ran with, defaults filled in, is recorded
+#'   `breaker`, `keep_traces`, `isolate`, `threads`, `no_improve`,
+#'   `min_calib_rows`, `min_ad_rows` and `min_degradation_rows`, and refuses
+#'   any other field that is set. The control it ran with, defaults filled in, is recorded
 #'   as `models$control`.
 #'
 #' @section Parallelism:
@@ -278,7 +280,11 @@
 #' `future::plan()` is not used, and `fit()` never sets, resizes or resets
 #' the daemons. With fewer than two connected, `fit()` runs sequentially and
 #' warns, with class `horizons_warning_substitution`; the warning is also a
-#' row of the object's `log`. A daemon that dies during a member, read as
+#' row of the object's `log`. A run in this session fits `rf`, `xgboost` and
+#' `lightgbm` members on `control_horizons(threads = )` threads, one by
+#' default, and the results are the same on any number; on the daemons each
+#' fits on one, and `threads` above one with `allow_par` is refused, as in
+#' [evaluate()]. A daemon that dies during a member, read as
 #' fewer daemons connected after it than before, stops the call with
 #' `horizons_error_systemic` and the members so far; so does one exiting
 #' under `maxtasks`, `idletime` or `walltime`, which the count cannot tell
@@ -372,6 +378,9 @@ fit <- function(x,
   control   <- resolve_control(control, "fit")
   allow_par <- control$allow_par
   verbose   <- control$verbose
+
+  ## threads is for a run in this session (#114)
+  check_threads_sequential(control)
 
   collector <- log_open("fit")
 
@@ -498,6 +507,16 @@ fit <- function(x,
       on.exit(unpin_threads(), add = TRUE)
 
     }
+
+  }
+
+  ## A run in this session fits the engines with a thread argument on
+  ## control_horizons(threads = ) threads (#114), and their options
+  ## (ranger's, which it reads to predict) match while it runs
+  if (!allow_par) {
+
+    restore_threads <- options(engine_thread_options(control$threads))
+    on.exit(options(restore_threads), add = TRUE)
 
   }
 
@@ -1002,7 +1021,7 @@ fit <- function(x,
   ## error's results.
 
   results_list <- list()
-  breaker      <- new_breaker(control$breaker)
+  breaker      <- new_breaker(control$breaker, all_configs[match(top_configs$config_id, all_configs$config_id), ])
 
   for (i in seq_len(n_best)) {
 
@@ -1068,6 +1087,7 @@ fit <- function(x,
       debug                = debug,
       keep_traces          = control$keep_traces,
       isolate              = control$isolate,
+      threads              = if (allow_par) ENGINE_THREADS else control$threads,
       fold_entries         = fold_entries
     ), member_results(results_list), verb = "fit", daemons = allow_par)
 
@@ -1186,9 +1206,11 @@ fit <- function(x,
 
     }
 
-    ## A run of identical failures across two models stops the call while
-    ## members remain; with none left they are ordinary failures
-    breaker_feed(breaker, config_result, cfg$model)
+    ## A run of identical failures across the members' models,
+    ## transformations, preprocessing methods and feature selections stops
+    ## the call while members remain; with none left they are ordinary
+    ## failures
+    breaker_feed(breaker, config_result, cfg)
 
     if (breaker$tripped) {
 

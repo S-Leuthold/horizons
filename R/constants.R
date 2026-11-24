@@ -30,9 +30,11 @@
 #   one from the stream.
 # - `threads`: how the engine's threads are set, for an engine that can run
 #   more than one: `argument`, its fit argument, which define_model_spec()
-#   sets to ENGINE_THREADS, and `option`, an R option it reads (ranger reads
-#   `ranger.num.threads` to predict), which every place that pins threads
-#   sets (engine_thread_options()). An engine with no `threads` runs on one
+#   sets to the run's count (ENGINE_THREADS on the daemons,
+#   control_horizons(threads = ) on a run in the session), and `option`, an
+#   R option it reads (ranger reads `ranger.num.threads` to predict), which
+#   every place that sets threads sets to the same count
+#   (engine_thread_options()). An engine with no `threads` runs on one
 #   thread, or on what BLAS and OpenMP are given.
 # - `isolate`: the promises the engine breaks when its fits share a process,
 #   each named with the upstream report about it. Such a model is fitted
@@ -153,8 +155,12 @@ MODEL_SPECS <- list(
 # The short model names configure() takes
 VALID_MODELS <- names(MODEL_SPECS)
 
-# The threads each fit runs on: what every place that pins threads sets the
-# engines' thread options to (engine_thread_options(), R/utils-models.R)
+# The threads each fit runs on where horizons pins them (the daemons and
+# their inner daemons, an isolated fit's process, the session while a
+# parallel run fits and as the package loads), the count
+# engine_thread_options() (R/utils-models.R) gives the engines' thread
+# options there; and control_horizons(threads = )'s default for a run in
+# the session
 ENGINE_THREADS <- 1L
 
 # The packages each feature-selection method's recipe step calls when it is
@@ -449,7 +455,6 @@ SHARED_ARG_NAMES <- c(
   "outcome_range",
   "data_fp",
   "settings",
-  "checkpoint_dir",
   "fold_cache_dir",
   "keep_traces",
   "isolate",
@@ -671,6 +676,16 @@ SMALL_FOLD_ROWS <- 10L
 # the first configurations to finish failing with the same cause stop
 # evaluate() or fit(), since every other configuration would fail the same way.
 BREAKER_FAILURES <- 3L
+
+# The parts of a configuration the breaker reads (new_breaker()), named by
+# what its message calls their values. Its failures must span two values of
+# each part the configurations it watches vary in, so a failure that belongs
+# to one value of one (one selection's fold preparation, a model's engine)
+# never stops a run, whatever order the configurations finish in.
+BREAKER_FACTORS <- c(model             = "models",
+                     transformation    = "transformations",
+                     preprocessing     = "preprocessing methods",
+                     feature_selection = "feature selections")
 
 # select_training(): cap on the components retained when ncomp is given as
 # a proportion of variance. 100 was the cap the defaults were measured

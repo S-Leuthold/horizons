@@ -377,8 +377,8 @@ describe("fit() - member failures", {
 describe("fit() - each member is one unit", {
 
   ## make_fit_object() with four evaluated configurations on two models, the
-  ## copies tied with their originals, so ranking orders them rf, rf, cubist,
-  ## cubist
+  ## copies tied with their originals, so ranking orders them as `models`
+  ## repeated: rf, cubist, rf, cubist
   four_members <- function(models = c("rf", "cubist")) {
 
     obj  <- fit_obj(2L)
@@ -662,9 +662,11 @@ describe("fit() - each member is one unit", {
 
   })
 
-  it("does not stop for failures on one model, nor when the breaker is off", {
+  it("does not stop for failures on one of the members' models, nor when the breaker is off", {
 
-    one_model <- four_members(models = "rf")
+    ## Ranked rf, rf, rf, cubist: the first three fail on one model, and
+    ## the one on another is the last
+    one_model <- four_members(models = c("rf", "rf", "rf", "cubist"))
 
     expect_error(
       testthat::with_mocked_bindings(

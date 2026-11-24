@@ -56,9 +56,9 @@ tree. The seed is recorded as \code{evaluation$seed}, and \code{\link[=fit]{fit(
 through \code{isolate} and \code{no_improve}, part of what it computes (see
 \code{\link[=control_horizons]{control_horizons()}}). \code{evaluate()} reads \code{allow_par},
 \code{parallelize_over}, \code{output_dir}, \code{verbose}, \code{debug}, \code{breaker},
-\code{keep_traces}, \code{isolate}, \code{inner_daemons} and \code{no_improve}, and refuses
-any other field that is set. The control it ran with, defaults filled
-in, is recorded as \code{evaluation$control}.}
+\code{keep_traces}, \code{isolate}, \code{inner_daemons}, \code{threads} and \code{no_improve},
+and refuses any other field that is set. The control it ran with,
+defaults filled in, is recorded as \code{evaluation$control}.}
 }
 \value{
 A \code{horizons_eval} object (inherits from \code{horizons_data}) with
@@ -111,7 +111,10 @@ searched under another is not resumed.
 
 With \code{control_horizons(output_dir = )}, each config's result is
 written to \verb{<output_dir>/checkpoints/<config_id>.rds} as it finishes, and
-a rerun into the same directory resumes from those files. Required when
+a rerun into the same directory resumes from those files. It raises
+again the warnings the resumed configs raised when they ran, and
+records them and their notes on the \code{log}, as a run from the start
+would; another package's warnings stay on each row's \code{warnings}. Required when
 configs are dispatched to workers, whose daemons also read the configs'
 data from it (see "Parallelism"). A resumed row must have been scored on
 this run's training data (the outcome, the sample ids, which columns hold
@@ -151,10 +154,9 @@ write to
 \code{output_dir} that fails (the directory, the manifest, a checkpoint, the
 configs' data or a fold's preparation) stops the run with
 \code{horizons_error_systemic}, naming the directory, the rows finished so
-far as its \code{results}. On the configs axis a checkpoint a worker could
-not write is known only once every configuration has run, so the
-evaluation is returned, with one \code{horizons_warning_skipped} naming the
-directory and the configurations a resumed run evaluates again. The
+far as its \code{results}, on either axis: this session writes every
+checkpoint, on the configs axis as each configuration's row comes back
+from its daemon. The
 ranking \code{metric} is not checked, since
 every row carries all six cross-validated metrics. A row scored under an
 earlier scoring schema, or recording less of the training data and
@@ -174,7 +176,12 @@ With fewer than two daemons connected it runs sequentially and warns, with
 class \code{horizons_warning_substitution}, naming the call that would set
 them; the warning is also a row of the object's \code{log}. Without
 \code{allow_par}, \code{evaluate()} runs in the calling process and never reads the
-daemons. It never sets, resizes or resets them; on the configs axis it can
+daemons; there \code{rf}, \code{xgboost} and \code{lightgbm} fit on
+\code{control_horizons(threads = )} threads, one by default, and the results
+are the same on any number. On the daemons each fits on one thread, so the
+cores a parallel run uses are the daemons set, and \code{threads} above one
+with \code{allow_par} is refused. It never sets, resizes or resets the
+daemons; on the configs axis it can
 start daemons of its own for a long configuration's folds, on that
 configuration's daemon and within the count set (see "Inner daemons"
 below).
@@ -322,10 +329,12 @@ does not name the package (on the configs axis it stops the run as
 systemic).
 
 When the configs axis stops, by an error, an interrupt or a stop of its
-own, it cancels the configurations still running on the daemons, so a
-configuration still running stops before it writes its checkpoint; a
-checkpoint is written whole or not at all, so one the cancel reaches
-mid-write is either complete or absent. A run stopped while its fold
+own, it cancels the configurations still running on the daemons. Each
+configuration's checkpoint is written in this session as its row comes
+back, so one the stop cancels writes nothing, and one whose row had not
+come back yet is evaluated again by a resumed run; a checkpoint is
+written whole or not at all, so one an interrupt reaches mid-write is
+either complete or absent. A run stopped while its fold
 preparations run cancels those still running the same way, on either
 axis; a cancelled one writes nothing, since this session writes each. A
 configuration on inner daemons ends them as its task is cancelled. A
@@ -339,8 +348,10 @@ the longest-first start both need mirai's dispatcher, which mirai keeps
 unless \code{dispatcher = FALSE} is set. On daemons set that way the configs
 axis runs as asked, but each configuration goes to the next daemon in
 turn as it is sent, free or not, and those running when the run stops go
-on to their end, while those queued behind them end as they start, since
-the configs' data are gone. \code{evaluate()} warns of it once, with class
+on to their end, their rows not kept (no checkpoint is written for them,
+so a resumed run evaluates them again), while those queued behind them
+end as they start, since the configs' data are gone. \code{evaluate()} warns
+of it once, with class
 \code{horizons_warning_input}; the warning is also a row of the object's
 \code{log}, and under \code{verbose} the progress tree's parallel line says "no
 dispatcher" before any configuration runs, so a run that is stopped
@@ -444,11 +455,18 @@ configuration whose final fit on the training part fails is failed too
 (#102). An error that is not the
 configuration's own (an input or dependency error, or a bug in horizons)
 stops the call. So does a failure every configuration would share: when
-the first configurations to run fail the same way across at least two
-models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so far
-as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
-run every configuration; the configs axis has no breaker), and their
-failures are not checkpointed. A daemon that lacks a package the
+the first configurations to run fail the same way (3 of them by default,
+\code{control_horizons(breaker = )}, \code{FALSE} to run every configuration), and
+between them span two of the models, the transformations, the
+preprocessing methods and the feature selections, each of these the grid
+has more than one of, \code{evaluate()} stops with \code{horizons_error_systemic},
+the rows so far as its \code{results}, and their failures are not
+checkpointed. A failure that belongs to one model, one transformation,
+one preprocessing method or one feature selection (one selection's fold
+preparation, say) never stops the run, whatever order the configurations
+run in: its configurations fail, and the rest run. On the configs axis
+the first configurations are the first to finish, and the stop cancels
+those still running. A daemon that lacks a package the
 configurations need, which this session has, is refused before the run
 (\code{horizons_error_missing_package}, see "Parallelism"); one found lacking
 it mid-run stops the run as systemic on the configs axis, and on the
@@ -491,9 +509,10 @@ again resumes them instead of re-running them. The per-config results,
 \code{evaluate()} aborts before it assigns \code{x$evaluation}; after an uncaught
 abort, \code{rlang::last_error()$results} recovers them without re-running.
 
-A failure the first configurations share across at least two models stops
-the call earlier, with \code{horizons_error_systemic} (also
-\code{horizons_error_run}) and the rows finished so far as its \code{results}; with
+A failure the first configurations share across the grid (see "Failed
+configurations") stops the call earlier, with \code{horizons_error_systemic}
+(also \code{horizons_error_run}) and the rows finished so far as its
+\code{results}; with
 \code{control_horizons(breaker = FALSE)} every configuration runs and the call
 ends in the all-failed abort instead. Both carry \code{results}, so a loop over
 subsets can catch \code{horizons_error_run}, tolerate a subset that fails

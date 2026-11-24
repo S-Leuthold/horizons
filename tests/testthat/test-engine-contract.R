@@ -311,7 +311,7 @@ describe("the engine contract: (d) threads", {
 
   for (model in names(MODEL_SPECS)) {
 
-    it(paste0("gives ", model, " the package's thread count through the argument its row declares, and no other"), {
+    it(paste0("gives ", model, " the package's thread count, or the count a sequential run is given, through the argument its row declares, and no other"), {
 
       skip_without_packages(model)
       check_packages(needed_packages(model), "the engine contract")
@@ -329,6 +329,13 @@ describe("the engine contract: (d) threads", {
       expect_identical(threads, row$threads$argument %||% character(0))
 
       for (arg in threads) expect_identical(rlang::eval_tidy(args[[arg]]), ENGINE_THREADS, label = paste(model, arg))
+
+      ## control_horizons(threads = ) on a sequential run reaches the same
+      ## argument of the engine's fit
+      given <- parsnip::translate(tune::finalize_model(define_model_spec(model, threads = 3L),
+                                                       tibble::as_tibble(CONTRACT_PARAMS[[model]])))$method$fit$args
+
+      for (arg in threads) expect_identical(rlang::eval_tidy(given[[arg]]), 3L, label = paste(model, arg, "at 3"))
 
     })
 

@@ -72,15 +72,14 @@ cause's, e.g. \code{horizons_error_prediction_failed} for a member that
 cannot predict the test rows), \code{error_message} and \code{trace}.}
 \item{\code{horizons_error_systemic}}{(run) \code{\link[=evaluate]{evaluate()}} or \code{\link[=fit]{fit()}} stopped
 early, because the first configurations or members to run failed the
-same way across at least two models (the circuit breaker,
+same way across the models, transformations, preprocessing methods and
+feature selections the run has more than one of (the circuit breaker,
 \code{control_horizons(breaker = )}), or \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}} or
 \code{\link[=ensemble]{ensemble()}} stopped because a mirai daemon died or lacks a package
 the run needs, or no mirai daemon was left to run its work
 (\code{horizons_error_no_daemons}, below), or \code{\link[=evaluate]{evaluate()}} could not write to its
-\code{output_dir} (on the configs axis a checkpoint a daemon could not
-write is a \code{skipped} warning instead, since every configuration has
-run by then), or on the configs axis a daemon could not read the
-configurations' data from its \code{output_dir}. The rows finished so far travel
+\code{output_dir}, on either axis, or on the configs axis a daemon could
+not read the configurations' data from its \code{output_dir}. The rows finished so far travel
 as \code{results}; \code{NULL} from \code{ensemble()}, which has none before its
 meta-learner is built.}
 \item{\code{horizons_error_no_daemons}}{(run, and \code{horizons_error_systemic})

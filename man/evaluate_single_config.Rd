@@ -24,6 +24,7 @@ evaluate_single_config(
   debug = FALSE,
   keep_traces = FALSE,
   isolate = TRUE,
+  threads = ENGINE_THREADS,
   outside_warnings = character(0),
   fold_entries = NULL
 )
@@ -111,6 +112,11 @@ row's \code{trace}.}
 \item{isolate}{Logical. Fit a model whose engine \code{MODEL_SPECS} marks
 \code{isolate} through its isolated twin, each fit in a process of its own
 (\code{model_engine()}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
+
+\item{threads}{A whole number. The threads an engine with a thread
+argument fits on (\code{\link[=define_model_spec]{define_model_spec()}}): \code{control_horizons(threads = )}
+on a run in the session, \code{ENGINE_THREADS} (one), the default, where tune
+runs the folds on daemons.}
 
 \item{outside_warnings}{Character. Warnings the caller caught outside the
 unit before it ran, as \code{condition_summary()} lines: the configs-axis

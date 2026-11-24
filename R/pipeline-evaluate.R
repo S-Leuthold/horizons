@@ -44,9 +44,9 @@
 #'   through `isolate` and `no_improve`, part of what it computes (see
 #'   [control_horizons()]). `evaluate()` reads `allow_par`,
 #'   `parallelize_over`, `output_dir`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `isolate`, `inner_daemons` and `no_improve`, and refuses
-#'   any other field that is set. The control it ran with, defaults filled
-#'   in, is recorded as `evaluation$control`.
+#'   `keep_traces`, `isolate`, `inner_daemons`, `threads` and `no_improve`,
+#'   and refuses any other field that is set. The control it ran with,
+#'   defaults filled in, is recorded as `evaluation$control`.
 #'
 #' @section The Bayesian search's stopping rule:
 #' Each configuration's Bayesian search stops once `no_improve` iterations in
@@ -62,7 +62,10 @@
 #' @section Checkpoints:
 #' With `control_horizons(output_dir = )`, each config's result is
 #'   written to `<output_dir>/checkpoints/<config_id>.rds` as it finishes, and
-#'   a rerun into the same directory resumes from those files. Required when
+#'   a rerun into the same directory resumes from those files. It raises
+#'   again the warnings the resumed configs raised when they ran, and
+#'   records them and their notes on the `log`, as a run from the start
+#'   would; another package's warnings stay on each row's `warnings`. Required when
 #'   configs are dispatched to workers, whose daemons also read the configs'
 #'   data from it (see "Parallelism"). A resumed row must have been scored on
 #'   this run's training data (the outcome, the sample ids, which columns hold
@@ -102,10 +105,9 @@
 #'   `output_dir` that fails (the directory, the manifest, a checkpoint, the
 #'   configs' data or a fold's preparation) stops the run with
 #'   `horizons_error_systemic`, naming the directory, the rows finished so
-#'   far as its `results`. On the configs axis a checkpoint a worker could
-#'   not write is known only once every configuration has run, so the
-#'   evaluation is returned, with one `horizons_warning_skipped` naming the
-#'   directory and the configurations a resumed run evaluates again. The
+#'   far as its `results`, on either axis: this session writes every
+#'   checkpoint, on the configs axis as each configuration's row comes back
+#'   from its daemon. The
 #'   ranking `metric` is not checked, since
 #'   every row carries all six cross-validated metrics. A row scored under an
 #'   earlier scoring schema, or recording less of the training data and
@@ -123,7 +125,12 @@
 #' class `horizons_warning_substitution`, naming the call that would set
 #' them; the warning is also a row of the object's `log`. Without
 #' `allow_par`, `evaluate()` runs in the calling process and never reads the
-#' daemons. It never sets, resizes or resets them; on the configs axis it can
+#' daemons; there `rf`, `xgboost` and `lightgbm` fit on
+#' `control_horizons(threads = )` threads, one by default, and the results
+#' are the same on any number. On the daemons each fits on one thread, so the
+#' cores a parallel run uses are the daemons set, and `threads` above one
+#' with `allow_par` is refused. It never sets, resizes or resets the
+#' daemons; on the configs axis it can
 #' start daemons of its own for a long configuration's folds, on that
 #' configuration's daemon and within the count set (see "Inner daemons"
 #' below).
@@ -272,10 +279,12 @@
 #' systemic).
 #'
 #' When the configs axis stops, by an error, an interrupt or a stop of its
-#' own, it cancels the configurations still running on the daemons, so a
-#' configuration still running stops before it writes its checkpoint; a
-#' checkpoint is written whole or not at all, so one the cancel reaches
-#' mid-write is either complete or absent. A run stopped while its fold
+#' own, it cancels the configurations still running on the daemons. Each
+#' configuration's checkpoint is written in this session as its row comes
+#' back, so one the stop cancels writes nothing, and one whose row had not
+#' come back yet is evaluated again by a resumed run; a checkpoint is
+#' written whole or not at all, so one an interrupt reaches mid-write is
+#' either complete or absent. A run stopped while its fold
 #' preparations run cancels those still running the same way, on either
 #' axis; a cancelled one writes nothing, since this session writes each. A
 #' configuration on inner daemons ends them as its task is cancelled. A
@@ -289,8 +298,10 @@
 #' unless `dispatcher = FALSE` is set. On daemons set that way the configs
 #' axis runs as asked, but each configuration goes to the next daemon in
 #' turn as it is sent, free or not, and those running when the run stops go
-#' on to their end, while those queued behind them end as they start, since
-#' the configs' data are gone. `evaluate()` warns of it once, with class
+#' on to their end, their rows not kept (no checkpoint is written for them,
+#' so a resumed run evaluates them again), while those queued behind them
+#' end as they start, since the configs' data are gone. `evaluate()` warns
+#' of it once, with class
 #' `horizons_warning_input`; the warning is also a row of the object's
 #' `log`, and under `verbose` the progress tree's parallel line says "no
 #' dispatcher" before any configuration runs, so a run that is stopped
@@ -389,11 +400,18 @@
 #' (#102). An error that is not the
 #' configuration's own (an input or dependency error, or a bug in horizons)
 #' stops the call. So does a failure every configuration would share: when
-#' the first configurations to run fail the same way across at least two
-#' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
-#' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
-#' run every configuration; the configs axis has no breaker), and their
-#' failures are not checkpointed. A daemon that lacks a package the
+#' the first configurations to run fail the same way (3 of them by default,
+#' `control_horizons(breaker = )`, `FALSE` to run every configuration), and
+#' between them span two of the models, the transformations, the
+#' preprocessing methods and the feature selections, each of these the grid
+#' has more than one of, `evaluate()` stops with `horizons_error_systemic`,
+#' the rows so far as its `results`, and their failures are not
+#' checkpointed. A failure that belongs to one model, one transformation,
+#' one preprocessing method or one feature selection (one selection's fold
+#' preparation, say) never stops the run, whatever order the configurations
+#' run in: its configurations fail, and the rest run. On the configs axis
+#' the first configurations are the first to finish, and the stop cancels
+#' those still running. A daemon that lacks a package the
 #' configurations need, which this session has, is refused before the run
 #' (`horizons_error_missing_package`, see "Parallelism"); one found lacking
 #' it mid-run stops the run as systemic on the configs axis, and on the
@@ -434,9 +452,10 @@
 #' `evaluate()` aborts before it assigns `x$evaluation`; after an uncaught
 #' abort, `rlang::last_error()$results` recovers them without re-running.
 #'
-#' A failure the first configurations share across at least two models stops
-#' the call earlier, with `horizons_error_systemic` (also
-#' `horizons_error_run`) and the rows finished so far as its `results`; with
+#' A failure the first configurations share across the grid (see "Failed
+#' configurations") stops the call earlier, with `horizons_error_systemic`
+#' (also `horizons_error_run`) and the rows finished so far as its
+#' `results`; with
 #' `control_horizons(breaker = FALSE)` every configuration runs and the call
 #' ends in the all-failed abort instead. Both carry `results`, so a loop over
 #' subsets can catch `horizons_error_run`, tolerate a subset that fails
@@ -518,6 +537,9 @@ evaluate <- function(x,
     ), kind = "input")
 
   }
+
+  ## threads is for a run in this session (#114)
+  check_threads_sequential(control)
 
   collector <- log_open("evaluate")
 
@@ -707,6 +729,14 @@ evaluate <- function(x,
 
     unpin_threads <- pin_parent_threads()
     on.exit(unpin_threads(), add = TRUE)
+
+  } else {
+
+    ## A run in this session fits the engines with a thread argument on
+    ## control_horizons(threads = ) threads (#114), and their options
+    ## (ranger's, which it reads to predict) match while it runs
+    restore_threads <- options(engine_thread_options(control$threads))
+    on.exit(options(restore_threads), add = TRUE)
 
   }
 
@@ -1097,9 +1127,10 @@ evaluate <- function(x,
     ## could not match before anything ran.
     ##
     ## A daemon resolves a relative path against the directory it was started
-    ## in, not this session's, so the directories it is sent, the
-    ## checkpoints' and the run files' (where the payload and the fold preps
-    ## are), are absolute, as the payload's path is below. This session's own
+    ## in, not this session's, so the directory it is sent, the run files'
+    ## (where the payload and the fold preps are), is absolute, as the
+    ## payload's path is below. It writes nothing: this session writes each
+    ## configuration's checkpoint as it collects the row. This session's own
     ## paths, and the messages about its writes, keep the directory as given.
 
     ## The rows resumed and those finished in this call, which any stop
@@ -1133,7 +1164,6 @@ evaluate <- function(x,
       outcome_range   = outcome_range,
       data_fp         = data_fp,
       settings        = settings,
-      checkpoint_dir  = normalizePath(checkpoint_dir, winslash = "/", mustWork = TRUE),
       fold_cache_dir  = abs_run_dir,
       keep_traces     = control$keep_traces,
       isolate         = control$isolate,
@@ -1235,8 +1265,8 @@ evaluate <- function(x,
 
     ## The circuit breaker watches the first configurations to run, so a
     ## failure every configuration would share stops the call early
-    ## (control_horizons(breaker = )); the configs axis has none.
-    breaker <- new_breaker(control$breaker)
+    ## (control_horizons(breaker = ))
+    breaker <- new_breaker(control$breaker, pending_configs)
 
     for (i in seq_len(nrow(configs))) {
 
@@ -1310,6 +1340,7 @@ evaluate <- function(x,
         debug           = debug,
         keep_traces     = control$keep_traces,
         isolate         = control$isolate,
+        threads         = if (axis$axis == "sequential") control$threads else ENGINE_THREADS,
         fold_entries    = fold_entries
       ), results_so_far(results_list), output_dir, daemons = axis$tune_allow_par)
 
@@ -1378,40 +1409,14 @@ evaluate <- function(x,
 
       }
 
-      ## Checkpoint: the per-config file is the only store (#42). The rows of
-      ## a run of identical failures the breaker is watching are held back
-      ## until it disarms, so a tripped run leaves none to resume.
-      released <- breaker_feed(breaker, result_row, cfg$model)
+      ## The breaker, then the checkpoint (#42: the per-config file is the
+      ## only store), as the configs axis finishes each row
+      not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
 
-      if (breaker$tripped) {
-
-        ## A stop saves the configurations still to run; with none left it
-        ## saves nothing, so the held failures are ordinary ones and the
-        ## call ends as any other whose configurations all failed
-        not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
-
-        if (length(not_run) > 0) {
-          abort_breaker_trip(breaker, results_so_far(results_list),
-                             length(not_run))
-        }
-
-        released <- breaker_release(breaker)
-
-      }
-
-      ## A write that fails stops the run, with the rows so far
-      if (!is.null(checkpoint_dir)) checkpoint_rows(released, checkpoint_dir, results_list)
+      finish_row(result_row, cfg, breaker, length(not_run), checkpoint_dir, results_list)
 
       ## Memory cleanup
       gc(verbose = FALSE)
-
-    }
-
-    ## The loop ended with the breaker still watching: its rows are ordinary
-    ## failures after all
-    if (!is.null(checkpoint_dir)) {
-
-      checkpoint_rows(breaker_release(breaker), checkpoint_dir, results_list)
 
     }
 
@@ -1479,6 +1484,25 @@ evaluate <- function(x,
 
     }
 
+    ## Each row is finished here as the window collects it, as the
+    ## sequential loop finishes it: the circuit breaker watches the first
+    ## configurations to finish, this session writes the checkpoints it
+    ## releases, and a trip or a write that fails stops the run with the
+    ## rows so far, the configurations in flight cancelled. The
+    ## configurations still to run are those not yet collected, in flight or
+    ## waiting; the window collects every row that came in together before
+    ## it finishes any, those that did not fail first (dispatch_configs()).
+    breaker  <- new_breaker(control$breaker, pending_configs)
+    eval_env <- rlang::current_env()
+
+    finish <- function(i, row) {
+      finish_row(row, pending_configs[i, ], breaker,
+                 n_left         = n_pending - (length(finished$rows) - length(completed_ids)),
+                 checkpoint_dir = checkpoint_dir,
+                 finished       = in_config_order(finished$rows, configs$config_id),
+                 call           = eval_env)
+    }
+
     ## A daemon that dies, a pool left with none, a daemon that cannot read
     ## the payload, or a configuration's inner daemon that dies stops the
     ## run in the window, with the rows so far, which are checkpointed; a
@@ -1486,36 +1510,18 @@ evaluate <- function(x,
     ## systemic here.
     stop_on_worker_death(
       dispatch_configs(configs = pending_configs, costs = pending_costs, payload_path = payload_path,
-                       finished = finished, rows_so_far = rows_so_far, output_dir = output_dir,
-                       inner = inner_plan, call = rlang::current_env()),
+                       finished = finished, rows_so_far = rows_so_far, finish = finish,
+                       output_dir = output_dir, inner = inner_plan, call = eval_env),
       rows_so_far(), output_dir
     )
 
-    ## A worker whose checkpoint could not be written said so on its row
-    ## (evaluate_config_worker()). Every configuration has run by now, so
-    ## the evaluation is returned, and one warning names what a resumed run
-    ## would evaluate again
     results_list <- in_config_order(finished$rows, configs$config_id)
-    not_saved    <- lapply(results_list, attr, "checkpoint_failed")
 
     ## Which configurations ran their folds on inner daemons, from what each
     ## task says; one whose inner daemons did not connect ran its folds on
     ## its own daemon, which costs time only
     log_inner_daemons(collector, pending_configs$config_id, planned, inner_plan, control$inner_daemons,
                       blas_pinned, finished$inner)
-
-    results_list <- lapply(results_list, function(row) {
-      attr(row, "checkpoint_failed") <- NULL
-      row
-    })
-
-    unsaved <- !vapply(not_saved, is.null, logical(1))
-
-    log_unsaved_checkpoints(collector,
-                            ids            = vapply(results_list[unsaved], `[[`, character(1), "config_id"),
-                            reasons        = unlist(not_saved[unsaved]),
-                            checkpoint_dir = checkpoint_dir,
-                            output_dir     = output_dir)
 
   }
 
@@ -2022,7 +2028,8 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 
 #' Write one result row to the per-config store
 #'
-#' @param row One-row result.
+#' @param row One-row result, its unit's records on it as the attribute
+#'   `"unit_records"`, which the checkpoint keeps.
 #' @param checkpoint_dir The `checkpoints/` directory.
 #' @return `NULL` when the row was written; otherwise why it could not be,
 #'   as [write_output_file()] reports it.
@@ -2030,10 +2037,8 @@ load_eval_checkpoints <- function(output_dir, config_ids, data_fp, settings,
 #' @noRd
 write_checkpoint_row <- function(row, checkpoint_dir) {
 
-  ## A unit's records are lifted onto the call's log, not stored: a resumed
-  ## row's warnings are read on the row (lift_unit_records()).
-  attr(row, "unit_records") <- NULL
-
+  ## With its unit's records, so a run that resumes the row raises its
+  ## warnings again, as the run that evaluated it did (lift_unit_records())
   write_output_file(row, checkpoint_path(checkpoint_dir, row$config_id))
 
 }
@@ -2219,6 +2224,50 @@ remove_empty_dir <- function(dir) {
 
 }
 
+#' Finish a configuration's row: the circuit breaker, then its checkpoint
+#'
+#' @description
+#' What `evaluate()` does with each row as it finishes, on either path: the
+#' sequential loop as each configuration returns, and the configs axis as
+#' its window collects each one ([dispatch_configs()]), so this session
+#' writes every checkpoint. The row feeds the breaker ([breaker_feed()]),
+#' which holds back a run of identical failures until it disarms; when it
+#' trips with configurations still to run the run stops
+#' ([abort_breaker_trip()]), the held rows not checkpointed. Once nothing is
+#' left to run it releases what it holds, ordinary failures after all,
+#' tripped or not, so the call ends as any other whose configurations all
+#' failed. The rows released are written to the store, and a write that
+#' fails stops the run with the rows so far ([checkpoint_rows()]).
+#'
+#' @param row The configuration's row, stamped.
+#' @param config The configuration, a one-row data frame: the breaker reads
+#'   its model, transformation, preprocessing and feature selection.
+#' @param breaker From [new_breaker()].
+#' @param n_left Integer(1). The configurations still to run once this one
+#'   is done, not those resumed from checkpoints: on the configs axis those
+#'   not yet collected, in flight or waiting.
+#' @param checkpoint_dir The `checkpoints/` directory, or `NULL` without an
+#'   `output_dir`.
+#' @param finished List of the rows finished so far, this one among them,
+#'   which a stop carries as its `results`.
+#' @param call The frame a stop reports: `evaluate()`'s.
+#' @return `NULL`, invisibly; or does not return, when the run stops.
+#' @keywords internal
+#' @noRd
+finish_row <- function(row, config, breaker, n_left, checkpoint_dir, finished, call = rlang::caller_env()) {
+
+  released <- breaker_feed(breaker, row, config)
+
+  if (breaker$tripped && n_left > 0) abort_breaker_trip(breaker, results_so_far(finished), n_left, call = call)
+
+  if (n_left == 0) released <- c(released, breaker_release(breaker))
+
+  if (!is.null(checkpoint_dir)) checkpoint_rows(released, checkpoint_dir, finished, call = call)
+
+  invisible(NULL)
+
+}
+
 #' Write rows to the checkpoint store, stopping on the first that fails
 #'
 #' @param rows List of result rows.
@@ -2275,46 +2324,6 @@ abort_output_write <- function(path, reason, results, call = rlang::caller_env()
 
 }
 
-#' Record the checkpoints the configs axis's workers could not write
-#'
-#' @description
-#' On the configs axis a worker that cannot write its checkpoint says so on
-#' the row it returns, and the parent reads those rows once every
-#' configuration has run. With nothing left to save by then, the evaluation
-#' is returned, and the checkpoints asked for that were not written are one
-#' `skipped` warning: a run resumed from `output_dir` evaluates those
-#' configurations again.
-#'
-#' @param collector The verb's collector, from `log_open()`.
-#' @param ids Character. The configurations whose checkpoint was not written.
-#' @param reasons Character, one per id: why, from [write_output_file()].
-#' @param checkpoint_dir The `checkpoints/` directory.
-#' @param output_dir The run's `output_dir`.
-#' @return `NULL`, invisibly; adds one warning to the collector, its ids the
-#'   configurations, when there are any.
-#' @keywords internal
-#' @noRd
-log_unsaved_checkpoints <- function(collector, ids, reasons, checkpoint_dir, output_dir) {
-
-  n_ids <- length(ids)
-
-  if (n_ids == 0) return(invisible(NULL))
-
-  ### The first one's cause, as a stop on the sequential path gives it
-  name   <- basename(checkpoint_path(checkpoint_dir, ids[1]))
-  reason <- reasons[1]
-
-  log_warning(collector, "skipped", c(
-    "{n_ids} configuration{?s} {?was/were} evaluated, but {?its/their} checkpoint{?s} could not be written to {.path {checkpoint_dir}}: {.val {ids}}.",
-    "x" = "{name}: {reason}",
-    "i" = "The evaluation is returned, but {cli::qty(n_ids)}{?that configuration has/those configurations have} no checkpoint, so a run resumed from {.path {output_dir}} evaluates {cli::qty(n_ids)}{?it/them} again.",
-    "i" = "Make {.path {checkpoint_dir}} writable before resuming."
-  ), ids = ids)
-
-  invisible(NULL)
-
-}
-
 #' Record the files in the store that could not be used
 #'
 #' @param collector The verb's collector, from `log_open()`.
@@ -2348,10 +2357,12 @@ log_unreadable_checkpoints <- function(collector, unreadable, output_dir) {
 #' attribute `"unit_records"`, since records are data and cross from a worker
 #' with the row. The horizons warnings among them go to the call's collector
 #' in one pass, with their notes ([log_unit_records()]), so a message several
-#' configurations raised is one event naming them all, and the attribute is dropped, so
-#' neither the results nor a checkpoint keeps it. Only rows evaluated in this
-#' call carry it: a row resumed from a checkpoint reports its warnings on the
-#' row.
+#' configurations raised is one event naming them all, and the attribute is
+#' dropped from the results. A row resumed from a checkpoint carries the
+#' records its checkpoint kept ([write_checkpoint_row()]), so a resumed run
+#' raises its earlier configurations' warnings again, every topic alike, as
+#' one event with the warnings of those it ran; a checkpoint with none lifts
+#' nothing.
 #'
 #' @param rows List of result rows.
 #' @param collector The call's collector, from [log_open()].
@@ -2407,26 +2418,36 @@ drop_unit_records <- function(rows) {
 ## Both stop the call with horizons_error_systemic and the rows so far, since
 ## every configuration still to run would fail the same way.
 
-#' A circuit breaker for the configurations a sequential run evaluates
+#' A circuit breaker for the configurations a run evaluates
 #'
 #' @description
-#' Armed from the start, it watches the configurations as they finish, not
-#' the rows loaded from checkpoints. A success, a pruned configuration, or a
+#' Armed from the start, it watches the configurations as they finish (on
+#' the configs axis, in the order the window collects them), not the rows
+#' loaded from checkpoints. A success, a pruned configuration, or a
 #' failure unlike those before it disarms it for the rest of the call. While
 #' armed it holds back the rows of the identical failures so far, and it
-#' trips once there are `limit` of them across at least two models, while
-#' configurations remain to be run (with none left, `evaluate()` releases the
-#' rows instead):
-#' `configure()`'s grid runs a model's configurations together, so a failure
-#' local to one model fills the run first and never trips it.
+#' trips once there are `limit` of them spanning two values of each part of
+#' a configuration that the configurations it watches vary in
+#' (`BREAKER_FACTORS`: the model, the transformation, the preprocessing and
+#' the feature selection), while configurations remain to be run (with none
+#' left, the caller releases the rows instead). A failure that belongs to one
+#' value of one of them, such as one feature selection's fold preparation
+#' or one model's engine, never trips it, whatever order the configurations
+#' finish in: only one every value of every part shares does.
 #'
 #' @param limit A whole number of at least 2, or `FALSE` for no breaker
 #'   (`control_horizons(breaker = )`).
+#' @param configs The configurations it watches: those the call runs, not
+#'   those resumed from checkpoints. A data frame with the columns
+#'   `names(BREAKER_FACTORS)`.
 #' @return An environment: `armed`, `tripped`, the run's `key`, its `held`
-#'   rows and their `models`.
+#'   rows, the `factors` the configurations vary in, and `values`, by factor,
+#'   the held rows' values of each.
 #' @keywords internal
 #' @noRd
-new_breaker <- function(limit) {
+new_breaker <- function(limit, configs) {
+
+  factors <- names(BREAKER_FACTORS)
 
   breaker         <- new.env(parent = emptyenv())
   breaker$limit   <- limit
@@ -2434,7 +2455,8 @@ new_breaker <- function(limit) {
   breaker$tripped <- FALSE
   breaker$key     <- NULL
   breaker$held    <- list()
-  breaker$models  <- character(0)
+  breaker$factors <- factors[vapply(factors, function(f) length(unique(configs[[f]])) >= 2L, logical(1))]
+  breaker$values  <- stats::setNames(rep(list(character(0)), length(breaker$factors)), breaker$factors)
 
   breaker
 
@@ -2444,13 +2466,14 @@ new_breaker <- function(limit) {
 #'
 #' @param breaker From [new_breaker()].
 #' @param row The row the configuration returned.
-#' @param model Character(1). The configuration's model.
+#' @param config The configuration: a one-row data frame with the columns
+#'   `names(BREAKER_FACTORS)`.
 #' @return List of the rows that may be checkpointed now: `row`, with the
 #'   held rows when it disarms the breaker, or none while the breaker holds
 #'   it. Sets `breaker$tripped` when this row trips it.
 #' @keywords internal
 #' @noRd
-breaker_feed <- function(breaker, row, model) {
+breaker_feed <- function(breaker, row, config) {
 
   if (!breaker$armed) return(list(row))
 
@@ -2462,12 +2485,13 @@ breaker_feed <- function(breaker, row, model) {
 
   }
 
-  breaker$key    <- key
-  breaker$held   <- c(breaker$held, list(row))
-  breaker$models <- c(breaker$models, model)
+  breaker$key  <- key
+  breaker$held <- c(breaker$held, list(row))
+
+  for (f in breaker$factors) breaker$values[[f]] <- c(breaker$values[[f]], config[[f]])
 
   breaker$tripped <- length(breaker$held) >= breaker$limit &&
-    length(unique(breaker$models)) >= 2L
+    all(lengths(lapply(breaker$values, unique)) >= 2L)
 
   list()
 
@@ -2531,11 +2555,16 @@ abort_breaker_trip <- function(breaker,
                                call        = rlang::caller_env()) {
 
   n_failed <- length(breaker$held)
-  n_models <- length(unique(breaker$models))
   cause    <- breaker$held[[1]]$error_message
 
+  ## What the failures span: "across 2 models and 2 feature selections"
+  spans  <- vapply(breaker$factors, function(f) {
+    paste(length(unique(breaker$values[[f]])), BREAKER_FACTORS[[f]])
+  }, character(1))
+  across <- if (length(spans)) paste0(", across ", cli::ansi_collapse(spans, sep2 = " and ", last = " and ")) else ""
+
   abort_horizons(c(
-    "The first {n_failed} {units} to run all failed the same way, across {n_models} models, so {.fn {verb}} stopped rather than run the other {n_left}.",
+    "The first {n_failed} {units} to run all failed the same way{across}, so {.fn {verb}} stopped rather than run the other {n_left}.",
     "x" = "{cause}",
     "i" = if (checkpoints) {
       "Their rows are in this error's {.field results} field and were not checkpointed, so a run after the fix evaluates them."
@@ -4103,11 +4132,13 @@ prepare_worker <- function(models, selections) {
 #'   `sg_window`, `pca_threshold` (the object's recipe settings),
 #'   `outcome_range` (the range scored predictions are clamped to), `data_fp`
 #'   and `settings` (the parent's [eval_data_fingerprint()] and
-#'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
+#'   [eval_settings()] records, stamped on the row as-is),
 #'   `fold_cache_dir` (the run files' directory, absolute, where the fold
 #'   preparations are), `keep_traces`, `isolate` and `pkg_version`. There is
 #'   no `allow_par`: whether tune runs the folds on daemons is `inner`'s.
-#'   There is no `debug` either, since a debug run never dispatches.
+#'   There is no `debug` either, since a debug run never dispatches, and no
+#'   checkpoint directory, since the session writes each row's checkpoint as
+#'   it collects the row ([finish_row()]).
 #' @param inner Integer(1). The daemons the configuration's folds run on
 #'   ([split_plan()]). With 1, tune runs them sequentially in this task.
 #'   With more, the task starts that many inner daemons on its own daemon
@@ -4118,8 +4149,7 @@ prepare_worker <- function(models, selections) {
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
 #'   records still on it for the parent to lift, any warning raised in the
 #'   worker's own steps before the unit rendered in its `warnings` with the
-#'   unit's, when its checkpoint could not be written, why, as the attribute
-#'   `"checkpoint_failed"`, and its inner daemons as the attribute
+#'   unit's, and its inner daemons as the attribute
 #'   `"inner_daemons"`: `daemons` (`inner`), `started` (whether they
 #'   connected) and `completed` (the tasks they ran for it, past their
 #'   set-up). When the file at
@@ -4288,17 +4318,6 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
   ## evaluate() reaches the worker's rows with no change here.
   result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
   result_row <- stamp_eval_settings(result_row, shared$settings)
-
-  ## A checkpoint that cannot be written is said on the row, for the parent
-  ## to report once every configuration has run, as the configs axis has
-  ## always done.
-  if (!is.null(shared$checkpoint_dir)) {
-
-    failed <- write_checkpoint_row(result_row, shared$checkpoint_dir)
-
-    if (!is.null(failed)) attr(result_row, "checkpoint_failed") <- failed
-
-  }
 
   ## Told the session, which keeps it apart from the row
   attr(result_row, "inner_daemons") <- list(daemons = as.integer(inner), started = on_inner, completed = completed)

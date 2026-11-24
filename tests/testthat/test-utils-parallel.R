@@ -303,7 +303,8 @@ describe("dispatch_configs()", {
     finished$rows <- list()
 
     err <- expect_error(
-      dispatch_configs(configs, rep(1, 3), "payload.rds", finished, function() dplyr::bind_rows(finished$rows)),
+      dispatch_configs(configs, rep(1, 3), "payload.rds", finished, function() dplyr::bind_rows(finished$rows),
+                       finish = function(i, row) NULL),
       class = "horizons_error_systemic"
     )
 
@@ -312,6 +313,65 @@ describe("dispatch_configs()", {
                  "The mirai daemon running configuration \"cfg_001\" stopped while it ran (`errorValue` 19, Connection reset)",
                  fixed = TRUE)
     expect_null(err$parent)
+
+  })
+
+  it("hands each row to finish once it is in finished$rows, and stops where finish stops", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003"),
+                              model = "plsr", feature_selection = "none")
+
+    local_mocked_bindings(connected_daemons = function() 1L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = tibble::tibble(config_id = configs$config_id[.args$config_i], status = "success"))
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+    handed        <- list()
+
+    ## The second row's finish stops the run, as a failed write does
+    finish <- function(i, row) {
+      handed[[length(handed) + 1L]] <<- list(i = i, id = row$config_id, in_rows = length(finished$rows))
+      if (i == 2L) rlang::abort("The write failed.", class = "test_finish_stop")
+    }
+
+    expect_error(dispatch_configs(configs, rep(1, 3), "payload.rds", finished, function() NULL, finish = finish),
+                 class = "test_finish_stop")
+
+    expect_identical(handed, list(list(i = 1L, id = "cfg_001", in_rows = 1L), list(i = 2L, id = "cfg_002", in_rows = 2L)))
+
+  })
+
+  it("collects every row of a pass before it finishes any, then hands those that did not fail first, so a stop carries the whole pass", {
+
+    configs <- tibble::tibble(config_id = c("cfg_001", "cfg_002", "cfg_003", "cfg_004"),
+                              model = "plsr", feature_selection = "none")
+    status  <- c("failed", "failed", "success", "pruned")
+
+    ## Three daemons: the first three come in together, the fourth after
+    local_mocked_bindings(connected_daemons = function() 3L)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = tibble::tibble(config_id = configs$config_id[.args$config_i], status = status[.args$config_i]))
+    }, .package = "mirai")
+
+    finished      <- new.env(parent = emptyenv())
+    finished$rows <- list()
+    handed        <- list()
+
+    ## The first row handed stops the run, as a trip does
+    finish <- function(i, row) {
+      handed[[length(handed) + 1L]] <<- list(id = row$config_id, in_rows = length(finished$rows))
+      if (length(handed) == 2L) rlang::abort("The breaker tripped.", class = "test_finish_stop")
+    }
+
+    expect_error(dispatch_configs(configs, rep(1, 4), "payload.rds", finished, function() NULL, finish = finish),
+                 class = "test_finish_stop")
+
+    ## The success first, then the failures in the order collected, each once
+    ## all three were in finished$rows
+    expect_identical(handed, list(list(id = "cfg_003", in_rows = 3L), list(id = "cfg_001", in_rows = 3L)))
+    expect_identical(vapply(finished$rows, `[[`, character(1), "config_id"), c("cfg_001", "cfg_002", "cfg_003"))
 
   })
 
@@ -337,7 +397,8 @@ describe("dispatch_configs()", {
     finished$rows <- list()
 
     err <- expect_error(
-      dispatch_configs(configs, rep(1, 3), unread$path, finished, function() dplyr::bind_rows(finished$rows)),
+      dispatch_configs(configs, rep(1, 3), unread$path, finished, function() dplyr::bind_rows(finished$rows),
+                       finish = function(i, row) NULL),
       class = "horizons_error_systemic"
     )
 
@@ -856,7 +917,7 @@ describe("dispatch_configs() and an inner daemon's death", {
 
     err <- expect_error(
       dispatch_configs(configs, c(1, 1), "payload.rds", finished, function() dplyr::bind_rows(finished$rows),
-                       inner = c(1L, 2L)),
+                       finish = function(i, row) NULL, inner = c(1L, 2L)),
       class = "horizons_error_systemic"
     )
 
@@ -884,7 +945,8 @@ describe("dispatch_configs() and an inner daemon's death", {
     finished      <- new.env(parent = emptyenv())
     finished$rows <- list()
 
-    dispatch_configs(configs, c(1, 1), "payload.rds", finished, function() NULL, inner = c(1L, 2L))
+    dispatch_configs(configs, c(1, 1), "payload.rds", finished, function() NULL, finish = function(i, row) NULL,
+                     inner = c(1L, 2L))
 
     expect_identical(unlist(sent), c(1L, 2L))
     expect_null(attr(finished$rows[[2]], "inner_daemons"))
@@ -899,7 +961,8 @@ describe("dispatch_configs() and an inner daemon's death", {
 
     local_mocked_bindings(dispatch_units = function(..., slots, call) seen <<- vapply(1:2, slots, integer(1)))
 
-    dispatch_configs(configs, c(1, 1), "payload.rds", new.env(), function() NULL, inner = c(1L, 2L))
+    dispatch_configs(configs, c(1, 1), "payload.rds", new.env(), function() NULL, finish = function(i, row) NULL,
+                     inner = c(1L, 2L))
 
     expect_identical(seen, c(1L, 2L))
 

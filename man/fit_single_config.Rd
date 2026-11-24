@@ -30,6 +30,7 @@ fit_single_config(
   debug = FALSE,
   keep_traces = FALSE,
   isolate = TRUE,
+  threads = ENGINE_THREADS,
   fold_entries = NULL
 )
 }
@@ -129,6 +130,11 @@ member's \code{trace}.}
 \item{isolate}{Logical. Fit a model whose engine \code{MODEL_SPECS} marks
 \code{isolate} through its isolated twin, each fit in a process of its own
 (\code{model_engine()}); \code{control_horizons(isolate = )}. Default \code{TRUE}.}
+
+\item{threads}{A whole number. The threads an engine with a thread
+argument fits on (\code{\link[=define_model_spec]{define_model_spec()}}): \code{control_horizons(threads = )}
+on a run in the session, \code{ENGINE_THREADS} (one), the default, where tune
+runs the folds on daemons.}
 
 \item{fold_entries}{The entries of the member's fold preps, as \code{fit()}
 built them, shaped as \code{\link[=evaluate_single_config]{evaluate_single_config()}} takes them. \code{NULL}

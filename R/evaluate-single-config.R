@@ -93,6 +93,10 @@
 #' @param isolate Logical. Fit a model whose engine `MODEL_SPECS` marks
 #'   `isolate` through its isolated twin, each fit in a process of its own
 #'   (`model_engine()`); `control_horizons(isolate = )`. Default `TRUE`.
+#' @param threads A whole number. The threads an engine with a thread
+#'   argument fits on ([define_model_spec()]): `control_horizons(threads = )`
+#'   on a run in the session, `ENGINE_THREADS` (one), the default, where tune
+#'   runs the folds on daemons.
 #' @param outside_warnings Character. Warnings the caller caught outside the
 #'   unit before it ran, as `condition_summary()` lines: the configs-axis
 #'   worker's, from loading the configuration's packages and rebuilding its
@@ -143,6 +147,7 @@ evaluate_single_config <- function(config_row,
                                    debug           = FALSE,
                                    keep_traces     = FALSE,
                                    isolate         = TRUE,
+                                   threads         = ENGINE_THREADS,
                                    outside_warnings = character(0),
                                    fold_entries     = NULL) {
 
@@ -199,7 +204,7 @@ evaluate_single_config <- function(config_row,
                                                sg_window     = sg_window,
                                                pca_threshold = pca_threshold))
 
-    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads))
 
     wflow <- unit_step("workflow", workflows::workflow() |>
                          workflows::add_recipe(recipe) |>

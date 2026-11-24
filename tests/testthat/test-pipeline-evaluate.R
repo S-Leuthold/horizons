@@ -2767,31 +2767,6 @@ describe("evaluate() - a failed write to output_dir", {
 
   })
 
-  ## The configs axis returns the evaluation instead, since every
-  ## configuration has run by the time it knows (test-evaluate-parallel.R)
-  it("records the checkpoints the configs axis's workers could not write as one skipped warning, naming each configuration", {
-
-    collector <- log_open("evaluate")
-    log_unsaved_checkpoints(collector, c("cfg_002", "cfg_003"),
-                            c("cannot open {the} file", "another reason"),
-                            checkpoint_dir = "/run/checkpoints", output_dir = "/run")
-    rows <- log_close(collector)
-
-    expect_identical(rows$type, "warning")
-    expect_identical(rows$topic, "skipped")
-    expect_identical(rows$ids[[1]], c("cfg_002", "cfg_003"))
-    expect_match(rows$message, "2 configurations were evaluated, but their checkpoints could not be written to '/run/checkpoints'",
-                 fixed = TRUE)
-    expect_match(rows$message, "cfg_002.rds: cannot open {the} file", fixed = TRUE)
-    expect_match(rows$message, "a run resumed from '/run' evaluates them again", fixed = TRUE)
-
-    ## Nothing when every checkpoint was written
-    collector <- log_open("evaluate")
-    log_unsaved_checkpoints(collector, character(0), NULL, "/run/checkpoints", "/run")
-    expect_identical(nrow(log_close(collector)), 0L)
-
-  })
-
 })
 
 ## =========================================================================
@@ -3297,24 +3272,31 @@ describe("evaluate() - plsr on PCA scores", {
 
 describe("evaluate() - the configurations' warnings and failures on the log", {
 
-  it("lifts a configuration's horizons warning onto the log once, naming the configurations, and stores no records", {
+  ## Each row as evaluate_single_config() returns it: its unit's records on
+  ## it, a substitution warning among them, and another package's warning,
+  ## which stays on the row
+  warning_runner <- function(template) {
+    function(config_row, ...) {
+      id  <- config_row$config_id
+      row <- mock_eval_row(template, id, "success", warnings = "Kept the grid's choice.")
+      attr(row, "unit_records") <- run_unit({
+        warn_in_unit("substitution", "Kept the grid's choice.")
+        warning("ranger warned")
+      }, "configuration", id)$records
+      row
+    }
+  }
+
+  ## The log's rows for a topic, their times aside
+  topic_rows <- function(ev, topic) {
+    rows <- ev$log[ev$log$topic %in% topic, ]
+    rows[setdiff(names(rows), "time")]
+  }
+
+  it("lifts a configuration's horizons warning onto the log once, naming the configurations, and keeps its records in the checkpoint", {
 
     template <- ev60()$evaluation$results[1, ]
-
-    ## Each row as evaluate_single_config() returns it: its unit's records
-    ## on it, a substitution warning among them, and another package's
-    ## warning, which stays on the row
-    local_mocked_bindings(
-      evaluate_single_config = function(config_row, ...) {
-        id  <- config_row$config_id
-        row <- mock_eval_row(template, id, "success", warnings = "Kept the grid's choice.")
-        attr(row, "unit_records") <- run_unit({
-          warn_in_unit("substitution", "Kept the grid's choice.")
-          warning("ranger warned")
-        }, "configuration", id)$records
-        row
-      }
-    )
+    local_mocked_bindings(evaluate_single_config = warning_runner(template))
 
     dir <- withr::local_tempdir()
     got <- collect_warnings(evaluate(make_eval_object(n = 60, n_configs = 2), seed = 42L,
@@ -3331,7 +3313,55 @@ describe("evaluate() - the configurations' warnings and failures on the log", {
     expect_match(row$message, "Kept the grid's choice. In 2 configurations", fixed = TRUE)
     expect_identical(subs[[1]]$log, row)
 
-    expect_null(attr(readRDS(file.path(dir, "checkpoints", "cfg_001.rds")), "unit_records"))
+    ## Not on the results, and in the checkpoint, for a resumed run to raise
+    expect_null(attr(ev$evaluation$results, "unit_records"))
+    expect_true("Kept the grid's choice." %in% attr(readRDS(file.path(dir, "checkpoints", "cfg_001.rds")), "unit_records")$message)
+
+  })
+
+  it("raises a resumed configuration's warnings again, once, naming it, with the log row the first run wrote", {
+
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = warning_runner(template))
+
+    dir   <- withr::local_tempdir()
+    obj   <- make_eval_object(n = 60, n_configs = 2)
+    first <- collect_warnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    ## Every configuration checkpointed, so nothing runs
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+    again <- collect_warnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    subs <- Filter(function(w) inherits(w, "horizons_warning_substitution"), again$warnings)
+    expect_length(subs, 1L)
+    expect_match(conditionMessage(subs[[1]]), "Kept the grid's choice.", fixed = TRUE)
+
+    expect_identical(topic_rows(again$value, "substitution"), topic_rows(first$value, "substitution"))
+    expect_identical(again$value$evaluation$results$warnings, first$value$evaluation$results$warnings)
+
+  })
+
+  it("resumes a checkpoint that keeps no records, raising nothing for it", {
+
+    template <- ev60()$evaluation$results[1, ]
+    local_mocked_bindings(evaluate_single_config = warning_runner(template))
+
+    dir <- withr::local_tempdir()
+    obj <- make_eval_object(n = 60, n_configs = 2)
+    suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    ## cfg_002's checkpoint as one written without its records
+    path <- file.path(dir, "checkpoints", "cfg_002.rds")
+    row  <- readRDS(path)
+    attr(row, "unit_records") <- NULL
+    saveRDS(row, path)
+
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+    again <- collect_warnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir)))
+
+    row <- topic_rows(again$value, "substitution")
+    expect_identical(row$ids[[1]], "cfg_001")
+    expect_length(Filter(function(w) inherits(w, "horizons_warning_substitution"), again$warnings), 1L)
 
   })
 
@@ -3474,14 +3504,15 @@ describe("evaluate() - the circuit breaker", {
 
   })
 
-  it("does not stop when the identical failures are all on one model, and checkpoints them at the end", {
+  it("does not stop when the identical failures share one model of the grid's, and checkpoints them at the end", {
 
     template <- ev60()$evaluation$results[1, ]
     ran      <- new.env()
     local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
 
+    ## Three on rf, then the one on cubist, which is the last
     obj <- make_eval_object(n = 60, n_configs = 4)
-    obj$config$configs$model <- "rf"
+    obj$config$configs$model <- c("rf", "rf", "rf", "cubist")
 
     dir <- withr::local_tempdir()
     expect_error(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))),
@@ -3489,6 +3520,109 @@ describe("evaluate() - the circuit breaker", {
 
     expect_length(ran$ids, 4L)
     expect_setequal(list.files(file.path(dir, "checkpoints")), paste0(obj$config$configs$config_id, ".rds"))
+
+  })
+
+  it("trips only on failures spanning two of each part the configurations vary in, whatever order they finish in", {
+
+    obj  <- make_breaker_grid_object()
+    grid <- obj$config$configs
+    cars <- which(grid$feature_selection == "cars")
+
+    ## The position in `order` at which the breaker trips on the failures of
+    ## the configurations in `failing` (NA when it does not), the rest
+    ## succeeding
+    trips_at <- function(order, failing, configs = grid) {
+      breaker <- new_breaker(3L, configs)
+      for (k in seq_along(order)) {
+        id  <- configs$config_id[order[k]]
+        row <- if (order[k] %in% failing) {
+          tibble::tibble(config_id = id, status = "failed", class = "simpleError",
+                         error_message = paste0("Fold preparation failed: CARS found no fold for ", id))
+        } else {
+          tibble::tibble(config_id = id, status = "success", class = NA_character_, error_message = NA_character_)
+        }
+        breaker_feed(breaker, row, configs[order[k], ])
+        if (breaker$tripped) return(k)
+      }
+      NA_integer_
+    }
+
+    ## CARS's fold preparation failing: its six configurations span the
+    ## three models and both preprocessing methods, but one selection, so
+    ## in no order does it trip, however many finish before a success,
+    ## though any three of them span two models
+    rest   <- setdiff(seq_len(nrow(grid)), cars)
+    orders <- list(c(cars, rest), c(rev(cars), rest), c(cars[c(1, 3, 5, 2, 4, 6)], rest), c(rest, cars))
+    for (o in orders) expect_identical(trips_at(o, cars), NA_integer_)
+
+    ## A failure every configuration shares trips, on configure()'s order at
+    ## the fifth, the first of the second model, where a rule on two models
+    ## alone trips too (feature selection varies fastest, the model slowest)
+    everything <- seq_len(nrow(grid))
+    expect_identical(trips_at(everything, everything), 5L)
+    expect_identical(trips_at(c(cars, rest), everything), 7L)
+
+    ## A part the grid has one value of is not counted: on one model, the
+    ## failures need only span the selections
+    one_model <- grid[grid$model == "rf", ]
+    expect_identical(trips_at(seq_len(nrow(one_model)), seq_len(nrow(one_model)), one_model), 3L)
+
+  })
+
+  it("counts the parts of the configurations a resumed run runs, not those it resumes", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    ## Four models on two preprocessing methods; the four on raw are
+    ## checkpointed by a first run of them alone
+    obj <- make_eval_object(n = 60, n_configs = 8)
+    obj$config$configs$model         <- rep(c("rf", "cubist", "plsr", "elastic_net"), 2L)
+    obj$config$configs$preprocessing <- rep(c("raw", "snv"), each = 4L)
+    raw <- obj$config$configs$config_id[1:4]
+
+    first <- obj
+    first$config$configs   <- obj$config$configs[1:4, ]
+    first$config$n_configs <- 4L
+
+    dir <- withr::local_tempdir()
+    testthat::with_mocked_bindings(
+      suppressWarnings(evaluate(first, seed = 42L, control = control_horizons(output_dir = dir))),
+      evaluate_single_config = failing_runner(template, new.env(), succeed = raw)
+    )
+
+    ## Resumed on the whole grid, the four on snv fail alike: they vary in
+    ## their models alone, so three across two models stop the run
+    ran <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran, succeed = raw))
+    err <- expect_error(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))),
+                        class = "horizons_error_systemic")
+
+    expect_identical(ran$ids, obj$config$configs$config_id[5:7])
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The first 3 configurations to run all failed the same way, across 3 models, so `evaluate()` stopped rather than run the other 1.",
+                 fixed = TRUE)
+
+  })
+
+  it("says what the failures span when it stops", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    ## Two models and two preprocessing methods, in configure()'s order:
+    ## the third is the first of the second model
+    obj <- make_eval_object(n = 60, n_configs = 4)
+    obj$config$configs$model         <- c("cubist", "cubist", "rf", "rf")
+    obj$config$configs$preprocessing <- c("raw", "snv", "raw", "snv")
+
+    err <- expect_error(suppressWarnings(evaluate(obj, seed = 42L)), class = "horizons_error_systemic")
+
+    expect_identical(ran$ids, obj$config$configs$config_id[1:3])
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The first 3 configurations to run all failed the same way, across 2 models and 2 preprocessing methods, so `evaluate()` stopped rather than run the other 1.",
+                 fixed = TRUE)
 
   })
 
@@ -3605,6 +3739,190 @@ describe("evaluate() - the circuit breaker", {
     expect_false(identical(breaker_key(row(b, paste0("Recipe building failed: boom in ", b, " at 15 rows"))), same))
     expect_false(identical(breaker_key(row(b, paste0("Grid search failed: boom in ", b, " at 15 rows"),
                                            class = "horizons_error_run")), same))
+
+  })
+
+})
+
+## The breaker on real configurations: lightgbm, rf and xgboost, two
+## preprocessing methods, CARS and no selection (make_breaker_grid_object()).
+## test-evaluate-parallel.R runs the same two on the configs axis.
+
+describe("evaluate() - the circuit breaker on a grid of models, preprocessing methods and selections", {
+
+  it("runs the grid when CARS's fold preparation fails, in the order the configs axis starts them, CARS's configurations failed and the rest scored", {
+
+    skip_unless_slow_tier()
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    ## CARS's six first, as the configs axis starts them when its cells are
+    ## the costliest: any three of them span two models
+    obj <- make_breaker_grid_object()
+    obj$config$configs <- obj$config$configs[order(obj$config$configs$feature_selection != "cars"), ]
+    local_mocked_bindings(cars_folds = function(y, k) stop("CARS found no fold to score its subsets on"))
+
+    dir  <- withr::local_tempdir()
+    ev   <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                      control = control_horizons(output_dir = dir, verbose = FALSE)))
+    rows <- ev$evaluation$results
+    cars <- endsWith(rows$config_id, "_cars")
+
+    expect_identical(rows$status[cars], rep("failed", 6L))
+    expect_length(unique(rows$error_message[cars]), 1L)
+    expect_match(rows$error_message[cars][1], "CARS found no fold to score its subsets on", fixed = TRUE)
+    expect_identical(rows$status[!cars], rep("success", 6L))
+    expect_length(list.files(file.path(dir, "checkpoints")), 12L)
+
+  })
+
+  it("stops a failure every configuration shares at the first configuration of the second model, on configure()'s order", {
+
+    skip_unless_slow_tier()
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    ## Every configuration's own recipe fails, the same way but for its id;
+    ## the fold preparations, built from the recipe with the response
+    ## transformed, are built as ever
+    real <- build_recipe
+    ran  <- character(0)
+    local_mocked_bindings(build_recipe = function(config_row, ..., transformed = FALSE) {
+      if (isTRUE(transformed)) return(real(config_row, ..., transformed = transformed))
+      ran <<- c(ran, config_row$config_id)
+      stop(paste0("no recipe for ", config_row$config_id, " at ", nchar(config_row$config_id) * 7, " rows"))
+    })
+
+    obj <- make_breaker_grid_object()
+    dir <- withr::local_tempdir()
+    err <- expect_error(suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                                  control = control_horizons(output_dir = dir, verbose = FALSE))),
+                        class = "horizons_error_systemic")
+
+    ## lightgbm's four, then rf's first, where a rule on two models alone
+    ## stops too: the selection varies fastest and the model slowest
+    expect_identical(ran, obj$config$configs$config_id[1:5])
+    expect_identical(err$results$config_id, obj$config$configs$config_id[1:5])
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The first 5 configurations to run all failed the same way, across 2 models, 2 preprocessing methods and 2 feature selections, so `evaluate()` stopped rather than run the other 7.",
+                 fixed = TRUE)
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
+})
+
+## =========================================================================
+## Threads on a run in this session (#114)
+## =========================================================================
+
+describe("evaluate() - threads on a run in this session (#114)", {
+
+  ## What each configuration's spec was built with, and ranger's option as
+  ## it was built
+  spec_threads <- function(obj, control) {
+    seen <- list()
+    real <- define_model_spec
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+      seen[[length(seen) + 1L]] <<- list(threads = threads, option = getOption("ranger.num.threads"))
+      real(model, isolate, threads)
+    })
+    suppressWarnings(evaluate(obj, seed = 42L, control = control))
+    seen
+  }
+
+  it("builds each configuration's spec on control_horizons(threads = ) threads, with ranger's option at that count while it runs, and on one without it", {
+
+    withr::local_options(ranger.num.threads = 7L)
+    obj <- make_eval_object(n = 60, n_configs = 1)
+
+    four <- spec_threads(obj, control_horizons(threads = 4))
+    one  <- spec_threads(obj, control_horizons())
+
+    expect_gt(length(four), 0L)
+    expect_true(all(vapply(four, function(x) x$threads == 4 && identical(x$option, 4L), logical(1))))
+    expect_gt(length(one), 0L)
+    expect_true(all(vapply(one, function(x) x$threads == 1 && identical(x$option, 1L), logical(1))))
+
+    ## The session's own, once each run is over
+    expect_identical(getOption("ranger.num.threads"), 7L)
+
+  })
+
+  it("leaves the session's OpenMP and BLAS threads as they are on a run in the session, whatever threads is", {
+
+    skip_if_not_installed("RhpcBLASctl")
+
+    ## Raised first, so a run that pinned either to one would show it:
+    ## threads is the engines' own count, and BLAS and OpenMP are pinned
+    ## only where a parallel run fits (pin_parent_threads(), prepare_worker())
+    old_omp  <- RhpcBLASctl::omp_get_max_threads()
+    old_blas <- RhpcBLASctl::blas_get_num_procs()
+    withr::defer({
+      RhpcBLASctl::omp_set_num_threads(old_omp)
+      RhpcBLASctl::blas_set_num_threads(old_blas)
+    })
+    RhpcBLASctl::omp_set_num_threads(2L)
+    RhpcBLASctl::blas_set_num_threads(2L)
+    skip_if_not(RhpcBLASctl::omp_get_max_threads() == 2L, "OpenMP's threads cannot be raised here")
+    skip_if_not(RhpcBLASctl::blas_get_num_procs() == 2L, "BLAS's threads cannot be raised here")
+
+    seen <- NULL
+    real <- define_model_spec
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+      seen <<- c(threads = threads, omp = RhpcBLASctl::omp_get_max_threads(), blas = RhpcBLASctl::blas_get_num_procs())
+      real(model, isolate, threads)
+    })
+
+    suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                              control = control_horizons(threads = 4)))
+
+    expect_equal(seen, c(threads = 4, omp = 2, blas = 2))
+    expect_identical(RhpcBLASctl::omp_get_max_threads(), 2L)
+    expect_identical(as.integer(RhpcBLASctl::blas_get_num_procs()), 2L)
+
+  })
+
+  it("refuses threads above one with allow_par, before anything is drawn", {
+
+    local_mocked_bindings(draw_eval_split = function(...) stop("the split was drawn"))
+
+    err <- expect_error(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
+                                 control = control_horizons(allow_par = TRUE, threads = 4)),
+                        class = "horizons_error_input")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "`control_horizons(threads = 4)` is for a run in this session",
+                 fixed = TRUE)
+
+  })
+
+  it("gives rf, xgboost and lightgbm the same results on one thread and on two, lightgbm fitting trees that split (the tier, at fixture size)", {
+
+    skip_if_not_installed("xgboost")
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    ## 200 rows, so a fold's analysis set (about 105 rows) can split at the
+    ## largest min_n the grid tries (40). At 60, lightgbm's chosen candidate
+    ## grew trees that never split, which predict one value whatever the
+    ## fit, so a change to its fit could not show.
+    obj <- make_eval_object(n = 200, n_configs = 3)
+    obj$config$configs$model <- c("rf", "xgboost", "lightgbm")
+
+    run  <- function(threads) {
+      suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(threads = threads)))$evaluation$results
+    }
+    one <- run(1)
+    two <- run(2)
+
+    expect_identical(one$status, c("success", "success", "success"))
+
+    ## lightgbm's predictions vary on every fold and on the test set (its R²
+    ## is defined on each), so its row depends on the splits its trees chose
+    expect_false(is.na(one$cv_rsq[3]))
+    expect_false(is.na(one$rsq[3]))
+
+    cols <- setdiff(names(one), "runtime_secs")
+    expect_identical(two[cols], one[cols])
 
   })
 

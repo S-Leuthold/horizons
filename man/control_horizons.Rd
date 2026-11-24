@@ -19,6 +19,7 @@ control_horizons(
   min_degradation_rows = NULL,
   isolate = NULL,
   inner_daemons = NULL,
+  threads = NULL,
   no_improve = NULL,
   min_resemblance_rows = NULL
 )
@@ -55,8 +56,10 @@ its failures are contained unit by unit.}
 \item{breaker}{A whole number of at least 2, or \code{FALSE}. When the first
 configurations to finish all fail with the same cause, this many of them
 stop the run at once, since every other configuration would fail the
-same way; \code{FALSE} turns the breaker off. Default 3. \code{\link[=evaluate]{evaluate()}},
-\code{\link[=fit]{fit()}}.}
+same way, provided they span two of the models, the transformations, the
+preprocessing methods and the feature selections, each of these the run
+has more than one of: a failure that belongs to one of them never stops
+it. \code{FALSE} turns the breaker off. Default 3. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
 
 \item{keep_traces}{\code{logical(1)}. Keep a failed unit's backtrace on its row
 of the results. Default \code{FALSE}. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=ensemble]{ensemble()}}:
@@ -101,6 +104,12 @@ BLAS runs on one thread, which \code{evaluate()} sets on its daemons through
 floating-point rounding, which the run says (see \code{\link[=evaluate]{evaluate()}}'s
 "Inner daemons"). \code{FALSE} runs every configuration on one daemon.
 Default \code{getOption("horizons.inner_daemons", TRUE)}. \code{\link[=evaluate]{evaluate()}}.}
+
+\item{threads}{A whole number. The threads \code{rf}, \code{xgboost} and \code{lightgbm}
+fit and predict on when the verb runs in this session; the results are
+the same on any number. A run with \code{allow_par = TRUE} fits each on one
+thread a daemon, since the daemons set are its cores, and refuses a
+\code{threads} above 1. Default 1. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
 
 \item{no_improve}{A whole number of at least 1, or \code{FALSE}. The Bayesian
 iterations without improvement on the best after which a search stops:
