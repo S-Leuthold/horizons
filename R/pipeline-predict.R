@@ -573,17 +573,9 @@ check_predict_dots <- function(..., .level_default = NULL, .collector,
 ensure_predict_namespaces <- function(object, config_ids, verb = "predict",
                                       call = rlang::caller_env()) {
 
+  ## The door validator has certified the grid, its model column included
   configs <- object$config$configs
-
-  models <- if (!is.null(configs) && "model" %in% names(configs)) {
-
-    configs$model[configs$config_id %in% config_ids]
-
-  } else {
-
-    character(0)
-
-  }
+  models  <- configs$model[configs$config_id %in% config_ids]
 
   ## ranger for the UQ quantile forest is only relevant to a plain
   ## horizons_fit: an ensemble's own intervals come from CV+ fold refits

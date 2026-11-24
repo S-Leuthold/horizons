@@ -1347,15 +1347,26 @@ test_that("summary() gives an unvalidated evaluated or fitted object its next st
 ## Promoted-class fixtures
 ## ----------------------------------------------------------------------------
 ## Each class validator runs its parent's first (ensemble -> fit -> eval ->
-## data), so each fixture is built on the one above it. None carries a data
-## slot: an empty one passes the base validator, which the chain tests below
-## exercise with a populated table instead.
+## data), so each fixture is built on the one above it. Each carries the
+## small table valid_data_slot() returns, as every object a verb promotes
+## carries its data: a configured object with no data is refused (#257).
+
+## A configuration grid the door validator accepts (config_findings()), one
+## row per id
+valid_config_grid <- function(config_id, model = "rf") {
+
+  tibble::tibble(config_id         = config_id,
+                 model             = model,
+                 transformation    = "none",
+                 preprocessing     = "raw",
+                 feature_selection = "none")
+
+}
 
 ## A minimal valid horizons_eval, built inline (the test-class-core idiom). The
 ## validators check the split's class and its columns (the id and the outcome,
-## by the role map; with no data slot, the id alone), and the fit validator
-## that its ids are in the analysis table, so a classed list with no rows
-## stands in for a real one.
+## by the role map), and the fit validator that its ids are in the analysis
+## table, so a classed list with no rows stands in for a real one.
 make_valid_eval <- function() {
 
   results <- tibble::tibble(
@@ -1388,11 +1399,8 @@ make_valid_eval <- function() {
     ## A configuration the door validator accepts (config_findings()), with
     ## what configure() writes beside the grid at its defaults
     config = list(
-      configs = tibble::tibble(config_id         = c("cfg_a", "cfg_b"),
-                               model             = c("rf", "plsr"),
-                               transformation    = "none",
-                               preprocessing     = "raw",
-                               feature_selection = "none"),
+      configs = valid_config_grid(c("cfg_a", "cfg_b"), model = c("rf", "plsr")),
+      n_configs = 2L,
       tuning  = list(cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
                      final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
                      ranges = merge_ranges(NULL), max_weights = DEFAULT_MAX_WEIGHTS),
@@ -1400,12 +1408,14 @@ make_valid_eval <- function() {
                      pca_threshold = DEFAULT_PCA_THRESHOLD),
       outcome_range = DEFAULT_OUTCOME_RANGE
     ),
+    data       = valid_data_slot(),
     evaluation = list(
       results          = results,
       best_config      = "cfg_a",
       rank_metric      = "rpd",
       screened         = TRUE,
-      split            = structure(list(data   = tibble::tibble(sample_id = character()),
+      split            = structure(list(data   = tibble::tibble(sample_id = character(),
+                                                                SOC       = numeric()),
                                         in_id  = integer(),
                                         out_id = NA),
                                    class = c("rsplit", "list")),
@@ -2040,7 +2050,7 @@ test_that("validate_horizons_eval requires results to cover the config table exa
   ## A config with no row: failed, pruned and not-evaluated configs keep
   ## theirs, so a missing one was lost.
   lost <- make_valid_eval()
-  lost$config$configs <- tibble::tibble(config_id = c("cfg_a", "cfg_b", "cfg_c"))
+  lost$config$configs <- valid_config_grid(c("cfg_a", "cfg_b", "cfg_c"))
 
   err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(lost))),
                   error = function(e) e)
@@ -2050,7 +2060,7 @@ test_that("validate_horizons_eval requires results to cover the config table exa
 
   ## A row with no config.
   foreign <- make_valid_eval()
-  foreign$config$configs <- tibble::tibble(config_id = "cfg_a")
+  foreign$config$configs <- valid_config_grid("cfg_a")
 
   err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(foreign))),
                   error = function(e) e)
@@ -2060,9 +2070,7 @@ test_that("validate_horizons_eval requires results to cover the config table exa
 
   ## A large loss names five and counts the rest.
   many <- make_valid_eval()
-  many$config$configs <- tibble::tibble(
-    config_id = c("cfg_a", "cfg_b", sprintf("cfg_%02d", 1:8))
-  )
+  many$config$configs <- valid_config_grid(c("cfg_a", "cfg_b", sprintf("cfg_%02d", 1:8)))
 
   err <- tryCatch(suppressMessages(capture.output(validate_horizons_eval(many))),
                   error = function(e) e)
@@ -2155,7 +2163,7 @@ test_that("validate_horizons_eval rejects a malformed results table", {
   ## cover it and the duplicate is the only finding
   dup <- make_valid_eval()
   dup$evaluation$results$config_id <- c("cfg_a", "cfg_a")
-  dup$config$configs <- tibble::tibble(config_id = "cfg_a")
+  dup$config$configs <- valid_config_grid("cfg_a")
   expect_error(suppressMessages(validate_horizons_eval(dup)),
                "Duplicate config_id values in results",
                fixed = TRUE, class = "horizons_error_validation")
@@ -3497,6 +3505,72 @@ describe("config_findings() at every verb's door", {
 
 })
 
+describe("a configured object whose data was removed (#257)", {
+
+  ## No verb returns one: it takes a modelled object with its data removed
+  ## by hand. It is checked as a configured object, not passed as an empty one.
+  strip_data <- function(obj) {
+    obj$data$analysis <- NULL
+    obj$data$role_map <- NULL
+    obj
+  }
+
+  it("refuses an evaluation, a fit and an ensemble whose grid has no model column, naming it", {
+
+    cases <- list(eval     = list(make_valid_eval(),     validate_horizons_eval),
+                  fit      = list(make_valid_fit(),      validate_horizons_fit),
+                  ensemble = list(make_valid_ensemble(), validate_horizons_ensemble))
+
+    for (kind in names(cases)) {
+
+      obj <- strip_data(cases[[kind]][[1]])
+      obj$config$configs$model <- NULL
+
+      findings <- finding_of(cases[[kind]][[2]](obj))
+
+      expect_true("config$configs has no model column" %in% findings, label = kind)
+
+    }
+
+  })
+
+  it("refuses one whose configuration is otherwise sound, for the outcome role it lacks", {
+
+    findings <- finding_of(validate_horizons_fit(strip_data(make_valid_fit())))
+
+    expect_identical(findings, "The object is configured but has no outcome role")
+
+  })
+
+  it("refuses a configured horizons_data with no data, at the base validator", {
+
+    findings <- finding_of(validate_horizons_data(strip_data(configured_object())))
+
+    expect_identical(findings, "The object is configured but has no outcome role")
+
+  })
+
+  it("still passes an object nothing has been done to, and checks its selection record", {
+
+    blank <- new_horizons_data()
+    expect_identical(validate_horizons_data(blank), blank)
+
+    blank$selection <- "batch"
+    expect_true(any(grepl("selection must be a list, not <character>",
+                          finding_of(validate_horizons_data(blank)), fixed = TRUE)))
+
+  })
+
+  it("leaves a configured object with no data to configure(), as it leaves any configuration", {
+
+    obj <- strip_data(configured_object())
+
+    expect_identical(validate_horizons_data(obj, config = FALSE), obj)
+
+  })
+
+})
+
 describe("the class validators' new checks (#234)", {
 
   it("require the cross-validated columns fit() ranks by, and allow an NA best_config", {
@@ -3620,7 +3694,7 @@ describe("the class validators' new checks (#234)", {
   it("refuse a split whose rows do not carry unique sample_ids", {
 
     obj <- make_valid_fit()
-    obj$evaluation$split$data <- tibble::tibble(sample_id = c("A", "A"))
+    obj$evaluation$split$data <- tibble::tibble(sample_id = c("A", "A"), SOC = c(1, 1))
 
     expect_true(any(grepl("do not carry unique sample_ids", finding_of(validate_horizons_fit(obj)),
                           fixed = TRUE)))

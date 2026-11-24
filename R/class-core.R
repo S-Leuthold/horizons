@@ -387,9 +387,12 @@ new_horizons_data <- function(analysis = NULL,
 #'     range the hull was fitted over, which `select_training()` compares
 #'     (#107).
 #'
-#' Empty objects (both analysis and role_map NULL) pass validation — this
-#' allows for incremental object construction. The selection record is
-#' checked even on an otherwise empty object.
+#' Empty objects (both analysis and role_map NULL, and no `config$configs`)
+#' pass validation — this allows for incremental object construction. The
+#' selection record is checked even on an otherwise empty object. A
+#' configured object with no data is checked as a configured object
+#' (#257): its configuration's findings, among them the outcome role it
+#' lacks, and its selection record's.
 #'
 #' @param x `horizons_data`. The object to validate.
 #' @param stage `character(1)`. `"full"` (default) or `"raw"`. See Details.
@@ -417,6 +420,11 @@ validate_horizons_data <- function(x,
 
   stage <- match.arg(stage)
 
+  ## Checked once the object is configured. configure() validates with
+  ## config = FALSE, since rewriting the configuration is the remedy for a bad
+  ## one.
+  check_config <- isTRUE(config) && !is.null(x$config$configs)
+
   ## ---------------------------------------------------------------------------
   ## Selection record — checked whether or not the object carries data
   ## ---------------------------------------------------------------------------
@@ -424,14 +432,21 @@ validate_horizons_data <- function(x,
   selection_errors <- check_selection_shape(x$selection, x$data$analysis$sample_id)
 
   ## ---------------------------------------------------------------------------
-  ## Early return for empty object
+  ## An object with no data
   ## ---------------------------------------------------------------------------
+  ## One nothing has been done to, being built up, has only its selection
+  ## record to check. One that is configured is checked as a configured
+  ## object, with its configuration's findings, the outcome role it lacks
+  ## among them (#257): no verb returns one, so it is a modelled object with
+  ## its data removed by hand.
 
   if (is.null(x$data$analysis) && is.null(x$data$role_map)) {
 
-    if (length(selection_errors) > 0) {
+    errors <- c(selection_errors, if (check_config) config_findings(x))
 
-      abort_validation(selection_errors, call = call)
+    if (length(errors) > 0) {
+
+      abort_validation(errors, call = call)
 
     }
 
@@ -839,11 +854,8 @@ validate_horizons_data <- function(x,
   }
 
   ## Configuration --------------------------------------------------------------
-  ## Checked once the object is configured. configure() validates with
-  ## config = FALSE, since rewriting the configuration is the remedy for a bad
-  ## one.
 
-  if (isTRUE(config) && !is.null(x$config$configs)) {
+  if (check_config) {
 
     errors <- c(errors, config_findings(x))
 

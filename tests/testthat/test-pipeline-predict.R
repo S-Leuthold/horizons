@@ -473,6 +473,26 @@ describe("predict.horizons_fit() - input validation", {
 
   })
 
+  it("refuses at its door a fit whose data was removed by hand, and one whose grid has no models (#257)", {
+
+    ## No verb returns a fit without its data, so it is checked as the
+    ## configured object it is rather than passed as an empty one
+    stripped <- fitted_fixture
+    stripped$data$analysis <- NULL
+    stripped$data$role_map <- NULL
+
+    err <- expect_error(predict(stripped, make_new_spectra(), interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true("The object is configured but has no outcome role" %in% err$findings)
+
+    stripped$config$configs$model <- NULL
+
+    err <- expect_error(predict(stripped, make_new_spectra(), interval = FALSE),
+                        class = "horizons_error_validation")
+    expect_true("config$configs has no model column" %in% err$findings)
+
+  })
+
   it("refuses an abstain_ood that is not TRUE or FALSE", {
 
     new_df <- make_new_spectra()
