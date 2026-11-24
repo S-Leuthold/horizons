@@ -254,10 +254,11 @@
 #'   recorded as `models$seed`, which [ensemble()] takes.
 #' @param control A [control_horizons()] object: how the run goes, and,
 #'   through `isolate` and `no_improve`, part of what it computes (see
-#'   [control_horizons()]). `fit()` reads `allow_par`, `verbose`, `debug`,
-#'   `breaker`, `keep_traces`, `isolate`, `threads`, `no_improve`,
-#'   `min_calib_rows`, `min_ad_rows` and `min_degradation_rows`, and refuses
-#'   any other field that is set. The control it ran with, defaults filled in, is recorded
+#'   [control_horizons()]). `fit()` reads `allow_par`, `parallelize_over`,
+#'   `verbose`, `debug`, `breaker`, `keep_traces`, `isolate`,
+#'   `inner_daemons`, `threads`, `no_improve`, `min_calib_rows`,
+#'   `min_ad_rows` and `min_degradation_rows`, and refuses any other field
+#'   that is set. The control it ran with, defaults filled in, is recorded
 #'   as `models$control`.
 #'
 #' @section Parallelism:
@@ -268,15 +269,42 @@
 #' there); the preparations are held in this session and dropped when the
 #' call returns. With `control_horizons(allow_par = TRUE)` they are prepared
 #' on the daemons, one task each, longest first, each carrying its rows, and
-#' those still running are cancelled when the call stops; both need mirai's
-#' dispatcher, so on daemons set with `dispatcher = FALSE` `fit()` warns of
-#' it once, with class `horizons_warning_input`, as [evaluate()] does, the
+#' those still running are cancelled when the call stops, as the members'
+#' tasks are on the members axis (below); both need mirai's dispatcher, so
+#' on daemons set with `dispatcher = FALSE` `fit()` warns of it once, with class `horizons_warning_input`, as [evaluate()] does, the
 #' warning a row of the object's `log` and "no dispatcher" on the progress
 #' tree's parallel line. A pool left with no daemon while they run stops the
 #' call with `horizons_error_no_daemons`, every member still to fit. Then
-#' tune runs the CV folds inside each member's re-tune, when it runs, and its
-#' OOF pass on the [mirai](https://mirai.r-lib.org) daemons the caller has set
-#' (`mirai::daemons(4)` before the call); a
+#' the members run on the [mirai](https://mirai.r-lib.org) daemons the
+#' caller has set (`mirai::daemons(4)` before the call), on one of two axes,
+#' `control_horizons(parallelize_over = )`, by the rule [evaluate()] applies
+#' to its configurations ("Parallelism" there):
+#'
+#' * `"resamples"`: the members are fitted one after another in this
+#'   session, and tune runs the CV folds of each member's re-tune, when it
+#'   runs, and of its out-of-fold pass on the daemons.
+#' * `"configs"`: each member is a task of its own on a daemon, its re-tune,
+#'   out-of-fold pass, final fit, intervals and applicability domain all
+#'   there, started longest first by an estimate of each one's time, at most
+#'   one member per daemon connected; its result comes back to this session
+#'   when it is done, and the members keep their rank whatever order they
+#'   finish in. Each task carries its member's rows, as the fold
+#'   preparations' tasks do, so this session holds a copy of the modelled
+#'   rows for each member in flight. A member whose share of the work is
+#'   large runs its folds on inner daemons its task starts on its daemon,
+#'   within the daemons set, as [evaluate()]'s configurations do ("Inner
+#'   daemons" there; `control_horizons(inner_daemons = FALSE)` runs every
+#'   member on one daemon). The progress tree prints each member's block, in
+#'   rank order, once every member is in.
+#' * `"auto"` (default): `"configs"` when there are at least as many members
+#'   as `cv_folds`, otherwise `"resamples"`, so the default five members on
+#'   ten folds are fitted on the folds axis. `fit()` checkpoints nothing, so
+#'   neither axis needs an `output_dir`.
+#'
+#' The results are the same on either axis and on any number of daemons:
+#' each member's draws are seeded from the run's seed and their own names,
+#' wherever they run. The run's axis and the daemons it began with are
+#' recorded as `models$parallelize_over` and `models$workers`. A
 #' `future::plan()` is not used, and `fit()` never sets, resizes or resets
 #' the daemons. With fewer than two connected, `fit()` runs sequentially and
 #' warns, with class `horizons_warning_substitution`; the warning is also a
@@ -284,22 +312,25 @@
 #' `lightgbm` members on `control_horizons(threads = )` threads, one by
 #' default, and the results are the same on any number; on the daemons each
 #' fits on one, and `threads` above one with `allow_par` is refused, as in
-#' [evaluate()]. A daemon that dies during a member, read as
-#' fewer daemons connected after it than before, stops the call with
-#' `horizons_error_systemic` and the members so far; so does one exiting
-#' under `maxtasks`, `idletime` or `walltime`, which the count cannot tell
-#' apart, and with fewer than two connected as a member starts (tune would
-#' fit it sequentially) the call stops with `horizons_error_no_daemons`. A
-#' pool whose daemons all exit during one of
-#' tune's calls waits inside tune, and a daemon whose library loses a package
-#' after the check before the run fails the member with tune's "Argument 1
-#' must be a data frame or a named atomic vector". `fit()` parallelises folds
-#' only in this version; a configs axis across the `n_best` members is gated
-#' on the fitted-object memory contract (a fitted object is hundreds of MB
-#' and would cross to workers). Before anything is fitted, a parallel `fit()`
-#' checks that the daemons on this machine fit in its memory, as
-#' [evaluate()] does ("Parallelism" there), warning with class
-#' `horizons_warning_input` when they would not.
+#' [evaluate()]. A daemon that dies during a member stops the call with
+#' `horizons_error_systemic` and the members so far, on either axis: on the
+#' folds axis read as fewer daemons connected after the member than before,
+#' which a daemon exiting under `maxtasks`, `idletime` or `walltime` also
+#' gives and the count cannot tell apart, and with fewer than two connected
+#' as a member starts (tune would fit it sequentially) the call stops with
+#' `horizons_error_no_daemons`; on the members axis read from the member's
+#' task, which ends in mirai's `errorValue` 19, and the members in flight are
+#' cancelled, as a pool left with no daemon stops the call with
+#' `horizons_error_no_daemons`. The finished members' rows are the error's
+#' `results` and their models are not kept, since `fit()` has no
+#' checkpoints: a run after the stop fits every member again. A pool whose
+#' daemons all exit during one of tune's calls waits inside tune, and a
+#' daemon whose library loses a package after the check before the run
+#' fails the member with tune's "Argument 1 must be a data frame or a named
+#' atomic vector". Before anything is fitted, a parallel `fit()` checks that
+#' the daemons on this machine fit in its memory, as [evaluate()] does
+#' ("Parallelism" there), warning with class `horizons_warning_input` when
+#' they would not.
 #'
 #' Each `cubist` fit runs in a process of its own, wherever it runs, as in
 #' [evaluate()] ("Isolated fits" there), so a member's results depend on the
