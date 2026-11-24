@@ -118,7 +118,7 @@ CONTROL_FIELDS <- list(
   parallelize_over = list(
     default = function() "auto",
     check   = control_check_parallelize_over,
-    verbs   = "evaluate"
+    verbs   = c("evaluate", "fit")
   ),
 
   verbose = list(
@@ -193,14 +193,15 @@ CONTROL_FIELDS <- list(
     verbs   = c("evaluate", "fit", "select_training")
   ),
 
-  ### How the configs axis arranges its work within the daemons set; the
-  ### results do not depend on it, so evaluate() does not record it with a
-  ### checkpoint's settings. Read from an option, as isolate is
+  ### How the configs axis arranges its work within the daemons set, and
+  ### fit()'s members axis its members'; the results do not depend on it, so
+  ### evaluate() does not record it with a checkpoint's settings. Read from
+  ### an option, as isolate is
   inner_daemons = list(
     default = function() getOption("horizons.inner_daemons", TRUE),
     option  = "horizons.inner_daemons",
     check   = control_check_bool,
-    verbs   = "evaluate"
+    verbs   = c("evaluate", "fit")
   ),
 
   ### The threads the engines with a thread argument fit on when the run is
@@ -258,10 +259,15 @@ CONTROL_FIELDS <- list(
 #'   with `mirai::daemons(4)` before the call; the verb never sets, resizes or
 #'   resets them, and a `future::plan()` is not used. Default `FALSE`.
 #'   [evaluate()], [fit()], [ensemble()].
-#' @param parallelize_over `character(1)`. The axis of [evaluate()]'s work the
-#'   daemons are applied to: `"auto"` (the default), `"configs"` or `"resamples"`.
-#'   `"auto"` never chooses `"configs"` without `output_dir`, and
-#'   `"configs"` asked for explicitly needs one.
+#' @param parallelize_over `character(1)`. The axis of the work the daemons
+#'   are applied to: `"auto"` (the default), `"configs"` or `"resamples"`.
+#'   [evaluate()]: its configurations, one task each, or tune's folds inside
+#'   each; `"auto"` takes `"configs"` when there are at least as many
+#'   configurations as folds and an `output_dir` to checkpoint them into,
+#'   and `"configs"` asked for explicitly needs one. [fit()]: its members,
+#'   one task each, or tune's folds inside each, by the same rule with the
+#'   members in place of the configurations; `fit()` checkpoints nothing, so
+#'   it needs no `output_dir`.
 #' @param verbose `logical(1)`. Print the verb's progress tree. Default
 #'   `getOption("horizons.verbose", TRUE)`, so a script can quiet the four
 #'   verbs, and [average()], at once. All four verbs.
@@ -313,12 +319,14 @@ CONTROL_FIELDS <- list(
 #'   configuration whose share of the run's work is large run its folds on
 #'   inner daemons that `evaluate()` starts on that configuration's daemon,
 #'   taking as many of the daemons set, so the run does not wait on its
-#'   longest configurations. The results are the same either way where
-#'   BLAS runs on one thread, which `evaluate()` sets on its daemons through
+#'   longest configurations; on [fit()]'s members axis, a member the same
+#'   way. The results are the same either way where
+#'   BLAS runs on one thread, which the verb sets on its daemons through
 #'   `RhpcBLASctl` when it is installed; without it they can differ in
 #'   floating-point rounding, which the run says (see [evaluate()]'s
-#'   "Inner daemons"). `FALSE` runs every configuration on one daemon.
-#'   Default `getOption("horizons.inner_daemons", TRUE)`. [evaluate()].
+#'   "Inner daemons"). `FALSE` runs every configuration or member on one
+#'   daemon. Default `getOption("horizons.inner_daemons", TRUE)`.
+#'   [evaluate()], [fit()].
 #' @param threads A whole number. The threads `rf`, `xgboost` and `lightgbm`
 #'   fit and predict on when the verb runs in this session; the results are
 #'   the same on any number. A run with `allow_par = TRUE` fits each on one

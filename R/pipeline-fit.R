@@ -601,15 +601,24 @@ fit <- function(x,
   ## session when isolation is turned off, which the log notes
   log_isolation_off(collector, member_configs$model, control$isolate)
 
+  ## The axis the daemons are applied to, by evaluate()'s rule with the
+  ## members in place of the configurations (#60): the members, each a task
+  ## of its own, or tune's folds inside each member. fit() checkpoints
+  ## nothing, so its members axis needs no directory.
+  axis         <- resolve_parallel_axis(control$parallelize_over, allow_par, n_configs = n_best,
+                                        cv_folds = cv_folds, configs_runnable = TRUE)
+  members_axis <- axis$dispatch_configs
+
   ## The daemons prepare the members' folds (their feature selections'
-  ## steps) and tune's tasks on them fit the members' engines, horizons' PLS
-  ## engine among them, so every daemon must run this session's horizons;
-  ## and it must load the members' packages, their engines' and their
-  ## feature selections': checked before anything is drawn
+  ## steps), and fit the members or tune's tasks on their folds, horizons'
+  ## PLS engine among them, so every daemon must run this session's
+  ## horizons; and it must load the members' packages, their engines' and
+  ## their feature selections': checked before anything is drawn
   ## The daemons on this machine against the memory it has, for this run's
   ## data, said once and on the tree's parallel line
   short_memory <- FALSE
   n_daemons    <- NA_integer_
+  reports      <- NULL
 
   if (allow_par) {
     ### Read before the check, which spends a task on each daemon and so can
@@ -812,12 +821,15 @@ fit <- function(x,
                                  seed = seed, sg_window = recipe_cfg$sg_window,
                                  pca_threshold = recipe_cfg$pca_threshold)
 
-  ## With allow_par the fold preps are the window's tasks, so without mirai's
-  ## dispatcher they lose the longest-first start and the cancel, and fit()
-  ## says so once, and on the tree's parallel line, as evaluate() does
-  no_dispatcher <- allow_par && length(fold_units) > 0 && !daemons_dispatch()
+  ## With allow_par the fold preps are the window's tasks, and on the members
+  ## axis the members are too, so without mirai's dispatcher they lose the
+  ## longest-first start and the cancel, and fit() says so once, and on the
+  ## tree's parallel line, as evaluate() does
+  no_dispatcher <- allow_par && (members_axis || length(fold_units) > 0) && !daemons_dispatch()
 
-  if (no_dispatcher) log_no_dispatcher(collector, "fold preparations", verb = "fit")
+  if (no_dispatcher) {
+    log_no_dispatcher(collector, if (members_axis) "members" else "fold preparations", verb = "fit")
+  }
 
   ## -----------------------------------------------------------------------
   ## Step 3: Tree header
@@ -959,8 +971,8 @@ fit <- function(x,
       retune_header_line(final_bayesian_iter, words$raised, words$searched, words$whole)
     }, "\n"))
 
-    ## A parallel fit runs the members' folds on the daemons
-    for (line in parallel_tree_lines(if (allow_par) "resamples" else "sequential", n_daemons,
+    ## A parallel fit runs its members, or the members' folds, on the daemons
+    for (line in parallel_tree_lines(axis$axis, n_daemons,
                                      member_configs$model, control$isolate,
                                      no_dispatcher = no_dispatcher, short_memory = short_memory,
                                      debug_off = par_by_user && debug)) {
@@ -981,6 +993,7 @@ fit <- function(x,
   ## while they are built, which a stop for want of daemons says.
 
   fold_store <- NULL
+  fold_stage <- NULL
 
   if (length(fold_units) > 0) {
 
@@ -1047,7 +1060,7 @@ fit <- function(x,
   )
 
   ## -----------------------------------------------------------------------
-  ## Step 4: Config loop
+  ## Step 4: The members, in this session or each a task on the daemons
   ## -----------------------------------------------------------------------
   ## Each member is one unit (fit_single_config()). The circuit breaker
   ## watches the first members, so a failure every member would share stops
@@ -1055,53 +1068,184 @@ fit <- function(x,
   ## that dies stops it at once; either way the members so far are the
   ## error's results.
 
-  results_list <- list()
-  breaker      <- new_breaker(control$breaker, all_configs[match(top_configs$config_id, all_configs$config_id), ])
+  breaker <- new_breaker(control$breaker, member_rows)
 
-  for (i in seq_len(n_best)) {
-
-    top_row   <- top_configs[i, ]
-    config_id <- top_row$config_id
-
-    ## Look up full config row from original configs table
-    cfg <- all_configs[all_configs$config_id == config_id, ]
-
-    ## Render config start
-    if (verbose) render_member_start(i, n_best, cfg)
-
-    ## Extract best_params from evaluate. NULL on a cold start, so the
-    ## re-tune starts from build_warmstart_grid()'s space-filling fallback.
-    best_params_eval <- top_row$best_params[[1]]
-
-    ## The member's fold preps, from the call's stage
-    fold_entries <- if (!is.null(fold_store)) {
+  ## A member's fold preps, from the call's stage
+  fold_entries_of <- function(cfg, results) {
+    if (!is.null(fold_store)) {
       config_fold_entries(fold_store, cfg, cv_resamples, role_map, verb = "fit", data = NULL,
                           seed = seed, sg_window = recipe_cfg$sg_window,
-                          pca_threshold = recipe_cfg$pca_threshold,
-                          results = member_results(results_list))
+                          pca_threshold = recipe_cfg$pca_threshold, results = results)
+    }
+  }
+
+  if (!members_axis) {
+
+    ## -------------------------------------------------------------------
+    ## In this session, one member after another; on the resamples axis
+    ## tune runs each member's folds on the daemons
+    ## -------------------------------------------------------------------
+
+    results_list <- list()
+
+    for (i in seq_len(n_best)) {
+
+      cfg <- member_rows[i, ]
+
+      ## Render config start
+      if (verbose) render_member_start(i, n_best, cfg)
+
+      ## Extract best_params from evaluate. NULL on a cold start, so the
+      ## re-tune starts from build_warmstart_grid()'s space-filling fallback.
+      best_params_eval <- top_configs$best_params[[i]]
+
+      ## The member's fold preps, from the call's stage
+      fold_entries <- fold_entries_of(cfg, member_results(results_list))
+
+      ## Call capture layer, with the settings every member shares
+      config_result <- stop_on_worker_death(fit_member(
+        cfg, best_params_eval, fold_entries, member_inputs, member_settings,
+        allow_par = axis$tune_allow_par,
+        threads   = if (allow_par) ENGINE_THREADS else control$threads,
+        debug     = debug
+      ), member_results(results_list), verb = "fit", daemons = axis$tune_allow_par)
+
+      results_list[[i]] <- config_result
+
+      ## Render result
+      if (verbose) render_member_block(config_result, i == n_best, cold_start, final_bayesian_iter)
+
+      ## A run of identical failures across the members' models,
+      ## transformations, preprocessing methods and feature selections stops
+      ## the call while members remain; with none left they are ordinary
+      ## failures
+      finish_member(config_result, cfg, breaker, n_left = n_best - i, results = member_results(results_list))
+
+      ## Memory cleanup after each config
+      gc(verbose = FALSE)
+
     }
 
-    ## Call capture layer, with the settings every member shares
-    config_result <- stop_on_worker_death(fit_member(
-      cfg, best_params_eval, fold_entries, member_inputs, member_settings,
-      allow_par = allow_par,
-      threads   = if (allow_par) ENGINE_THREADS else control$threads,
-      debug     = debug
-    ), member_results(results_list), verb = "fit", daemons = allow_par)
+  } else {
 
-    results_list[[i]] <- config_result
+    ## -------------------------------------------------------------------
+    ## The members axis: each member a task of its own on the daemons (#60)
+    ## -------------------------------------------------------------------
+    ## Through the window evaluate()'s configs axis runs through
+    ## (dispatch_units()): longest first by the cost table, a long member's
+    ## folds on inner daemons its task starts, within the daemons set
+    ## (split_plan()), each member's result collected into its rank's place
+    ## as it finishes, and those in flight cancelled when the call stops. A
+    ## daemon that dies, a pool left with none, or a member's inner daemon
+    ## that dies stops the call as systemic with the members so far, as on
+    ## every axis. fit() has no output_dir, so each task carries its member's
+    ## data (member_payload()): the session holds one copy of the rows for
+    ## each member in flight, since mirai keeps a task's message until it is
+    ## collected. A member's result exists only here once it returns, so a
+    ## stop loses the models of the members finished, as it does on the
+    ## other axes; their rows are on the error.
 
-    ## Render result
-    if (verbose) render_member_block(config_result, i == n_best, cold_start, final_bayesian_iter)
+    member_costs <- config_costs(member_rows, nrow(train_Fit))
+    n_now        <- connected_daemons()
+    planned      <- split_plan(member_costs, n_now, cv_folds)
+    inner_plan   <- planned
 
-    ## A run of identical failures across the members' models,
-    ## transformations, preprocessing methods and feature selections stops
-    ## the call while members remain; with none left they are ordinary
-    ## failures
-    finish_member(config_result, cfg, breaker, n_left = n_best - i, results = member_results(results_list))
+    if (!isTRUE(control$inner_daemons)) {
 
-    ## Memory cleanup after each config
-    gc(verbose = FALSE)
+      inner_plan[] <- 1L
+
+    } else if (any(inner_plan > 1L)) {
+
+      ## A split is made only when its inner daemons fit in this machine's
+      ## memory beside the daemons, which the log notes when they do not
+      processes <- daemon_processes(member_rows$model, control$isolate)
+      extra     <- split_need(inner_plan, dispatch_order(member_costs), n_now, processes,
+                              n_rows = nrow(x$data$analysis), n_predictors = sum(role_map$role == "predictor"),
+                              n_train = nrow(train_Fit), kept = config_kept(member_rows, role_map, fold_stage),
+                              folds = cv_folds)
+
+      if (!check_split_memory(reports, extra, processes, n_rows = nrow(x$data$analysis),
+                              n_predictors = sum(role_map$role == "predictor"),
+                              n_split = sum(inner_plan > 1L), collector = collector, verb = "fit")) {
+        inner_plan[] <- 1L
+      }
+
+    }
+
+    ## Which members run their folds on inner daemons, said in the tree from
+    ## the plan, and on the log once the window has run, from what started
+    blas_pinned <- blas_pinnable()
+
+    inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned)
+
+    if (verbose && length(inner_lines) > 0) {
+      for (line in inner_lines) cat(paste0("\u2502  ", line, "\n"))
+      cat("\u2502\n")
+    }
+
+    results_list  <- vector("list", n_best)
+    inner_records <- list()
+    fit_env       <- rlang::current_env()
+    collected     <- function() Filter(Negate(is.null), results_list)
+    rows_so_far   <- function() member_results(collected())
+
+    ## What every task carries, built once; each task adds its member's own
+    ## part, its fold preps read from the call's stage as it is sent
+    shared    <- member_payload(split_F, trimmed_rows, trimmed_ids, cv_resamples, split_C, role_map,
+                                member_settings)
+    task_call <- quote(worker(payload, inner))
+
+    stop_on_worker_death(dispatch_units(
+      n       = n_best,
+      order   = dispatch_order(member_costs),
+      task    = function(i) {
+        cfg <- member_rows[i, ]
+        list(call = task_call,
+             args = list(worker  = fit_member_worker,
+                         payload = member_task_payload(shared, cfg, top_configs$best_params[[i]],
+                                                       fold_entries_of(cfg, rows_so_far())),
+                         inner   = inner_plan[[i]]))
+      },
+      ## By its rank, not the order it finished in: best_config is the first
+      ## success in rank order. What it says of its inner daemons is kept
+      ## apart from it.
+      collect = function(i, value) {
+        inner_records[[member_rows$config_id[i]]] <<- attr(value, "inner_daemons")
+        attr(value, "inner_daemons") <- NULL
+        results_list[[i]] <<- value
+      },
+      ## The breaker reads a pass's members once every one is in, those that
+      ## did not fail first; the members still to fit are those not yet
+      ## collected, in flight or waiting
+      pass    = function(done) {
+        n_left <- n_best - length(collected())
+        for (k in pass_finish_order(results_list[done])) {
+          i <- done[[k]]
+          finish_member(results_list[[i]], member_rows[i, ], breaker, n_left, results = rows_so_far(),
+                        call = fit_env)
+        }
+      },
+      label       = function(i) list(what = "member", id = member_rows$config_id[i]),
+      rows_so_far = rows_so_far,
+      verb        = "fit",
+      slots       = function(i) inner_plan[[i]],
+      call        = fit_env
+    ), rows_so_far(), verb = "fit", call = fit_env)
+
+    ## Each member's block, in rank order once every one is in: printed as
+    ## they finished they would interleave out of rank
+    if (verbose) {
+      for (i in seq_len(n_best)) {
+        render_member_start(i, n_best, member_rows[i, ])
+        render_member_block(results_list[[i]], i == n_best, cold_start, final_bayesian_iter)
+      }
+    }
+
+    ## Which members ran their folds on inner daemons, from what each task
+    ## says; one whose inner daemons did not connect ran its folds on its
+    ## own daemon, which costs time only
+    log_inner_daemons(collector, member_rows$config_id, planned, inner_plan, control$inner_daemons,
+                      blas_pinned, inner_records, verb = "fit")
 
   }
 
@@ -1259,6 +1403,11 @@ fit <- function(x,
     ## one, and a re-fit takes it too
     seed              = seed,
     seed_rule         = SEED_RULE,
+    ## How the run went, as evaluate() records it: the daemons connected
+    ## when it began (1 in this session) and the axis they were applied to.
+    ## The results do not depend on either.
+    workers           = if (axis$axis == "sequential") 1L else n_daemons,
+    parallelize_over  = axis$axis,
     control           = control,
     timestamp         = Sys.time(),
     runtime_secs      = total_runtime

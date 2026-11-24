@@ -680,14 +680,14 @@ evaluate <- function(x,
   axis <- resolve_parallel_axis(parallelize_over, dispatch,
                                 n_configs      = nrow(configs),
                                 cv_folds       = cv_folds,
-                                has_output_dir = !is.null(output_dir))
+                                configs_runnable = !is.null(output_dir))
 
   if (dispatch && !check_parallel_backend("evaluate", collector)) {
 
     axis <- resolve_parallel_axis(parallelize_over, allow_par = FALSE,
                                   n_configs      = nrow(configs),
                                   cv_folds       = cv_folds,
-                                  has_output_dir = !is.null(output_dir))
+                                  configs_runnable = !is.null(output_dir))
 
   }
 

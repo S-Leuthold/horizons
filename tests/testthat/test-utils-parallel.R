@@ -15,7 +15,7 @@ describe("resolve_parallel_axis()", {
 
     for (req in c("auto", "configs", "resamples")) {
       r <- resolve_parallel_axis(req, allow_par = FALSE, n_configs = 100, cv_folds = 5,
-                                 has_output_dir = TRUE)
+                                 configs_runnable = TRUE)
       expect_equal(r$axis, "sequential", info = req)
       expect_false(r$dispatch_configs)
       expect_false(r$tune_allow_par)
@@ -26,13 +26,13 @@ describe("resolve_parallel_axis()", {
 
   it("maps configs and resamples to their dispatch and tune settings", {
 
-    cfg <- resolve_parallel_axis("configs", TRUE, n_configs = 2, cv_folds = 5, has_output_dir = TRUE)
+    cfg <- resolve_parallel_axis("configs", TRUE, n_configs = 2, cv_folds = 5, configs_runnable = TRUE)
     expect_equal(cfg$axis, "configs")
     expect_true(cfg$dispatch_configs)
     expect_false(cfg$tune_allow_par)          # tune ships nothing inward
     expect_null(cfg$tune_parallel_over)
 
-    res <- resolve_parallel_axis("resamples", TRUE, n_configs = 200, cv_folds = 5, has_output_dir = TRUE)
+    res <- resolve_parallel_axis("resamples", TRUE, n_configs = 200, cv_folds = 5, configs_runnable = TRUE)
     expect_equal(res$axis, "resamples")
     expect_false(res$dispatch_configs)
     expect_true(res$tune_allow_par)
@@ -56,7 +56,7 @@ describe("resolve_parallel_axis()", {
 
     for (i in seq_len(nrow(table))) {
       r <- resolve_parallel_axis("auto", TRUE, table$n_configs[i], table$cv_folds[i],
-                                 has_output_dir = TRUE)
+                                 configs_runnable = TRUE)
       expect_equal(r$axis, table$expected[i],
                    info = sprintf("n_configs = %d, cv_folds = %d",
                                   table$n_configs[i], table$cv_folds[i]))
@@ -66,7 +66,7 @@ describe("resolve_parallel_axis()", {
 
   it("auto never chooses the configs axis without an output_dir to checkpoint into (#233)", {
 
-    r <- resolve_parallel_axis("auto", TRUE, n_configs = 240, cv_folds = 5, has_output_dir = FALSE)
+    r <- resolve_parallel_axis("auto", TRUE, n_configs = 240, cv_folds = 5, configs_runnable = FALSE)
 
     expect_equal(r$axis, "resamples")
     expect_false(r$dispatch_configs)
@@ -509,6 +509,55 @@ describe("dispatch_units() with slots", {
 
     expect_identical(got$start, c(1L, 0L, 2L, 0L, 3L))
     expect_lte(max(got$busy), 2L)
+
+  })
+
+})
+
+describe("dispatch_units() for fit()'s members", {
+
+  ## fit()'s members axis runs its members through the same window, labelled
+  ## as members of fit(): each stop names the member and the verb (#60)
+  run_members <- function(values, width = 2L) {
+
+    local_mocked_bindings(connected_daemons = function() width)
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      list(data = values[[.args$i]])
+    }, .package = "mirai")
+
+    got <- list()
+
+    dispatch_units(
+      n           = length(values),
+      order       = seq_along(values),
+      task        = function(i) list(call = quote(worker(i)), args = list(worker = identity, i = i)),
+      collect     = function(i, value) got[[i]] <<- value,
+      label       = function(i) list(what = "member", id = sprintf("cfg_%03d", i)),
+      rows_so_far = function() tibble::tibble(config_id = sprintf("cfg_%03d", which(!vapply(got, is.null, logical(1))))),
+      verb        = "fit"
+    )
+
+  }
+
+  it("stops as systemic, naming the member and fit(), with the members so far, when a member's daemon dies", {
+
+    err <- expect_error(run_members(list(list(status = "success"), died_value())), class = "horizons_error_systemic")
+
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The mirai daemon running member \"cfg_002\" stopped while it ran (`errorValue` 19, Connection reset), so `fit()` cannot go on.",
+                 fixed = TRUE)
+    expect_identical(err$results$config_id, "cfg_001")
+
+  })
+
+  it("stops as systemic, naming the member and fit(), when a member's inner daemon dies", {
+
+    died <- structure(list(id = "cfg_001", started = 3L, connected = 2L), class = "horizons_inner_daemon_died")
+    err  <- expect_error(run_members(list(died)), class = "horizons_error_systemic")
+
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "An inner mirai daemon running member \"cfg_001\"'s folds stopped while it ran, so `fit()` cannot go on.",
+                 fixed = TRUE)
 
   })
 

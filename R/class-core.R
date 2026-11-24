@@ -203,6 +203,8 @@ new_horizons_data <- function(analysis = NULL,
                   selection_present = NULL,  ## logical: training rows came from select_training()
                   seed              = NULL,  ## integer: the run's root seed; ensemble() and a re-fit take it unless given one
                   seed_rule         = NULL,  ## integer: SEED_RULE
+                  workers           = NULL,  ## integer: the daemons connected when the run began, 1 when sequential
+                  parallelize_over  = NULL,  ## character: axis actually parallelized
                   control           = NULL,  ## horizons_control fit() ran with, or NULL
                   timestamp         = NULL,  ## POSIXct
                   runtime_secs      = NULL), ## numeric
@@ -1513,8 +1515,12 @@ CONTRACT_KEYS_OPTIONAL <- list(
   ## because no evaluate() ran
   evaluation = c("workers", "parallelize_over"),
 
-  ## fit() writes every key
-  models     = character(),
+  ## fit()'s run provenance, recorded as evaluate()'s is and checked when
+  ## present (#60). fit() writes both on every path; they are optional so
+  ## that a fit saved before they were recorded, the stored test fixture
+  ## among them, is not refused for lacking them. Every other key fit()
+  ## writes is required.
+  models     = c("workers", "parallelize_over"),
 
   ## ensemble() writes every key
   ensemble   = character()
@@ -1540,6 +1546,64 @@ CONTRACT_KEYS_OPTIONAL <- list(
 contract_keys <- function(slot) {
 
   setdiff(names(new_horizons_data()[[slot]]), CONTRACT_KEYS_OPTIONAL[[slot]])
+
+}
+
+## ---------------------------------------------------------------------------
+## run_provenance_findings() — How a run went: its daemons and its axis
+## ---------------------------------------------------------------------------
+
+#' Findings on a slot's record of how its run went
+#'
+#' @description
+#' `evaluation` and `models` record the daemons connected when their verb's
+#' run began (`workers`, 1 when it ran in the session) and the axis they were
+#' applied to (`parallelize_over`). Each key is checked on its own presence:
+#' when present, `parallelize_over` is one of `"sequential"`, `"configs"`
+#' and `"resamples"`, and `workers` a single positive whole number; a key
+#' present but `NULL` fails.
+#'
+#' @param slot The slot: `x$evaluation` or `x$models`.
+#' @return Character, empty when both are absent or valid.
+#' @keywords internal
+#' @noRd
+run_provenance_findings <- function(slot) {
+
+  errors <- character()
+
+  if ("parallelize_over" %in% names(slot)) {
+
+    po <- slot$parallelize_over
+
+    if (!is.character(po) || length(po) != 1 || is.na(po) ||
+        !po %in% c("sequential", "configs", "resamples")) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field parallelize_over} must be one of {.val {c('sequential', 'configs', 'resamples')}}"
+      ))
+
+    }
+
+  }
+
+  ## `workers` is the daemons connected when the run began (observed), 1
+  ## when it ran sequentially: a single positive whole number.
+
+  if ("workers" %in% names(slot)) {
+
+    w <- slot$workers
+
+    if (!is.numeric(w) || length(w) != 1 || is.na(w) || w < 1 || w != as.integer(w)) {
+
+      errors <- c(errors, cli::format_inline(
+        "{.field workers} must be a single positive whole number"
+      ))
+
+    }
+
+  }
+
+  errors
 
 }
 
@@ -2096,37 +2160,7 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
   ## present-but-NULL parallelize_over fails. Each key is checked on its own
   ## presence.
 
-  if ("parallelize_over" %in% names(ev)) {
-
-    po <- ev$parallelize_over
-
-    if (!is.character(po) || length(po) != 1 || is.na(po) ||
-        !po %in% c("sequential", "configs", "resamples")) {
-
-      errors <- c(errors, cli::format_inline(
-        "{.field parallelize_over} must be one of {.val {c('sequential', 'configs', 'resamples')}}"
-      ))
-
-    }
-
-  }
-
-  ## `workers` is the daemons connected when the run began (observed), 1
-  ## when it ran sequentially: a single positive whole number.
-
-  if ("workers" %in% names(ev)) {
-
-    w <- ev$workers
-
-    if (!is.numeric(w) || length(w) != 1 || is.na(w) || w < 1 || w != as.integer(w)) {
-
-      errors <- c(errors, cli::format_inline(
-        "{.field workers} must be a single positive whole number"
-      ))
-
-    }
-
-  }
+  errors <- c(errors, run_provenance_findings(ev))
 
   ## screened (#45) -------------------------------------------------------------
   ## Whether best_config was chosen by ranking (TRUE) or is the one
@@ -2481,7 +2515,9 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    `predictor_schema`, `response_bound`, `cv_predictions`, `results`,
 #'    `uq`, `ad`, `selection_present`, `seed`, `seed_rule`, `control`,
 #'    `timestamp`, `runtime_secs`. [fit()] writes every one, so a fit made
-#'    before the seed was recorded is refused. Extra keys are tolerated.
+#'    before the seed was recorded is refused. Extra keys are tolerated. The
+#'    run-provenance keys `workers` and `parallelize_over` are tolerated when
+#'    absent and checked when present, as `evaluation`'s are.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
 #' 4. **rank_metric**: a length-1 character.
@@ -2599,6 +2635,11 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
   ## control ----------------------------------------------------------------------
 
   errors <- c(errors, control_finding(md$control, "models"))
+
+  ## parallelize_over / workers (run provenance) ----------------------------------
+  ## As evaluation's: each checked when present (CONTRACT_KEYS_OPTIONAL)
+
+  errors <- c(errors, run_provenance_findings(md))
 
   ## rank_metric ----------------------------------------------------------------
 

@@ -236,3 +236,32 @@ worker_payload_file <- function(shared = worker_payload(), .env = parent.frame()
   path
 
 }
+
+## The window's tasks run as they are sent, in this session, until the
+## calling frame exits: mirai() is mocked to hand back a window's task (one
+## that sends a worker) already resolved, whose value is its worker's, so the
+## real window (dispatch_units()) collects every task sent in a round as one
+## pass. Any other task, an isolated fit's, goes to mirai as before. The
+## daemons are mocked as `n` matching ones on another machine. For the
+## members axis's path through fit() without daemons, under load_all() too;
+## what the transport does is the installed-build tests'
+## (test-pipeline-fit-members.R).
+local_tasks_in_session <- function(n = 2L, .env = parent.frame()) {
+
+  real_mirai <- mirai::mirai
+
+  testthat::local_mocked_bindings(
+    running_under_load_all = function() FALSE,
+    daemon_reports         = function(...) daemons_on(pids = seq_len(n)),
+    check_parallel_backend = function(...) TRUE,
+    connected_daemons      = function() as.integer(n),
+    daemons_dispatch       = function() TRUE,
+    .package = "horizons", .env = .env
+  )
+
+  testthat::local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+    if (!is.function(.args$worker)) return(real_mirai(.expr, ..., .args = .args, .timeout = .timeout, .compute = .compute))
+    list(data = eval(.expr, .args))
+  }, .package = "mirai", .env = .env)
+
+}

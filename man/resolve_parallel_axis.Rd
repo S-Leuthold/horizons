@@ -9,7 +9,7 @@ resolve_parallel_axis(
   allow_par,
   n_configs,
   cv_folds,
-  has_output_dir
+  configs_runnable
 )
 }
 \arguments{
@@ -18,11 +18,14 @@ resolve_parallel_axis(
 
 \item{allow_par}{Logical. \code{FALSE} short-circuits to sequential.}
 
-\item{n_configs}{Integer. Number of configs to evaluate.}
+\item{n_configs}{Integer. Number of configs to evaluate, or members to
+fit.}
 
 \item{cv_folds}{Integer. CV folds per config.}
 
-\item{has_output_dir}{Logical. Whether the run checkpoints.}
+\item{configs_runnable}{Logical. Whether the configs axis can run:
+\code{evaluate()}'s when it has an \code{output_dir} to checkpoint into, \code{fit()}'s
+always.}
 }
 \value{
 A list: \code{axis} (\code{"sequential"}, \code{"configs"} or \code{"resamples"}),
@@ -44,8 +47,11 @@ ceiling(n_configs / workers) * T, on the resamples axis roughly
 n_configs * T / k with k the effective inner speedup, which is capped at
 \code{cv_folds}. Configs wins whenever \code{n_configs >= k}, and always once
 \code{n_configs} exceeds the worker count, so the worker count cancels and the
-rule is \code{n_configs >= cv_folds}. Dispatching configs needs a checkpoint
-directory, so \code{"auto"} chooses it only when there is one (#233).
+rule is \code{n_configs >= cv_folds}. It is the rule for \code{evaluate()}'s
+configurations and for \code{fit()}'s members alike. \code{evaluate()}'s configs
+axis checkpoints each configuration, so it needs a directory, and \code{"auto"}
+chooses it only when there is one (#233); \code{fit()} checkpoints nothing, so
+its members axis can always run.
 
 On the configs axis the worker runs tune sequentially, unless the run's
 plan gives its configuration inner daemons (\code{split_plan()}), which it

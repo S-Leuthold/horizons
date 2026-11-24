@@ -2337,7 +2337,8 @@ test_that("the validators refuse a slot without the run's seed and its rule, wit
 test_that("validate_horizons_fit takes its required keys from the constructor", {
 
   ## Every key new_horizons_data() declares for the slot is required, ad
-  ## included: fit() writes them all.
+  ## included, but the run's record of its axis and daemons (#60), which is
+  ## checked when present, as evaluation's is.
   no_ad <- make_valid_fit()
   no_ad$models$ad <- NULL
 
@@ -2345,7 +2346,8 @@ test_that("validate_horizons_fit takes its required keys from the constructor", 
                "missing from models: ad",
                class = "horizons_error_validation")
 
-  expect_identical(contract_keys("models"), names(new_horizons_data()$models))
+  expect_identical(contract_keys("models"),
+                   setdiff(names(new_horizons_data()$models), c("workers", "parallelize_over")))
   expect_identical(contract_keys("evaluation"),
                    setdiff(names(new_horizons_data()$evaluation),
                            c("workers", "parallelize_over")))

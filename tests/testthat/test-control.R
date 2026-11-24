@@ -292,20 +292,35 @@ describe("resolve_control()", {
 
   })
 
-  it("reads inner_daemons from horizons.inner_daemons when it is not set, for evaluate() alone", {
+  it("reads inner_daemons from horizons.inner_daemons when it is not set, for evaluate() and fit()", {
 
     withr::local_options(horizons.inner_daemons = NULL)
     expect_true(resolve_control(NULL, "evaluate")$inner_daemons)
+    expect_true(resolve_control(NULL, "fit")$inner_daemons)
 
     withr::local_options(horizons.inner_daemons = FALSE)
     expect_false(resolve_control(NULL, "evaluate")$inner_daemons)
-    expect_true(resolve_control(control_horizons(inner_daemons = TRUE), "evaluate")$inner_daemons)
+    expect_false(resolve_control(NULL, "fit")$inner_daemons)
+    expect_true(resolve_control(control_horizons(inner_daemons = TRUE), "fit")$inner_daemons)
 
-    for (verb in c("fit", "ensemble", "select_training")) {
+    for (verb in c("ensemble", "select_training")) {
       expect_null(resolve_control(NULL, verb)$inner_daemons, label = verb)
     }
-    expect_error(resolve_control(control_horizons(inner_daemons = FALSE), "fit"),
-                 "inner_daemons: evaluate()", fixed = TRUE, class = "horizons_error_input")
+    expect_error(resolve_control(control_horizons(inner_daemons = FALSE), "ensemble"),
+                 "inner_daemons: evaluate(), fit()", fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("gives fit() the parallel axis, as evaluate() has it, with no output_dir (#60)", {
+
+    expect_identical(resolve_control(NULL, "fit")$parallelize_over, "auto")
+    expect_identical(resolve_control(control_horizons(parallelize_over = "configs"), "fit")$parallelize_over,
+                     "configs")
+
+    expect_error(resolve_control(control_horizons(parallelize_over = "configs"), "ensemble"),
+                 "parallelize_over: evaluate(), fit()", fixed = TRUE, class = "horizons_error_input")
+    expect_error(resolve_control(control_horizons(output_dir = "out"), "fit"),
+                 "output_dir: evaluate()", fixed = TRUE, class = "horizons_error_input")
 
   })
 

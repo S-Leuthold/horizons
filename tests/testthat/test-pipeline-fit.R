@@ -176,6 +176,28 @@ describe("fit() - success path", {
 
   })
 
+  it("records how the run went, and its validator checks the record as evaluation's (#60)", {
+
+    result <- fit60()$fit
+
+    expect_identical(result$models[c("parallelize_over", "workers")], list(parallelize_over = "sequential", workers = 1L))
+
+    ## Each key checked on its own presence, as evaluation's are
+    for (bad in list(list(workers = 0L), list(workers = 1.5), list(parallelize_over = "folds"),
+                     list(parallelize_over = NULL))) {
+      edited <- result
+      edited$models[names(bad)] <- list(bad[[1]])
+      expect_error(validate_horizons_fit(edited), class = "horizons_error_validation",
+                   label = paste(names(bad), format(bad[[1]])))
+    }
+
+    ## A fit saved before they were recorded holds neither, and is read
+    saved <- result
+    saved$models[c("parallelize_over", "workers")] <- NULL
+    expect_s3_class(validate_horizons_fit(saved), "horizons_fit")
+
+  })
+
   it("orders members by cv_<rank_metric> and records the top one as best_config, with the rank metric used", {
 
     shared <- fit60()
@@ -1633,6 +1655,56 @@ describe("fit() - the progress tree", {
       testthat::with_mocked_bindings(
         suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE,
                              seed = 42L, control = control_horizons(verbose = TRUE))),
+        Sys.time = clock, .package = "base"
+      )
+    }
+
+    expect_snapshot(invisible(run()))
+
+  })
+
+  it("prints each member's block in rank order once every member is in, on the members axis (#60)", {
+
+    ## As above, the members fitted on two daemons, each a task of its own,
+    ## run in this session as they are sent (helper-parallel.R); the second
+    ## is sent first, so they come in out of rank
+    obj <- rank_configs_as(mfo(), c("cfg_001", "cfg_002"))
+
+    members <- list(
+      cfg_001 = list(
+        config_id = "cfg_001", status = "success", degraded = FALSE, degraded_reason = NA_character_,
+        fitted_workflow = "fitted workflow", best_params = tibble::tibble(mtry = 2L, min_n = 5L),
+        warm_start = TRUE, start_grid_size = 2L, cv_predictions = NULL,
+        test_metrics = tibble::tibble(rmse = 0.512, rrmse = 20.4, rsq = 0.61, ccc = 0.72, rpd = 1.1, mae = 0.41),
+        cv_metrics = tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.4567, 2.0), std_err = c(0.0321, 0.1234)),
+        uq = NULL, ad = NULL, warnings = "The final fit warned", error_message = NA_character_, runtime_secs = 12.34
+      ),
+      cfg_002 = list(
+        config_id = "cfg_002", status = "failed", degraded = NA, degraded_reason = NA_character_,
+        fitted_workflow = NULL, best_params = NULL, warm_start = TRUE, start_grid_size = 2L,
+        cv_predictions = NULL, test_metrics = NULL, cv_metrics = NULL, uq = NULL, ad = NULL,
+        warnings = NULL, error_message = "Warm-start tuning failed: mocked", runtime_secs = 3.4
+      )
+    )
+
+    local_tasks_in_session(2L)
+    local_mocked_bindings(
+      fit_single_config = function(config_row, ...) members[[config_row$config_id]],
+      config_costs      = function(configs, n_rows) as.numeric(seq_len(nrow(configs)))
+    )
+
+    start <- as.POSIXct("2026-01-01 12:00:00", tz = "UTC")
+    ticks <- 0L
+    clock <- function() {
+      ticks <<- ticks + 1L
+      if (ticks == 1L) start else start + 90
+    }
+
+    run <- function() {
+      testthat::with_mocked_bindings(
+        suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                             control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                        verbose = TRUE))),
         Sys.time = clock, .package = "base"
       )
     }
