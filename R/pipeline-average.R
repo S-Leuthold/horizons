@@ -628,14 +628,12 @@ average <- function(x,
   if (length(failed_samples) > 0) {
 
     n_failed <- length(failed_samples)
-    shown    <- utils::head(failed_samples, 5)
-    more     <- if (n_failed > 5) paste0(" and ", n_failed - 5, " more") else ""
 
     if (on_all_outliers == "warn") {
 
       log_warning(collector, "quality", c(
         "All replicates failed QC for {n_failed} sample{?s}, averaged anyway.",
-        "i" = "Samples: {.val {shown}}{more}.",
+        "i" = "Samples: {shown_ids(failed_samples)}.",
         "i" = "Use {.code on_all_outliers = \"keep_best\"} to keep one replicate of each, or {.code \"drop\"} to drop them."
       ), ids = failed_samples)
 
@@ -649,7 +647,7 @@ average <- function(x,
 
       log_note(collector, c(
         statement,
-        "i" = "Samples: {.val {shown}}{more}."
+        "i" = "Samples: {shown_ids(failed_samples)}."
       ), ids = failed_samples)
 
     }
@@ -682,12 +680,10 @@ average <- function(x,
     lost_samples <- unique(removed_scans$sample_id)
     n_lost       <- length(lost_samples)
     n_removed    <- nrow(removed_scans)
-    shown        <- utils::head(lost_samples, 5)
-    more         <- if (n_lost > 5) paste0(" and ", n_lost - 5, " more") else ""
 
     log_note(collector, c(
       "The quality check removed {n_removed} replicate{?s} from {n_lost} sample{?s}.",
-      "i" = "Samples: {.val {shown}}{more}.",
+      "i" = "Samples: {shown_ids(lost_samples)}.",
       "i" = "Each scan, why it was removed and its mean correlation are in this row's {.field detail}."
     ), ids = lost_samples, n = n_removed, detail = removed_scans)
 

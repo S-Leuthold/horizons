@@ -333,7 +333,7 @@ test_that("average() names every sample whose replicates all failed, on the log,
 
     ## The message names them too, for a reader of the log alone
     expect_match(row$message, "All replicates failed QC for 2 samples", fixed = TRUE, info = mode)
-    expect_match(row$message, 'Samples: "S1" and "S2".', fixed = TRUE, info = mode)
+    expect_match(row$message, 'Samples: "S1", "S2".', fixed = TRUE, info = mode)
 
   }
 
@@ -1078,6 +1078,33 @@ test_that("average()'s record of removed scans counts what its note counts, in e
     expect_identical(nrow(detail), count, info = mode)
 
   }
+
+})
+
+test_that("average()'s lists of samples name five and count the rest, as the package's other lists do", {
+
+  ## Seven samples whose scans are unrelated to each other, so every
+  ## replicate of each fails
+  hd <- make_test_hd_average(n_samples = 7, n_reps = 3)
+  set.seed(7)
+  for (col in grep("^wn_", names(hd$data$analysis), value = TRUE)) {
+    hd$data$analysis[[col]] <- stats::runif(21, 0, 2)
+  }
+  listed <- 'Samples: "S1", "S2", "S3", "S4", "S5" and 2 more.'
+
+  ## Under "warn", the warning naming the failed samples
+  result <- suppressWarnings(average(hd, verbose = FALSE))
+  events <- log_events_added(hd, result)
+  expect_identical(events$type, "warning")
+  expect_match(events$message, listed, fixed = TRUE)
+
+  ## Under "keep_best", the note naming them, then the note of the scans the
+  ## check removed
+  result <- average(hd, on_all_outliers = "keep_best", verbose = FALSE)
+  events <- log_events_added(hd, result)
+  expect_identical(lengths(events$detail), c(0L, 5L))
+  expect_match(events$message[1], listed, fixed = TRUE)
+  expect_match(events$message[2], listed, fixed = TRUE)
 
 })
 
