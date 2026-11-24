@@ -47,14 +47,17 @@ Minimum 2.}
 \item{grid_size}{\code{integer}. Hyperparameter grid size (Latin hypercube).
 Default 10. Minimum 1, and at least 2 when \code{bayesian_iter} or
 \code{final_bayesian_iter} is above 0, since \code{evaluate()}'s Bayesian search
-starts from the grid, and so does \code{fit()}'s re-tune on a cold start.
-\code{fit()}'s re-tune of \code{evaluate()}'s members starts instead from each
-member's hyperparameters and, for d tuned parameters, d points drawn
-around them.}
+starts from the grid, as do \code{fit()}'s on a cold start and its re-tune of
+a member whose hyperparameters from \code{evaluate()} are unusable. \code{fit()}'s
+re-tune of \code{evaluate()}'s members starts instead from each member's
+hyperparameters and, for d tuned parameters, d points drawn around
+them.}
 
-\item{bayesian_iter}{\code{integer}. Bayesian optimization iterations, at
-least: a model tuning more parameters runs more, so that its grid and its
-search together try at least ten points a tuned parameter (\code{10 * d - grid_size} iterations for \code{d} parameters, when that is more). At the
+\item{bayesian_iter}{\code{integer}. Bayesian optimization iterations of
+\code{evaluate()}'s search, and of \code{fit()}'s on a cold start, which tunes its
+one configuration as \code{evaluate()} would (see \code{\link[=fit]{fit()}}), at least: a model
+tuning more parameters runs more, so that its grid and its search
+together try at least ten points a tuned parameter (\code{10 * d - grid_size} iterations for \code{d} parameters, when that is more). At the
 defaults that is 15 for rf, elastic_net and svm_rbf, 20 for cubist and
 mlp, 30 for lightgbm and 50 for xgboost. Each search stops once
 \code{control_horizons(no_improve = )} iterations in a row have not improved
@@ -63,25 +66,24 @@ search together is gridded whole, with no search: a submodel's values
 share one fit, so plsr's components are gridded whole, every count
 scored from one fit a fold, and at the defaults so is mars's space, two
 fits a fold. Default 15. Minimum 0: 0 turns the search off for every
-model.}
+model, and a cold start then keeps the best of its grid.}
 
 \item{final_bayesian_iter}{\code{integer}. Bayesian optimization iterations for
-\code{fit()}'s re-tune of each member, at least. Default 0, which turns the
-re-tune off: each member keeps \code{evaluate()}'s hyperparameters, clamped
-into \code{fit()}'s range and scored by its out-of-fold predictions alone,
-and a cold start keeps the best of a grid of \code{grid_size} points. It is
-off by default because on a library-scale and a local benchmark the
-re-tune never moved a member past its margin, so the members kept
-\code{evaluate()}'s hyperparameters either way, while it took most of
+\code{fit()}'s re-tune of each of \code{evaluate()}'s members, at least. Default 0,
+which turns the re-tune off: each member keeps \code{evaluate()}'s
+hyperparameters, clamped into \code{fit()}'s range and scored by its
+out-of-fold predictions alone. A cold start does not read it: it tunes by
+\code{bayesian_iter}, and warns that a \code{final_bayesian_iter} above 0 is
+ignored. The re-tune is off by default because on a library-scale and a
+local benchmark it never moved a member past its margin, so the members
+kept \code{evaluate()}'s hyperparameters either way, while it took most of
 \code{fit()}'s run time (see "The re-tune" in \code{\link[=fit]{fit()}}). Above 0 the re-tune
 runs, its budget raised as \code{bayesian_iter}'s is, counting the points it
 starts from: from \code{evaluate()}'s hyperparameters and d points drawn
 around them, for d tuned parameters, 25 iterations run 25 up to two
 tuned parameters, 26 for cubist and mlp, 35 for lightgbm and 53 for
-xgboost; on a cold start, from the grid, 25 up to three tuned parameters
-at the default \code{grid_size}, 30 for lightgbm and 50 for xgboost. Each
-re-tune stops once \code{control_horizons(no_improve = )} iterations in a row
-have not improved on its best. Minimum 0.}
+xgboost. Each re-tune stops once \code{control_horizons(no_improve = )}
+iterations in a row have not improved on its best. Minimum 0.}
 
 \item{sg_window}{\code{integer}. Savitzky-Golay window in grid points, applied
 to every configuration. Default 9. Must be odd, at least 5, and (checked

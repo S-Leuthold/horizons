@@ -1040,8 +1040,10 @@ config_findings <- function(x) {
   }
 
   ### And configure()'s rule on the three together: evaluate()'s Bayesian
-  ### search, and fit()'s on a cold start, start from the grid, and
-  ### tune_bayes() needs two of its points (#209)
+  ### search and fit()'s on a cold start (bayesian_iter), and fit()'s re-tune
+  ### of a member whose parameters from evaluate() are unusable
+  ### (final_bayesian_iter), start from the grid, and tune_bayes() needs two
+  ### of its points (#209)
   if (tuning_ok && tuning$grid_size < 2 &&
       (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
 

@@ -160,17 +160,17 @@ defaults to 0, so each member keeps \code{evaluate()}'s hyperparameters,
 clamped into the range \code{fit()}'s data allow (a \code{num_comp} above the cap of
 fewer rows, say), and is scored by its out-of-fold predictions alone, as
 \code{tune::fit_best()} refits a choice. A member whose parameters are unusable
-is tuned instead on a space-filling grid of \code{grid_size} points, as a cold
-start is. On a library-scale and a local benchmark the re-tune never moved
-a member past its margin (below): every member kept \code{evaluate()}'s
-hyperparameters, the best candidate leading them by at most 0.2 of its
-standard errors, while the re-tune took most of \code{fit()}'s run time.
+is tuned instead on a space-filling grid of \code{grid_size} points, followed by
+\code{final_bayesian_iter} Bayesian iterations when it is above 0. On a
+library-scale and a local benchmark the re-tune never moved a member past
+its margin (below): every member kept \code{evaluate()}'s hyperparameters, the
+best candidate leading them by at most 0.2 of its standard errors, while
+the re-tune took most of \code{fit()}'s run time.
 \code{configure(final_bayesian_iter = )} above 0 turns it on; the tree's header
-says whether it ran. \code{evaluate()} chose the
-hyperparameters on its training rows, which hold \code{fit()}'s and, with UQ or
-AD on, the calibration rows, so a member that keeps them is fitted at
-hyperparameters the calibration rows took part in choosing, as they took
-part in choosing the members (#44).
+says whether it ran. \code{evaluate()} chose the hyperparameters on its training
+rows, which hold \code{fit()}'s and, with UQ or AD on, the calibration rows, so
+a member that keeps them is fitted at hyperparameters the calibration rows
+took part in choosing, as they took part in choosing the members (#44).
 
 With the re-tune on, each member's re-tune starts from \code{evaluate()}'s
 hyperparameters, clamped, and, for a model tuning d parameters, d points
@@ -229,9 +229,12 @@ members' re-tunes the Bayesian search's stopping rule ended early
 (\code{control_horizons(no_improve = )}: a search stops once that many
 iterations in a row have not improved on its best, and \code{FALSE} runs every
 iteration), each member recording the iterations its search began
-(\code{bayes_iter}) and why it ended (\code{bayes_stop}); and how many members kept
+(\code{bayes_iter}) and why it ended (\code{bayes_stop}); how many members kept
 \code{evaluate()}'s hyperparameters, or that the re-tune was off, as it is by
-default (see "The re-tune"). The folds are
+default (see "The re-tune"); and, on a cold start, what its Bayesian
+search ran (see "Cold start from one configuration"), warning with class
+\code{horizons_warning_input} when a \code{final_bayesian_iter} above 0, which a
+cold start does not read, was set. The folds are
 drawn from the rows the members are fitted on, which must outnumber the
 folds, or \code{fit()} refuses, as \code{evaluate()} does.
 }
@@ -276,11 +279,18 @@ go straight to \code{fit()} (#45). \code{fit()} then draws the train/test split
 itself, by the draw \code{evaluate()} uses, so at the same \code{seed} it holds out
 exactly the rows \code{evaluate()} would have, and applies a response trim
 \code{validate()} requested as \code{evaluate()} does, on fences from the training
-partition alone. With no parameters from \code{evaluate()} to keep, the member
-is tuned on a space-filling grid of \code{grid_size} points and keeps the
-grid's best by CV RMSE; with \code{final_bayesian_iter} above 0 a Bayesian
-search runs from that grid. The console tree says so, and
-\code{models$results$warm_start} is \code{FALSE}. On either path, a search space
+partition alone. With no parameters from \code{evaluate()} to keep, \code{fit()}
+tunes the configuration as \code{evaluate()} would, since this is its only
+tuning: a space-filling grid of \code{grid_size} points, then a Bayesian search
+of \code{bayesian_iter} iterations (\code{\link[=configure]{configure()}}), raised to ten points a
+tuned parameter and stopped by \code{control_horizons(no_improve = )} as in
+\code{evaluate()}, keeping the candidate with the lowest CV RMSE. At
+\code{bayesian_iter = 0} it grids only, as \code{evaluate()} does. A cold start does
+not read \code{final_bayesian_iter}, the budget of the re-tune of \code{evaluate()}'s
+members: one above 0 is ignored, with a warning of class
+\code{horizons_warning_input}. The console tree's header and a note on the log
+say what the search ran, and \code{models$results$warm_start} is \code{FALSE}. On
+either path, a search space
 whose tuned parameters are all whole numbers, costing no more fits than
 the grid and the Bayesian iterations together, is gridded whole with no
 Bayesian search, as \code{evaluate()} grids it: a submodel's values share one
@@ -321,8 +331,7 @@ warning a row of the object's \code{log} and "no dispatcher" on the progress
 tree's parallel line. A pool left with no daemon while they run stops the
 call with \code{horizons_error_no_daemons}, every member still to fit. Then
 tune runs the CV folds inside each member's re-tune, when it runs, and its
-OOF pass on the
-\href{https://mirai.r-lib.org}{mirai} daemons the caller has set
+OOF pass on the \href{https://mirai.r-lib.org}{mirai} daemons the caller has set
 (\code{mirai::daemons(4)} before the call); a
 \code{future::plan()} is not used, and \code{fit()} never sets, resizes or resets
 the daemons. With fewer than two connected, \code{fit()} runs sequentially and

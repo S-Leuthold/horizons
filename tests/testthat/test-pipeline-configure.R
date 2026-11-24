@@ -267,7 +267,8 @@ describe("configure() validation", {
       class = "horizons_error_input"
     )
 
-    ## fit()'s re-tune starts from the grid on a cold start
+    ## fit()'s re-tune starts from the grid when evaluate()'s parameters are
+    ## unusable
     expect_error(
       capture.output(configure(hd, grid_size = 1, bayesian_iter = 0, final_bayesian_iter = 25)),
       "`grid_size` must be at least 2 when a Bayesian search runs", fixed = TRUE,

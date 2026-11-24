@@ -53,8 +53,11 @@ or NULL (\code{fit()}'s cold start), in which case the re-tune starts from a
 space-filling grid.}
 
 \item{final_bayesian_iter}{Integer. Bayesian iterations for re-tuning, at
-least: raised as \code{evaluate_single_config()}'s are (\code{search_budget()}),
-counting the points the re-tune starts from. When every tuned parameter
+least: \code{fit()} passes \code{configure()}'s \code{final_bayesian_iter} on the
+\code{evaluate()} path and \code{bayesian_iter} on a cold start, which tunes as
+\code{evaluate()} would. Raised as \code{evaluate_single_config()}'s are
+(\code{search_budget()}), counting the points the re-tune starts from. When
+every tuned parameter
 is a whole number and the space costs no more fits than the start and
 those iterations together (a submodel's values sharing one fit), the
 grid is every point and no Bayesian search runs (\code{exhaustive_grid()}).

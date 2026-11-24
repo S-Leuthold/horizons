@@ -46,8 +46,11 @@
 #'   or NULL (`fit()`'s cold start), in which case the re-tune starts from a
 #'   space-filling grid.
 #' @param final_bayesian_iter Integer. Bayesian iterations for re-tuning, at
-#'   least: raised as `evaluate_single_config()`'s are (`search_budget()`),
-#'   counting the points the re-tune starts from. When every tuned parameter
+#'   least: `fit()` passes `configure()`'s `final_bayesian_iter` on the
+#'   `evaluate()` path and `bayesian_iter` on a cold start, which tunes as
+#'   `evaluate()` would. Raised as `evaluate_single_config()`'s are
+#'   (`search_budget()`), counting the points the re-tune starts from. When
+#'   every tuned parameter
 #'   is a whole number and the space costs no more fits than the start and
 #'   those iterations together (a submodel's values sharing one fit), the
 #'   grid is every point and no Bayesian search runs (`exhaustive_grid()`).
