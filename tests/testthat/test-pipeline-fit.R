@@ -1100,6 +1100,9 @@ describe("fit() - on two daemons", {
       fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
     )
 
+    ## The members compared learned something, so a difference in them would show
+    expect_fits_nontrivial(seq_fit)
+
     local_test_daemons(2)
     before <- list(n = mirai::nextget("n"), dispatcher = mirai::nextget("dispatcher"),
                    connected = connected_daemons())

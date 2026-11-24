@@ -2368,6 +2368,9 @@ describe("evaluate() - inner daemons", {
     split   <- run(TRUE, withr::local_tempdir())
     unsplit <- run(FALSE, withr::local_tempdir())
 
+    ## The fits compared learned something, so a difference in them would show
+    expect_fits_nontrivial(unsplit)
+
     ## The split engaged: every configuration's inner daemons connected and
     ## ran its folds
     note <- split$log[grepl("on inner daemons it started", split$log$message, fixed = TRUE), ]
@@ -2911,6 +2914,9 @@ describe("evaluate() - results are identical across axes", {
     seq_result <- run$result
     local_test_daemons(2)
 
+    ## The fit compared learned something, so a difference in it would show
+    expect_fits_nontrivial(seq_result)
+
     ## One config against three folds: auto resolves to the resamples axis,
     ## which needs no output_dir
     par_result <- with_deadline(suppressWarnings(
@@ -2936,6 +2942,9 @@ describe("evaluate() - results are identical across axes", {
     seq_result <- run$result
     local_test_daemons(2)
     tmpdir <- withr::local_tempdir()
+
+    ## The fit compared learned something, so a difference in it would show
+    expect_fits_nontrivial(seq_result)
 
     par_result <- with_deadline(suppressWarnings(
       evaluate(obj, seed = 42L, control = control_horizons(allow_par = TRUE, parallelize_over = "configs", output_dir = tmpdir))
