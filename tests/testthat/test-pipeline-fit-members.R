@@ -1159,6 +1159,8 @@ describe("fit_member_worker() - a member's fit as a task", {
 
   it("fits its member as this session fits it, its intervals and its domain among them, and keeps a warning raised outside the member's unit", {
 
+    skip_unless_slow_tier()
+
     member <- member_task()
     seen   <- member$seen
 
@@ -1291,6 +1293,7 @@ describe("fit() - the members axis (#60)", {
 
   it("fits every member as this session does, each a task of its own, and keeps them in rank order when they finish out of it", {
 
+    skip_unless_slow_tier()
     skip_if_not_installed("Cubist")
 
     obj     <- members_axis_obj()

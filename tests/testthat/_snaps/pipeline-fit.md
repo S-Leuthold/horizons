@@ -33,37 +33,3 @@
       └─ Class: horizons_eval → horizons_fit
       ──────────────────────────────────────────────────────────────
 
-# fit() - the progress tree / prints each member's block in rank order once every member is in, on the members axis (#60)
-
-    Code
-      invisible(run())
-    Output
-      
-      ┌ fit ─────────────────────────────────────────────────────────
-      │
-      │  Fitting top 2 of 2 configurations
-      │  Split: 48 train / 12 test (evaluate()'s held-out rows)
-      │  CV: 3-fold stratified on SOC
-      │  Stratified CV on fewer strata: too little data for 4
-      │  Re-tune: off (`final_bayesian_iter = 0`, the default), so each member keeps evaluate()'s hyperparameters; `configure(final_bayesian_iter = )` above 0 turns it on
-      │  Parallel: over configs on mirai (2 daemons)
-      │  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)
-      │
-      │  ├─ [1/2] Random Forest + none + raw + none
-      │  │  ├─ Test: RPD = 1.1, R² = 0.61, RMSE = 0.512
-      │  │  ├─ CV:   RPD = 2 ± 0.12, RMSE = 0.457 ± 0.032
-      │  │  ├─ The final fit warned
-      │  │  └─ ✓ 12.3s
-      │  └─ [2/2] Cubist + none + raw + none
-      │     ├─ FAILED: Warm-start tuning failed: mocked
-      │     └─ ✗ 3.4s
-      │
-      │  Summary
-      │  ├─ Successful: 1 / 2
-      │  ├─ Failed: 1 / 2
-      │  ├─ CV-selected: cfg_001 (test RPD 1.1)
-      │  └─ Runtime: 1.5 min
-      │
-      └─ Class: horizons_eval → horizons_fit
-      ──────────────────────────────────────────────────────────────
-

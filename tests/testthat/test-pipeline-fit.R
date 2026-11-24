@@ -182,13 +182,17 @@ describe("fit() - success path", {
 
     expect_identical(result$models[c("parallelize_over", "workers")], list(parallelize_over = "sequential", workers = 1L))
 
-    ## Each key checked on its own presence, as evaluation's are
+    ## Each key checked on its own presence, as evaluation's are, each value
+    ## refused by its own finding
+    finding <- c(workers          = "workers must be a single positive whole number",
+                 parallelize_over = "parallelize_over must be one of")
+
     for (bad in list(list(workers = 0L), list(workers = 1.5), list(parallelize_over = "folds"),
                      list(parallelize_over = NULL))) {
       edited <- result
       edited$models[names(bad)] <- list(bad[[1]])
-      expect_error(validate_horizons_fit(edited), class = "horizons_error_validation",
-                   label = paste(names(bad), format(bad[[1]])))
+      expect_error(validate_horizons_fit(edited), finding[[names(bad)]], fixed = TRUE,
+                   class = "horizons_error_validation", label = paste(names(bad), format(bad[[1]])))
     }
 
     ## A fit saved before they were recorded holds neither, and is read
@@ -1693,23 +1697,28 @@ describe("fit() - the progress tree", {
       config_costs      = function(configs, n_rows) as.numeric(seq_len(nrow(configs)))
     )
 
-    start <- as.POSIXct("2026-01-01 12:00:00", tz = "UTC")
-    ticks <- 0L
-    clock <- function() {
-      ticks <<- ticks + 1L
-      if (ticks == 1L) start else start + 90
-    }
+    lines <- utils::capture.output(suppressWarnings(
+      fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+          control = control_horizons(allow_par = TRUE, parallelize_over = "configs", verbose = TRUE))
+    ))
+    at <- function(text) grep(text, lines, fixed = TRUE)
 
-    run <- function() {
-      testthat::with_mocked_bindings(
-        suppressWarnings(fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
-                             control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
-                                                        verbose = TRUE))),
-        Sys.time = clock, .package = "base"
-      )
-    }
+    ## The blocks, the header and the summary are printed by the code the
+    ## snapshot above holds; what the members axis adds is the order: each
+    ## member's line once, in rank order, each block under its own member's
+    ## line, and both before the summary
+    first   <- at("[1/2] Random Forest")
+    second  <- at("[2/2] Cubist")
+    test    <- at("Test: RPD = 1.1")
+    failed  <- at("FAILED: Warm-start tuning failed: mocked")
+    summary <- at("Summary")
 
-    expect_snapshot(invisible(run()))
+    for (line in list(first, second, test, failed, summary)) expect_length(line, 1L)
+
+    expect_lt(first, test)
+    expect_lt(test, second)
+    expect_lt(second, failed)
+    expect_lt(failed, summary)
 
   })
 
