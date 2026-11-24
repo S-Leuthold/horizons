@@ -702,7 +702,8 @@ fit <- function(x,
   calib_data  <- NULL
   calib_drawn <- NULL
   calib_note  <- NULL
-  calib_pool  <- if (is.null(trimmed_rows)) train_F else dplyr::bind_rows(train_F, trimmed_rows)
+  split_C     <- NULL
+  calib_pool  <- calibration_pool(train_F, trimmed_rows)
 
   if (compute_uq || compute_ad) {
 
@@ -715,14 +716,11 @@ fit <- function(x,
     ))
     split_C <- calib_drawn$draw
 
-    train_Fit  <- rsample::training(split_C)
-    calib_data <- rsample::testing(split_C)
-
-    if (!is.null(trimmed_rows)) {
-
-      train_Fit <- train_Fit[!train_Fit[[id_col]] %in% trimmed_ids, , drop = FALSE]
-
-    }
+    ## The fit rows less the trimmed ones, by the code a members-axis task
+    ## rebuilds them with (rebuild_resamples())
+    parts      <- calibration_parts(split_C, trimmed_ids, id_col)
+    train_Fit  <- parts$train
+    calib_data <- parts$calib
 
     ## Guard: minimum calibration size. Too small disables BOTH capabilities
     ## that needed it \u2014 neither UQ nor AD can calibrate on an undersized set.
@@ -742,6 +740,7 @@ fit <- function(x,
       compute_ad <- FALSE
       train_Fit  <- train_F
       calib_data <- NULL
+      split_C    <- NULL
 
     }
 
@@ -1012,6 +1011,42 @@ fit <- function(x,
   }
 
   ## -----------------------------------------------------------------------
+  ## Step 3c: What every member is fitted on, and with
+  ## -----------------------------------------------------------------------
+  ## The rows, and the settings fit_single_config() takes that are the same
+  ## for every member: one list, which the members fitted in this session
+  ## and each member's task on the members axis are both fitted with
+  ## (fit_member()). An argument fit_single_config() takes for every member
+  ## is added to `member_settings`, once, and reaches both.
+
+  member_inputs <- list(
+    split_F      = split_F,
+    cv_resamples = cv_resamples,
+    calib_data   = calib_data,
+    train_data   = train_Fit,
+    role_map     = role_map
+  )
+
+  member_settings <- list(
+    final_bayesian_iter  = tune_iter,
+    grid_size            = tuning$grid_size,
+    tune_ranges          = tuning$ranges,
+    no_improve           = control$no_improve,
+    compute_uq           = compute_uq,
+    compute_ad           = compute_ad,
+    seed                 = seed,
+    sg_window            = recipe_cfg$sg_window,
+    pca_threshold        = recipe_cfg$pca_threshold,
+    outcome_range        = outcome_range,
+    response_fences      = response_fences,
+    min_calib_rows       = control$min_calib_rows,
+    min_ad_rows          = control$min_ad_rows,
+    min_degradation_rows = control$min_degradation_rows,
+    keep_traces          = control$keep_traces,
+    isolate              = control$isolate
+  )
+
+  ## -----------------------------------------------------------------------
   ## Step 4: Config loop
   ## -----------------------------------------------------------------------
   ## Each member is one unit (fit_single_config()). The circuit breaker
@@ -1046,35 +1081,12 @@ fit <- function(x,
                           results = member_results(results_list))
     }
 
-    ## Call capture layer
-    config_result <- stop_on_worker_death(fit_single_config(
-      config_row          = cfg,
-      split_F             = split_F,
-      cv_resamples        = cv_resamples,
-      calib_data          = calib_data,
-      train_data          = train_Fit,
-      role_map            = role_map,
-      best_params_eval    = best_params_eval,
-      final_bayesian_iter = tune_iter,
-      grid_size           = tuning$grid_size,
-      tune_ranges         = tuning$ranges,
-      no_improve          = control$no_improve,
-      compute_uq          = compute_uq,
-      compute_ad          = compute_ad,
-      allow_par           = allow_par,
-      seed                = seed,
-      sg_window           = recipe_cfg$sg_window,
-      pca_threshold       = recipe_cfg$pca_threshold,
-      outcome_range       = outcome_range,
-      response_fences     = response_fences,
-      min_calib_rows       = control$min_calib_rows,
-      min_ad_rows          = control$min_ad_rows,
-      min_degradation_rows = control$min_degradation_rows,
-      debug                = debug,
-      keep_traces          = control$keep_traces,
-      isolate              = control$isolate,
-      threads              = if (allow_par) ENGINE_THREADS else control$threads,
-      fold_entries         = fold_entries
+    ## Call capture layer, with the settings every member shares
+    config_result <- stop_on_worker_death(fit_member(
+      cfg, best_params_eval, fold_entries, member_inputs, member_settings,
+      allow_par = allow_par,
+      threads   = if (allow_par) ENGINE_THREADS else control$threads,
+      debug     = debug
     ), member_results(results_list), verb = "fit", daemons = allow_par)
 
     results_list[[i]] <- config_result
@@ -1447,6 +1459,232 @@ member_row <- function(res) {
     warnings        = list(res$warnings),
     runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## A member's fit, in this session or in its own task on a daemon
+## ---------------------------------------------------------------------------
+
+#' Fit one member, with the settings every member shares
+#'
+#' @description
+#' The one call of [fit_single_config()] for a member, in this session and in
+#' a members-axis task ([fit_member_worker()]): its configuration,
+#' `evaluate()`'s parameters for it and its fold preparations; the rows it is
+#' fitted, scored and calibrated on (`inputs`); the settings every member
+#' shares (`settings`, `fit()`'s `member_settings`); and how this run fits
+#' it. An argument [fit_single_config()] takes for every member is added to
+#' `member_settings`, once, so a member fits alike wherever it runs. Each
+#' argument is passed by its own name ([call_by_name()]), so the call holds
+#' none of the data, and nor does a trace that records it.
+#'
+#' @param config_row The member's configuration, a one-row data frame.
+#' @param best_params_eval `evaluate()`'s parameters for it, or `NULL` on a
+#'   cold start.
+#' @param fold_entries Its fold preparations, or `NULL` with no feature
+#'   selection.
+#' @param inputs List: `split_F`, `cv_resamples`, `calib_data`, `train_data`
+#'   and `role_map`, as [fit_single_config()] takes them.
+#' @param settings Named list: the rest of [fit_single_config()]'s arguments
+#'   that are the same for every member.
+#' @param allow_par Logical(1). Whether tune runs the member's folds on the
+#'   daemons: the resamples axis's, or a members-axis task's inner daemons.
+#' @param threads A whole number: the threads its engine fits on.
+#' @param debug Logical(1). Contain nothing; only in this session.
+#' @param outside_warnings Character. Warnings caught outside the member's
+#'   unit, by its task.
+#' @return What [fit_single_config()] returns.
+#' @keywords internal
+#' @noRd
+fit_member <- function(config_row, best_params_eval, fold_entries, inputs, settings,
+                       allow_par, threads, debug = FALSE, outside_warnings = character(0)) {
+
+  args <- c(list(config_row = config_row, best_params_eval = best_params_eval), inputs, settings,
+            list(allow_par = allow_par, threads = threads, debug = debug,
+                 outside_warnings = outside_warnings, fold_entries = fold_entries))
+
+  eval(call_by_name(quote(fit_single_config), args), args)
+
+}
+
+#' What every member's task carries on the members axis
+#'
+#' @description
+#' The part of a member's task ([fit_member_worker()]) that is the same for
+#' every member: the modelled rows once, with the training rows a response
+#' trim left out when a calibration set is drawn from them, the positions
+#' its split, fit rows, calibration rows and folds are rebuilt from
+#' ([resample_indices()]), the role map, `fit()`'s `member_settings` and
+#' this session's version. Each member's task adds its own part
+#' ([member_task_payload()]).
+#'
+#' @param split_F `fit()`'s split, pointed at the modelled rows.
+#' @param trimmed_rows The training rows a response trim left out, or `NULL`.
+#' @param trimmed_ids Character. Their ids.
+#' @param cv_resamples `fit()`'s folds.
+#' @param split_C `fit()`'s calibration split, or `NULL` when no calibration
+#'   set was drawn or it was too small to use.
+#' @param role_map Tibble with `variable` and `role` columns.
+#' @param settings `fit()`'s `member_settings`.
+#' @return List with the keys `FIT_ARG_NAMES` less the member's own.
+#' @keywords internal
+#' @noRd
+member_payload <- function(split_F, trimmed_rows, trimmed_ids, cv_resamples, split_C, role_map, settings) {
+
+  calibrated <- !is.null(split_C)
+
+  list(
+    data         = split_F$data,
+    trimmed      = if (calibrated) trimmed_rows,
+    resample_idx = resample_indices(split_F, cv_resamples, calib = split_C,
+                                    trimmed_ids = if (calibrated) trimmed_ids else character(0)),
+    role_map     = role_map,
+    settings     = settings,
+    pkg_version  = as.character(utils::packageVersion("horizons"))
+  )
+
+}
+
+#' A member's task: what every member's carries, and its own
+#'
+#' @param shared From [member_payload()].
+#' @param config_row The member's configuration, a one-row data frame.
+#' @param best_params `evaluate()`'s parameters for it, or `NULL`.
+#' @param fold_entries Its fold preparations, or `NULL`.
+#' @return List with the keys `FIT_ARG_NAMES`.
+#' @keywords internal
+#' @noRd
+member_task_payload <- function(shared, config_row, best_params, fold_entries) {
+
+  c(shared, list(config_row = config_row, best_params = best_params, fold_entries = fold_entries))
+
+}
+
+#' Fit One Member Inside a Task on a Daemon
+#'
+#' @description
+#' The body `fit()`'s members axis sends each daemon, one task a member,
+#' through the window ([dispatch_units()]), kept at top level, as
+#' [evaluate_config_worker()] is, so a task carries the function's code and
+#' its arguments and nothing of `fit()`'s frame. `fit()` has no `output_dir`,
+#' so there is no payload file: each task carries its member's data
+#' (`FIT_ARG_NAMES`), as `fit()`'s fold preparations' tasks carry theirs.
+#'
+#' The version is checked first, since another version's payload keys may
+#' differ, then the payload's keys ([check_worker_payload()]). The daemon is
+#' set up for the member as for any unit ([prepare_worker()]: BLAS and
+#' OpenMP on one thread, put back as the task ends, the engines' thread
+#' options and the member's packages); its split, its fit and calibration
+#' rows and its folds are rebuilt from the rows and their positions
+#' ([rebuild_resamples()]), the rows sent once. A warning raised in those
+#' steps, outside the member's unit, is caught and rendered with the
+#' member's own, where mirai would drop it.
+#'
+#' With `inner` above one the task starts that many inner daemons on its own
+#' daemon ([start_inner_daemons()]), tune runs the member's folds on them,
+#' and they are reset as the task ends, however it ends; a pool that does not
+#' come up runs the folds here. Then the member is fitted as this session
+#' fits one ([fit_member()]), its prediction intervals and applicability
+#' domain among it: they need the workflow before it is slimmed, and their
+#' draws are units named by the member, so they give the same numbers on any
+#' axis.
+#'
+#' @param payload List with the keys `FIT_ARG_NAMES`: `data` (the modelled
+#'   rows less those a response trim left out), `trimmed` (those, or
+#'   `NULL`), `resample_idx` ([resample_indices()], with the calibration
+#'   split when there is one), `role_map`, `settings` (`fit()`'s
+#'   `member_settings`), `config_row`, `best_params` (`evaluate()`'s, or
+#'   `NULL`), `fold_entries` and `pkg_version`. No `debug`, since a debug run
+#'   never dispatches.
+#' @param inner Integer(1). The daemons the member's folds run on
+#'   ([split_plan()]). With 1, tune runs them sequentially in this task.
+#' @return What [fit_single_config()] returns, its unit's records on it for
+#'   `fit()` to lift, and its inner daemons as the attribute
+#'   `"inner_daemons"`: `daemons` (`inner`), `started` (whether they
+#'   connected) and `completed` (the tasks they ran for it, past their
+#'   set-up). When an inner daemon died, instead, the record
+#'   [watch_inner_daemons()] returns.
+#' @keywords internal
+#' @noRd
+fit_member_worker <- function(payload, inner = 1L) {
+
+  ## -------------------------------------------------------------------------
+  ## The worker's horizons, then the cross-process contract
+  ## -------------------------------------------------------------------------
+  ## As evaluate_config_worker() checks them: the version first, since
+  ## another version's payload keys may differ, which is a version skew, not
+  ## a bug; then the keys, since a mis-keyed entry arrives as NULL.
+
+  worker_version <- as.character(utils::packageVersion("horizons"))
+
+  if (rlang::is_string(payload$pkg_version) && !identical(worker_version, payload$pkg_version)) {
+    abort_worker_version(worker_version, payload$pkg_version)
+  }
+
+  check_worker_payload(payload, FIT_ARG_NAMES)
+
+  ## BLAS and OpenMP go on one thread as the daemon is set up below, as the
+  ## inner daemons run them, and are put back as the task ends, since the
+  ## daemon is the user's. The put-back is registered first and bound once
+  ## the pin is made.
+  unpin_blas <- function() invisible(NULL)
+  on.exit(unpin_blas(), add = TRUE)
+
+  cfg     <- payload$config_row
+  outside <- character(0)
+
+  rows <- withCallingHandlers({
+
+    ## The daemon's threads pinned, and the member's packages loaded
+    unpin_blas <- prepare_worker(cfg$model, cfg$feature_selection)
+
+    ## The split, the fit and calibration rows and the folds, from one copy
+    ## of the rows and their positions
+    rebuild_resamples(payload$data, payload$resample_idx, trimmed = payload$trimmed,
+                      id_col = id_column(payload$role_map))
+
+  }, warning = function(w) {
+    outside <<- c(outside, condition_summary(w))
+    rlang::cnd_muffle(w)
+  })
+
+  ## -------------------------------------------------------------------------
+  ## The member, its folds on inner daemons when the plan splits it
+  ## -------------------------------------------------------------------------
+  ## The inner daemons are this daemon's own profile, which tune reads, and
+  ## are reset as the task ends, however it ends: the reset is registered
+  ## before they start.
+
+  on_inner <- FALSE
+
+  if (inner > 1L) {
+    on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
+    on_inner <- start_inner_daemons(inner, cfg$model, cfg$feature_selection)
+  }
+
+  ## The tasks the inner daemons ran before the member (their set-up), so its
+  ## record counts only its own
+  completed_before <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
+
+  inputs <- list(split_F = rows$split, cv_resamples = rows$cv_folds, calib_data = rows$calib,
+                 train_data = rows$train, role_map = payload$role_map)
+
+  run <- function() {
+    fit_member(cfg, payload$best_params, payload$fold_entries, inputs, payload$settings,
+               allow_par = on_inner, threads = ENGINE_THREADS, outside_warnings = outside)
+  }
+
+  result <- if (on_inner) watch_inner_daemons(run(), inner, cfg$config_id) else run()
+
+  if (inherits(result, "horizons_inner_daemon_died")) return(result)
+
+  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) - completed_before else 0L
+
+  ## Told the session, which keeps it apart from the member
+  attr(result, "inner_daemons") <- list(daemons = as.integer(inner), started = on_inner, completed = completed)
+
+  result
 
 }
 

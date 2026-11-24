@@ -1091,3 +1091,109 @@ describe("fit() - the members' packages", {
   })
 
 })
+
+
+## =========================================================================
+## A member's fit as a task: fit_member_worker()
+## =========================================================================
+## What the members axis sends a daemon for each member (#60), called here in
+## this session: it needs no daemon, so these run under load_all() too. The
+## task carries its member's data, as fit()'s fold preparations' tasks do,
+## since fit() has no output_dir to write a payload file to.
+
+describe("fit_member_worker() - a member's fit as a task", {
+
+  it("keeps its body out of fit()'s frame and takes its inputs as arguments", {
+
+    expect_true(isNamespace(environment(fit_member_worker)))
+    expect_named(formals(fit_member_worker), c("payload", "inner"))
+
+  })
+
+  it("fits its member as this session fits it, its intervals and its domain among them, and keeps a warning raised outside the member's unit", {
+
+    ## rf on PCA, so the task carries fold preparations and the training
+    ## part's that bounds mtry; UQ and AD on, so it carries the calibration
+    ## split's positions too
+    obj <- make_fit_object(n = 100, n_configs = 1, feature_selection = "pca")
+
+    ## What fit() hands its one member, and its calibration split, recorded
+    ## as the member is fitted in this session
+    seen       <- NULL
+    split_C    <- NULL
+    real_fit   <- fit_member
+    real_parts <- calibration_parts
+
+    fitted <- with_mocked_bindings(
+      suppressWarnings(fit(obj, n_best = 1L, seed = 42L, control = control_horizons(min_calib_rows = 10))),
+      fit_member = function(config_row, best_params_eval, fold_entries, inputs, settings, ...) {
+        value <- real_fit(config_row, best_params_eval, fold_entries, inputs, settings, ...)
+        seen  <<- list(config_row = config_row, best_params = best_params_eval, fold_entries = fold_entries,
+                       inputs = inputs, settings = settings, value = value)
+        value
+      },
+      calibration_parts = function(split, ...) {
+        split_C <<- split
+        real_parts(split, ...)
+      }
+    )
+
+    expect_fits_nontrivial(fitted)
+    expect_false(is.null(seen$fold_entries))
+    expect_false(is.null(split_C))
+
+    ## The task fit() sends, through a serialization round trip as mirai
+    ## sends it
+    shared  <- member_payload(seen$inputs$split_F, NULL, character(0), seen$inputs$cv_resamples, split_C,
+                              seen$inputs$role_map, seen$settings)
+    payload <- unserialize(serialize(member_task_payload(shared, seen$config_row, seen$best_params,
+                                                         seen$fold_entries), NULL))
+
+    expect_setequal(names(payload), FIT_ARG_NAMES)
+
+    ## A package's warning as the daemon loads the member's packages, which
+    ## mirai would drop
+    real_prepare <- prepare_worker
+    local_mocked_bindings(prepare_worker = function(...) {
+      warning("a package warned as it loaded")
+      real_prepare(...)
+    })
+
+    task <- fit_member_worker(payload)
+
+    expect_identical(attr(task, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
+    expect_true(any(grepl("a package warned as it loaded", task$warnings, fixed = TRUE)))
+    expect_true(all(seen$value$warnings %in% task$warnings))
+
+    same <- setdiff(names(seen$value), c("fitted_workflow", "warnings", "uq", "ad", "runtime_secs"))
+
+    expect_identical(task[same], seen$value[same])
+    expect_equal(task$uq, seen$value$uq)
+    expect_equal(task$ad, seen$value$ad)
+
+    test_rows <- rsample::testing(seen$inputs$split_F)
+    expect_identical(predict(task$fitted_workflow, test_rows), predict(seen$value$fitted_workflow, test_rows))
+
+  })
+
+  it("refuses a payload with a key missing, and a worker on another version, as the configuration worker does", {
+
+    good <- stats::setNames(vector("list", length(FIT_ARG_NAMES)), FIT_ARG_NAMES)
+    good$pkg_version <- as.character(utils::packageVersion("horizons"))
+
+    err <- expect_error(fit_member_worker(good[setdiff(names(good), "settings")]),
+                        "Malformed worker payload", class = "horizons_error_internal")
+    expect_match(conditionMessage(err), "Missing: settings; unexpected: -", fixed = TRUE)
+
+    ## The version first: another version's keys may differ, and that is
+    ## not a bug
+    other <- good[setdiff(names(good), "settings")]
+    other$pkg_version <- "0.0.0"
+
+    expect_error(fit_member_worker(other), "but this session runs 0.0.0.", fixed = TRUE,
+                 class = "horizons_error_dependency")
+
+  })
+
+})
+
