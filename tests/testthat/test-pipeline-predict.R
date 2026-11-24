@@ -15,17 +15,16 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
 
   set.seed(seed)
 
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra and a positive outcome they carry, so models fit and intervals
+  ## mean something. The outcome stays comfortably positive, so the non-neg
+  ## clamp is not spuriously triggered by the clean-data tests (a dedicated
+  ## test forces a negative).
+  sim      <- make_signal_spectra(n, n_wn)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Non-negative outcome with real signal so models fit and intervals mean
-  ## something. Kept comfortably positive so the non-neg clamp is not spuriously
-  ## triggered by the clean-data tests (a dedicated test forces a negative).
-  df$SOC <- 5 + rowMeans(spec_mat[, 1:3]) * 1.5 + rnorm(n, sd = 0.4)
+  df$SOC       <- sim$outcome
 
   roles <- tibble::tibble(
     variable = c("sample_id", wn_names, "SOC"),
@@ -103,13 +102,11 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
 
 }
 
-## New-data tibble on the SAME training axis.
+## New-data tibble on the SAME training axis, from the training rows' process.
 make_new_spectra <- function(n = 8, n_wn = 10, seed = 99) {
 
   set.seed(seed)
-  m <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(m) <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  df <- tibble::as_tibble(m)
+  df <- tibble::as_tibble(make_signal_spectra(n, n_wn)$spectra)
   df$sample_id <- paste0("NEW", seq_len(n))
   df
 
@@ -914,17 +911,13 @@ describe("predict.horizons_fit() - empirical coverage", {
     ## and check the fraction covered is in a tolerance band around 0.90. This
     ## is the test that would catch a double-transform scale bug or a broken
     ## conformal margin. Data-size gated for safety.
+    ## Same data-generating process as the training fixture's.
     set.seed(2024)
     n_test  <- 120
-    n_wn    <- 10
-    wn      <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-    m       <- matrix(rnorm(n_test * n_wn), nrow = n_test)
-    colnames(m) <- wn
-    test_df <- tibble::as_tibble(m)
+    sim     <- make_signal_spectra(n_test)
+    test_df <- tibble::as_tibble(sim$spectra)
     test_df$sample_id <- paste0("T", seq_len(n_test))
-
-    ## Same data-generating process as the training fixture's outcome.
-    truth <- 5 + rowMeans(m[, 1:3]) * 1.5 + rnorm(n_test, sd = 0.4)
+    truth   <- sim$outcome
 
     p <- predict(fitted_fixture, test_df)   # intervals at the fitted level (0.90)
 

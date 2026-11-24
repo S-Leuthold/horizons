@@ -7,16 +7,13 @@ make_eval_setup <- function(n = 40, n_wn = 10) {
 
   set.seed(42)
 
-  ## Spectral data: n samples x n_wn wavelengths
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra (n samples x n_wn wavelengths) and an outcome they carry
+  sim      <- make_signal_spectra(n, n_wn)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with weak signal from first 3 predictors
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+  df$SOC       <- sim$outcome
 
   ## Role map
   roles <- tibble::tibble(

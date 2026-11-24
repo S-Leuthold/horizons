@@ -51,16 +51,13 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 
   set.seed(42)
 
-  ## Spectral data
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra and an outcome they carry
+  sim      <- make_signal_spectra(n, n_wn)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with weak signal
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+  df$SOC       <- sim$outcome
 
   ## Role map
   roles <- tibble::tibble(
@@ -127,16 +124,13 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
 
   set.seed(seed)
 
-  ## Spectral data
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra and an outcome they carry
+  sim      <- make_signal_spectra(n, n_wn)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with weak signal from first 3 predictors
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+  df$SOC       <- sim$outcome
 
   ## Rows with no measured outcome, as add_response() leaves them (#67)
   if (n_na > 0) df$SOC[seq_len(n_na)] <- NA_real_
@@ -176,7 +170,7 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
   obj$validation$timestamp <- Sys.time()
 
   ## Run evaluate() to populate evaluation slot
-  ## prune = FALSE ensures configs get status "success" even with weak signal
+  ## prune = FALSE ensures every config gets status "success"
   suppressWarnings(
     evaluate(obj, prune = FALSE, seed = seed)
   )

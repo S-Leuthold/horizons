@@ -963,9 +963,9 @@ describe("fit() - a PCA member stores only the components it uses", {
     steps[[which(vapply(steps, inherits, logical(1), what = "step_pca"))]]
   }
 
+  ## New rows from the training rows' process
   set.seed(9)
-  new_rows <- tibble::as_tibble(matrix(rnorm(25 * 40), nrow = 25,
-                                       dimnames = list(NULL, names(obj$data$analysis)[1:40])))
+  new_rows <- tibble::as_tibble(make_signal_spectra(25, n_wn = 40)$spectra)
   new_rows$sample_id <- sprintf("N%02d", 1:25)
 
   it("fits plsr on the scores at one component, the least-squares fit on them, not a count fitted to rounding", {
