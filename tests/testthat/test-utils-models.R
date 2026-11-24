@@ -106,6 +106,24 @@ describe("define_model_spec()", {
 
   })
 
+  it("carries nothing of its caller's frame, so a tune task stays small, whatever it leaves unread", {
+
+    ## tune serializes the spec to a worker with every task, and its tune()
+    ## arguments keep define_model_spec()'s frame. rf has no weight limit,
+    ## so it never reads max_weights; left a promise, the argument would
+    ## carry its caller's frame with it: here 40 MB, in the verbs the folds
+    ## and the training rows.
+    in_a_heavy_frame <- function(model) {
+      heavy <- numeric(5e6)
+      define_model_spec(model, isolate = FALSE, threads = length(heavy[1]), max_weights = heavy[1] + 10000)
+    }
+
+    for (model in c("rf", "mlp")) {
+      expect_lt(length(serialize(in_a_heavy_frame(model), NULL)), 1e6, label = model)
+    }
+
+  })
+
   it("gives mlp's engine the weight budget as its own limit, 10000 unless told otherwise", {
 
     expect_identical(rlang::eval_tidy(define_model_spec("mlp")$eng_args$MaxNWts), 10000)

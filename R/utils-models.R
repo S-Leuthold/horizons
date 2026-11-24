@@ -30,6 +30,16 @@
 define_model_spec <- function(model, isolate = TRUE, threads = ENGINE_THREADS,
                               max_weights = DEFAULT_MAX_WEIGHTS) {
 
+  ## Forced here, as fold_workflow() forces its outcome: the tune() arguments
+  ## parsnip captures keep this frame, and tune serializes the spec to a
+  ## worker with every task, so an argument left a promise (max_weights, for
+  ## a model with no weight limit, is never read) would carry the caller's
+  ## frame, its folds and training rows, along with it.
+  force(model)
+  force(isolate)
+  force(threads)
+  force(max_weights)
+
   row <- MODEL_SPECS[[model]]
 
   ### The verbs' doors refuse a model outside VALID_MODELS first
