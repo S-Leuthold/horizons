@@ -18,6 +18,30 @@ member_of <- function(obj, model) {
   obj$config$configs$config_id[obj$config$configs$model == model]
 }
 
+## fit_obj(2L) with `n` evaluated configurations, its two repeated, ranked in
+## config_id order, whose models are `models` repeated in that order: rf,
+## cubist, rf, cubist, ... by default. Read inside an it() block, before
+## anything is mocked.
+ranked_members <- function(n, models = c("rf", "cubist")) {
+
+  obj  <- fit_obj(2L)
+  ids  <- sprintf("cfg_%03d", seq_len(n))
+  from <- rep(obj$config$configs$config_id, length.out = n)
+
+  configs <- obj$config$configs[match(from, obj$config$configs$config_id), ]
+  results <- obj$evaluation$results[match(from, obj$evaluation$results$config_id), ]
+
+  configs$config_id <- results$config_id <- ids
+  configs$model     <- rep(models, length.out = n)
+
+  obj$config$configs     <- configs
+  obj$config$n_configs   <- as.integer(n)
+  obj$evaluation$results <- results
+
+  rank_configs_as(obj, ids)
+
+}
+
 
 ## =========================================================================
 ## No config passed the prune gate: fit() takes evaluate()'s fallback (#38)
@@ -381,27 +405,9 @@ describe("fit() - member failures", {
 
 describe("fit() - each member is one unit", {
 
-  ## make_fit_object() with four evaluated configurations, ranked in
-  ## config_id order, whose models are `models` repeated in that order: rf,
-  ## cubist, rf, cubist by default
-  four_members <- function(models = c("rf", "cubist")) {
-
-    obj  <- fit_obj(2L)
-    more <- obj$config$configs
-    more$config_id <- c("cfg_003", "cfg_004")
-
-    res <- obj$evaluation$results
-    add <- res
-    add$config_id <- more$config_id
-
-    obj$config$configs    <- dplyr::bind_rows(obj$config$configs, more)
-    obj$config$configs$model <- rep(models, length.out = 4L)
-    obj$config$n_configs  <- 4L
-    obj$evaluation$results <- dplyr::bind_rows(res, add)
-
-    rank_configs_as(obj, obj$config$configs$config_id)
-
-  }
+  ## Four members, ranked in config_id order: rf, cubist, rf, cubist by
+  ## default (ranked_members())
+  four_members <- function(models = c("rf", "cubist")) ranked_members(4L, models)
 
   fitted_member <- function(config_row, ...) {
 
@@ -1326,6 +1332,27 @@ describe("fit() - the members axis (#60)", {
     expect_identical(obj$config$tuning$cv_folds, 3L)
     expect_identical(axis_at(2L), "resamples")
     expect_identical(axis_at(3L), "configs")
+
+  })
+
+  it("takes the members axis at the defaults: fit()'s n_best members on configure()'s cv_folds", {
+
+    ## Read from the two functions, not restated, so a change to either
+    ## default that moves the axis fails here, and ?fit's "Parallelism" with it
+    n_best   <- eval(formals(fit)$n_best)
+    cv_folds <- eval(formals(configure)$cv_folds)
+
+    obj <- ranked_members(n_best)
+    obj$config$tuning$cv_folds <- cv_folds
+
+    local_tasks_in_session(2L)
+    local_mocked_bindings(fit_single_config = function(config_row, ...) stand_in(config_row))
+
+    fitted <- suppressWarnings(fit(obj, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+                                   control = control_horizons(allow_par = TRUE)))
+
+    expect_identical(nrow(fitted$models$results), as.integer(n_best))
+    expect_identical(fitted$models$parallelize_over, "configs")
 
   })
 

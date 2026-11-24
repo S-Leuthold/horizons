@@ -298,8 +298,9 @@
 #'   rank order, once every member is in.
 #' * `"auto"` (default): `"configs"` when there are at least as many members
 #'   as `cv_folds`, otherwise `"resamples"`, so the default five members on
-#'   ten folds are fitted on the folds axis. `fit()` checkpoints nothing, so
-#'   neither axis needs an `output_dir`.
+#'   [configure()]'s default five folds are fitted on the members axis, and
+#'   on ten folds on the folds axis. `fit()` checkpoints nothing, so neither
+#'   axis needs an `output_dir`.
 #'
 #' The results are the same on either axis and on any number of daemons:
 #' each member's draws are seeded from the run's seed and their own names,

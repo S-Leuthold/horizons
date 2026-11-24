@@ -356,8 +356,9 @@ member on one daemon). The progress tree prints each member's block, in
 rank order, once every member is in.
 \item \code{"auto"} (default): \code{"configs"} when there are at least as many members
 as \code{cv_folds}, otherwise \code{"resamples"}, so the default five members on
-ten folds are fitted on the folds axis. \code{fit()} checkpoints nothing, so
-neither axis needs an \code{output_dir}.
+\code{\link[=configure]{configure()}}'s default five folds are fitted on the members axis, and
+on ten folds on the folds axis. \code{fit()} checkpoints nothing, so neither
+axis needs an \code{output_dir}.
 }
 
 The results are the same on either axis and on any number of daemons:
