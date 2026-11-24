@@ -2011,21 +2011,30 @@ describe("evaluate() - the circuit breaker on the configs axis", {
 
   })
 
-  it("runs every configuration with breaker = FALSE, checkpointing each (installed build)", {
+  it("runs every configuration with breaker = FALSE, checkpointing each, failures the breaker stops when on (installed build)", {
 
     skip_unless_slow_tier()
     skip_on_cran()
     skip_if_dev_package()
 
+    ## Six configurations, as in the first test, so the failures that run
+    ## with the breaker off stop the run with it on: when the first of
+    ## cubist's comes in, another is still to come. With four, cubist's two
+    ## can come in together with nothing left, and the run ends as it does
+    ## with the breaker off.
     local_test_daemons(2)
-    dir   <- withr::local_tempdir()
     marks <- withr::local_tempdir()
-    local_breaker_daemons(fail = sprintf("cfg_%03d", 1:4), marks = marks)
+    local_breaker_daemons(fail = sprintf("cfg_%03d", 1:6), marks = marks)
 
-    err <- expect_error(breaker_run(4, dir, breaker = FALSE), class = "horizons_error_all_configs_failed")
+    expect_error(breaker_run(6, withr::local_tempdir()), class = "horizons_error_systemic")
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
 
-    expect_identical(err$results$config_id, sprintf("cfg_%03d", 1:4))
-    expect_setequal(list.files(file.path(dir, "checkpoints")), sprintf("cfg_%03d.rds", 1:4))
+    dir <- withr::local_tempdir()
+    err <- expect_error(breaker_run(6, dir, breaker = FALSE), class = "horizons_error_all_configs_failed")
+
+    expect_false(inherits(err, "horizons_error_systemic"))
+    expect_identical(err$results$config_id, sprintf("cfg_%03d", 1:6))
+    expect_setequal(list.files(file.path(dir, "checkpoints")), sprintf("cfg_%03d.rds", 1:6))
 
   })
 
