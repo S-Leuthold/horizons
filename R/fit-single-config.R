@@ -274,16 +274,17 @@ fit_single_config <- function(config_row,
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
     ## -----------------------------------------------------------------------
-    ## Step 2: Finalize parameter set (the ranges, then the mtry / num_comp
-    ## upper bound; num_comp also by the smallest fold's rows, #216)
+    ## Step 2: The parameter set's ranges, and the predictors that bound them
     ## -----------------------------------------------------------------------
     ## The configured ranges first, as in evaluate_single_config(), so the
-    ## re-tune searches the space evaluate() did. The prep rule
-    ## evaluate_single_config() follows: each fold's recipe is
+    ## re-tune searches the space evaluate() did, then the bounds, from the
+    ## fewest predictors the whole training part's prep or a fold's keeps
+    ## (num_comp also by the smallest fold's rows, #216), set in Step 2b. The
+    ## prep rule evaluate_single_config() follows: each fold's recipe is
     ## prepped once, before the re-tune, and the re-tune and the out-of-fold
-    ## predictions are scored on it; the bounds are read from one more prep,
-    ## of the fold recipe on the whole training part. A step's error in either
-    ## ends the member with its class.
+    ## predictions are scored on it; the training part's count is read from
+    ## one more prep, of the fold recipe on the whole training part. A step's
+    ## error in either ends the member with its class.
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
     param_set   <- unit_step("finalize_parameters", apply_tune_ranges(param_set, tune_ranges))
@@ -301,25 +302,29 @@ fit_single_config <- function(config_row,
       cv_resamples
     )
 
-    if (prepped_now) {
-
-      ## The training part's prep sets the bounds, and is not the model
-      ## returned, so the selection steps' warnings are not taken from it
-      ## (the final fit's record is read instead)
-      bound     <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
-      param_set <- unit_step("finalize_parameters", finalize_bound(param_set, bound, cv_resamples))
-
-    }
+    ## The training part's prep is read first, so a failed one ends the
+    ## member before any fold is prepped. It is not the model returned, so
+    ## the selection steps' warnings are not taken from it (the final fit's
+    ## record is read instead)
+    if (prepped_now) bound <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
 
     ## -----------------------------------------------------------------------
-    ## Step 2b: The folds, from each fold's prep
+    ## Step 2b: The folds, from each fold's prep, and the bounds
     ## -----------------------------------------------------------------------
     ## Once for the member: the re-tune's grid, its Bayesian iterations and the
     ## out-of-fold predictions all run on these folds. The warnings another
     ## package raised in a fold's prep join the member's with their folds.
+    ## The bounds are set from the training part's prep and every fold's
+    ## together, so with the re-tune off evaluate()'s point is clamped into a
+    ## range every one of this member's fits can take.
 
     prepped_folds <- unit_step("fold_prep", assemble_folds(entry_at, cv_resamples, fold_inputs, role_map))
     warning_log   <- dplyr::bind_rows(warning_log, prepped_folds$warnings)
+
+    if (prepped_now) {
+      param_set <- unit_step("finalize_parameters",
+                             finalize_bound(param_set, c(length(bound), prepped_folds$n_predictors), cv_resamples))
+    }
 
     rm(fold_inputs, entry_at)
 

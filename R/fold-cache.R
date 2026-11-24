@@ -572,12 +572,14 @@ fold_entry_reader <- function(fold_entries, units, build, folds) {
 
 }
 
-#' The predictors a configuration's tuning parameters are bounded by
+#' The predictors the whole training part's prep keeps
 #'
 #' @description
 #' Those the whole training part's prep kept, read from its entry, whose
 #' records the configuration then holds as its own (a failure ends it
 #' here), or, with no feature selection, the transformed rows' predictors.
+#' With each fold's ([assemble_folds()]), they bound the configuration's
+#' tuning parameters ([finalize_bound()]): the final fit is made on them.
 #'
 #' @param entry The training part's entry, or `NULL`.
 #' @param inputs [fold_prep_inputs()]'s value.
@@ -594,37 +596,45 @@ fold_bound <- function(entry, inputs) {
 
 }
 
-#' A parameter set bounded by the predictors a recipe keeps
+#' A parameter set bounded by the predictors a configuration's preps keep
 #'
 #' @description
 #' [dials::finalize()] reads only the width of the frame it is given for
-#' `mtry` and `num_comp`, so it is given a frame of no rows of those
-#' predictors. It sets only an upper bound still `unknown()`, so a range
-#' `config$tuning$ranges` set first ([apply_tune_ranges()]) is kept, and the
-#' data then cap whatever range the parameter has ([cap_by_data()]).
+#' `mtry`, so it is given a frame of no rows and as many columns as the
+#' fewest predictors any of the configuration's preps keeps. It sets only an
+#' upper bound still `unknown()`, so a range `config$tuning$ranges` set
+#' first ([apply_tune_ranges()]) is kept, and the data then cap whatever
+#' range the parameter has ([cap_by_data()]).
 #'
 #' @param param_set A `parameters` object, its ranges applied.
-#' @param predictors Character. The predictors the recipe keeps.
+#' @param n_predictors Integer. The predictors each of the configuration's
+#'   preps keeps: the whole training part's, which the final fit uses, and
+#'   each fold's ([assemble_folds()]'s `n_predictors`).
 #' @param folds The `rset` the configuration is tuned over.
 #' @return The finalized `parameters` object.
 #' @keywords internal
 #' @noRd
-finalize_bound <- function(param_set, predictors, folds) {
+finalize_bound <- function(param_set, n_predictors, folds) {
 
-  frame     <- tibble::new_tibble(stats::setNames(rep(list(double(0)), length(predictors)), predictors),
+  fewest    <- min(n_predictors)
+  frame     <- tibble::new_tibble(stats::setNames(rep(list(double(0)), fewest), paste0("x", seq_len(fewest))),
                                   nrow = 0L)
   finalized <- dials::finalize(param_set, frame)
 
-  cap_by_data(finalized, length(predictors), min_analysis_rows(folds))
+  cap_by_data(finalized, n_predictors, min_analysis_rows(folds))
 
 }
 
 #' Cap the bounded parameters' ranges by what the data hold
 #'
 #' @description
-#' `mtry`'s upper bound at the predictors the recipe keeps, and `num_comp`'s
-#' at those predictors and at the smallest analysis set's rows less one, so a
-#' grid or a Bayesian search proposes no value a fold cannot fit (#216). Each
+#' `mtry`'s upper bound at the fewest predictors any of the configuration's
+#' preps keeps (the whole training part's or a fold's), and `num_comp`'s at
+#' those predictors and at the smallest analysis set's rows less one, so a
+#' grid or a Bayesian search proposes no value one of its fits cannot take
+#' (#216): a feature selection keeps a different number of predictors in
+#' each fold, and a value above a fold's count would be truncated by one
+#' engine, refused by another and passed over silently by a third. Each
 #' keeps its lower bound and any upper bound already below the cap, so a
 #' range set by `configure(tune_ranges = )` narrows to the data rather than
 #' being replaced, as `num_comp`'s default range always has. A range whose
@@ -633,15 +643,17 @@ finalize_bound <- function(param_set, predictors, folds) {
 #' neither is returned unchanged.
 #'
 #' @param param_set A `parameters` object, after [dials::finalize()].
-#' @param n_predictors Integer. Predictors after the recipe.
+#' @param n_predictors Integer. The predictors each of the configuration's
+#'   preps keeps (one count, or one per prep).
 #' @param n_rows Integer. Rows in the smallest analysis set.
 #' @return The parameter set.
 #' @keywords internal
 #' @noRd
 cap_by_data <- function(param_set, n_predictors, n_rows) {
 
-  caps <- c(mtry     = max(1L, n_predictors),
-            num_comp = pls_components(Inf, n_predictors, n_rows))
+  fewest <- min(n_predictors)
+  caps   <- c(mtry     = max(1L, fewest),
+              num_comp = pls_components(Inf, fewest, n_rows))
 
   for (id in intersect(names(caps), param_set$id)) {
 
@@ -652,9 +664,9 @@ cap_by_data <- function(param_set, n_predictors, n_rows) {
     if (lower > caps[[id]]) {
 
       held <- if (id == "num_comp") {
-        cli::format_inline("{n_predictors} predictor{?s} and analysis sets of {n_rows} row{?s} at the smallest")
+        cli::format_inline("{fewest} predictor{?s}, the fewest a fold or the whole training part keeps, and analysis sets of {n_rows} row{?s} at the smallest")
       } else {
-        cli::format_inline("{n_predictors} predictor{?s}")
+        cli::format_inline("{fewest} predictor{?s}, the fewest a fold or the whole training part keeps")
       }
 
       abort_horizons(c(
@@ -700,9 +712,12 @@ cap_by_data <- function(param_set, n_predictors, n_rows) {
 #' @param folds An `rset` of one id column, cut from `inputs$data`'s rows.
 #' @param inputs [fold_prep_inputs()]'s value.
 #' @param role_map Tibble with `variable` and `role` columns.
-#' @return List with `folds` (an `rset` with `folds`' ids) and `warnings`
-#'   (records shaped like `new_warning_log()`'s, scope `"cv"`, each with the
-#'   folds that raised it).
+#' @return List with `folds` (an `rset` with `folds`' ids), `n_predictors`
+#'   (integer, the predictors each fold's prep kept, in fold order: with no
+#'   feature selection, the transformed rows' for every fold), which bound
+#'   the configuration's tuning parameters ([finalize_bound()]), and
+#'   `warnings` (records shaped like `new_warning_log()`'s, scope `"cv"`,
+#'   each with the folds that raised it).
 #' @keywords internal
 #' @noRd
 assemble_folds <- function(entry_at, folds, inputs, role_map) {
@@ -712,7 +727,8 @@ assemble_folds <- function(entry_at, folds, inputs, role_map) {
   n           <- nrow(hoisted)
   split_class <- setdiff(class(folds$splits[[1]]), "rsplit")
 
-  arrivals <- vector("list", nrow(folds))
+  arrivals     <- vector("list", nrow(folds))
+  n_predictors <- integer(nrow(folds))
 
   splits <- lapply(seq_len(nrow(folds)), function(i) {
 
@@ -726,6 +742,8 @@ assemble_folds <- function(entry_at, folds, inputs, role_map) {
     rows  <- fold_rows(folds$splits[[i]])
     kept  <- if (is.null(entry)) inputs$predictors else entry$kept
     blank <- rep(NA_integer_, n)
+
+    n_predictors[[i]] <<- length(kept)
 
     ### The outcome placed as a fold's two bakes place it: transformed on the
     ### analysis rows, as measured on the assessment rows
@@ -746,8 +764,9 @@ assemble_folds <- function(entry_at, folds, inputs, role_map) {
 
   })
 
-  list(folds    = rsample::manual_rset(splits, ids = folds$id),
-       warnings = fold_warning_records(arrivals, nrow(folds)))
+  list(folds        = rsample::manual_rset(splits, ids = folds$id),
+       n_predictors = n_predictors,
+       warnings     = fold_warning_records(arrivals, nrow(folds)))
 
 }
 

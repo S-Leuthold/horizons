@@ -25,8 +25,10 @@ The fit function of the \code{"pls"} engine horizons registers for
 scaled (a constant column is left unscaled, so it contributes nothing).
 \code{ncomp} is capped at the number of predictors and at the rows less one, the
 most components the data can hold. A fit asked for more uses that many and
-warns, with class \code{horizons_warning_substitution}: the runners cap the tuning range from the whole training set, so a
-fold whose recipe selects fewer predictors can still reach this cap.
+warns, with class \code{horizons_warning_substitution}. The runners cap the
+tuning range at the fewest predictors any fold or the whole training part
+keeps and at the smallest fold's rows less one (\code{cap_by_data()}), so a
+tuned count never reaches this cap; a direct fit, or the stop below, can.
 
 The fit also stops before a component that would add nothing to it, and
 warns the same way. PLS with \code{a} components is the least-squares fit over

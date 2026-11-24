@@ -177,9 +177,9 @@ SELECTION_PACKAGES <- list(
 )
 
 # The most components the plsr model tunes over (#216), its default range's
-# upper bound in TUNE_RANGES. The runners cap it further at the predictors the
-# recipe keeps and the smallest fold's rows less one (cap_by_data(),
-# R/fold-cache.R). MIR models often want more than the handful a default
+# upper bound in TUNE_RANGES. The runners cap it further at the fewest
+# predictors the recipe keeps in a fold or on the whole training part and at
+# the smallest fold's rows less one (cap_by_data(), R/fold-cache.R). MIR models often want more than the handful a default
 # range allows, and 30 keeps a grid's points where models land. Not a field
 # of MODEL_SPECS: CARS caps its components with it too (R/step-select-cars.R).
 PLS_MAX_COMP <- 30L
@@ -247,7 +247,8 @@ VALID_FEATURE_SELECTION <- c(
 OUTCOME_SELECTIONS <- c("correlation", "boruta", "cars")
 
 ### The tuned parameters whose upper bound is read from the predictors a
-### recipe keeps (dials::finalize()), so a model that tunes one has its
+### recipe keeps (dials::finalize(), cap_by_data()), the fewest it keeps in
+### any fold or on the whole training part, so a model that tunes one has its
 ### configuration's recipe prepped on the whole training part as well as on
 ### each fold (bounded_model(), R/fold-cache.R)
 BOUNDED_PARAMETERS <- c("mtry", "num_comp")
@@ -674,7 +675,11 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #   9  2026-11-23: a PLS fit stops at the components that carry information
 #      about the outcome, so plsr on PCA scores no longer scores counts
 #      fitted to rounding error (#278).
-SCORING_SCHEMA <- 9L
+#  10  2026-11-24: mtry and num_comp are capped at the fewest predictors any
+#      fold's prep or the whole training part's keeps, not the training
+#      part's alone, so a feature selection that keeps fewer in a fold no
+#      longer has candidates truncated, passed over or failed there.
+SCORING_SCHEMA <- 10L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records

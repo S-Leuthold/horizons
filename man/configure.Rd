@@ -268,10 +268,12 @@ tunes it. The ids each model tunes:
 
 A range is in dials' units: a parameter searched on a log scale takes its
 range in log10 (log2 for \code{cost}), so \code{learn_rate = c(-3, -1)} searches
-0.001 to 0.1. The data still cap \code{mtry} at the predictors a recipe keeps,
-and \code{num_comp} at those and the smallest fold's rows less one, narrowing a
-range given here; a range whose lower bound is above that cap fails the
-configuration, saying so. \code{configure()} refuses a name no configured model
+0.001 to 0.1. The data still cap \code{mtry} at the fewest predictors a
+configuration's recipe keeps in any cross-validation fold or on the whole
+training part, and \code{num_comp} at those and the smallest fold's rows less
+one, narrowing a range given here, so no candidate asks a fold for more
+predictors than it kept; a range whose lower bound is above that cap
+fails the configuration, saying so. \code{configure()} refuses a name no configured model
 tunes, a range that is not two finite numbers with the lower below the
 upper, an \code{mtry} or \code{num_comp} range starting below 1 (each counts the
 predictors or components a fit uses, so 0 is no model), and a fractional
