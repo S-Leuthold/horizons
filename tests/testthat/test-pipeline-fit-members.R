@@ -1513,7 +1513,7 @@ describe("fit() - the members axis on daemons (#60)", {
     note <- split$log[split$log$type == "note" & grepl("on inner daemons it started", split$log$message, fixed = TRUE), ]
 
     expect_identical(nrow(note), 1L)
-    expect_match(note$message, paste0("`fit()` ran the folds of 1 long configuration on inner daemons it started on its daemon, within the daemons set: ",
+    expect_match(note$message, paste0("`fit()` ran the folds of 1 long member on inner daemons it started on its daemon, within the daemons set: ",
                                       first, " on 3."), fixed = TRUE)
 
   })

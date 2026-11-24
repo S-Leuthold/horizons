@@ -323,8 +323,9 @@ meta_formula <- function() {
 #' promises among it. tune serializes the workflow with every task it sends
 #' the daemons under `allow_par`, and the fitted meta-learner stores the
 #' specification, so either would carry the fitted object. This frame binds
-#' `method` and `optimize` alone, as [meta_formula()]'s environment holds
-#' nothing and `fold_workflow()` forces its outcome name.
+#' `method`, `optimize` and the small specification itself (`spec`), and
+#' nothing of the caller's, as [meta_formula()]'s environment holds nothing
+#' and `fold_workflow()` forces its outcome name.
 #'
 #' Each branch writes its arguments literally, not as an inline `if`
 #' (`trees = if (optimize) tune() else 500`): parsnip would keep the

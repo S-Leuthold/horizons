@@ -1181,14 +1181,14 @@ fit <- function(x,
     plan         <- inner_daemon_plan(member_costs, member_rows$model, cv_folds, control, reports,
                                       n_rows = nrow(x$data$analysis), n_predictors = sum(role_map$role == "predictor"),
                                       n_train = nrow(train_Fit), kept = config_kept(member_rows, role_map, fold_stage),
-                                      collector = collector, verb = "fit")
+                                      collector = collector, verb = "fit", unit = "member")
     planned      <- plan$planned
     inner_plan   <- plan$inner
     blas_pinned  <- plan$pinned
 
     ## Which members run their folds on inner daemons, said in the tree from
     ## the plan, and on the log once the window has run, from what started
-    inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned)
+    inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned, unit = "member")
 
     if (verbose && length(inner_lines) > 0) {
       for (line in inner_lines) cat(paste0("\u2502  ", line, "\n"))
@@ -1256,7 +1256,7 @@ fit <- function(x,
     ## says; one whose inner daemons did not connect ran its folds on its
     ## own daemon, which costs time only
     log_inner_daemons(collector, member_rows$config_id, planned, inner_plan, control$inner_daemons,
-                      blas_pinned, inner_records, verb = "fit")
+                      blas_pinned, inner_records, verb = "fit", unit = "member")
 
   }
 

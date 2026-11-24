@@ -1437,7 +1437,7 @@ evaluate <- function(x,
     plan          <- inner_daemon_plan(pending_costs, configs$model, cv_folds, control, reports,
                                        n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
                                        n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
-                                       collector = collector, verb = "evaluate")
+                                       collector = collector, verb = "evaluate", unit = "configuration")
     planned       <- plan$planned
     inner_plan    <- plan$inner
     blas_pinned   <- plan$pinned

@@ -712,7 +712,7 @@ describe("check_split_memory()", {
     collector <- log_open("evaluate")
     local_mocked_bindings(memory_available = function() available)
     fits <- check_split_memory(reports, extra, processes, 1000, 200,
-                               n_split = 1L, collector = collector, verb = "evaluate")
+                               n_split = 1L, collector = collector, verb = "evaluate", unit = "configuration")
     list(fits = fits, rows = log_close(collector))
   }
 
@@ -1121,6 +1121,27 @@ describe("inner_daemons_tree_line() and log_inner_daemons()", {
     expect_identical(rows$ids, list(c("cfg_001", "cfg_002", "cfg_003")))
     expect_match(rows$message, "as `control_horizons(inner_daemons = FALSE)` asked; it would have run the folds of 3 long configurations on inner daemons.",
                  fixed = TRUE)
+
+  })
+
+  it("says member for fit()'s members, in the tree's line and on the log", {
+
+    expect_identical(inner_daemons_tree_line(c(5L, 2L, 2L, 1L), c(5L, 2L, 2L, 1L), TRUE, TRUE, unit = "member"),
+                     "Inner daemons: 3 long members run their folds on 5, 2 and 2 (control_horizons(inner_daemons = FALSE) turns it off)")
+    expect_identical(inner_daemons_tree_line(c(2L, 1L), c(1L, 1L), FALSE, TRUE, unit = "member"),
+                     "Inner daemons: off, as asked; 1 long member runs on one daemon")
+
+    collector <- log_open("fit")
+    log_inner_daemons(collector, ids, plan, plan, TRUE, FALSE, records, verb = "fit", unit = "member")
+    rows <- log_close(collector)
+    msg  <- gsub("\\s+", " ", rows$message)
+
+    expect_match(msg[[1]], "`fit()` ran the folds of 1 long member on inner daemons it started on its daemon, within the daemons set: cfg_001 on 2.",
+                 fixed = TRUE)
+    expect_match(msg[[1]], "runs each member on one daemon.", fixed = TRUE)
+    expect_match(msg[[2]], "started for 2 members did not connect within 60 seconds, so they ran their folds on their own daemons",
+                 fixed = TRUE)
+    expect_match(msg[[3]], "so the 1 member run on inner daemons can differ in floating-point rounding", fixed = TRUE)
 
   })
 

@@ -246,13 +246,15 @@ split_plan <- function(costs, n, folds) {
 #'   Read only when the plan splits some.
 #' @param collector The verb's collector.
 #' @param verb Character(1). The verb that runs them.
+#' @param unit Character(1). The verb's word for a unit, `"configuration"` or
+#'   `"member"`, for the note.
 #' @return List: `planned` (the daemons [split_plan()] gave each unit),
 #'   `inner` (the daemons each runs on) and `pinned` (whether BLAS and
 #'   OpenMP can be pinned on the daemons, [blas_pinnable()]).
 #' @keywords internal
 #' @noRd
 inner_daemon_plan <- function(costs, models, folds, control, reports, n_rows, n_predictors, n_train,
-                              kept, collector, verb) {
+                              kept, collector, verb, unit) {
 
   n       <- connected_daemons()
   planned <- split_plan(costs, n, folds)
@@ -271,7 +273,7 @@ inner_daemon_plan <- function(costs, models, folds, control, reports, n_rows, n_
                             n_predictors = n_predictors, n_train = n_train, kept = kept, folds = folds)
 
     if (!check_split_memory(reports, extra, processes, n_rows = n_rows, n_predictors = n_predictors,
-                            n_split = sum(inner > 1L), collector = collector, verb = verb)) {
+                            n_split = sum(inner > 1L), collector = collector, verb = verb, unit = unit)) {
       inner[] <- 1L
     }
 
@@ -793,11 +795,13 @@ split_need <- function(inner, order, n, processes, n_rows, n_predictors, n_train
 #' @param n_split Integer(1). The configurations the plan splits.
 #' @param collector The verb's collector.
 #' @param verb Character(1).
+#' @param unit Character(1). The verb's word for a unit, `"configuration"` or
+#'   `"member"`.
 #' @return Logical(1): `TRUE` when the split fits, `FALSE` when the plan is
 #'   to be emptied, which the note says.
 #' @keywords internal
 #' @noRd
-check_split_memory <- function(reports, extra, processes, n_rows, n_predictors, n_split, collector, verb) {
+check_split_memory <- function(reports, extra, processes, n_rows, n_predictors, n_split, collector, verb, unit) {
 
   local     <- local_daemon_memory(reports, processes, n_rows, n_predictors)
   n_local   <- local$n
@@ -812,7 +816,7 @@ check_split_memory <- function(reports, extra, processes, n_rows, n_predictors, 
   gb <- function(bytes) format(round(bytes / 1e9, 1), nsmall = 1)
 
   log_note(collector, c(
-    "{.fn {verb}} ran each configuration on one daemon: the inner daemons it would start for {n_split} long configuration{?s} would need about {gb(extra)} GB on this machine beside the {gb(need)} GB its {n_local} daemon{?s} {?needs/need}, and {gb(available)} GB is available."
+    "{.fn {verb}} ran each {unit} on one daemon: the inner daemons it would start for {n_split} long {unit}{cli::qty(n_split)}{?s} would need about {gb(extra)} GB on this machine beside the {gb(need)} GB its {n_local} daemon{?s} {?needs/need}, and {gb(available)} GB is available."
   ))
 
   FALSE
@@ -872,26 +876,28 @@ parallel_tree_lines <- function(axis, n_daemons, models, isolate, no_dispatcher 
 #' @param setting Logical(1). `control_horizons(inner_daemons = )`.
 #' @param pinned Logical(1). Whether BLAS and OpenMP can be pinned at run
 #'   time ([blas_pinnable()]).
+#' @param unit Character(1). The verb's word for a unit: `"configuration"`
+#'   for `evaluate()`, `"member"` for `fit()`.
 #' @return Character: the lines, without the tree's prefix, or `NULL`.
 #' @keywords internal
 #' @noRd
-inner_daemons_tree_line <- function(planned, inner, setting, pinned) {
+inner_daemons_tree_line <- function(planned, inner, setting, pinned, unit = "configuration") {
 
   n_planned <- sum(planned > 1L)
   n_split   <- sum(inner > 1L)
 
   if (n_split > 0L) {
     counts <- inner[inner > 1L]
-    c(paste0("Inner daemons: ", n_split, " long configuration", if (n_split != 1L) "s",
+    c(paste0("Inner daemons: ", n_split, " long ", unit, if (n_split != 1L) "s",
              " run", if (n_split == 1L) "s", " ", if (n_split == 1L) "its" else "their", " folds on ",
              if (n_split == 1L) counts else paste0(paste(counts[-n_split], collapse = ", "), " and ", counts[n_split]),
              " (control_horizons(inner_daemons = FALSE) turns it off)"),
       if (!isTRUE(pinned)) {
-        paste0("BLAS threads: not pinned, so a configuration on inner daemons can differ from an unsplit run in ",
+        paste0("BLAS threads: not pinned, so a ", unit, " on inner daemons can differ from an unsplit run in ",
                "rounding (install RhpcBLASctl, or Sys.setenv(OPENBLAS_NUM_THREADS = 1) before mirai::daemons())")
       })
   } else if (n_planned > 0L && !isTRUE(setting)) {
-    paste0("Inner daemons: off, as asked; ", n_planned, " long configuration", if (n_planned != 1L) "s",
+    paste0("Inner daemons: off, as asked; ", n_planned, " long ", unit, if (n_planned != 1L) "s",
            " run", if (n_planned == 1L) "s on one daemon" else " each on one daemon")
   } else if (n_planned > 0L) {
     "Inner daemons: none, since they would not fit in this machine's memory (see the log)"
@@ -921,10 +927,13 @@ inner_daemons_tree_line <- function(planned, inner, setting, pinned) {
 #' @param records Named list: each configuration's record of its inner
 #'   daemons, from its row, by configuration (`finished$inner`).
 #' @param verb Character(1). The verb that ran them.
+#' @param unit Character(1). Its word for a unit, as
+#'   [inner_daemons_tree_line()]'s.
 #' @return `NULL`, invisibly.
 #' @keywords internal
 #' @noRd
-log_inner_daemons <- function(collector, ids, planned, inner, setting, pinned, records, verb = "evaluate") {
+log_inner_daemons <- function(collector, ids, planned, inner, setting, pinned, records, verb = "evaluate",
+                              unit = "configuration") {
 
   if (!isTRUE(setting)) {
 
@@ -933,7 +942,7 @@ log_inner_daemons <- function(collector, ids, planned, inner, setting, pinned, r
 
     if (n > 0L) {
       log_note(collector,
-        "{.fn {verb}} ran each configuration on one daemon, as {.code control_horizons(inner_daemons = FALSE)} asked; it would have run the folds of {n} long configuration{?s} on inner daemons.",
+        "{.fn {verb}} ran each {unit} on one daemon, as {.code control_horizons(inner_daemons = FALSE)} asked; it would have run the folds of {n} long {unit}{cli::qty(n)}{?s} on inner daemons.",
         ids = would)
     }
 
@@ -951,8 +960,8 @@ log_inner_daemons <- function(collector, ids, planned, inner, setting, pinned, r
     details <- paste0(split, " on ", inner[match(split, ids)])
 
     log_note(collector, c(
-      "{.fn {verb}} ran the folds of {n} long configuration{?s} on inner daemons it started on {?its/their} daemon{?s}, within the daemons set: {details}.",
-      "i" = "{.code control_horizons(inner_daemons = FALSE)} runs each configuration on one daemon."
+      "{.fn {verb}} ran the folds of {n} long {unit}{cli::qty(n)}{?s} on inner daemons it started on {?its/their} daemon{?s}, within the daemons set: {details}.",
+      "i" = "{.code control_horizons(inner_daemons = FALSE)} runs each {unit} on one daemon."
     ), ids = split)
 
   }
@@ -962,7 +971,7 @@ log_inner_daemons <- function(collector, ids, planned, inner, setting, pinned, r
     n <- length(unstarted)
 
     log_note(collector,
-      "The inner daemons {.fn {verb}} started for {n} configuration{?s} did not connect within {INNER_START_SECONDS} seconds, so {cli::qty(n)}{?it/they} ran {?its/their} folds on {?its/their} own daemon{?s}: {.val {unstarted}}.",
+      "The inner daemons {.fn {verb}} started for {n} {unit}{cli::qty(n)}{?s} did not connect within {INNER_START_SECONDS} seconds, so {cli::qty(n)}{?it/they} ran {?its/their} folds on {?its/their} own daemon{?s}: {.val {unstarted}}.",
       ids = unstarted)
 
   }
@@ -972,7 +981,7 @@ log_inner_daemons <- function(collector, ids, planned, inner, setting, pinned, r
     n <- length(split)
 
     log_note(collector, c(
-      "{.fn {verb}} could not pin BLAS and OpenMP to one thread on its daemons, since {.pkg RhpcBLASctl} is not installed, so the {n} configuration{?s} run on inner daemons can differ in floating-point rounding from the same run without them: {.val {split}}.",
+      "{.fn {verb}} could not pin BLAS and OpenMP to one thread on its daemons, since {.pkg RhpcBLASctl} is not installed, so the {n} {unit}{cli::qty(n)}{?s} run on inner daemons can differ in floating-point rounding from the same run without them: {.val {split}}.",
       "i" = "Install {.pkg RhpcBLASctl} ({.code install.packages(\"RhpcBLASctl\")}), or set {.code Sys.setenv(OPENBLAS_NUM_THREADS = 1)} before {.code mirai::daemons()}, so every process runs BLAS on one thread."
     ), ids = split)
 
@@ -1924,7 +1933,7 @@ abort_inner_daemon_died <- function(died, unit, results, output_dir = NULL, verb
   abort_horizons(c(
     "An inner mirai daemon running {what} {.val {id}}'s folds stopped while it ran, so {.fn {verb}} cannot go on.",
     "i" = "{n - left} of the {n} inner daemon{?s} {.fn {verb}} started on its daemon {cli::qty(n - left)}{?was/were} gone after it.",
-    "i" = "{.fn {verb}} runs a long configuration's folds on daemons it starts on that configuration's daemon, within the daemons set; {.code control_horizons(inner_daemons = FALSE)} runs each configuration on one daemon.",
+    "i" = "{.fn {verb}} runs a long {what}'s folds on daemons it starts on that {what}'s daemon, within the daemons set; {.code control_horizons(inner_daemons = FALSE)} runs each {what} on one daemon.",
     resume_hint(results, output_dir)
   ), kind = "run", class = "horizons_error_systemic", results = results, call = call)
 
