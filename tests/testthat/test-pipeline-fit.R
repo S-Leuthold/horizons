@@ -195,10 +195,12 @@ describe("fit() - success path", {
                    class = "horizons_error_validation", label = paste(names(bad), format(bad[[1]])))
     }
 
-    ## A fit saved before they were recorded holds neither, and is read
+    ## fit() writes both on every path, so a fit without them, one saved
+    ## before they were recorded, is refused and re-run, as for any key
     saved <- result
     saved$models[c("parallelize_over", "workers")] <- NULL
-    expect_s3_class(validate_horizons_fit(saved), "horizons_fit")
+    expect_error(validate_horizons_fit(saved), "Contract keys missing from models: workers, parallelize_over",
+                 fixed = TRUE, class = "horizons_error_validation")
 
   })
 

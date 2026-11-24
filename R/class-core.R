@@ -1515,12 +1515,8 @@ CONTRACT_KEYS_OPTIONAL <- list(
   ## because no evaluate() ran
   evaluation = c("workers", "parallelize_over"),
 
-  ## fit()'s run provenance, recorded as evaluate()'s is and checked when
-  ## present (#60). fit() writes both on every path; they are optional so
-  ## that a fit saved before they were recorded, the stored test fixture
-  ## among them, is not refused for lacking them. Every other key fit()
-  ## writes is required.
-  models     = c("workers", "parallelize_over"),
+  ## fit() writes every key
+  models     = character(),
 
   ## ensemble() writes every key
   ensemble   = character()
@@ -2516,8 +2512,8 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #'    `uq`, `ad`, `selection_present`, `seed`, `seed_rule`, `control`,
 #'    `timestamp`, `runtime_secs`. [fit()] writes every one, so a fit made
 #'    before the seed was recorded is refused. Extra keys are tolerated. The
-#'    run-provenance keys `workers` and `parallelize_over` are tolerated when
-#'    absent and checked when present, as `evaluation`'s are.
+#'    run-provenance keys `workers` and `parallelize_over` are checked as
+#'    `evaluation`'s are.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
 #' 4. **rank_metric**: a length-1 character.
@@ -2637,7 +2633,7 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
   errors <- c(errors, control_finding(md$control, "models"))
 
   ## parallelize_over / workers (run provenance) ----------------------------------
-  ## As evaluation's: each checked when present (CONTRACT_KEYS_OPTIONAL)
+  ## As evaluation's, by the one check both validators call
 
   errors <- c(errors, run_provenance_findings(md))
 
