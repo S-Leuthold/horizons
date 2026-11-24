@@ -1299,23 +1299,6 @@ describe("fit() - the members axis (#60)", {
     )
   }
 
-  ## Four members on two models, ranked rf, cubist, rf, cubist
-  four <- function() {
-
-    obj  <- fit_obj(2L)
-    more <- obj$config$configs
-    more$config_id <- c("cfg_003", "cfg_004")
-    add  <- obj$evaluation$results
-    add$config_id <- more$config_id
-
-    obj$config$configs     <- dplyr::bind_rows(obj$config$configs, more)
-    obj$config$n_configs   <- 4L
-    obj$evaluation$results <- dplyr::bind_rows(obj$evaluation$results, add)
-
-    rank_configs_as(obj, obj$config$configs$config_id)
-
-  }
-
   it("takes the members axis on auto by evaluate()'s rule: once there are as many members as folds", {
 
     obj <- members_axis_obj()
@@ -1358,32 +1341,43 @@ describe("fit() - the members axis (#60)", {
 
   it("stops when the first members to come in fail the same way across two models, and not when a success comes in with them", {
 
-    obj <- four()
-
-    ## The first three ranked fail alike; the fourth succeeds
+    ## Five members ranked rf, cubist, rf, cubist, rf: the first three fail
+    ## alike, the last two succeed
+    obj   <- ranked_members(5L)
     fails <- c("cfg_001", "cfg_002", "cfg_003")
-    local_mocked_bindings(fit_single_config = function(config_row, ...) stand_in(config_row, config_row$config_id %in% fails))
+
+    ## Equal costs, so the window starts them in rank order; and each member
+    ## on one daemon, since split_plan() would give each rf member inner
+    ## daemons, which would bring them in over more passes and start real
+    ## inner daemons in this session
+    local_mocked_bindings(
+      fit_single_config = function(config_row, ...) stand_in(config_row, config_row$config_id %in% fails),
+      config_costs      = function(configs, n_rows) rep(1, nrow(configs))
+    )
 
     run <- function(n) {
       local_tasks_in_session(n)
-      suppressWarnings(fit(obj, n_best = 4L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
-                           control = control_horizons(allow_par = TRUE, parallelize_over = "configs")))
+      suppressWarnings(fit(obj, n_best = 5L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+                           control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                      inner_daemons = FALSE)))
     }
 
-    ## On one daemon they come in one a pass, in rank order (equal costs):
-    ## the third failure trips it with one member still to fit
+    ## On one daemon they come in one a pass, in rank order: the third
+    ## failure trips it with two members still to fit
     err <- expect_error(run(1L), class = "horizons_error_systemic")
 
     expect_identical(err$results$config_id, fails)
     expect_match(conditionMessage(err), "The first 3 members to run all failed the same way, across 2 models",
                  fixed = TRUE)
-    expect_match(conditionMessage(err), "`fit()` stopped rather than run the other 1", fixed = TRUE)
+    expect_match(conditionMessage(err), "`fit()` stopped rather than run the other 2", fixed = TRUE)
 
-    ## On four they come in in one pass, and the success is read first, so
-    ## the failures are ordinary ones
+    ## On four the first four come in in one pass, the three failures and a
+    ## success, while the fifth waits: the success is read first, so the
+    ## failures are ordinary ones and the fit returns. Read failures first,
+    ## they would trip it with the fifth still to fit.
     fitted <- run(4L)
 
-    expect_identical(fitted$models$results$status, c("failed", "failed", "failed", "success"))
+    expect_identical(fitted$models$results$status, c("failed", "failed", "failed", "success", "success"))
     expect_identical(fitted$models$best_config, "cfg_004")
 
   })
