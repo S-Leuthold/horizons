@@ -16,10 +16,11 @@
 #' A manifest written by another version of horizons is refused;
 #' `evaluate()` rewrites it when a run starts in the directory.
 #'
-#' The ETA counts each config by the time its model and feature selection
-#' are expected to take, from a table of the seconds each took on a measured
-#' grid (the one the configs axis starts the longest first by), not as one,
-#' since configs differ in length by orders of magnitude.
+#' The ETA counts each config by the time it is expected to take (the
+#' estimate the configs axis starts the longest first by: the seconds its
+#' model and feature selection took on a measured grid, scaled to the run's
+#' rows), not as one, since configs differ in length by orders of
+#' magnitude.
 #'
 #' @param output_dir Character. Path to the output directory given to
 #'   `evaluate()` as `control_horizons(output_dir = )`.

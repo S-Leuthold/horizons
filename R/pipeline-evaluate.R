@@ -44,9 +44,9 @@
 #'   through `isolate` and `no_improve`, part of what it computes (see
 #'   [control_horizons()]). `evaluate()` reads `allow_par`,
 #'   `parallelize_over`, `output_dir`, `verbose`, `debug`, `breaker`,
-#'   `keep_traces`, `isolate` and `no_improve`, and refuses any other field
-#'   that is set. The control it ran with, defaults filled in, is recorded
-#'   as `evaluation$control`.
+#'   `keep_traces`, `isolate`, `inner_daemons` and `no_improve`, and refuses
+#'   any other field that is set. The control it ran with, defaults filled
+#'   in, is recorded as `evaluation$control`.
 #'
 #' @section The Bayesian search's stopping rule:
 #' Each configuration's Bayesian search stops once `no_improve` iterations in
@@ -123,7 +123,10 @@
 #' class `horizons_warning_substitution`, naming the call that would set
 #' them; the warning is also a row of the object's `log`. Without
 #' `allow_par`, `evaluate()` runs in the calling process and never reads the
-#' daemons. It never sets, resizes or resets them.
+#' daemons. It never sets, resizes or resets them; on the configs axis it can
+#' start daemons of its own for a long configuration's folds, on that
+#' configuration's daemon and within the count set (see "Inner daemons"
+#' below).
 #'
 #' The user owns the daemons; `evaluate()` owns only which axis they are
 #' applied to, through `control_horizons(parallelize_over = )`.
@@ -144,11 +147,14 @@
 #' for the call.
 #'
 #' * `"configs"`: one task per config on the daemons, with tune running
-#'   sequentially inside each. The configs start longest first, by a table
-#'   of the seconds each model and feature selection took on a measured
-#'   grid, so the short ones fill the daemons at the end; the rows come back
+#'   sequentially inside each, but for a long config's inner daemons (see
+#'   below). The configs start longest first, by an
+#'   estimate of each one's time (the seconds its model and feature
+#'   selection took on a measured grid, scaled to the run's rows), so the
+#'   short ones fill the daemons at the end; the rows come back
 #'   in configuration order whatever order they finish in. At most one
-#'   config per connected daemon is in flight. The configs' data are written
+#'   config per connected daemon is in flight, and a config with inner
+#'   daemons holds as many. The configs' data are written
 #'   once, to a file in `<output_dir>/tmp/`, which each config's daemon
 #'   reads, so this session holds no copy of a running config's data; the
 #'   file is removed when `evaluate()` returns or stops. The daemons must
@@ -169,12 +175,45 @@
 #'   the worker count cancels. `"configs"` asked for explicitly without an
 #'   `output_dir` is refused before anything runs (#233).
 #'
+#' Inner daemons. On the configs axis a run waits on its longest config, so a
+#' config whose expected share of the run's work is more than 0.75 / n (n
+#' the daemons connected) runs its folds on inner daemons: `evaluate()`
+#' starts them inside that config's task, on its daemon, as many as the
+#' smallest divisor of `cv_folds`, at most n, that brings its share under
+#' that, else the largest, and keeps that many daemons from other configs
+#' while it runs, so no more than n cores are busy. Its daemon waits in tune
+#' while they fit the folds. With the default 5 folds nothing splits on
+#' fewer than 5 daemons. The inner daemons start with the daemon's library
+#' paths and one BLAS and OpenMP thread, are set up for the config as its
+#' daemon is (the engines' thread options and the config's packages), and
+#' are reset when the config's task ends, however it ends; a daemon that
+#' dies takes them with it. Inner daemons that do not connect within a
+#' minute are reset, and the config runs its folds on its own daemon, with a
+#' note on the `log`. The configs that run on inner daemons, and on how
+#' many, are a line in the progress tree and a note on the `log`.
+#' `control_horizons(inner_daemons = FALSE)`, or `options(horizons.inner_daemons
+#' = FALSE)`, runs every config on one daemon, which the `log` notes when a
+#' config would have had inner daemons. A split is made only when its inner
+#' daemons fit in this machine's memory (see below).
+#'
+#' Every process that fits runs BLAS and OpenMP on one thread, as is usual
+#' for a pool inside a pool: the inner daemons from their start, and each
+#' daemon while a config's task or a fold preparation's runs on it, set at
+#' run time through `RhpcBLASctl` and put back as the task ends. A config's
+#' results are then the same split or not. Without `RhpcBLASctl` a config's
+#' daemon keeps the threads it was started with, so when those are more
+#' than one a split config's results can differ from the unsplit run's in
+#' floating-point rounding; the run then says so once, in the progress tree
+#' and on the `log`, with how to pin them: install `RhpcBLASctl`, or call
+#' `Sys.setenv(OPENBLAS_NUM_THREADS = 1)` before `mirai::daemons()`.
+#'
 #' Results do not depend on the backend, the number of daemons, which daemon
 #' runs a configuration or the order the work finishes in: every draw is
 #' seeded from the run's `seed` and its own name, where it is made, and each
 #' `cubist` fit runs in a process of its own (see "Isolated fits" below),
-#' unless `control_horizons(isolate = FALSE)`. The daemons' own seed
-#' (`mirai::daemons(seed = )`) has no effect on them.
+#' unless `control_horizons(isolate = FALSE)`; without `RhpcBLASctl`, a
+#' config run on inner daemons can differ in rounding (above). The daemons'
+#' own seed (`mirai::daemons(seed = )`) has no effect on them.
 #'
 #' ```
 #' # Laptop: four cores, parallelise the folds inside each config.
@@ -195,8 +234,11 @@
 #' environment variables the session had when `mirai::daemons()` was called
 #' (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`), not its in-process settings,
 #' so a thread count set in the session with `options()` or `RhpcBLASctl`
-#' does not reach them; on the configs axis each configuration's task sets
-#' data.table's and ranger's threads to one itself. On either axis the daemons load the
+#' does not reach them; each configuration's task on the configs axis, and
+#' each fold preparation's on either axis, sets data.table's and ranger's
+#' threads to one itself, and BLAS's and OpenMP's through `RhpcBLASctl` when
+#' it is installed, which it puts back as it ends (see "Inner daemons"
+#' above). On either axis the daemons load the
 #' *installed* package, so a parallel run refuses, before anything is drawn,
 #' under `devtools::load_all()`. Every daemon connected is then asked, one
 #' task each, which horizons it loads and whether it can load the packages
@@ -210,6 +252,7 @@
 #' A daemon that dies stops the run with `horizons_error_systemic`, the rows
 #' finished so far as its `results` (and in `output_dir`): on the configs
 #' axis when its configuration's task comes back as mirai's `errorValue` 19,
+#' or fewer of its inner daemons are connected after it than before, and
 #' on the resamples axis when fewer daemons are connected after a
 #' configuration than before it, since tune reads a death as a failure of
 #' its own. That count cannot tell a death from a daemon exiting under
@@ -234,11 +277,12 @@
 #' checkpoint is written whole or not at all, so one the cancel reaches
 #' mid-write is either complete or absent. A run stopped while its fold
 #' preparations run cancels those still running the same way, on either
-#' axis; a cancelled one writes nothing, since this session writes each. A configuration in an isolated
-#' fit (each `cubist` fit; see "Isolated fits") stops at once, its fit's
-#' process ended with it. One inside another compiled fit (an xgboost fit,
-#' say) stops only when that fit returns, its daemon busy until then, and
-#' writes nothing. On the resamples
+#' axis; a cancelled one writes nothing, since this session writes each. A
+#' configuration on inner daemons ends them as its task is cancelled. A
+#' configuration in an isolated fit (each `cubist` fit; see "Isolated fits")
+#' stops at once, its fit's process ended with it. One inside another
+#' compiled fit (an xgboost fit, say) stops only when that fit returns, its
+#' daemon busy until then, and writes nothing. On the resamples
 #' axis the folds' tasks are tune's, which `evaluate()` does not cancel: they
 #' run to their end on the daemons, and write nothing. The cancellation and
 #' the longest-first start both need mirai's dispatcher, which mirai keeps
@@ -273,7 +317,11 @@
 #' memory than available"; the run goes on. The memory available is
 #' `ps::ps_system_memory()`'s, which under a container's or `systemd-run`'s
 #' memory cap is the machine's, not the cap's. Daemons on another machine
-#' are not checked.
+#' are not checked. When a configuration is to run on inner daemons, they
+#' are counted too, each as a daemon of the run, with what its
+#' configuration's daemon holds while they run its folds; when
+#' they would not fit beside the daemons, no configuration is split, and a
+#' note on the `log` gives the figures.
 #'
 #' @section Isolated fits:
 #' A model whose engine keeps state from one fit to the next in the process
@@ -989,7 +1037,7 @@ evaluate <- function(x,
       n_total                      = n_total,
       n_pending                    = n_pending,
       config_ids                   = configs$config_id,
-      config_cost                  = config_costs(configs),
+      config_cost                  = config_costs(configs, n_train),
       start_time                   = start_time,
       metric                       = metric,
       cv_folds                     = cv_folds,
@@ -1136,6 +1184,7 @@ evaluate <- function(x,
 
   run_completed <- FALSE
   fold_store    <- NULL
+  fold_stage    <- NULL
 
   if (length(fold_units) > 0) {
 
@@ -1376,7 +1425,48 @@ evaluate <- function(x,
     ## A task carries the payload's path, and the file is the payload; the
     ## tests of what a task carries in test-evaluate-parallel.R guard both.
 
+    ## The pending configurations' costs, which the window starts them
+    ## longest first by, and the daemons each one's folds run on
+    ## (split_plan()), from the daemons connected now
+    pending_costs <- config_costs(pending_configs, n_train)
+    n_now         <- connected_daemons()
+    planned       <- split_plan(pending_costs, n_now, cv_folds)
+    inner_plan    <- planned
+
+    if (!isTRUE(control$inner_daemons)) {
+
+      inner_plan[] <- 1L
+
+    } else if (any(inner_plan > 1L)) {
+
+      ## A split is made only when its inner daemons fit in this machine's
+      ## memory beside the daemons, which the log notes when they do not
+      processes <- daemon_processes(configs$model, control$isolate)
+      extra     <- split_need(inner_plan, dispatch_order(pending_costs), n_now, processes,
+                              n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
+                              n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
+                              folds = cv_folds)
+
+      if (!check_split_memory(reports, extra, processes, n_rows = nrow(analysis),
+                              n_predictors = sum(role_map$role == "predictor"),
+                              n_split = sum(inner_plan > 1L), collector = collector, verb = "evaluate")) {
+        inner_plan[] <- 1L
+      }
+
+    }
+
+    ## Which configurations run their folds on inner daemons, said in the
+    ## tree from the plan, or that the setting kept them whole; and whether
+    ## BLAS can be pinned on the daemons, without which a split can differ
+    ## from the unsplit run in rounding. The log says it once the window has
+    ## run, from what started.
+    blas_pinned <- blas_pinnable()
+
     if (verbose) {
+
+      inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned)
+
+      for (line in inner_lines) cat(paste0("\u2502  ", line, "\n"))
 
       cat(paste0(
         "\u2502  Processing ", n_pending, " pending configs...\n"
@@ -1389,13 +1479,15 @@ evaluate <- function(x,
 
     }
 
-    ## A daemon that dies, a pool left with none, or a daemon that cannot
-    ## read the payload stops the run in the window, with the rows so far,
-    ## which are checkpointed; a package missing on a daemon comes back as
-    ## the worker's error, and is systemic here.
+    ## A daemon that dies, a pool left with none, a daemon that cannot read
+    ## the payload, or a configuration's inner daemon that dies stops the
+    ## run in the window, with the rows so far, which are checkpointed; a
+    ## package missing on a daemon comes back as the worker's error, and is
+    ## systemic here.
     stop_on_worker_death(
-      dispatch_configs(pending_configs, payload_path, finished, rows_so_far, output_dir,
-                       call = rlang::current_env()),
+      dispatch_configs(configs = pending_configs, costs = pending_costs, payload_path = payload_path,
+                       finished = finished, rows_so_far = rows_so_far, output_dir = output_dir,
+                       inner = inner_plan, call = rlang::current_env()),
       rows_so_far(), output_dir
     )
 
@@ -1405,6 +1497,12 @@ evaluate <- function(x,
     ## would evaluate again
     results_list <- in_config_order(finished$rows, configs$config_id)
     not_saved    <- lapply(results_list, attr, "checkpoint_failed")
+
+    ## Which configurations ran their folds on inner daemons, from what each
+    ## task says; one whose inner daemons did not connect ran its folds on
+    ## its own daemon, which costs time only
+    log_inner_daemons(collector, pending_configs$config_id, planned, inner_plan, control$inner_daemons,
+                      blas_pinned, finished$inner)
 
     results_list <- lapply(results_list, function(row) {
       attr(row, "checkpoint_failed") <- NULL
@@ -3915,14 +4013,17 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' Set a daemon up to run a unit: its threads, and the packages it needs
 #'
 #' @description
-#' Thread pinning that works happens in the session before dispatch
-#' (pin_parent_threads()): OpenBLAS reads its thread count when it loads, so
-#' setting OPENBLAS_NUM_THREADS on a daemon, after the library is loaded,
-#' changed nothing when measured (2026-09-15). What can be set at run time
-#' is set here: data.table's threads, and the thread options the model table
-#' declares for its engines (ranger's, which Boruta's forests read too). A
-#' daemon starts with the session's environment variables from when
-#' daemons() was called, not its in-process settings.
+#' Every process that fits runs one thread. OpenBLAS reads its thread count
+#' when it loads, so setting OPENBLAS_NUM_THREADS on a daemon, after the
+#' library is loaded, changed nothing when measured (2026-09-15): BLAS and
+#' OpenMP are pinned here at run time through RhpcBLASctl instead
+#' ([pin_blas_threads()]), and the function that puts them back is
+#' returned, for the worker to call as its task ends, since the daemon is
+#' the user's. Without RhpcBLASctl the daemon keeps the threads it started
+#' with. Also set here: data.table's threads, and the thread options the
+#' model table declares for its engines (ranger's, which Boruta's forests
+#' read too). A daemon starts with the session's environment variables from
+#' when daemons() was called, not its in-process settings.
 #'
 #' Then the packages the unit needs are loaded, as the verb's door check
 #' loaded them in the session. A daemon is a fresh process, and some of them
@@ -3931,14 +4032,18 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' workflow creation on a daemon.
 #'
 #' Called by both workers once the daemon's horizons is known to be this
-#' session's version ([evaluate_config_worker()], [fold_prep_worker()]).
+#' session's version ([evaluate_config_worker()], [fold_prep_worker()]), and
+#' on a split configuration's inner daemons ([start_inner_daemons()]).
 #'
 #' @param models,selections The unit's models and feature selections
 #'   ([needed_packages()]).
-#' @return `NULL`, invisibly.
+#' @return A function of no arguments that puts BLAS's and OpenMP's threads
+#'   back as they were ([pin_blas_threads()]), invisibly.
 #' @keywords internal
 #' @noRd
 prepare_worker <- function(models, selections) {
+
+  unpin_blas <- pin_blas_threads()
 
   if (requireNamespace("data.table", quietly = TRUE)) data.table::setDTthreads(1L)
 
@@ -3946,7 +4051,7 @@ prepare_worker <- function(models, selections) {
 
   for (pkg in names(needed_packages(models, selections))) requireNamespace(pkg, quietly = TRUE)
 
-  invisible(NULL)
+  invisible(unpin_blas)
 
 }
 
@@ -4001,23 +4106,32 @@ prepare_worker <- function(models, selections) {
 #'   [eval_settings()] records, stamped on the row as-is), `checkpoint_dir`,
 #'   `fold_cache_dir` (the run files' directory, absolute, where the fold
 #'   preparations are), `keep_traces`, `isolate` and `pkg_version`. There is
-#'   no `allow_par`: on
-#'   the configs axis tune always runs sequentially inside the worker. There
-#'   is no `debug` either, since a debug run never dispatches.
+#'   no `allow_par`: whether tune runs the folds on daemons is `inner`'s.
+#'   There is no `debug` either, since a debug run never dispatches.
+#' @param inner Integer(1). The daemons the configuration's folds run on
+#'   ([split_plan()]). With 1, tune runs them sequentially in this task.
+#'   With more, the task starts that many inner daemons on its own daemon
+#'   ([start_inner_daemons()]) once its folds are rebuilt, tune runs the
+#'   folds on them, and they are reset as the task ends, however it ends. A
+#'   pool that does not come up runs the folds here, and the row says so.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
 #'   records still on it for the parent to lift, any warning raised in the
 #'   worker's own steps before the unit rendered in its `warnings` with the
-#'   unit's, and, when its checkpoint could not be written, why, as the
-#'   attribute `"checkpoint_failed"`. When the file at `payload_path`, or one
-#'   of its fold preparations, cannot be read, instead, a list of class
-#'   `horizons_run_file_unread` holding the `path`, the `reason` (what base R
-#'   said, any warning before the error, or that the file holds another
-#'   preparation) and what the `file` holds.
+#'   unit's, when its checkpoint could not be written, why, as the attribute
+#'   `"checkpoint_failed"`, and its inner daemons as the attribute
+#'   `"inner_daemons"`: `daemons` (`inner`), `started` (whether they
+#'   connected) and `completed` (the tasks they ran for it, past their
+#'   set-up). When the file at
+#'   `payload_path`, or one of its fold preparations, cannot be read,
+#'   instead, a list of class `horizons_run_file_unread` holding the `path`,
+#'   the `reason` (what base R said, any warning before the error, or that
+#'   the file holds another preparation) and what the `file` holds; when an
+#'   inner daemon died, the record [watch_inner_daemons()] returns.
 #' @keywords internal
 #' @noRd
 
-evaluate_config_worker <- function(config_i, payload_path) {
+evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
 
   ## -------------------------------------------------------------------------
   ## The payload, read from the file evaluate() wrote
@@ -4078,6 +4192,13 @@ evaluate_config_worker <- function(config_i, payload_path) {
   ## transport changed the payload.
   check_worker_payload(shared, SHARED_ARG_NAMES)
 
+  ## BLAS and OpenMP go on one thread as the daemon is set up below, as the
+  ## inner daemons run them, so the configuration's folds and its final fit
+  ## compute alike whether it is split or not; put back as the task ends.
+  ## The put-back is registered first and bound once the pin is made.
+  unpin_blas <- function() invisible(NULL)
+  on.exit(unpin_blas(), add = TRUE)
+
   ## mirai relays no condition from a task, so a warning raised in the
   ## worker's own steps before the configuration's unit runs (a package's
   ## while it loads, say) is caught here and rendered with the row's own
@@ -4091,7 +4212,7 @@ evaluate_config_worker <- function(config_i, payload_path) {
     cfg <- shared$configs[config_i, ]
 
     ## The daemon's threads pinned, and the configuration's packages loaded
-    prepare_worker(cfg$model, cfg$feature_selection)
+    unpin_blas <- prepare_worker(cfg$model, cfg$feature_selection)
 
     ## Reconstruct the split and folds from indices. Fold membership is
     ## reproduced by construction, not by replaying the RNG.
@@ -4114,27 +4235,52 @@ evaluate_config_worker <- function(config_i, payload_path) {
 
   if (inherits(resamples$fold_entries, "horizons_run_file_unread")) return(resamples$fold_entries)
 
-  result_row <- evaluate_single_config(
-    config_row       = cfg,
-    split            = resamples$split,
-    cv_folds         = resamples$cv_folds,
-    role_map         = shared$role_map,
-    grid_size        = shared$grid_size,
-    bayesian_iter    = shared$bayesian_iter,
-    tune_ranges      = shared$tune_ranges,
-    no_improve       = shared$no_improve,
-    prune            = shared$prune,
-    prune_threshold  = shared$prune_threshold,
-    allow_par        = FALSE,     # configs axis: tune runs sequentially inside
-    seed             = shared$seed,
-    sg_window        = shared$sg_window,
-    pca_threshold    = shared$pca_threshold,
-    outcome_range    = shared$outcome_range,
-    keep_traces      = shared$keep_traces,
-    isolate          = shared$isolate,
-    outside_warnings = outside,
-    fold_entries     = resamples$fold_entries
-  )
+  ## -------------------------------------------------------------------------
+  ## The configuration, its folds on inner daemons when the plan splits it
+  ## -------------------------------------------------------------------------
+  ## The inner daemons are this daemon's own profile, which tune reads, and
+  ## are reset as the task ends, however it ends: the reset is registered
+  ## before they start. A pool that does not come up runs the folds here.
+  on_inner <- FALSE
+
+  if (inner > 1L) {
+    on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
+    on_inner <- start_inner_daemons(inner, cfg$model, cfg$feature_selection)
+  }
+
+  ## The tasks the inner daemons ran before the configuration (their set-up),
+  ## so its row counts only its own
+  completed_before <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
+
+  run <- function() {
+    evaluate_single_config(
+      config_row       = cfg,
+      split            = resamples$split,
+      cv_folds         = resamples$cv_folds,
+      role_map         = shared$role_map,
+      grid_size        = shared$grid_size,
+      bayesian_iter    = shared$bayesian_iter,
+      tune_ranges      = shared$tune_ranges,
+      no_improve       = shared$no_improve,
+      prune            = shared$prune,
+      prune_threshold  = shared$prune_threshold,
+      allow_par        = on_inner,
+      seed             = shared$seed,
+      sg_window        = shared$sg_window,
+      pca_threshold    = shared$pca_threshold,
+      outcome_range    = shared$outcome_range,
+      keep_traces      = shared$keep_traces,
+      isolate          = shared$isolate,
+      outside_warnings = outside,
+      fold_entries     = resamples$fold_entries
+    )
+  }
+
+  result_row <- if (on_inner) watch_inner_daemons(run(), inner, cfg$config_id) else run()
+
+  if (inherits(result_row, "horizons_inner_daemon_died")) return(result_row)
+
+  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) - completed_before else 0L
 
   ## Both provenance records are sent rather than rebuilt. The data
   ## fingerprint hashes the whole predictor matrix, which is a once-per-run
@@ -4153,6 +4299,9 @@ evaluate_config_worker <- function(config_i, payload_path) {
     if (!is.null(failed)) attr(result_row, "checkpoint_failed") <- failed
 
   }
+
+  ## Told the session, which keeps it apart from the row
+  attr(result_row, "inner_daemons") <- list(daemons = as.integer(inner), started = on_inner, completed = completed)
 
   result_row
 

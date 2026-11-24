@@ -2260,12 +2260,9 @@ describe("evaluate() - checkpoint data provenance", {
     expect_identical(manifest$data_hash, res$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, res$evaluation$n_train)
 
-    ## Each configuration's cell of the cost table, for the monitor's ETA, in
-    ## the grid's order: cfg_002's cubist costs more than cfg_001's rf, so a
-    ## record in the order they start would differ
+    ## Each configuration's id, in the grid's order (its cost: the test
+    ## below)
     expect_identical(manifest$config_ids, c("cfg_001", "cfg_002"))
-    expect_identical(manifest$config_cost,
-                     unname(CONFIG_COST_SECONDS[c("rf/none", "cubist/none")]))
 
     expect_identical(manifest$settings,
                      eval_settings(cv_folds = 3L, grid_size = 2L,
@@ -2294,6 +2291,33 @@ describe("evaluate() - checkpoint data provenance", {
     expect_identical(manifest$data_fields$outcome, "SOC")
     expect_identical(row$settings[[1]], manifest$settings)
     expect_identical(res$evaluation$results$settings[[1]], manifest$settings)
+
+  })
+
+  it("records each configuration's expected cost for the monitor in the grid's order, not the order they start in", {
+
+    ## plsr before rf in the grid, and rf's cost the larger, so a record in
+    ## the order they start would differ. Read once the manifest is written,
+    ## before any configuration runs.
+    obj <- make_eval_object(n_configs = 2)
+    obj$config$configs$model <- c("plsr", "rf")
+    dir <- withr::local_tempdir()
+
+    local_mocked_bindings(evaluate_single_config = function(...) rlang::abort("stop", class = "manifest_written"))
+    tryCatch(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir, verbose = FALSE))),
+             manifest_written = function(e) NULL)
+
+    manifest <- readRDS(file.path(dir, "eval_manifest.rds"))
+    rows     <- manifest$data_n_rows
+
+    ## Each cell times the rows over the grid's, raised to its model's
+    ## exponent
+    expected <- c(CONFIG_COST_SECONDS[["plsr/none"]] * (rows / CONFIG_ROWS_REF)^CONFIG_ROW_EXPONENT[["plsr"]],
+                  CONFIG_COST_SECONDS[["rf/none"]] * (rows / CONFIG_ROWS_REF)^CONFIG_ROW_EXPONENT[["rf"]])
+
+    expect_lt(expected[[1]], expected[[2]])
+    expect_identical(manifest$config_ids, c("cfg_001", "cfg_002"))
+    expect_equal(manifest$config_cost, expected)
 
   })
 

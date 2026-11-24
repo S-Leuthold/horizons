@@ -70,7 +70,7 @@ describe("evaluate() parallel worker footprint", {
   it("takes its inputs as an argument rather than by capture", {
 
     expect_named(formals(horizons:::evaluate_config_worker),
-                 c("config_i", "payload_path"))
+                 c("config_i", "payload_path", "inner"))
 
   })
 
@@ -211,7 +211,10 @@ describe("evaluate() parallel worker footprint", {
 
     expect_identical(row$data_hash, shared$data_fp$data_hash)
     expect_identical(row$settings[[1]], shared$settings)
-    expect_identical(readRDS(file.path(shared$checkpoint_dir, "cfg_001.rds")), row)
+    ## What the row says of its inner daemons is the session's, not the
+    ## checkpoint's
+    expect_identical(attr(row, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
+    expect_identical(readRDS(file.path(shared$checkpoint_dir, "cfg_001.rds")), structure(row, inner_daemons = NULL))
 
     ## Another version's worker is a dependency error, which no unit
     ## contains, and it is checked before the payload's keys: another
@@ -760,6 +763,165 @@ describe("evaluate() - the daemons' memory", {
 
 })
 
+## A configs-axis run whose plan splits its first configuration onto two of
+## its two daemons, both on this machine, with `available` bytes free. Each
+## task runs here as it is sent (mirai() mocked), through the window and the
+## worker, which keep the daemons each was sent and what its row says of its
+## inner daemons; the inner daemons are mocked to connect or not
+## (`connects`), and BLAS to be pinnable or not (`pinned`). The
+## configurations' own work is a row of an earlier run.
+run_split <- function(available = 1e15, inner_daemons = TRUE, connects = TRUE, pinned = TRUE,
+                      .env = parent.frame()) {
+
+  template <- allow_par_run()$result$evaluation$results[1, ]
+  sent     <- integer(0)
+
+  local_mocked_bindings(
+    running_under_load_all  = function() FALSE,
+    daemon_reports          = function(...) daemons_on(host = this_host()),
+    check_parallel_backend  = function(...) TRUE,
+    connected_daemons       = function() 2L,
+    daemons_dispatch        = function() TRUE,
+    memory_available        = function() available,
+    blas_pinnable           = function() pinned,
+    split_plan              = function(costs, n, folds) c(2L, rep(1L, length(costs) - 1L)),
+    start_inner_daemons     = function(...) connects,
+    evaluate_single_config  = function(config_row, ...) {
+      row <- template
+      row$config_id <- config_row$config_id
+      row
+    },
+    .env = .env
+  )
+  local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+    sent <<- c(sent, .args$inner)
+    list(data = eval(.expr, .args))
+  }, .package = "mirai", .env = .env)
+
+  out <- utils::capture.output(got <- collect_warnings(
+    evaluate(make_eval_object(n = 60, n_configs = 3), seed = 42L,
+             control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                        output_dir = withr::local_tempdir(), verbose = TRUE,
+                                        inner_daemons = inner_daemons))
+  ))
+
+  list(inner = sent, log = got$value$log, out = out,
+       input = Filter(function(w) inherits(w, "horizons_warning_input"), got$warnings))
+
+}
+
+describe("evaluate() - inner daemons and this machine's memory", {
+
+  split_note <- function(log) log[grepl("inner daemons it would start", log$message, fixed = TRUE), ]
+
+  it("splits as planned when the daemons and their inner daemons fit", {
+
+    got <- run_split(1e15)
+
+    expect_identical(got$inner, c(2L, 1L, 1L))
+    expect_identical(nrow(split_note(got$log)), 0L)
+    expect_length(got$input, 0L)
+
+  })
+
+  it("splits nothing, with a note, when the daemons fit and their inner daemons would not", {
+
+    ## Two daemons need about 4.1 GB for this run, each with a cubist fit's
+    ## process, and a split onto two inner daemons as much again
+    got <- run_split(5e9)
+
+    expect_identical(got$inner, c(1L, 1L, 1L))
+    expect_identical(split_note(got$log)$type, "note")
+    expect_length(got$input, 0L)
+
+  })
+
+  it("splits nothing when the daemons alone do not fit, which the check at the door warns of once", {
+
+    got <- run_split(1e9)
+
+    expect_identical(got$inner, c(1L, 1L, 1L))
+    expect_length(got$input, 1L)
+    expect_match(gsub("\\s+", " ", conditionMessage(got$input[[1]])), "The 2 mirai daemons on this machine would need about",
+                 fixed = TRUE)
+
+  })
+
+})
+
+describe("evaluate() - saying which configurations run on inner daemons", {
+
+  it("says once, in the tree and as a note on the log naming them, which configurations run on inner daemons and on how many", {
+
+    got  <- run_split()
+    note <- got$log[grepl("on inner daemons it started", got$log$message, fixed = TRUE), ]
+
+    expect_identical(grep("Inner daemons:", got$out, value = TRUE, fixed = TRUE),
+                     "\u2502  Inner daemons: 1 long configuration runs its folds on 2 (control_horizons(inner_daemons = FALSE) turns it off)")
+    expect_identical(note$type, "note")
+    expect_identical(note$ids[[1]], "cfg_001")
+    expect_match(gsub("\\s+", " ", note$message),
+                 "`evaluate()` ran the folds of 1 long configuration on inner daemons it started on its daemon, within the daemons set: cfg_001 on 2.",
+                 fixed = TRUE)
+    expect_match(note$message, "`control_horizons(inner_daemons = FALSE)` runs each configuration on one daemon.", fixed = TRUE)
+
+    ## Its inner daemons connected, and BLAS is pinned: nothing else to say
+    expect_false(any(grepl("did not connect|could not pin BLAS", got$log$message)))
+    expect_false(any(grepl("BLAS threads:", got$out, fixed = TRUE)))
+
+  })
+
+  it("says a configuration the plan split ran on its own daemon when its inner daemons did not connect, and not that it ran on them", {
+
+    got <- run_split(connects = FALSE)
+    msg <- gsub("\\s+", " ", got$log$message)
+
+    ## The task was sent its two daemons, and its row said they did not
+    ## connect
+    expect_identical(got$inner, c(2L, 1L, 1L))
+
+    fallback <- got$log[grepl("did not connect within", msg, fixed = TRUE), ]
+    expect_identical(fallback$type, "note")
+    expect_identical(fallback$ids[[1]], "cfg_001")
+    expect_match(gsub("\\s+", " ", fallback$message),
+                 "for 1 configuration did not connect within 60 seconds, so it ran its folds on its own daemon:",
+                 fixed = TRUE)
+    expect_false(any(grepl("on inner daemons it started", msg, fixed = TRUE)))
+
+  })
+
+  it("says once, in the tree and on the log, that BLAS is not pinned and how to pin it, when it cannot be and a configuration runs on inner daemons", {
+
+    got  <- run_split(pinned = FALSE)
+    note <- got$log[grepl("could not pin BLAS", got$log$message, fixed = TRUE), ]
+
+    expect_identical(grep("BLAS threads:", got$out, value = TRUE, fixed = TRUE),
+                     paste0("│  BLAS threads: not pinned, so a configuration on inner daemons can differ from an unsplit run in ",
+                            "rounding (install RhpcBLASctl, or Sys.setenv(OPENBLAS_NUM_THREADS = 1) before mirai::daemons())"))
+    expect_identical(note$type, "note")
+    expect_identical(note$ids[[1]], "cfg_001")
+    expect_match(gsub("\\s+", " ", note$message), "can differ in floating-point rounding from the same run without them",
+                 fixed = TRUE)
+
+  })
+
+  it("says, with inner daemons off, that a configuration that would have had them ran on one daemon", {
+
+    got  <- run_split(inner_daemons = FALSE)
+    note <- got$log[grepl("inner_daemons = FALSE)` asked", got$log$message, fixed = TRUE), ]
+
+    expect_identical(got$inner, c(1L, 1L, 1L))
+    expect_identical(grep("Inner daemons:", got$out, value = TRUE, fixed = TRUE),
+                     "\u2502  Inner daemons: off, as asked; 1 long configuration runs on one daemon")
+    expect_identical(note$type, "note")
+    expect_identical(note$ids[[1]], "cfg_001")
+    expect_match(gsub("\\s+", " ", note$message), "it would have run the folds of 1 long configuration on inner daemons.",
+                 fixed = TRUE)
+
+  })
+
+})
+
 describe("evaluate() - output_dir and the configs axis (#233)", {
 
   it("refuses an explicit configs axis without an output_dir before anything runs", {
@@ -936,8 +1098,9 @@ describe("evaluate() - the configs axis on mirai", {
       dispatched = function(e) NULL
     )
 
-    expect_identical(sent$expr, quote(worker(config_i, payload_path)))
-    expect_named(sent$args, c("worker", "config_i", "payload_path"))
+    expect_identical(sent$expr, quote(worker(config_i, payload_path, inner)))
+    expect_named(sent$args, c("worker", "config_i", "payload_path", "inner"))
+    expect_identical(sent$args$inner, 1L)
     expect_identical(sent$args$worker, evaluate_config_worker)
     expect_true(isNamespace(environment(sent$args$worker)))
     expect_null(sent$compute)
@@ -1698,6 +1861,354 @@ describe("evaluate() - the configs axis on mirai", {
 
 
 ## =========================================================================
+## Inner daemons: a long configuration's folds on daemons of its own
+## =========================================================================
+## The plan is mocked in this session, where evaluate() makes it, so a small
+## grid splits as a long one would. A split configuration takes as many of
+## the window's slots as its inner daemons, so on two test daemons it runs
+## alone, its daemon waiting in tune while its two inner daemons fit the
+## folds.
+
+## The plan with the configurations at `which` (in grid order) split onto
+## `inner` daemons, until the calling frame exits
+local_split <- function(which, inner = 2L, .env = parent.frame()) {
+  testthat::local_mocked_bindings(split_plan = function(costs, n, folds) {
+    plan <- rep(1L, length(costs))
+    plan[which] <- as.integer(inner)
+    plan
+  }, .package = "horizons", .env = .env)
+}
+
+## Whether any of the user's daemons has a profile of its own set, read with
+## one task on each
+profiles_left <- function() {
+  unlist(with_deadline(mirai::everywhere(mirai::daemons_set())[], 30))
+}
+
+## rf, plsr and cubist, so a seeded engine, a submodel engine and an isolated
+## fit's chain all run on inner daemons, with a Bayesian search. On this
+## data only rf's row moves with its stages' seeds: plsr and cubist choose
+## and score the same whatever the seed, so a split that changed a seed
+## would show in rf's row alone.
+inner_object <- function() {
+  obj <- make_eval_object(n = 60, n_configs = 3)
+  obj$config$configs$model <- c("rf", "plsr", "cubist")
+  obj$config$tuning$bayesian_iter <- 2L
+  obj
+}
+
+## A worker's payload for one plsr configuration on 200 rows of 200
+## predictors, three folds: large enough that BLAS on two threads rounds its
+## fits differently from one
+blas_payload <- function() {
+
+  obj <- make_eval_object(n = 200, n_wn = 200, n_configs = 1)
+  obj$config$configs$model <- "plsr"
+  set.seed(1)
+  split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
+  folds <- rsample::vfold_cv(rsample::training(split), v = 3)
+
+  shared <- worker_payload()
+  shared$data         <- split$data
+  shared$resample_idx <- resample_indices(split, folds)
+  shared$configs      <- obj$config$configs
+  shared$role_map     <- obj$data$role_map
+  shared$data_fp      <- eval_data_fingerprint(rsample::training(split), obj$data$role_map)
+  shared
+
+}
+
+describe("evaluate() - inner daemons", {
+
+  it("sends every task one daemon when inner_daemons = FALSE, though the plan would split", {
+
+    ## Mocked as the task-shape test above; the first task's daemons are
+    ## read as it is sent
+    sent <- NULL
+    local_split(1:4)
+    local_mocked_bindings(
+      running_under_load_all  = function() FALSE,
+      daemon_reports          = matching_daemons,
+      check_parallel_backend  = function(...) TRUE,
+      connected_daemons       = function() 2L,
+      daemons_dispatch        = function() TRUE
+    )
+    local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .timeout = NULL, .compute = NULL) {
+      sent <<- .args$inner
+      rlang::abort("stop", class = "dispatched")
+    }, .package = "mirai")
+
+    run <- function(inner_daemons) {
+      tryCatch(
+        suppressWarnings(evaluate(make_eval_object(n_configs = 4), seed = 42L,
+                                  control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                             output_dir = withr::local_tempdir(), verbose = FALSE,
+                                                             inner_daemons = inner_daemons))),
+        dispatched = function(e) NULL
+      )
+      sent
+    }
+
+    expect_identical(run(TRUE), 2L)
+    expect_identical(run(FALSE), 1L)
+
+  })
+
+  it("resumes checkpoints written with inner daemons on in a run with them off, since the results do not depend on them", {
+
+    dir <- withr::local_tempdir()
+    obj <- make_eval_object(n_configs = 2)
+
+    first  <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir, verbose = FALSE)))
+    second <- suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir, verbose = FALSE,
+                                                                                    inner_daemons = FALSE)))
+
+    expect_identical(second$evaluation$results$runtime_secs, first$evaluation$results$runtime_secs)
+
+  })
+
+  it("runs a configuration whose inner daemons did not connect on its own daemon, and says so on its row", {
+
+    local_mocked_bindings(start_inner_daemons = function(...) FALSE)
+    path <- worker_payload_file()
+
+    row <- evaluate_config_worker(1L, path, inner = 2L)
+
+    expect_identical(row$status, "success")
+    expect_identical(attr(row, "inner_daemons"), list(daemons = 2L, started = FALSE, completed = 0L))
+    expect_false(mirai::daemons_set())
+
+  })
+
+  it("fits a split configuration's folds on its inner daemons, and an unsplit one's on its own (installed build)", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## The worker in this session, which stands in for its daemon
+    mirai::daemons(0)
+    path <- worker_payload_file()
+
+    split   <- with_deadline(evaluate_config_worker(1L, path, inner = 2L), 120)
+    unsplit <- with_deadline(evaluate_config_worker(1L, path, inner = 1L), 120)
+
+    ## Three folds a call, the grid's at least, and only its folds: tune
+    ## sends a call's folds together, so the count is a multiple of three,
+    ## which the inner daemons' two set-up tasks would not leave it
+    expect_true(attr(split, "inner_daemons")$started)
+    expect_gte(attr(split, "inner_daemons")$completed, 3L)
+    expect_identical(attr(split, "inner_daemons")$completed %% 3L, 0L)
+    expect_identical(attr(unsplit, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
+    expect_false(mirai::daemons_set())
+
+    cols <- setdiff(names(split), "runtime_secs")
+    attr(split, "inner_daemons") <- attr(unsplit, "inner_daemons") <- NULL
+    expect_identical(split[cols], unsplit[cols])
+
+  })
+
+  it("runs a configuration's daemon on one BLAS thread, as its inner daemons run, so its row is the same split or not where the daemon started on more, and puts its threads back (installed build)", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("RhpcBLASctl")
+
+    ## The worker in this session, which stands in for a daemon the user
+    ## started with BLAS on two threads. At 200 x 200 two threads round
+    ## plsr's fits differently from one; at a tenth of that they do not.
+    mirai::daemons(0)
+    old <- RhpcBLASctl::blas_get_num_procs()
+    withr::defer(RhpcBLASctl::blas_set_num_threads(old))
+    RhpcBLASctl::blas_set_num_threads(2L)
+    skip_if_not(RhpcBLASctl::blas_get_num_procs() == 2, "BLAS here runs on one thread whatever is asked")
+
+    path <- worker_payload_file(blas_payload())
+
+    split   <- with_deadline(evaluate_config_worker(1L, path, inner = 2L), 120)
+    after   <- RhpcBLASctl::blas_get_num_procs()
+    unsplit <- with_deadline(evaluate_config_worker(1L, path, inner = 1L), 120)
+
+    expect_true(attr(split, "inner_daemons")$started)
+    expect_identical(split$status, "success")
+    expect_equal(c(after, RhpcBLASctl::blas_get_num_procs()), c(2, 2))
+
+    cols <- setdiff(names(split), "runtime_secs")
+    attr(split, "inner_daemons") <- attr(unsplit, "inner_daemons") <- NULL
+    expect_identical(split[cols], unsplit[cols])
+
+  })
+
+  it("sends tune's fold tasks a split each and little else, so a split configuration's daemon holds its folds (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+
+    ## What tune ships with each call's fold tasks, the shared arguments
+    ## apart from the folds: read in tune's own call to mirai, then sent on
+    sizes <- new.env(parent = emptyenv())
+    real  <- get("eval_mirai", envir = asNamespace("tune"))
+    local_mocked_bindings(eval_mirai = function(.x, .f, ..., .args) {
+      shared <- lapply(.args, get, envir = parent.frame())
+      sizes$shared <- c(sizes$shared, length(serialize(list(.f, shared), NULL)))
+      sizes$split  <- c(sizes$split, max(vapply(.x, function(s) length(serialize(s, NULL)), numeric(1))))
+      res <- mirai::mirai_map(.x, .f, ..., .args = shared)
+      mirai::collect_mirai(res)
+    }, .package = "tune")
+
+    ## Enough data that a frame carried with the tasks would show
+    obj   <- make_eval_object(n = 400, n_wn = 400, n_configs = 1)
+    set.seed(1)
+    split <- rsample::initial_split(obj$data$analysis, prop = 0.8)
+    folds <- rsample::vfold_cv(rsample::training(split), v = 3)
+
+    row <- with_deadline(evaluate_single_config(obj$config$configs[1, ], split, folds, obj$data$role_map,
+                                                grid_size = 2L, bayesian_iter = 0L, allow_par = TRUE, seed = 42L), 120)
+
+    expect_identical(row$status, "success")
+    expect_gt(length(sizes$shared), 0L)
+    expect_lt(max(sizes$shared), min(sizes$split) / 2)
+
+  })
+
+  it("gives the same results with a configuration split as without, and leaves no profile on the user's daemons (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## Every configuration split onto both daemons, so each runs alone on
+    ## two inner daemons
+    local_test_daemons(2)
+    local_split(1:3)
+
+    run <- function(inner_daemons, dir) {
+      with_deadline(suppressWarnings(evaluate(inner_object(), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE,
+                                                                         inner_daemons = inner_daemons))), 300)
+    }
+
+    split   <- run(TRUE, withr::local_tempdir())
+    unsplit <- run(FALSE, withr::local_tempdir())
+
+    ## The split engaged: every configuration's inner daemons connected and
+    ## ran its folds
+    note <- split$log[grepl("on inner daemons it started", split$log$message, fixed = TRUE), ]
+    expect_identical(note$ids[[1]], c("cfg_001", "cfg_002", "cfg_003"))
+    expect_false(any(grepl("did not connect", split$log$message, fixed = TRUE)))
+
+    cols <- setdiff(names(split$evaluation$results), "runtime_secs")
+    expect_identical(split$evaluation$results[cols], unsplit$evaluation$results[cols])
+    expect_identical(split$evaluation$best_config, unsplit$evaluation$best_config)
+
+    expect_false(any(profiles_left()))
+    expect_identical(connected_daemons(), 2L)
+
+  })
+
+  it("resets a split configuration's inner daemons when the configuration's task fails (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(2)
+    local_split(1L)
+
+    ## On the daemons, the split configuration fails as a bug would, once
+    ## its inner daemons are up, saying how many its daemon had connected
+    with_deadline(mirai::everywhere({
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        stop(sprintf("a bug in the configuration's code, on %d inner daemons",
+                     as.integer(sum(mirai::info()[["connections"]]))))
+      }, ns = "horizons")
+    })[], 30)
+
+    expect_error(
+      with_deadline(suppressWarnings(evaluate(plsr_object(2), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = withr::local_tempdir(),
+                                                                         verbose = FALSE))), 120),
+      "a bug in the configuration's code, on 2 inner daemons", fixed = TRUE
+    )
+
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_false(any(profiles_left()))
+    expect_identical(connected_daemons(), 2L)
+
+  })
+
+  it("cancels a split configuration in flight when it is interrupted, ending its inner daemons, and writes no checkpoint after it returns (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    local_test_daemons(3)
+    dir     <- withr::local_tempdir()
+    store   <- file.path(dir, "checkpoints")
+    signals <- withr::local_tempdir()
+
+    ## The second configuration is split onto two inner daemons and, once
+    ## they are up, writes how many its daemon has connected and waits in R
+    ## code a cancellation interrupts; the first runs once it is waiting, so
+    ## the interrupt, as the window's first wait ends, finds the split one in
+    ## flight
+    local_split(2L)
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("evaluate_single_config", envir = ns)
+      utils::assignInNamespace("evaluate_single_config", function(config_row, ...) {
+        until <- Sys.time() + 30
+        if (config_row$config_id == "cfg_002") {
+          writeLines(as.character(sum(mirai::info()[["connections"]])), file.path(signals, "cfg_002-waiting"))
+          Sys.sleep(10)
+        }
+        if (config_row$config_id == "cfg_001") {
+          while (!file.exists(file.path(signals, "cfg_002-waiting")) && Sys.time() < until) Sys.sleep(0.05)
+        }
+        real(config_row, ...)
+      }, ns = "horizons")
+    }, signals = signals)[], 30)
+
+    fired      <- FALSE
+    real_round <- await_round
+    local_mocked_bindings(
+      daemon_reports = matching_daemons,
+      await_round    = function(tasks, no_daemons) {
+        real_round(tasks, no_daemons)
+        if (!fired) {
+          fired <<- TRUE
+          rlang::interrupt()
+        }
+      }
+    )
+
+    got <- tryCatch(
+      with_deadline(suppressWarnings(evaluate(plsr_object(3), seed = 42L,
+                                              control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                         output_dir = dir, verbose = FALSE))), 60),
+      interrupt = function(i) "interrupted"
+    )
+
+    expect_identical(got, "interrupted")
+
+    ## The split configuration was in flight on its two inner daemons
+    expect_identical(readLines(file.path(signals, "cfg_002-waiting")), "2")
+
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_identical(list.files(store), "cfg_001.rds")
+    expect_false(any(profiles_left()))
+    expect_identical(connected_daemons(), 3L)
+
+  })
+
+})
+
+## =========================================================================
 ## A package missing on a worker
 ## =========================================================================
 ## evaluate() checks the configurations' packages in this session, and on
@@ -2418,6 +2929,37 @@ pca_object <- function() {
 }
 
 describe("evaluate() - the fold preparations on the daemons", {
+
+  it("runs a fold preparation's task on one BLAS thread where its daemon started on more, and puts its threads back", {
+
+    skip_if_not_installed("RhpcBLASctl")
+
+    ## In process: the worker body stands in for a daemon the user started
+    ## with BLAS on two threads, and the prep reads the count it runs at
+    old <- RhpcBLASctl::blas_get_num_procs()
+    withr::defer(RhpcBLASctl::blas_set_num_threads(old))
+    RhpcBLASctl::blas_set_num_threads(2L)
+    skip_if_not(RhpcBLASctl::blas_get_num_procs() == 2, "BLAS here runs on one thread whatever is asked")
+
+    shared <- worker_payload()
+    shared$configs$feature_selection <- "pca"
+    rebuilt <- rebuild_resamples(shared$data, shared$resample_idx)
+    units   <- fold_prep_units(shared$configs, rebuilt$cv_folds, shared$role_map, "evaluate",
+                               shared$data_fp$data_fields, shared$seed, shared$sg_window, shared$pca_threshold)
+
+    inside <- NULL
+    testthat::local_mocked_bindings(
+      prep_fold_entry = function(...) {
+        inside <<- RhpcBLASctl::blas_get_num_procs()
+        "the entry"
+      },
+      .package = "horizons"
+    )
+
+    expect_identical(fold_prep_worker(units[[1]], worker_payload_file(shared)), "the entry")
+    expect_equal(c(inside = inside, after = RhpcBLASctl::blas_get_num_procs()), c(inside = 1, after = 2))
+
+  })
 
   it("reads its configuration's fold preparations in the worker, and returns one it cannot read as what went wrong, raising nothing", {
 

@@ -47,6 +47,7 @@ describe("control_horizons()", {
       min_ad_rows          = "10",
       min_degradation_rows = -5,
       isolate              = "no",
+      inner_daemons        = 2,
       no_improve           = 0,
       min_resemblance_rows = NA_real_
     )
@@ -253,6 +254,23 @@ describe("resolve_control()", {
     withr::local_options(horizons.isolate = "yes")
     expect_error(resolve_control(NULL, "evaluate"), "getOption(\"horizons.isolate\")",
                  fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("reads inner_daemons from horizons.inner_daemons when it is not set, for evaluate() alone", {
+
+    withr::local_options(horizons.inner_daemons = NULL)
+    expect_true(resolve_control(NULL, "evaluate")$inner_daemons)
+
+    withr::local_options(horizons.inner_daemons = FALSE)
+    expect_false(resolve_control(NULL, "evaluate")$inner_daemons)
+    expect_true(resolve_control(control_horizons(inner_daemons = TRUE), "evaluate")$inner_daemons)
+
+    for (verb in c("fit", "ensemble", "select_training")) {
+      expect_null(resolve_control(NULL, verb)$inner_daemons, label = verb)
+    }
+    expect_error(resolve_control(control_horizons(inner_daemons = FALSE), "fit"),
+                 "inner_daemons: evaluate()", fixed = TRUE, class = "horizons_error_input")
 
   })
 

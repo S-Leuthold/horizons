@@ -1334,8 +1334,9 @@ log_unusable_fold_entries <- function(collector, unusable, output_dir) {
 #' another version gets as far as saying so: a file it cannot read is said
 #' on what it returns, not raised. Then the version is checked; past it the
 #' daemon runs this version, so the rest is the helpers both workers share:
-#' the payload's keys ([check_worker_payload()]) and the daemon's threads
-#' and packages ([prepare_worker()]). The unit's fold is read from the
+#' the payload's keys ([check_worker_payload()]) and the daemon's threads,
+#' BLAS's among them for the task, and packages ([prepare_worker()]). The
+#' unit's fold is read from the
 #' folds rebuilt from the payload ([rebuild_resamples()]). On the resamples
 #' axis and in `fit()`
 #' `payload` is what the task carries (`FOLD_PREP_ARG_NAMES`): the training
@@ -1399,6 +1400,13 @@ fold_prep_worker <- function(unit, payload) {
 
   check_worker_payload(shared, if (is.character(payload)) SHARED_ARG_NAMES else FOLD_PREP_ARG_NAMES)
 
+  ## BLAS and OpenMP go on one thread as the daemon is set up below, as on
+  ## every process that fits, and are put back as the task ends, since the
+  ## daemon is the user's. The put-back is registered first and bound once
+  ## the pin is made.
+  unpin_blas <- function() invisible(NULL)
+  on.exit(unpin_blas(), add = TRUE)
+
   ## -------------------------------------------------------------------------
   ## The training part and the fold, then the prep
   ## -------------------------------------------------------------------------
@@ -1406,7 +1414,7 @@ fold_prep_worker <- function(unit, payload) {
   inputs <- withCallingHandlers({
 
     ## As the configuration's worker sets the daemon up
-    prepare_worker(character(0), tolower(unit$row$feature_selection))
+    unpin_blas <- prepare_worker(character(0), tolower(unit$row$feature_selection))
 
     if (is.character(payload)) {
       folds <- rebuild_resamples(shared$data, shared$resample_idx)$cv_folds
