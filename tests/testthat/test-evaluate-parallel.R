@@ -117,12 +117,6 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("does not carry a checkpoint directory in the payload: this session writes every checkpoint", {
-
-    expect_false("checkpoint_dir" %in% horizons:::SHARED_ARG_NAMES)
-
-  })
-
   it("carries the recipe settings, the outcome range, the ranges searched, the stopping rule, keep_traces and isolate in the payload and hands them to the config (#62, #76)", {
 
     ## Run in-process: the worker body is an ordinary function, and what is

@@ -3853,26 +3853,33 @@ describe("evaluate() - threads on a run in this session (#114)", {
 
     skip_if_not_installed("RhpcBLASctl")
 
-    ## Raised first, so a run that pinned them to one would show it: threads
-    ## is the engines' own count, and BLAS is pinned only where a parallel
-    ## run fits (pin_parent_threads(), prepare_worker())
-    old_omp <- RhpcBLASctl::omp_get_max_threads()
-    withr::defer(RhpcBLASctl::omp_set_num_threads(old_omp))
+    ## Raised first, so a run that pinned either to one would show it:
+    ## threads is the engines' own count, and BLAS and OpenMP are pinned
+    ## only where a parallel run fits (pin_parent_threads(), prepare_worker())
+    old_omp  <- RhpcBLASctl::omp_get_max_threads()
+    old_blas <- RhpcBLASctl::blas_get_num_procs()
+    withr::defer({
+      RhpcBLASctl::omp_set_num_threads(old_omp)
+      RhpcBLASctl::blas_set_num_threads(old_blas)
+    })
     RhpcBLASctl::omp_set_num_threads(2L)
+    RhpcBLASctl::blas_set_num_threads(2L)
     skip_if_not(RhpcBLASctl::omp_get_max_threads() == 2L, "OpenMP's threads cannot be raised here")
+    skip_if_not(RhpcBLASctl::blas_get_num_procs() == 2L, "BLAS's threads cannot be raised here")
 
     seen <- NULL
     real <- define_model_spec
     local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
-      seen <<- c(threads = threads, omp = RhpcBLASctl::omp_get_max_threads())
+      seen <<- c(threads = threads, omp = RhpcBLASctl::omp_get_max_threads(), blas = RhpcBLASctl::blas_get_num_procs())
       real(model, isolate, threads)
     })
 
     suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,
                               control = control_horizons(threads = 4)))
 
-    expect_equal(seen, c(threads = 4, omp = 2))
+    expect_equal(seen, c(threads = 4, omp = 2, blas = 2))
     expect_identical(RhpcBLASctl::omp_get_max_threads(), 2L)
+    expect_identical(as.integer(RhpcBLASctl::blas_get_num_procs()), 2L)
 
   })
 
@@ -3888,12 +3895,14 @@ describe("evaluate() - threads on a run in this session (#114)", {
 
   })
 
-  it("gives rf and xgboost the same results on one thread and on two (the tier, at fixture size)", {
+  it("gives rf, xgboost and lightgbm the same results on one thread and on two (the tier, at fixture size)", {
 
     skip_if_not_installed("xgboost")
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
 
-    obj <- make_eval_object(n = 60, n_configs = 2)
-    obj$config$configs$model <- c("rf", "xgboost")
+    obj <- make_eval_object(n = 60, n_configs = 3)
+    obj$config$configs$model <- c("rf", "xgboost", "lightgbm")
 
     run  <- function(threads) {
       suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(threads = threads)))$evaluation$results
@@ -3901,7 +3910,7 @@ describe("evaluate() - threads on a run in this session (#114)", {
     one <- run(1)
     two <- run(2)
 
-    expect_identical(one$status, c("success", "success"))
+    expect_identical(one$status, c("success", "success", "success"))
     cols <- setdiff(names(one), "runtime_secs")
     expect_identical(two[cols], one[cols])
 
