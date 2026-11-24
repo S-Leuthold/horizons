@@ -164,6 +164,18 @@
 #' over other ranges is not resumed. `ensemble()`'s meta-learners keep their
 #' own grids.
 #'
+#' `mtry` has no range of horizons': rf, xgboost and lightgbm search it from
+#' 1 to the predictors the data cap it at, which on full spectra is about
+#' 1,700. A random forest's fit time grows with it: on one cross-validation
+#' fold of full spectra, 500 trees took 148 s at an `mtry` of 41 and 3,051 s
+#' at 1,200, on one thread. On the spectral data the package has been
+#' benchmarked on, the values chosen on about 1,700 bands sat between 0.06
+#' and 0.22 of them, and the cross-validated error changed little across
+#' that span. So where time matters, `tune_ranges = list(mtry = c(1, 200))`,
+#' or a feature selection that keeps fewer bands, searches the faster part
+#' of the range. That evidence is one data set, so the default searches the
+#' whole range (#115).
+#'
 #' mlp's networks are kept within a weight budget, `max_weights`. A network
 #' of h hidden units on p predictors holds h(p + 2) + 1 weights, and nnet's
 #' optimizer keeps a matrix of the weights squared, so a fit's memory grows
