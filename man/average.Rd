@@ -155,9 +155,10 @@ table with one row per scan removed:
 its row number as text
 \item \code{row}: its row in the data \code{average()} was given
 \item \code{reason}: \code{"below_threshold"}, removed because its mean correlation fell
-below \code{correlation_threshold}, every scan of a sample
-\code{on_all_outliers = "drop"} dropped among them; \code{"uncorrelatable"}, a
-scan QC could not correlate with the others, such as a flat one; or
+below \code{correlation_threshold}, as is every scan of a sample
+\code{on_all_outliers = "drop"} dropped but an uncorrelatable one;
+\code{"uncorrelatable"}, a scan QC could not correlate with the others, such
+as a flat one, in every mode; or
 \code{"not_best"}, a scan of a sample whose replicates all failed, left out
 when \code{on_all_outliers = "keep_best"} kept the best
 \item \code{mean_correlation}: its mean correlation with the sample's other scans
@@ -165,12 +166,14 @@ in the last round of the removal it took part in, \code{NA} when it had none
 }
 
 \code{dplyr::bind_rows(x$log$detail[x$log$verb == "average"])} gathers it,
-to join to a sample table by \code{sample_id}. Nothing resets the log, so the
-table stays on the object through every later verb. Under
-\code{on_all_outliers = "warn"} a sample whose replicates all failed keeps them
-all, so none of its scans is in the table. Flagged replicates are left out
-of QC rather than removed by it, and are counted in the call's note
-instead.
+to join to a sample table by \code{sample_id}. When the check removed no scan,
+no row carries a table and the gather is a table with no columns, so check
+it has rows before joining. Nothing resets the log, so the table stays on
+the object through every later verb. Under \code{on_all_outliers = "warn"} a
+sample whose replicates all failed keeps every scan QC could correlate, so
+only its uncorrelatable scans can be in the table. Flagged replicates are
+left out of QC rather than removed by it, and are counted in the call's
+note instead.
 }
 \examples{
 \dontrun{

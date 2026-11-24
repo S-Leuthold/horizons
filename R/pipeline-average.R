@@ -98,21 +98,24 @@
 #'   its row number as text
 #' * `row`: its row in the data `average()` was given
 #' * `reason`: `"below_threshold"`, removed because its mean correlation fell
-#'   below `correlation_threshold`, every scan of a sample
-#'   `on_all_outliers = "drop"` dropped among them; `"uncorrelatable"`, a
-#'   scan QC could not correlate with the others, such as a flat one; or
+#'   below `correlation_threshold`, as is every scan of a sample
+#'   `on_all_outliers = "drop"` dropped but an uncorrelatable one;
+#'   `"uncorrelatable"`, a scan QC could not correlate with the others, such
+#'   as a flat one, in every mode; or
 #'   `"not_best"`, a scan of a sample whose replicates all failed, left out
 #'   when `on_all_outliers = "keep_best"` kept the best
 #' * `mean_correlation`: its mean correlation with the sample's other scans
 #'   in the last round of the removal it took part in, `NA` when it had none
 #'
 #' `dplyr::bind_rows(x$log$detail[x$log$verb == "average"])` gathers it,
-#' to join to a sample table by `sample_id`. Nothing resets the log, so the
-#' table stays on the object through every later verb. Under
-#' `on_all_outliers = "warn"` a sample whose replicates all failed keeps them
-#' all, so none of its scans is in the table. Flagged replicates are left out
-#' of QC rather than removed by it, and are counted in the call's note
-#' instead.
+#' to join to a sample table by `sample_id`. When the check removed no scan,
+#' no row carries a table and the gather is a table with no columns, so check
+#' it has rows before joining. Nothing resets the log, so the table stays on
+#' the object through every later verb. Under `on_all_outliers = "warn"` a
+#' sample whose replicates all failed keeps every scan QC could correlate, so
+#' only its uncorrelatable scans can be in the table. Flagged replicates are
+#' left out of QC rather than removed by it, and are counted in the call's
+#' note instead.
 #'
 #' @param x A `horizons_data` object from the pipeline.
 #' @param by Character. Column name to group replicates by. Default: `"sample_id"`.
@@ -1014,10 +1017,11 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #'     among them: the rows of `removed`
 #'   * `removed`: One row per replicate QC removed, by its row in
 #'     `group_data`: `index`, `reason` (`"uncorrelatable"`, set aside before
-#'     the removal; `"below_threshold"`, removed by it, every one of a sample
-#'     `"drop"` dropped among them; `"not_best"`, left out of a sample
-#'     `"keep_best"` kept to its best) and `mean_correlation` (from the last
-#'     round of QC it took part in, `NA` when it had none), in row order
+#'     the removal; `"below_threshold"`, removed by it, as is every other
+#'     replicate of a sample `"drop"` dropped; `"not_best"`, left out of a
+#'     sample `"keep_best"` kept to its best) and `mean_correlation` (from
+#'     the last round of QC it took part in, `NA` when it had none), in row
+#'     order
 #'   * `all_outliers`: Logical, TRUE if all replicates were outliers
 #'   * `qc_info`: QC details
 #'   * `conflicts`: One entry per non-numeric response whose replicates
