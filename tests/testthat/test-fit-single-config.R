@@ -8,23 +8,17 @@
 ## Helper: build minimal data, split, folds, and role_map for fit testing
 ## ---------------------------------------------------------------------------
 
-make_fit_setup <- function(n = 60, n_wn = 10, seed = 42,
-                           signal_cols = seq_len(min(3, n_wn)),
-                           signal = 0.5, noise_sd = 0.5) {
+make_fit_setup <- function(n = 60, n_wn = 10, seed = 42, outcome_noise = 0.4) {
 
   set.seed(seed)
 
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra and an outcome they carry
+  sim      <- make_signal_spectra(n, n_wn, outcome_noise)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with signal from signal_cols (by default, weak signal from the
-  ## first 3 predictors)
-  df$SOC <- 2 + rowMeans(spec_mat[, signal_cols, drop = FALSE]) * signal +
-    rnorm(n, sd = noise_sd)
+  df$SOC       <- sim$outcome
 
   role_map <- tibble::tibble(
     variable = c("sample_id", wn_names, "SOC"),
@@ -100,15 +94,15 @@ EXPECTED_CV_PRED_COLS <- c(
 ## =========================================================================
 ## One successful fit_single_config() result, built on its first use in a
 ## process and read by every block below that asserts on a successful fit.
-## The fixture learns: its strong signal sits on columns 5 and 6, the two
-## that survive the raw step's edge trim at 10 points, so the bootstrap
-## interval of its test RPD reaches well past its CV mean RPD and the fit is
-## not flagged as degraded. Returns the setup with the result, since some
-## tests read the split.
+## The fixture learns: its outcome is carried by the bands the raw step's
+## edge trim leaves (make_signal_spectra()), with little measurement noise, so
+## the bootstrap interval of its test RPD reaches well past its CV mean RPD
+## and the fit is not flagged as degraded. Returns the setup with the result,
+## since some tests read the split.
 
 build_fsc <- function() {
 
-  setup <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
+  setup <- make_fit_setup(outcome_noise = 0.1)
 
   result <- fit_single_config(
     config_row       = make_fit_config(),
@@ -927,7 +921,7 @@ describe("fit_single_config() - row minimums", {
 
 build_fsc_mocked <- function() {
 
-  setup      <- make_fit_setup(signal_cols = 5:6, signal = 1, noise_sd = 0.1)
+  setup      <- make_fit_setup(outcome_noise = 0.1)
   test_truth <- rsample::testing(setup$split_F)$SOC
 
   real_recipe    <- build_recipe

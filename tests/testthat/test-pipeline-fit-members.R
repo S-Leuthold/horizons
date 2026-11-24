@@ -13,6 +13,11 @@ fit_obj <- function(n_configs) {
   memo_fixture("members_fit_obj", make_fit_object, n = 60, n_configs = n_configs)
 }
 
+## The configuration of `obj` that fits `model`
+member_of <- function(obj, model) {
+  obj$config$configs$config_id[obj$config$configs$model == model]
+}
+
 
 ## =========================================================================
 ## No config passed the prune gate: fit() takes evaluate()'s fallback (#38)
@@ -376,9 +381,9 @@ describe("fit() - member failures", {
 
 describe("fit() - each member is one unit", {
 
-  ## make_fit_object() with four evaluated configurations on two models, the
-  ## copies tied with their originals, so ranking orders them as `models`
-  ## repeated: rf, cubist, rf, cubist
+  ## make_fit_object() with four evaluated configurations, ranked in
+  ## config_id order, whose models are `models` repeated in that order: rf,
+  ## cubist, rf, cubist by default
   four_members <- function(models = c("rf", "cubist")) {
 
     obj  <- fit_obj(2L)
@@ -390,11 +395,11 @@ describe("fit() - each member is one unit", {
     add$config_id <- more$config_id
 
     obj$config$configs    <- dplyr::bind_rows(obj$config$configs, more)
-    obj$config$configs$model <- rep(models, length.out = 4L)[order(c(1, 3, 2, 4))]
+    obj$config$configs$model <- rep(models, length.out = 4L)
     obj$config$n_configs  <- 4L
     obj$evaluation$results <- dplyr::bind_rows(res, add)
 
-    obj
+    rank_configs_as(obj, obj$config$configs$config_id)
 
   }
 
@@ -594,11 +599,14 @@ describe("fit() - each member is one unit", {
       "."
     )
 
-    res <- got$value$models$results
+    ## Each member read by the configuration it is, whichever ranked first
+    res    <- got$value$models$results
+    failed <- res[res$config_id == "cfg_002", ]
+    fitted <- res[res$config_id == "cfg_001", ]
 
-    expect_identical(res$class, c(NA_character_, "simpleError"))
-    expect_identical(res$trace, list(NULL, "the backtrace, as text"))
-    expect_identical(res$warnings[[1]], "The member's engine warned")
+    expect_identical(c(fitted$class, failed$class), c(NA_character_, "simpleError"))
+    expect_identical(c(fitted$trace, failed$trace), list(NULL, "the backtrace, as text"))
+    expect_identical(fitted$warnings[[1]], "The member's engine warned")
 
     partial <- Filter(function(w) inherits(w, "horizons_warning_partial_failure"), got$warnings)
     expect_length(partial, 1L)
@@ -706,7 +714,7 @@ describe("fit() - each member is one unit", {
   it("stops with the members so far when the daemons fall across a member", {
 
     obj    <- fit_obj(2L)
-    calls  <- 0L
+    ran    <- character(0)
     fallen <- FALSE
 
     err <- expect_error(
@@ -718,8 +726,8 @@ describe("fit() - each member is one unit", {
         check_parallel_workers = function(...) invisible(NULL),
         connected_daemons      = function() if (fallen) 1L else 2L,
         fit_single_config      = function(config_row, ...) {
-          calls <<- calls + 1L
-          if (calls == 2L) fallen <<- TRUE
+          ran <<- c(ran, config_row$config_id)
+          if (length(ran) == 2L) fallen <<- TRUE
           fitted_member(config_row)
         },
         .package = "horizons"
@@ -730,7 +738,9 @@ describe("fit() - each member is one unit", {
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "A mirai daemon stopped while `fit()` was running", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected after the work than before it", fixed = TRUE)
-    expect_identical(err$results$config_id, "cfg_001")
+
+    ## The rows so far are the member that finished before the daemons fell
+    expect_identical(err$results$config_id, ran[1])
     expect_null(err$parent)
 
   })
@@ -766,12 +776,15 @@ describe("fit() - each member is one unit", {
           control = control_horizons(isolate = FALSE)),
       "."
     )
-    res <- got$value$models$results
+    ## Each member read by its model, whichever ranked first
+    res    <- got$value$models$results
+    rf     <- res[res$config_id == member_of(obj, "rf"), ]
+    cubist <- res[res$config_id == member_of(obj, "cubist"), ]
 
-    expect_identical(res$status, c("success", "failed"))
-    expect_match(res$error_message[2],
+    expect_identical(c(rf$status, cubist$status), c("success", "failed"))
+    expect_match(cubist$error_message,
                  "^OOF predictions failed: every out-of-fold fit failed \u2014 the engine broke on every fold")
-    expect_identical(names(got$value$models$workflows), res$config_id[1])
+    expect_identical(names(got$value$models$workflows), rf$config_id)
     expect_true(any(vapply(got$warnings, inherits, logical(1), "horizons_warning_partial_failure")))
 
   })
@@ -804,12 +817,15 @@ describe("fit() - each member is one unit", {
       fit(obj, n_best = 2L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE),
       "."
     ), 300)
-    res <- got$value$models$results
+    ## Each member read by its model, whichever ranked first
+    res    <- got$value$models$results
+    rf     <- res[res$config_id == member_of(obj, "rf"), ]
+    cubist <- res[res$config_id == member_of(obj, "cubist"), ]
 
-    expect_identical(res$status, c("success", "failed"))
-    expect_identical(res$class[2], "horizons_error_process_died")
-    expect_match(res$error_message[2], paste("^Final model fit failed:", PROCESS_DIED, "a Cubist fit"))
-    expect_identical(names(got$value$models$workflows), res$config_id[1])
+    expect_identical(c(rf$status, cubist$status), c("success", "failed"))
+    expect_identical(cubist$class, "horizons_error_process_died")
+    expect_match(cubist$error_message, paste("^Final model fit failed:", PROCESS_DIED, "a Cubist fit"))
+    expect_identical(names(got$value$models$workflows), rf$config_id)
     expect_identical(connected_daemons(), before)
 
   })
@@ -849,7 +865,10 @@ describe("fit() - each member is one unit", {
     msg <- gsub("\\s+", " ", conditionMessage(err))
     expect_match(msg, "A mirai daemon stopped while `fit()` was running", fixed = TRUE)
     expect_match(msg, "Fewer mirai daemons were connected", fixed = TRUE)
-    expect_identical(err$results$config_id, "cfg_001")
+
+    ## The rows so far are the first member fit() ran, the best ranked
+    expect_identical(err$results$config_id,
+                     rank_configs_by_cv(obj$evaluation$results, obj$evaluation$rank_metric)$config_id[1])
 
   })
 

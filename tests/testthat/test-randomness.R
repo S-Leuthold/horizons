@@ -378,7 +378,9 @@ describe("the parallel backend", {
   ## `control` takes a fresh directory, so no setting resumes another's.
   for_each_setting <- function(axis, control) {
 
+    ## The fits compared learned something, so a difference in them would show
     base <- rng_base()
+    expect_fits_nontrivial(base$ev)
 
     for (setting in settings) {
 

@@ -7,16 +7,13 @@ make_eval_setup <- function(n = 40, n_wn = 10) {
 
   set.seed(42)
 
-  ## Spectral data: n samples x n_wn wavelengths
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra (n samples x n_wn wavelengths) and an outcome they carry
+  sim      <- make_signal_spectra(n, n_wn)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with weak signal from first 3 predictors
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+  df$SOC       <- sim$outcome
 
   ## Role map
   roles <- tibble::tibble(
@@ -645,16 +642,19 @@ describe("evaluate_single_config() - tuning on the original scale", {
 
   setup <- make_eval_setup(n = 100, n_wn = 30)
 
-  ## Overwrite the weak-signal outcome with a strong log-linear one, keeping
-  ## the split/fold row membership from make_eval_setup(). The signal sits in
-  ## interior wavenumbers so the SG window (9) does not trim it away. plsr is
-  ## linear in log space, so original-scale test RPD lands around 6 when the
-  ## grid is scored honestly; scored cross-scale the same grid reads below 1
-  ## and the config is pruned.
+  ## Overwrite the fixture's outcome with a strong log-linear one, keeping
+  ## the split/fold row membership from make_eval_setup(). The signal is the
+  ## peak's apex and its flanks (bands 15 to 17 of 30, make_signal_spectra()),
+  ## interior wavenumbers the SG window (9) does not trim away, centred so
+  ## log1p(SOC) spreads about 1.5 with a standard deviation near 0.5. The
+  ## elastic net is linear in log space, so original-scale test RPD lands
+  ## around 8 when the grid is scored honestly; scored cross-scale the same
+  ## grid reads below 1 and the config is pruned.
   set.seed(4902)
   wn_names <- paste0("wn_", seq(4000, by = -2, length.out = 30))
-  signal   <- rowMeans(as.matrix(setup$data[, wn_names[10:15]]))
-  setup$data$SOC <- expm1(1.5 + 1.2 * signal + stats::rnorm(nrow(setup$data), sd = 0.05))
+  signal   <- rowMeans(as.matrix(setup$data[, wn_names[15:17]]))
+  setup$data$SOC <- expm1(1.5 + 2.4 * (signal - mean(signal)) +
+                            stats::rnorm(nrow(setup$data), sd = 0.05))
   setup$split$data <- setup$data
   setup$folds <- suppressWarnings(
     rsample::vfold_cv(rsample::training(setup$split), v = 3, strata = "SOC")

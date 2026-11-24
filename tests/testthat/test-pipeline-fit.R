@@ -963,9 +963,9 @@ describe("fit() - a PCA member stores only the components it uses", {
     steps[[which(vapply(steps, inherits, logical(1), what = "step_pca"))]]
   }
 
+  ## New rows from the training rows' process
   set.seed(9)
-  new_rows <- tibble::as_tibble(matrix(rnorm(25 * 40), nrow = 25,
-                                       dimnames = list(NULL, names(obj$data$analysis)[1:40])))
+  new_rows <- tibble::as_tibble(make_signal_spectra(25, n_wn = 40)$spectra)
   new_rows$sample_id <- sprintf("N%02d", 1:25)
 
   it("fits plsr on the scores at one component, the least-squares fit on them, not a count fitted to rounding", {
@@ -1099,6 +1099,9 @@ describe("fit() - on two daemons", {
     seq_fit <- suppressWarnings(
       fit(obj, n_best = 2L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)
     )
+
+    ## The members compared learned something, so a difference in them would show
+    expect_fits_nontrivial(seq_fit)
 
     local_test_daemons(2)
     before <- list(n = mirai::nextget("n"), dispatcher = mirai::nextget("dispatcher"),
@@ -1281,9 +1284,10 @@ describe("fit() - what it reports at its end", {
                  "Prediction intervals (UQ) and the applicability domain (AD) were not computed for any member: the calibration set has 10 rows, fewer than `min_calib_rows` (30).",
                  fixed = TRUE)
 
+    ## The record names the one member, whichever configuration ranked first
     log <- both$value$log[both$value$log$verb == "fit", ]
     expect_identical(log$topic[log$topic %in% "skipped"], "skipped")
-    expect_identical(log$ids[log$topic %in% "skipped"][[1]], "cfg_001")
+    expect_identical(log$ids[log$topic %in% "skipped"][[1]], both$value$models$results$config_id)
 
     ## Only what was asked for is named, and nothing when neither was
     ad_only <- fit_reports(mfo(), compute_uq = FALSE)
@@ -1586,8 +1590,9 @@ describe("fit() - the progress tree", {
 
   it("prints each member's result, the counts, the selected member and the runtime", {
 
-    ## Read the fixture before the runner is mocked (helper-memo.R)
-    obj <- mfo()
+    ## Read the fixture before the runner is mocked (helper-memo.R), ranked
+    ## so the members run and print in the order below
+    obj <- rank_configs_as(mfo(), c("cfg_001", "cfg_002"))
 
     ## The runner's results for the two members: one that succeeded, degraded
     ## and warned, and one that failed. The fitted workflow is a stand-in;

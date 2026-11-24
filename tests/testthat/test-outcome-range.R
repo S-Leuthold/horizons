@@ -295,11 +295,12 @@ describe("evaluate() - an untransformed response's tuning metrics (#104)", {
   it("scores the cross-validation on the clamped fold predictions, as the test set is scored", {
 
     ## An outcome that is zero for half the rows and rises linearly with a
-    ## band the raw step keeps (it trims four of the ten from each edge): a
-    ## linear model's fold predictions go below the default range's floor at
-    ## the low end
-    hd <- make_range_hd(n = 60)
-    hd$data$analysis$SOC <- pmax(2 * hd$data$analysis$wn_3992, 0)
+    ## band the raw step keeps (it trims four of the ten from each edge),
+    ## above its median: a linear model's fold predictions go below the
+    ## default range's floor at the low end
+    hd   <- make_range_hd(n = 60)
+    band <- hd$data$analysis$wn_3992
+    hd$data$analysis$SOC <- pmax(2 * (band - stats::median(band)), 0)
     invisible(utils::capture.output(
       cfg <- configure(hd, models = "plsr", cv_folds = 3L, grid_size = 2L,
                        bayesian_iter = 0L, final_bayesian_iter = 0L)

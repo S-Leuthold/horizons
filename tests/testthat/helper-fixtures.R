@@ -3,6 +3,45 @@
 
 
 ## ---------------------------------------------------------------------------
+## Synthetic spectra with an outcome every preprocessing keeps
+## ---------------------------------------------------------------------------
+
+#' `n` synthetic spectra of `n_wn` bands and an outcome they carry, for any
+#' fixture whose rows go through a configuration's recipe. Each spectrum is
+#' one baseline shape shared by every row (half a cosine across the bands), a
+#' peak whose height varies by row, and small noise; the outcome is the
+#' peak's height rescaled, plus measurement noise drawn uniformly within
+#' `outcome_noise` of it.
+#'
+#' The peak's apex is the band just past the middle and its flank the one
+#' before it, so both sit in the bands the default window keeps
+#' (transform_spectra_matrix() trims (window - 1) / 2 bands at each edge,
+#' leaving the middle two of ten): the raw and smoothed bands read the
+#' height, the first derivative the flank's slope, the second the apex's
+#' curvature. The baseline gives SNV a shape to scale each spectrum against,
+#' so the height survives its division. The outcome lies between
+#' 1 - outcome_noise and 3 + outcome_noise by construction, inside the
+#' default outcome_range, as a soil property does. Draws from the session's
+#' random stream, so the caller seeds it. Returns `spectra`, a matrix named on
+#' the fixtures' wavenumber axis, and `outcome`.
+make_signal_spectra <- function(n, n_wn = 10, outcome_noise = 0.4) {
+
+  band     <- seq_len(n_wn)
+  baseline <- cos(pi * (band - 1) / max(n_wn - 1, 1))
+  peak     <- exp(-(band - (n_wn %/% 2 + 1))^2 / 2)
+  height   <- stats::runif(n)
+
+  spectra <- outer(rep(1, n), baseline) + outer(height, peak) +
+    matrix(stats::rnorm(n * n_wn, sd = 0.03), nrow = n)
+  colnames(spectra) <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
+
+  list(spectra = spectra,
+       outcome = 1 + 2 * height + stats::runif(n, -outcome_noise, outcome_noise))
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## Evaluate Test Object
 ## ---------------------------------------------------------------------------
 
@@ -12,16 +51,13 @@ make_eval_object <- function(n = 40, n_wn = 10, n_configs = 2,
 
   set.seed(42)
 
-  ## Spectral data
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra and an outcome they carry
+  sim      <- make_signal_spectra(n, n_wn)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with weak signal
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+  df$SOC       <- sim$outcome
 
   ## Role map
   roles <- tibble::tibble(
@@ -88,16 +124,13 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
 
   set.seed(seed)
 
-  ## Spectral data
-  wn_names <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
-  spec_mat <- matrix(rnorm(n * n_wn), nrow = n)
-  colnames(spec_mat) <- wn_names
+  ## Spectra and an outcome they carry
+  sim      <- make_signal_spectra(n, n_wn)
+  wn_names <- colnames(sim$spectra)
 
-  df <- tibble::as_tibble(spec_mat)
+  df <- tibble::as_tibble(sim$spectra)
   df$sample_id <- paste0("S", sprintf("%03d", seq_len(n)))
-
-  ## Outcome with weak signal from first 3 predictors
-  df$SOC <- 2 + rowMeans(spec_mat[, 1:min(3, n_wn)]) * 0.5 + rnorm(n, sd = 0.5)
+  df$SOC       <- sim$outcome
 
   ## Rows with no measured outcome, as add_response() leaves them (#67)
   if (n_na > 0) df$SOC[seq_len(n_na)] <- NA_real_
@@ -137,10 +170,41 @@ make_fit_object <- function(n = 60, n_wn = 10, n_configs = 2, seed = 42,
   obj$validation$timestamp <- Sys.time()
 
   ## Run evaluate() to populate evaluation slot
-  ## prune = FALSE ensures configs get status "success" even with weak signal
+  ## prune = FALSE ensures every config gets status "success"
   suppressWarnings(
     evaluate(obj, prune = FALSE, seed = seed)
   )
+
+}
+
+
+## ---------------------------------------------------------------------------
+## An evaluation ranked by hand
+## ---------------------------------------------------------------------------
+
+#' `obj` (an evaluated object) with its configurations ranked in the order of
+#' `ids`, which names every one of them, best first, for a test of fit()
+#' whose point is the order its members run or print in, whatever the
+#' fixture's fits scored. Only the cross-validated column of the
+#' evaluation's rank metric changes, set to 1 to `length(ids)` in the
+#' metric's direction, and best_config with it.
+rank_configs_as <- function(obj, ids) {
+
+  res    <- obj$evaluation$results
+  metric <- obj$evaluation$rank_metric
+  score  <- seq_along(ids)
+
+  ## A configuration left out would keep its own score and could rank ahead
+  ## of best_config
+  stopifnot(setequal(ids, res$config_id), !anyDuplicated(ids))
+
+  if (metric %in% HIGHER_BETTER_METRICS) score <- rev(score)
+
+  res[[paste0("cv_", metric)]][match(ids, res$config_id)] <- score
+
+  obj$evaluation$results     <- res
+  obj$evaluation$best_config <- ids[1]
+  obj
 
 }
 
