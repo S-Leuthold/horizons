@@ -469,6 +469,96 @@ describe("fit_tuned_meta_learner() - the clamped combination (#104)", {
 
 
 ## =========================================================================
+## The meta-learner's workflow carries nothing of its callers' frames
+## =========================================================================
+## tune serializes the workflow with every task it sends the daemons under
+## allow_par, and the fitted meta-learner keeps its specification. parsnip
+## keeps each model argument as a quosure on the frame the specification was
+## written in, so one written inside an engine carried the engine's frame,
+## the fitted object among it: twice the fitted object's size per task on
+## real data, against a few kilobytes.
+
+describe("the meta-learner's workflow - what tune is handed", {
+
+  it("carries nothing of the fitted object, for both methods, tuned or fixed", {
+
+    fitted  <- ens_fitted()
+    members <- gather_members(fitted)$members
+    oof     <- build_oof_matrix(fitted, members)
+
+    ## The fitted object holds 50 MB more, as a real one does
+    heavy       <- fitted
+    heavy$heavy <- numeric(6.5e6)
+
+    ## The workflow tune is first handed: tune_grid()'s when tuned, the
+    ## out-of-fold pass's when fixed. The run stops there.
+    handed <- NULL
+    local_mocked_bindings(
+      tune_grid     = function(object, ...) { handed <<- object; stop("handed") },
+      fit_resamples = function(object, ...) { handed <<- object; stop("handed") },
+      .package = "tune"
+    )
+
+    for (engine in c("penalized", "xgb")) {
+
+      fit_engine <- if (engine == "xgb") fit_ensemble_xgb else fit_ensemble_penalized
+
+      for (optimize in c(TRUE, FALSE)) {
+
+        handed <- NULL
+
+        ## suppressWarnings(): rsample's note that the meta rows are too few
+        ## for its default strata breaks
+        suppressWarnings(run_unit(fit_engine(heavy, members, oof, rank_metric = "rpd", optimize = optimize,
+                                             seed = 307L),
+                                  unit = "meta_learner", id = engine))
+
+        label <- paste0(engine, ", optimize = ", optimize)
+
+        expect_s3_class(handed, "workflow")
+        expect_lt(serialized_size(handed), 1e6, label = label)
+
+      }
+
+    }
+
+  })
+
+  it("specifies what the engines wrote inline: the same arguments, engine and mode", {
+
+    ## Each argument's expression, not its quosure, whose environment is the
+    ## point of the helper
+    exprs <- function(spec) lapply(spec$args, rlang::quo_get_expr)
+
+    inline <- list(
+      `xgb TRUE`        = parsnip::boost_tree(trees = tune::tune(), tree_depth = tune::tune(), learn_rate = tune::tune()) |>
+        parsnip::set_engine("xgboost") |> parsnip::set_mode("regression"),
+      `xgb FALSE`       = parsnip::boost_tree(trees = 500, tree_depth = 3, learn_rate = 0.05) |>
+        parsnip::set_engine("xgboost") |> parsnip::set_mode("regression"),
+      `penalized TRUE`  = parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) |>
+        parsnip::set_engine("glmnet"),
+      `penalized FALSE` = parsnip::linear_reg(penalty = 0.01, mixture = 1) |>
+        parsnip::set_engine("glmnet")
+    )
+
+    for (key in names(inline)) {
+
+      parts <- strsplit(key, " ")[[1]]
+      spec  <- meta_learner_spec(parts[1], as.logical(parts[2]))
+
+      expect_identical(class(spec), class(inline[[key]]), label = key)
+      expect_identical(exprs(spec), exprs(inline[[key]]), label = key)
+      expect_identical(spec[c("engine", "mode", "method")], inline[[key]][c("engine", "mode", "method")], label = key)
+      expect_length(spec$eng_args, 0L)
+
+    }
+
+  })
+
+})
+
+
+## =========================================================================
 ## The engines' run time
 ## =========================================================================
 

@@ -308,6 +308,72 @@ meta_formula <- function() {
 }
 
 ## ---------------------------------------------------------------------------
+## meta_learner_spec()
+## ---------------------------------------------------------------------------
+
+#' The Meta-Learner's Model Specification, Built in a Frame That Holds Nothing
+#'
+#' @description
+#' The `penalized` and `xgb` meta-learners' parsnip specifications, with
+#' `tune()` placeholders when `optimize` is `TRUE` and fixed values
+#' otherwise. parsnip keeps each model argument as a quosure on the frame the
+#' specification was written in, and never forces it, so a specification
+#' written inside an engine function keeps that function's frame, the fitted
+#' object, the out-of-fold matrix and `ensemble()`'s frame through their
+#' promises among it. tune serializes the workflow with every task it sends
+#' the daemons under `allow_par`, and the fitted meta-learner stores the
+#' specification, so either would carry the fitted object. This frame binds
+#' `method` and `optimize` alone, as [meta_formula()]'s environment holds
+#' nothing and `fold_workflow()` forces its outcome name.
+#'
+#' Each branch writes its arguments literally, not as an inline `if`
+#' (`trees = if (optimize) tune() else 500`): parsnip would keep the
+#' unevaluated `if` as the quosure, tune would read `tune()` in its text and
+#' flag the argument tunable when `optimize = FALSE`, and `fit_resamples()`
+#' would abort with "arguments have been tagged for tuning".
+#'
+#' @param method Character(1). `"penalized"` (glmnet, `penalty` and
+#'   `mixture`; fixed at `penalty = 0.01`, `mixture = 1`) or `"xgb"`
+#'   (xgboost, `trees`, `tree_depth` and `learn_rate`; fixed at 500, 3 and
+#'   0.05, conservative for a small meta-feature space).
+#' @param optimize Logical(1). Tune the hyperparameters (`TRUE`) or fix them.
+#' @return A parsnip model specification.
+#' @keywords internal
+#' @noRd
+meta_learner_spec <- function(method, optimize) {
+
+  if (identical(method, "xgb")) {
+
+    spec <- if (optimize) {
+      parsnip::boost_tree(trees = tune::tune(), tree_depth = tune::tune(), learn_rate = tune::tune())
+    } else {
+      parsnip::boost_tree(trees = 500, tree_depth = 3, learn_rate = 0.05)
+    }
+
+    return(spec |>
+             parsnip::set_engine("xgboost") |>
+             parsnip::set_mode("regression"))
+
+  }
+
+  if (identical(method, "penalized")) {
+
+    spec <- if (optimize) {
+      parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune())
+    } else {
+      parsnip::linear_reg(penalty = 0.01, mixture = 1)
+    }
+
+    return(parsnip::set_engine(spec, "glmnet"))
+
+  }
+
+  abort_horizons("{.fn meta_learner_spec} has no specification for method {.val {method}}.",
+                 kind = "internal")
+
+}
+
+## ---------------------------------------------------------------------------
 ## fit_tuned_meta_learner()
 ## ---------------------------------------------------------------------------
 
