@@ -1031,22 +1031,8 @@ fit <- function(x,
     ## Look up full config row from original configs table
     cfg <- all_configs[all_configs$config_id == config_id, ]
 
-    ## Pretty config description
-    model_name  <- model_label(cfg$model)
-    config_desc <- paste(model_name, cfg$transformation, cfg$preprocessing,
-                         cfg$feature_selection, sep = " + ")
-    is_last     <- i == n_best
-    branch      <- if (is_last) "\u2514\u2500" else "\u251C\u2500"
-    cont        <- if (is_last) "   " else "\u2502  "
-
     ## Render config start
-    if (verbose) {
-
-      cat(paste0(
-        "\u2502  ", branch, " [", i, "/", n_best, "] ", config_desc, "\n"
-      ))
-
-    }
+    if (verbose) render_member_start(i, n_best, cfg)
 
     ## Extract best_params from evaluate. NULL on a cold start, so the
     ## re-tune starts from build_warmstart_grid()'s space-filling fallback.
@@ -1094,134 +1080,13 @@ fit <- function(x,
     results_list[[i]] <- config_result
 
     ## Render result
-    if (verbose) {
-
-      ## A re-tune with no usable parameters to centre on starts from a
-      ## space-filling grid. On a cold start that is by design; on the
-      ## evaluate() path it means evaluate()'s parameters were unusable.
-      if (isFALSE(config_result$warm_start)) {
-
-        start_text <- paste0(
-          if (cold_start) "Cold start: no warm-start parameters" else "No usable warm-start parameters from evaluate()",
-          "; grid of ", config_result$start_grid_size, " points"
-        )
-
-        cat(paste0(
-          "\u2502  ", cont, "\u251C\u2500 ",
-          if (cold_start) start_text else cli::col_yellow(start_text), "\n"
-        ))
-
-      }
-
-      ## Whether the re-tune kept evaluate()'s parameters, and by how much
-      ## its best candidate led them; with the re-tune off the header says
-      retune_text <- if (final_bayesian_iter > 0) {
-        retune_member_line(config_result$retune_moved, config_result$retune_gain)
-      }
-
-      if (!is.null(retune_text)) cat(paste0("\u2502  ", cont, "\u251C\u2500 ", retune_text, "\n"))
-
-      if (config_result$status == "success") {
-
-        ## Test metrics
-        tm <- config_result$test_metrics
-        cat(paste0(
-          "\u2502  ", cont, "\u251C\u2500 Test: ",
-          "RPD = ", round(tm$rpd, 2),
-          ", R\u00B2 = ", round(tm$rsq, 2),
-          ", RMSE = ", round(tm$rmse, 3), "\n"
-        ))
-
-        ## CV metrics comparison
-        cv_met <- config_result$cv_metrics
-        cv_rpd <- cv_met[cv_met$.metric == "rpd", ]
-        cv_rmse <- cv_met[cv_met$.metric == "rmse", ]
-
-        if (nrow(cv_rpd) == 1 && nrow(cv_rmse) == 1) {
-
-          cat(paste0(
-            "\u2502  ", cont, "\u251C\u2500 CV:   ",
-            "RPD = ", round(cv_rpd$mean, 2),
-            " \u00B1 ", round(cv_rpd$std_err, 2),
-            ", RMSE = ", round(cv_rmse$mean, 3),
-            " \u00B1 ", round(cv_rmse$std_err, 3), "\n"
-          ))
-
-        }
-
-        ## Degradation flag
-        if (isTRUE(config_result$degraded)) {
-
-          cat(paste0(
-            "\u2502  ", cont, "\u251C\u2500 ",
-            cli::col_yellow("\u26A0 DEGRADED: ",
-                            config_result$degraded_reason), "\n"
-          ))
-
-        }
-
-        ## UQ coverage, measured on the held-out test rows (#118)
-        if (!is.null(config_result$uq)) {
-
-          cat(paste0(
-            "\u2502  ", cont, "\u251C\u2500 ",
-            format_test_coverage(config_result$uq), "\n"
-          ))
-
-        }
-
-      } else {
-
-        cat(paste0(
-          "\u2502  ", cont, "\u251C\u2500 ",
-          cli::col_red("FAILED: ", config_result$error_message), "\n"
-        ))
-
-      }
-
-      ## Warnings
-      if (!is.null(config_result$warnings)) {
-
-        for (w in config_result$warnings) {
-
-          cat(paste0(
-            "\u2502  ", cont, "\u251C\u2500 ",
-            cli::col_yellow(w), "\n"
-          ))
-
-        }
-
-      }
-
-      ## Runtime
-      cat(paste0(
-        "\u2502  ", cont, "\u2514\u2500 ",
-        if (config_result$status == "failed") {
-          cli::col_red("\u2717")
-        } else {
-          cli::col_green("\u2713")
-        },
-        " ", round(config_result$runtime_secs, 1), "s\n"
-      ))
-
-    }
+    if (verbose) render_member_block(config_result, i == n_best, cold_start, final_bayesian_iter)
 
     ## A run of identical failures across the members' models,
     ## transformations, preprocessing methods and feature selections stops
     ## the call while members remain; with none left they are ordinary
     ## failures
-    breaker_feed(breaker, config_result, cfg)
-
-    if (breaker$tripped) {
-
-      if (i < n_best) {
-        abort_breaker_trip(breaker, member_results(results_list), n_best - i,
-                           verb = "fit", units = "members", checkpoints = FALSE)
-      }
-
-      breaker_release(breaker)
-
-    }
+    finish_member(config_result, cfg, breaker, n_left = n_best - i, results = member_results(results_list))
 
     ## Memory cleanup after each config
     gc(verbose = FALSE)
@@ -1582,6 +1447,207 @@ member_row <- function(res) {
     warnings        = list(res$warnings),
     runtime_secs    = as.numeric(res$runtime_secs %||% NA_real_)
   )
+
+}
+
+## ---------------------------------------------------------------------------
+## A member, finished: the breaker, and its block in the tree
+## ---------------------------------------------------------------------------
+
+#' Feed a finished member to the circuit breaker, and stop when it trips
+#'
+#' @description
+#' What `fit()` does with each member as it finishes, on every axis: in this
+#' session as each returns, and on the members axis as the window collects
+#' each, those of a pass that did not fail first ([pass_finish_order()]).
+#' The member feeds the breaker ([breaker_feed()]); when it trips with
+#' members still to fit the call stops ([abort_breaker_trip()]), and with
+#' none left the members it held are ordinary failures, so it is released.
+#' `fit()` checkpoints nothing, so a released member goes nowhere.
+#'
+#' @param result The member, as [fit_single_config()] returns it.
+#' @param config The member's configuration, a one-row data frame: the
+#'   breaker reads its model, transformation, preprocessing and feature
+#'   selection.
+#' @param breaker From [new_breaker()].
+#' @param n_left Integer(1). The members still to fit once this one is done:
+#'   on the members axis those not yet collected, in flight or waiting.
+#' @param results The members table so far ([member_results()]), carried by
+#'   the stop; evaluated only when the breaker trips.
+#' @param call The frame the stop reports: `fit()`'s.
+#' @return `NULL`, invisibly; or does not return, when the call stops.
+#' @keywords internal
+#' @noRd
+finish_member <- function(result, config, breaker, n_left, results, call = rlang::caller_env()) {
+
+  breaker_feed(breaker, result, config)
+
+  if (breaker$tripped) {
+
+    if (n_left > 0) {
+      abort_breaker_trip(breaker, results, n_left, verb = "fit", units = "members", checkpoints = FALSE,
+                         call = call)
+    }
+
+    breaker_release(breaker)
+
+  }
+
+  invisible(NULL)
+
+}
+
+#' Print a member's line in fit()'s tree
+#'
+#' @param i,n_best Integer(1). The member's rank and the members fitted.
+#' @param config_row The member's configuration, a one-row data frame.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+render_member_start <- function(i, n_best, config_row) {
+
+  config_desc <- paste(model_label(config_row$model), config_row$transformation, config_row$preprocessing,
+                       config_row$feature_selection, sep = " + ")
+  branch      <- if (i == n_best) "\u2514\u2500" else "\u251C\u2500"
+
+  cat(paste0("\u2502  ", branch, " [", i, "/", n_best, "] ", config_desc, "\n"))
+
+  invisible(NULL)
+
+}
+
+#' Print what a member's fit came to, under its line in fit()'s tree
+#'
+#' @description
+#' The member's block: how its re-tune started and what it kept, its test
+#' and cross-validated metrics, the degradation flag and the measured
+#' coverage, or its failure; its warnings; and its run time. The one
+#' printer of a member, so a member prints alike as it returns in this
+#' session and, on the members axis, in rank order once the window has
+#' collected every member.
+#'
+#' @param config_result The member, as [fit_single_config()] returns it.
+#' @param last Logical(1). Whether it is the last member, whose block closes
+#'   the tree's branch.
+#' @param cold_start Logical(1). Whether `fit()` started cold.
+#' @param final_bayesian_iter Integer(1). The re-tune's budget, 0 when it is
+#'   off.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+render_member_block <- function(config_result, last, cold_start, final_bayesian_iter) {
+
+  cont <- if (last) "   " else "\u2502  "
+
+  ## A re-tune with no usable parameters to centre on starts from a
+  ## space-filling grid. On a cold start that is by design; on the
+  ## evaluate() path it means evaluate()'s parameters were unusable.
+  if (isFALSE(config_result$warm_start)) {
+
+    start_text <- paste0(
+      if (cold_start) "Cold start: no warm-start parameters" else "No usable warm-start parameters from evaluate()",
+      "; grid of ", config_result$start_grid_size, " points"
+    )
+
+    cat(paste0(
+      "\u2502  ", cont, "\u251C\u2500 ",
+      if (cold_start) start_text else cli::col_yellow(start_text), "\n"
+    ))
+
+  }
+
+  ## Whether the re-tune kept evaluate()'s parameters, and by how much
+  ## its best candidate led them; with the re-tune off the header says
+  retune_text <- if (final_bayesian_iter > 0) {
+    retune_member_line(config_result$retune_moved, config_result$retune_gain)
+  }
+
+  if (!is.null(retune_text)) cat(paste0("\u2502  ", cont, "\u251C\u2500 ", retune_text, "\n"))
+
+  if (config_result$status == "success") {
+
+    ## Test metrics
+    tm <- config_result$test_metrics
+    cat(paste0(
+      "\u2502  ", cont, "\u251C\u2500 Test: ",
+      "RPD = ", round(tm$rpd, 2),
+      ", R\u00B2 = ", round(tm$rsq, 2),
+      ", RMSE = ", round(tm$rmse, 3), "\n"
+    ))
+
+    ## CV metrics comparison
+    cv_met <- config_result$cv_metrics
+    cv_rpd <- cv_met[cv_met$.metric == "rpd", ]
+    cv_rmse <- cv_met[cv_met$.metric == "rmse", ]
+
+    if (nrow(cv_rpd) == 1 && nrow(cv_rmse) == 1) {
+
+      cat(paste0(
+        "\u2502  ", cont, "\u251C\u2500 CV:   ",
+        "RPD = ", round(cv_rpd$mean, 2),
+        " \u00B1 ", round(cv_rpd$std_err, 2),
+        ", RMSE = ", round(cv_rmse$mean, 3),
+        " \u00B1 ", round(cv_rmse$std_err, 3), "\n"
+      ))
+
+    }
+
+    ## Degradation flag
+    if (isTRUE(config_result$degraded)) {
+
+      cat(paste0(
+        "\u2502  ", cont, "\u251C\u2500 ",
+        cli::col_yellow("\u26A0 DEGRADED: ",
+                        config_result$degraded_reason), "\n"
+      ))
+
+    }
+
+    ## UQ coverage, measured on the held-out test rows (#118)
+    if (!is.null(config_result$uq)) {
+
+      cat(paste0(
+        "\u2502  ", cont, "\u251C\u2500 ",
+        format_test_coverage(config_result$uq), "\n"
+      ))
+
+    }
+
+  } else {
+
+    cat(paste0(
+      "\u2502  ", cont, "\u251C\u2500 ",
+      cli::col_red("FAILED: ", config_result$error_message), "\n"
+    ))
+
+  }
+
+  ## Warnings
+  if (!is.null(config_result$warnings)) {
+
+    for (w in config_result$warnings) {
+
+      cat(paste0(
+        "\u2502  ", cont, "\u251C\u2500 ",
+        cli::col_yellow(w), "\n"
+      ))
+
+    }
+
+  }
+
+  ## Runtime
+  cat(paste0(
+    "\u2502  ", cont, "\u2514\u2500 ",
+    if (config_result$status == "failed") {
+      cli::col_red("\u2717")
+    } else {
+      cli::col_green("\u2713")
+    },
+    " ", round(config_result$runtime_secs, 1), "s\n"
+  ))
+
+  invisible(NULL)
 
 }
 

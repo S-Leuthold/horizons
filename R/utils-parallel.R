@@ -1554,9 +1554,8 @@ dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far
     },
     ## The pass's rows are the last collected; those that did not fail first
     pass    = function(collected) {
-      rows   <- utils::tail(finished$rows, length(collected))
-      failed <- vapply(rows, function(row) identical(row$status, "failed"), logical(1))
-      for (k in order(failed)) finish(collected[[k]], rows[[k]])
+      rows <- utils::tail(finished$rows, length(collected))
+      for (k in pass_finish_order(rows)) finish(collected[[k]], rows[[k]])
     },
     label   = function(i) list(what = "configuration", id = configs$config_id[i]),
     rows_so_far = rows_so_far,
@@ -1564,6 +1563,28 @@ dispatch_configs <- function(configs, costs, payload_path, finished, rows_so_far
     slots       = function(i) inner[[i]],
     call        = call
   )
+
+}
+
+#' The order a pass's units are finished in: those that did not fail first
+#'
+#' @description
+#' The window collects every unit that came in together before it finishes
+#' any ([dispatch_units()]'s `pass`), and the circuit breaker reads them in
+#' this order: a success that came in with failures disarms it before they
+#' can trip it, so what the breaker reads does not depend on the order
+#' within a pass. Ties keep the order they were collected in. The one rule
+#' for both verbs' windows: `evaluate()`'s configurations
+#' ([dispatch_configs()]) and `fit()`'s members.
+#'
+#' @param units List of the pass's results, each with a `status`: a
+#'   configuration's row or a member.
+#' @return Integer: positions in `units`.
+#' @keywords internal
+#' @noRd
+pass_finish_order <- function(units) {
+
+  order(vapply(units, function(unit) identical(unit$status, "failed"), logical(1)))
 
 }
 
