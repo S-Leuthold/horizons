@@ -476,7 +476,7 @@ describe("predict.horizons_fit() - input validation", {
   it("refuses at its door a fit whose data was removed by hand, and one whose grid has no models (#257)", {
 
     ## No verb returns a fit without its data, so it is checked as the
-    ## configured object it is rather than passed as an empty one
+    ## configured object it is rather than refused for its split
     stripped <- fitted_fixture
     stripped$data$analysis <- NULL
     stripped$data$role_map <- NULL

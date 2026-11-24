@@ -1133,8 +1133,11 @@ test_that("average() names a removed scan by its row when the input has no filen
 
 test_that("average() records no removed scans when none was removed or the check is off", {
 
-  ## A flagged scan is left out of the check, not removed by it
-  hd <- make_test_hd_average(n_samples = 2, n_reps = 3)
+  ## A flagged scan is left out of the check, not removed by it: S1's first
+  ## scan, which the check removes when it is not flagged
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 3, add_outlier = TRUE)
+  expect_identical(removed_detail(hd, average(hd, verbose = FALSE))$row, 1L)
+
   hd$data$analysis$.flag <- c("standardize", rep(NA, 5))
   hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
 
@@ -1148,6 +1151,11 @@ test_that("average() records no removed scans when none was removed or the check
 })
 
 test_that("average()'s record of removed scans stays on the log through every later verb, a reset and a second average()", {
+
+  ## About 4 s, over the slow tier's 3 s line, and kept in the fast tier on
+  ## purpose: it is the one test that takes the record through every later
+  ## verb, and average() and configure() are not slow-tier paths, so in the
+  ## tier a change to either would not run it before its merge
 
   ## Thirty samples of three scans with an outcome they carry; the first
   ## sample's first scan inverted
@@ -1197,7 +1205,9 @@ test_that("average()'s record of removed scans stays on the log through every la
 
   ### average() after evaluate() is refused by design, so it cannot write
   ### over the record
-  expect_error(average(fitted, verbose = FALSE), class = "horizons_error_input")
+  expect_error(average(fitted, verbose = FALSE),
+               "It carries evaluation results, an evaluation split, fitted models",
+               fixed = TRUE, class = "horizons_error_input")
 
 })
 
