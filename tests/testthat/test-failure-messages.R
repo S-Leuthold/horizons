@@ -1484,19 +1484,16 @@ describe("evaluate() - a fold prep that fails in the run's stage", {
 
   })
 
-  it("trips the breaker on three of its configurations across two models, keeping the run's fold preps", {
+  it("does not trip the breaker on its configurations, three across three models but on one feature selection, run first: the rest run", {
 
     obj <- stage_object()
     local_failing_prep(obj)
-    dir <- withr::local_tempdir()
 
-    err <- expect_error(suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
-                                                  control = control_horizons(verbose = FALSE, output_dir = dir))),
-                        class = "horizons_error_systemic")
+    ev   <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(verbose = FALSE)))
+    rows <- ev$evaluation$results
 
-    expect_identical(err$results$config_id, c("cfg_rf", "cfg_enet", "cfg_plsr"))
-    expect_match(conditionMessage(err), "The first 3 configurations to run all failed the same way", fixed = TRUE)
-    expect_length(list.files(file.path(dir, "tmp"), pattern = "^fold-"), 7L)
+    expect_identical(rows$status, c("failed", "failed", "failed", "success"))
+    expect_identical(ev$evaluation$best_config, "cfg_pca")
 
   })
 

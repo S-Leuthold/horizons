@@ -671,6 +671,16 @@ SMALL_FOLD_ROWS <- 10L
 # evaluate() or fit(), since every other configuration would fail the same way.
 BREAKER_FAILURES <- 3L
 
+# The parts of a configuration the breaker reads (new_breaker()), named by
+# what its message calls their values. Its failures must span two values of
+# each part the configurations it watches vary in, so a failure that belongs
+# to one value of one (one selection's fold preparation, a model's engine)
+# never stops a run, whatever order the configurations finish in.
+BREAKER_FACTORS <- c(model             = "models",
+                     transformation    = "transformations",
+                     preprocessing     = "preprocessing methods",
+                     feature_selection = "feature selections")
+
 # select_training(): cap on the components retained when ncomp is given as
 # a proportion of variance. 100 was the cap the defaults were measured
 # with; the KSSL pool at 99 % retains far fewer.

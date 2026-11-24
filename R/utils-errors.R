@@ -240,7 +240,8 @@ check_reserved_columns <- function(columns,
 #'     cannot predict the test rows), `error_message` and `trace`.}
 #'   \item{`horizons_error_systemic`}{(run) [evaluate()] or [fit()] stopped
 #'     early, because the first configurations or members to run failed the
-#'     same way across at least two models (the circuit breaker,
+#'     same way across the models, transformations, preprocessing methods and
+#'     feature selections the run has more than one of (the circuit breaker,
 #'     `control_horizons(breaker = )`), or [evaluate()], [fit()] or
 #'     [ensemble()] stopped because a mirai daemon died or lacks a package
 #'     the run needs, or no mirai daemon was left to run its work

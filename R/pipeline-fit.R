@@ -157,11 +157,13 @@
 #' the member's and stops the call: before any member is fitted, `fit()`
 #' refuses members whose model's engine or feature-selection step needs a
 #' package that is not installed, naming each (`horizons_error_missing_package`). When the first members fail the same
-#' way across at least two models, `fit()` stops with
-#' `horizons_error_systemic` and the members so far as `results`
-#' (`control_horizons(breaker = )`, 3 by default, `FALSE` to fit every
-#' member), and it stops the same way when a daemon dies (see
-#' "Parallelism"). A daemon lacking a package the members need is refused
+#' way (3 of them by default, `control_horizons(breaker = )`, `FALSE` to
+#' fit every member), and between them span two of the members' models,
+#' transformations, preprocessing methods and feature selections, each of
+#' these the members have more than one of, `fit()` stops with
+#' `horizons_error_systemic` and the members so far as `results`, as
+#' [evaluate()] does ("Failed configurations" there); and it stops the same
+#' way when a daemon dies (see "Parallelism"). A daemon lacking a package the members need is refused
 #' before the run (`horizons_error_missing_package`); one found lacking it
 #' later fails the members it runs with tune's error. With
 #' `control_horizons(debug = TRUE)` the re-tunes run in this session and the
@@ -1019,7 +1021,7 @@ fit <- function(x,
   ## error's results.
 
   results_list <- list()
-  breaker      <- new_breaker(control$breaker)
+  breaker      <- new_breaker(control$breaker, all_configs[match(top_configs$config_id, all_configs$config_id), ])
 
   for (i in seq_len(n_best)) {
 
@@ -1204,9 +1206,11 @@ fit <- function(x,
 
     }
 
-    ## A run of identical failures across two models stops the call while
-    ## members remain; with none left they are ordinary failures
-    breaker_feed(breaker, config_result, cfg$model)
+    ## A run of identical failures across the members' models,
+    ## transformations, preprocessing methods and feature selections stops
+    ## the call while members remain; with none left they are ordinary
+    ## failures
+    breaker_feed(breaker, config_result, cfg)
 
     if (breaker$tripped) {
 

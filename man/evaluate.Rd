@@ -452,12 +452,18 @@ configuration whose final fit on the training part fails is failed too
 (#102). An error that is not the
 configuration's own (an input or dependency error, or a bug in horizons)
 stops the call. So does a failure every configuration would share: when
-the first configurations to run fail the same way across at least two
-models, \code{evaluate()} stops with \code{horizons_error_systemic}, the rows so far
-as its \code{results} (\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to
-run every configuration), and their failures are not checkpointed. On the
-configs axis these are the first configurations to finish, and the stop
-cancels those still running. A daemon that lacks a package the
+the first configurations to run fail the same way (3 of them by default,
+\code{control_horizons(breaker = )}, \code{FALSE} to run every configuration), and
+between them span two of the models, the transformations, the
+preprocessing methods and the feature selections, each of these the grid
+has more than one of, \code{evaluate()} stops with \code{horizons_error_systemic},
+the rows so far as its \code{results}, and their failures are not
+checkpointed. A failure that belongs to one model, one transformation,
+one preprocessing method or one feature selection (one selection's fold
+preparation, say) never stops the run, whatever order the configurations
+run in: its configurations fail, and the rest run. On the configs axis
+the first configurations are the first to finish, and the stop cancels
+those still running. A daemon that lacks a package the
 configurations need, which this session has, is refused before the run
 (\code{horizons_error_missing_package}, see "Parallelism"); one found lacking
 it mid-run stops the run as systemic on the configs axis, and on the
@@ -500,9 +506,10 @@ again resumes them instead of re-running them. The per-config results,
 \code{evaluate()} aborts before it assigns \code{x$evaluation}; after an uncaught
 abort, \code{rlang::last_error()$results} recovers them without re-running.
 
-A failure the first configurations share across at least two models stops
-the call earlier, with \code{horizons_error_systemic} (also
-\code{horizons_error_run}) and the rows finished so far as its \code{results}; with
+A failure the first configurations share across the grid (see "Failed
+configurations") stops the call earlier, with \code{horizons_error_systemic}
+(also \code{horizons_error_run}) and the rows finished so far as its
+\code{results}; with
 \code{control_horizons(breaker = FALSE)} every configuration runs and the call
 ends in the all-failed abort instead. Both carry \code{results}, so a loop over
 subsets can catch \code{horizons_error_run}, tolerate a subset that fails

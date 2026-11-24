@@ -278,8 +278,10 @@ CONTROL_FIELDS <- list(
 #' @param breaker A whole number of at least 2, or `FALSE`. When the first
 #'   configurations to finish all fail with the same cause, this many of them
 #'   stop the run at once, since every other configuration would fail the
-#'   same way; `FALSE` turns the breaker off. Default 3. [evaluate()],
-#'   [fit()].
+#'   same way, provided they span two of the models, the transformations, the
+#'   preprocessing methods and the feature selections, each of these the run
+#'   has more than one of: a failure that belongs to one of them never stops
+#'   it. `FALSE` turns the breaker off. Default 3. [evaluate()], [fit()].
 #' @param keep_traces `logical(1)`. Keep a failed unit's backtrace on its row
 #'   of the results. Default `FALSE`. [evaluate()], [fit()], [ensemble()]:
 #'   [select_training()] has no unit that leaves a row to keep one on.

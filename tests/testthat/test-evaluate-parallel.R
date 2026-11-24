@@ -2045,6 +2045,81 @@ describe("evaluate() - the circuit breaker on the configs axis", {
 
   })
 
+  ## The grid of test-pipeline-evaluate.R's twins (make_breaker_grid_object()),
+  ## CARS's configurations costed first, so the first to finish are CARS's,
+  ## across the three models
+  grid_run <- function(dir) {
+    local_mocked_bindings(config_costs = function(configs, n_rows) {
+      ifelse(configs$feature_selection == "cars", 2, 1)
+    }, .package = "horizons")
+    with_deadline(suppressWarnings(evaluate(make_breaker_grid_object(), prune = FALSE, seed = 42L,
+                                            control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                                       output_dir = dir, verbose = FALSE))), 300)
+  }
+
+  it("runs the grid when CARS's fold preparation fails, though CARS's configurations finish first: they fail, the rest are scored, and nothing stops as systemic (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    local_test_daemons(2)
+    with_deadline(mirai::everywhere({
+      utils::assignInNamespace("cars_folds", function(y, k) stop("CARS found no fold to score its subsets on"),
+                               ns = "horizons")
+    })[], 30)
+
+    dir  <- withr::local_tempdir()
+    ev   <- grid_run(dir)
+    rows <- ev$evaluation$results
+    cars <- endsWith(rows$config_id, "_cars")
+
+    expect_identical(rows$status[cars], rep("failed", 6L))
+    expect_length(unique(rows$error_message[cars]), 1L)
+    expect_match(rows$error_message[cars][1], "CARS found no fold to score its subsets on", fixed = TRUE)
+    expect_identical(rows$status[!cars], rep("success", 6L))
+    expect_length(list.files(file.path(dir, "checkpoints")), 12L)
+
+  })
+
+  it("stops a failure every configuration shares, once the first to finish span every part the grid varies, cancelling the rest (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    ## Every configuration's own recipe fails, the same way but for its id;
+    ## the fold preparations are built as ever
+    local_test_daemons(2)
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("build_recipe", envir = ns)
+      utils::assignInNamespace("build_recipe", function(config_row, ..., transformed = FALSE) {
+        if (isTRUE(transformed)) return(real(config_row, ..., transformed = transformed))
+        stop(paste0("no recipe for ", config_row$config_id, " at ", nchar(config_row$config_id) * 7, " rows"))
+      }, ns = "horizons")
+    })[], 30)
+
+    dir <- withr::local_tempdir()
+    err <- expect_error(grid_run(dir), class = "horizons_error_systemic")
+
+    got <- make_breaker_grid_object()$config$configs
+    got <- got[match(err$results$config_id, got$config_id), ]
+    expect_identical(unique(err$results$status), "failed")
+    expect_gte(nrow(got), 3L)
+    expect_lt(nrow(got), 12L)
+    for (part in c("model", "preprocessing", "feature_selection")) expect_gte(length(unique(got[[part]])), 2L)
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "preprocessing methods and 2 feature selections, so `evaluate()` stopped",
+                 fixed = TRUE)
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 30)
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
+
+  })
+
 })
 
 ## =========================================================================

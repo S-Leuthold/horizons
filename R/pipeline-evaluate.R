@@ -397,12 +397,18 @@
 #' (#102). An error that is not the
 #' configuration's own (an input or dependency error, or a bug in horizons)
 #' stops the call. So does a failure every configuration would share: when
-#' the first configurations to run fail the same way across at least two
-#' models, `evaluate()` stops with `horizons_error_systemic`, the rows so far
-#' as its `results` (`control_horizons(breaker = )`, 3 by default, `FALSE` to
-#' run every configuration), and their failures are not checkpointed. On the
-#' configs axis these are the first configurations to finish, and the stop
-#' cancels those still running. A daemon that lacks a package the
+#' the first configurations to run fail the same way (3 of them by default,
+#' `control_horizons(breaker = )`, `FALSE` to run every configuration), and
+#' between them span two of the models, the transformations, the
+#' preprocessing methods and the feature selections, each of these the grid
+#' has more than one of, `evaluate()` stops with `horizons_error_systemic`,
+#' the rows so far as its `results`, and their failures are not
+#' checkpointed. A failure that belongs to one model, one transformation,
+#' one preprocessing method or one feature selection (one selection's fold
+#' preparation, say) never stops the run, whatever order the configurations
+#' run in: its configurations fail, and the rest run. On the configs axis
+#' the first configurations are the first to finish, and the stop cancels
+#' those still running. A daemon that lacks a package the
 #' configurations need, which this session has, is refused before the run
 #' (`horizons_error_missing_package`, see "Parallelism"); one found lacking
 #' it mid-run stops the run as systemic on the configs axis, and on the
@@ -443,9 +449,10 @@
 #' `evaluate()` aborts before it assigns `x$evaluation`; after an uncaught
 #' abort, `rlang::last_error()$results` recovers them without re-running.
 #'
-#' A failure the first configurations share across at least two models stops
-#' the call earlier, with `horizons_error_systemic` (also
-#' `horizons_error_run`) and the rows finished so far as its `results`; with
+#' A failure the first configurations share across the grid (see "Failed
+#' configurations") stops the call earlier, with `horizons_error_systemic`
+#' (also `horizons_error_run`) and the rows finished so far as its
+#' `results`; with
 #' `control_horizons(breaker = FALSE)` every configuration runs and the call
 #' ends in the all-failed abort instead. Both carry `results`, so a loop over
 #' subsets can catch `horizons_error_run`, tolerate a subset that fails
@@ -1256,7 +1263,7 @@ evaluate <- function(x,
     ## The circuit breaker watches the first configurations to run, so a
     ## failure every configuration would share stops the call early
     ## (control_horizons(breaker = ))
-    breaker <- new_breaker(control$breaker)
+    breaker <- new_breaker(control$breaker, pending_configs)
 
     for (i in seq_len(nrow(configs))) {
 
@@ -1403,18 +1410,10 @@ evaluate <- function(x,
       ## only store), as the configs axis finishes each row
       not_run <- setdiff(configs$config_id[-seq_len(i)], completed_ids)
 
-      finish_row(result_row, cfg$model, breaker, length(not_run), checkpoint_dir, results_list)
+      finish_row(result_row, cfg, breaker, length(not_run), checkpoint_dir, results_list)
 
       ## Memory cleanup
       gc(verbose = FALSE)
-
-    }
-
-    ## The loop ended with the breaker still watching: its rows are ordinary
-    ## failures after all
-    if (!is.null(checkpoint_dir)) {
-
-      checkpoint_rows(breaker_release(breaker), checkpoint_dir, results_list)
 
     }
 
@@ -1489,11 +1488,11 @@ evaluate <- function(x,
     ## rows so far, the configurations in flight cancelled. The
     ## configurations still to run are those not yet collected, in flight or
     ## waiting.
-    breaker  <- new_breaker(control$breaker)
+    breaker  <- new_breaker(control$breaker, pending_configs)
     eval_env <- rlang::current_env()
 
     finish <- function(i, row) {
-      finish_row(row, pending_configs$model[i], breaker,
+      finish_row(row, pending_configs[i, ], breaker,
                  n_left         = n_pending - (length(finished$rows) - length(completed_ids)),
                  checkpoint_dir = checkpoint_dir,
                  finished       = in_config_order(finished$rows, configs$config_id),
@@ -1513,10 +1512,6 @@ evaluate <- function(x,
     )
 
     results_list <- in_config_order(finished$rows, configs$config_id)
-
-    ## The window ended with the breaker still watching: its rows are
-    ## ordinary failures after all
-    checkpoint_rows(breaker_release(breaker), checkpoint_dir, results_list)
 
     ## Which configurations ran their folds on inner daemons, from what each
     ## task says; one whose inner daemons did not connect ran its folds on
@@ -2234,18 +2229,19 @@ remove_empty_dir <- function(dir) {
 #' writes every checkpoint. The row feeds the breaker ([breaker_feed()]),
 #' which holds back a run of identical failures until it disarms; when it
 #' trips with configurations still to run the run stops
-#' ([abort_breaker_trip()]), the held rows not checkpointed, and with none
-#' left it releases them, ordinary failures after all, so the call ends as
-#' any other whose configurations all failed. The rows released are written
-#' to the store, and a write that fails stops the run with the rows so far
-#' ([checkpoint_rows()]).
+#' ([abort_breaker_trip()]), the held rows not checkpointed. Once nothing is
+#' left to run it releases what it holds, ordinary failures after all,
+#' tripped or not, so the call ends as any other whose configurations all
+#' failed. The rows released are written to the store, and a write that
+#' fails stops the run with the rows so far ([checkpoint_rows()]).
 #'
 #' @param row The configuration's row, stamped.
-#' @param model Character(1). Its model.
+#' @param config The configuration, a one-row data frame: the breaker reads
+#'   its model, transformation, preprocessing and feature selection.
 #' @param breaker From [new_breaker()].
 #' @param n_left Integer(1). The configurations still to run once this one
 #'   is done, not those resumed from checkpoints: on the configs axis those
-#'   in flight and those waiting.
+#'   not yet collected, in flight or waiting.
 #' @param checkpoint_dir The `checkpoints/` directory, or `NULL` without an
 #'   `output_dir`.
 #' @param finished List of the rows finished so far, this one among them,
@@ -2254,17 +2250,13 @@ remove_empty_dir <- function(dir) {
 #' @return `NULL`, invisibly; or does not return, when the run stops.
 #' @keywords internal
 #' @noRd
-finish_row <- function(row, model, breaker, n_left, checkpoint_dir, finished, call = rlang::caller_env()) {
+finish_row <- function(row, config, breaker, n_left, checkpoint_dir, finished, call = rlang::caller_env()) {
 
-  released <- breaker_feed(breaker, row, model)
+  released <- breaker_feed(breaker, row, config)
 
-  if (breaker$tripped) {
+  if (breaker$tripped && n_left > 0) abort_breaker_trip(breaker, results_so_far(finished), n_left, call = call)
 
-    if (n_left > 0) abort_breaker_trip(breaker, results_so_far(finished), n_left, call = call)
-
-    released <- breaker_release(breaker)
-
-  }
+  if (n_left == 0) released <- c(released, breaker_release(breaker))
 
   if (!is.null(checkpoint_dir)) checkpoint_rows(released, checkpoint_dir, finished, call = call)
 
@@ -2430,19 +2422,28 @@ drop_unit_records <- function(rows) {
 #' loaded from checkpoints. A success, a pruned configuration, or a
 #' failure unlike those before it disarms it for the rest of the call. While
 #' armed it holds back the rows of the identical failures so far, and it
-#' trips once there are `limit` of them across at least two models, while
-#' configurations remain to be run (with none left, `evaluate()` releases the
-#' rows instead):
-#' `configure()`'s grid runs a model's configurations together, so a failure
-#' local to one model fills the run first and never trips it.
+#' trips once there are `limit` of them spanning two values of each part of
+#' a configuration that the configurations it watches vary in
+#' (`BREAKER_FACTORS`: the model, the transformation, the preprocessing and
+#' the feature selection), while configurations remain to be run (with none
+#' left, the caller releases the rows instead). A failure that belongs to one
+#' value of one of them, such as one feature selection's fold preparation
+#' or one model's engine, never trips it, whatever order the configurations
+#' finish in: only one every value of every part shares does.
 #'
 #' @param limit A whole number of at least 2, or `FALSE` for no breaker
 #'   (`control_horizons(breaker = )`).
+#' @param configs The configurations it watches: those the call runs, not
+#'   those resumed from checkpoints. A data frame with the columns
+#'   `names(BREAKER_FACTORS)`.
 #' @return An environment: `armed`, `tripped`, the run's `key`, its `held`
-#'   rows and their `models`.
+#'   rows, the `factors` the configurations vary in, and `values`, by factor,
+#'   the held rows' values of each.
 #' @keywords internal
 #' @noRd
-new_breaker <- function(limit) {
+new_breaker <- function(limit, configs) {
+
+  factors <- names(BREAKER_FACTORS)
 
   breaker         <- new.env(parent = emptyenv())
   breaker$limit   <- limit
@@ -2450,7 +2451,8 @@ new_breaker <- function(limit) {
   breaker$tripped <- FALSE
   breaker$key     <- NULL
   breaker$held    <- list()
-  breaker$models  <- character(0)
+  breaker$factors <- factors[vapply(factors, function(f) length(unique(configs[[f]])) >= 2L, logical(1))]
+  breaker$values  <- stats::setNames(rep(list(character(0)), length(breaker$factors)), breaker$factors)
 
   breaker
 
@@ -2460,13 +2462,14 @@ new_breaker <- function(limit) {
 #'
 #' @param breaker From [new_breaker()].
 #' @param row The row the configuration returned.
-#' @param model Character(1). The configuration's model.
+#' @param config The configuration: a one-row data frame with the columns
+#'   `names(BREAKER_FACTORS)`.
 #' @return List of the rows that may be checkpointed now: `row`, with the
 #'   held rows when it disarms the breaker, or none while the breaker holds
 #'   it. Sets `breaker$tripped` when this row trips it.
 #' @keywords internal
 #' @noRd
-breaker_feed <- function(breaker, row, model) {
+breaker_feed <- function(breaker, row, config) {
 
   if (!breaker$armed) return(list(row))
 
@@ -2478,12 +2481,13 @@ breaker_feed <- function(breaker, row, model) {
 
   }
 
-  breaker$key    <- key
-  breaker$held   <- c(breaker$held, list(row))
-  breaker$models <- c(breaker$models, model)
+  breaker$key  <- key
+  breaker$held <- c(breaker$held, list(row))
+
+  for (f in breaker$factors) breaker$values[[f]] <- c(breaker$values[[f]], config[[f]])
 
   breaker$tripped <- length(breaker$held) >= breaker$limit &&
-    length(unique(breaker$models)) >= 2L
+    all(lengths(lapply(breaker$values, unique)) >= 2L)
 
   list()
 
@@ -2547,11 +2551,16 @@ abort_breaker_trip <- function(breaker,
                                call        = rlang::caller_env()) {
 
   n_failed <- length(breaker$held)
-  n_models <- length(unique(breaker$models))
   cause    <- breaker$held[[1]]$error_message
 
+  ## What the failures span: "across 2 models and 2 feature selections"
+  spans  <- vapply(breaker$factors, function(f) {
+    paste(length(unique(breaker$values[[f]])), BREAKER_FACTORS[[f]])
+  }, character(1))
+  across <- if (length(spans)) paste0(", across ", cli::ansi_collapse(spans, sep2 = " and ", last = " and ")) else ""
+
   abort_horizons(c(
-    "The first {n_failed} {units} to run all failed the same way, across {n_models} models, so {.fn {verb}} stopped rather than run the other {n_left}.",
+    "The first {n_failed} {units} to run all failed the same way{across}, so {.fn {verb}} stopped rather than run the other {n_left}.",
     "x" = "{cause}",
     "i" = if (checkpoints) {
       "Their rows are in this error's {.field results} field and were not checkpointed, so a run after the fix evaluates them."

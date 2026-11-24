@@ -3504,14 +3504,15 @@ describe("evaluate() - the circuit breaker", {
 
   })
 
-  it("does not stop when the identical failures are all on one model, and checkpoints them at the end", {
+  it("does not stop when the identical failures share one model of the grid's, and checkpoints them at the end", {
 
     template <- ev60()$evaluation$results[1, ]
     ran      <- new.env()
     local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
 
+    ## Three on rf, then the one on cubist, which is the last
     obj <- make_eval_object(n = 60, n_configs = 4)
-    obj$config$configs$model <- "rf"
+    obj$config$configs$model <- c("rf", "rf", "rf", "cubist")
 
     dir <- withr::local_tempdir()
     expect_error(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))),
@@ -3519,6 +3520,109 @@ describe("evaluate() - the circuit breaker", {
 
     expect_length(ran$ids, 4L)
     expect_setequal(list.files(file.path(dir, "checkpoints")), paste0(obj$config$configs$config_id, ".rds"))
+
+  })
+
+  it("trips only on failures spanning two of each part the configurations vary in, whatever order they finish in", {
+
+    obj  <- make_breaker_grid_object()
+    grid <- obj$config$configs
+    cars <- which(grid$feature_selection == "cars")
+
+    ## The position in `order` at which the breaker trips on the failures of
+    ## the configurations in `failing` (NA when it does not), the rest
+    ## succeeding
+    trips_at <- function(order, failing, configs = grid) {
+      breaker <- new_breaker(3L, configs)
+      for (k in seq_along(order)) {
+        id  <- configs$config_id[order[k]]
+        row <- if (order[k] %in% failing) {
+          tibble::tibble(config_id = id, status = "failed", class = "simpleError",
+                         error_message = paste0("Fold preparation failed: CARS found no fold for ", id))
+        } else {
+          tibble::tibble(config_id = id, status = "success", class = NA_character_, error_message = NA_character_)
+        }
+        breaker_feed(breaker, row, configs[order[k], ])
+        if (breaker$tripped) return(k)
+      }
+      NA_integer_
+    }
+
+    ## CARS's fold preparation failing: its six configurations span the
+    ## three models and both preprocessing methods, but one selection, so
+    ## in no order does it trip, however many finish before a success,
+    ## though any three of them span two models
+    rest   <- setdiff(seq_len(nrow(grid)), cars)
+    orders <- list(c(cars, rest), c(rev(cars), rest), c(cars[c(1, 3, 5, 2, 4, 6)], rest), c(rest, cars))
+    for (o in orders) expect_identical(trips_at(o, cars), NA_integer_)
+
+    ## A failure every configuration shares trips, on configure()'s order at
+    ## the fifth, the first of the second model, where a rule on two models
+    ## alone trips too (feature selection varies fastest, the model slowest)
+    everything <- seq_len(nrow(grid))
+    expect_identical(trips_at(everything, everything), 5L)
+    expect_identical(trips_at(c(cars, rest), everything), 7L)
+
+    ## A part the grid has one value of is not counted: on one model, the
+    ## failures need only span the selections
+    one_model <- grid[grid$model == "rf", ]
+    expect_identical(trips_at(seq_len(nrow(one_model)), seq_len(nrow(one_model)), one_model), 3L)
+
+  })
+
+  it("counts the parts of the configurations a resumed run runs, not those it resumes", {
+
+    template <- ev60()$evaluation$results[1, ]
+
+    ## Four models on two preprocessing methods; the four on raw are
+    ## checkpointed by a first run of them alone
+    obj <- make_eval_object(n = 60, n_configs = 8)
+    obj$config$configs$model         <- rep(c("rf", "cubist", "plsr", "elastic_net"), 2L)
+    obj$config$configs$preprocessing <- rep(c("raw", "snv"), each = 4L)
+    raw <- obj$config$configs$config_id[1:4]
+
+    first <- obj
+    first$config$configs   <- obj$config$configs[1:4, ]
+    first$config$n_configs <- 4L
+
+    dir <- withr::local_tempdir()
+    testthat::with_mocked_bindings(
+      suppressWarnings(evaluate(first, seed = 42L, control = control_horizons(output_dir = dir))),
+      evaluate_single_config = failing_runner(template, new.env(), succeed = raw)
+    )
+
+    ## Resumed on the whole grid, the four on snv fail alike: they vary in
+    ## their models alone, so three across two models stop the run
+    ran <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran, succeed = raw))
+    err <- expect_error(suppressWarnings(evaluate(obj, seed = 42L, control = control_horizons(output_dir = dir))),
+                        class = "horizons_error_systemic")
+
+    expect_identical(ran$ids, obj$config$configs$config_id[5:7])
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The first 3 configurations to run all failed the same way, across 3 models, so `evaluate()` stopped rather than run the other 1.",
+                 fixed = TRUE)
+
+  })
+
+  it("says what the failures span when it stops", {
+
+    template <- ev60()$evaluation$results[1, ]
+    ran      <- new.env()
+    local_mocked_bindings(evaluate_single_config = failing_runner(template, ran))
+
+    ## Two models and two preprocessing methods, in configure()'s order:
+    ## the third is the first of the second model
+    obj <- make_eval_object(n = 60, n_configs = 4)
+    obj$config$configs$model         <- c("cubist", "cubist", "rf", "rf")
+    obj$config$configs$preprocessing <- c("raw", "snv", "raw", "snv")
+
+    err <- expect_error(suppressWarnings(evaluate(obj, seed = 42L)), class = "horizons_error_systemic")
+
+    expect_identical(ran$ids, obj$config$configs$config_id[1:3])
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The first 3 configurations to run all failed the same way, across 2 models and 2 preprocessing methods, so `evaluate()` stopped rather than run the other 1.",
+                 fixed = TRUE)
 
   })
 
@@ -3635,6 +3739,74 @@ describe("evaluate() - the circuit breaker", {
     expect_false(identical(breaker_key(row(b, paste0("Recipe building failed: boom in ", b, " at 15 rows"))), same))
     expect_false(identical(breaker_key(row(b, paste0("Grid search failed: boom in ", b, " at 15 rows"),
                                            class = "horizons_error_run")), same))
+
+  })
+
+})
+
+## The breaker on real configurations: lightgbm, rf and xgboost, two
+## preprocessing methods, CARS and no selection (make_breaker_grid_object()).
+## test-evaluate-parallel.R runs the same two on the configs axis.
+
+describe("evaluate() - the circuit breaker on a grid of models, preprocessing methods and selections", {
+
+  it("runs the grid when CARS's fold preparation fails, in the order the configs axis starts them, CARS's configurations failed and the rest scored", {
+
+    skip_unless_slow_tier()
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    ## CARS's six first, as the configs axis starts them when its cells are
+    ## the costliest: any three of them span two models
+    obj <- make_breaker_grid_object()
+    obj$config$configs <- obj$config$configs[order(obj$config$configs$feature_selection != "cars"), ]
+    local_mocked_bindings(cars_folds = function(y, k) stop("CARS found no fold to score its subsets on"))
+
+    dir  <- withr::local_tempdir()
+    ev   <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                      control = control_horizons(output_dir = dir, verbose = FALSE)))
+    rows <- ev$evaluation$results
+    cars <- endsWith(rows$config_id, "_cars")
+
+    expect_identical(rows$status[cars], rep("failed", 6L))
+    expect_length(unique(rows$error_message[cars]), 1L)
+    expect_match(rows$error_message[cars][1], "CARS found no fold to score its subsets on", fixed = TRUE)
+    expect_identical(rows$status[!cars], rep("success", 6L))
+    expect_length(list.files(file.path(dir, "checkpoints")), 12L)
+
+  })
+
+  it("stops a failure every configuration shares at the first configuration of the second model, on configure()'s order", {
+
+    skip_unless_slow_tier()
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    ## Every configuration's own recipe fails, the same way but for its id;
+    ## the fold preparations, built from the recipe with the response
+    ## transformed, are built as ever
+    real <- build_recipe
+    ran  <- character(0)
+    local_mocked_bindings(build_recipe = function(config_row, ..., transformed = FALSE) {
+      if (isTRUE(transformed)) return(real(config_row, ..., transformed = transformed))
+      ran <<- c(ran, config_row$config_id)
+      stop(paste0("no recipe for ", config_row$config_id, " at ", nchar(config_row$config_id) * 7, " rows"))
+    })
+
+    obj <- make_breaker_grid_object()
+    dir <- withr::local_tempdir()
+    err <- expect_error(suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L,
+                                                  control = control_horizons(output_dir = dir, verbose = FALSE))),
+                        class = "horizons_error_systemic")
+
+    ## lightgbm's four, then rf's first, where a rule on two models alone
+    ## stops too: the selection varies fastest and the model slowest
+    expect_identical(ran, obj$config$configs$config_id[1:5])
+    expect_identical(err$results$config_id, obj$config$configs$config_id[1:5])
+    expect_match(gsub("\\s+", " ", conditionMessage(err)),
+                 "The first 5 configurations to run all failed the same way, across 2 models, 2 preprocessing methods and 2 feature selections, so `evaluate()` stopped rather than run the other 7.",
+                 fixed = TRUE)
+    expect_length(list.files(file.path(dir, "checkpoints")), 0L)
 
   })
 

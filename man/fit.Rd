@@ -251,11 +251,13 @@ A member's own warnings, from the engines and from tune, are in
 the member's and stops the call: before any member is fitted, \code{fit()}
 refuses members whose model's engine or feature-selection step needs a
 package that is not installed, naming each (\code{horizons_error_missing_package}). When the first members fail the same
-way across at least two models, \code{fit()} stops with
-\code{horizons_error_systemic} and the members so far as \code{results}
-(\code{control_horizons(breaker = )}, 3 by default, \code{FALSE} to fit every
-member), and it stops the same way when a daemon dies (see
-"Parallelism"). A daemon lacking a package the members need is refused
+way (3 of them by default, \code{control_horizons(breaker = )}, \code{FALSE} to
+fit every member), and between them span two of the members' models,
+transformations, preprocessing methods and feature selections, each of
+these the members have more than one of, \code{fit()} stops with
+\code{horizons_error_systemic} and the members so far as \code{results}, as
+\code{\link[=evaluate]{evaluate()}} does ("Failed configurations" there); and it stops the same
+way when a daemon dies (see "Parallelism"). A daemon lacking a package the members need is refused
 before the run (\code{horizons_error_missing_package}); one found lacking it
 later fails the members it runs with tune's error. With
 \code{control_horizons(debug = TRUE)} the re-tunes run in this session and the

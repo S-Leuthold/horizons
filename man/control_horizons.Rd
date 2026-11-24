@@ -56,8 +56,10 @@ its failures are contained unit by unit.}
 \item{breaker}{A whole number of at least 2, or \code{FALSE}. When the first
 configurations to finish all fail with the same cause, this many of them
 stop the run at once, since every other configuration would fail the
-same way; \code{FALSE} turns the breaker off. Default 3. \code{\link[=evaluate]{evaluate()}},
-\code{\link[=fit]{fit()}}.}
+same way, provided they span two of the models, the transformations, the
+preprocessing methods and the feature selections, each of these the run
+has more than one of: a failure that belongs to one of them never stops
+it. \code{FALSE} turns the breaker off. Default 3. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
 
 \item{keep_traces}{\code{logical(1)}. Keep a failed unit's backtrace on its row
 of the results. Default \code{FALSE}. \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=ensemble]{ensemble()}}:
