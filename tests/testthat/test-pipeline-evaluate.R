@@ -3895,13 +3895,17 @@ describe("evaluate() - threads on a run in this session (#114)", {
 
   })
 
-  it("gives rf, xgboost and lightgbm the same results on one thread and on two (the tier, at fixture size)", {
+  it("gives rf, xgboost and lightgbm the same results on one thread and on two, lightgbm fitting trees that split (the tier, at fixture size)", {
 
     skip_if_not_installed("xgboost")
     skip_if_not_installed("bonsai")
     skip_if_not_installed("lightgbm")
 
-    obj <- make_eval_object(n = 60, n_configs = 3)
+    ## 200 rows, so a fold's analysis set (about 105 rows) can split at the
+    ## largest min_n the grid tries (40). At 60, lightgbm's chosen candidate
+    ## grew trees that never split, which predict one value whatever the
+    ## fit, so a change to its fit could not show.
+    obj <- make_eval_object(n = 200, n_configs = 3)
     obj$config$configs$model <- c("rf", "xgboost", "lightgbm")
 
     run  <- function(threads) {
@@ -3911,6 +3915,12 @@ describe("evaluate() - threads on a run in this session (#114)", {
     two <- run(2)
 
     expect_identical(one$status, c("success", "success", "success"))
+
+    ## lightgbm's predictions vary on every fold and on the test set (its R²
+    ## is defined on each), so its row depends on the splits its trees chose
+    expect_false(is.na(one$cv_rsq[3]))
+    expect_false(is.na(one$rsq[3]))
+
     cols <- setdiff(names(one), "runtime_secs")
     expect_identical(two[cols], one[cols])
 
