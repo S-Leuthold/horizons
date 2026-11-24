@@ -579,6 +579,25 @@ describe("configure() storage", {
 
   })
 
+  test_that("final_bayesian_iter defaults to 0, so fit()'s re-tune is off unless asked for", {
+
+    ## configure()'s default is the constant the constructor and the
+    ## single-member runner take, so an object built either way runs the
+    ## same fit()
+    expect_identical(formals(configure)$final_bayesian_iter, DEFAULT_FINAL_BAYES_ITER)
+    expect_identical(DEFAULT_FINAL_BAYES_ITER, 0L)
+    expect_identical(formals(fit_single_config)$final_bayesian_iter, quote(DEFAULT_FINAL_BAYES_ITER))
+    expect_identical(new_horizons_data()$config$tuning$final_bayesian_iter, 0L)
+
+    result <- quiet_configure(make_single_response_hd())
+    expect_identical(result$config$tuning$final_bayesian_iter, 0L)
+
+    ## With fit()'s re-tune off by default, a grid of one needs only
+    ## evaluate()'s search off (#209)
+    expect_no_error(capture.output(configure(make_single_response_hd(), grid_size = 1, bayesian_iter = 0)))
+
+  })
+
   test_that("config$recipe is a key of the constructor's config slot", {
 
     expect_true("recipe" %in% names(new_horizons_data()$config))

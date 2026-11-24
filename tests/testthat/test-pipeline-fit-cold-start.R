@@ -104,6 +104,12 @@ describe("fit() - cold start from one configuration (#45)", {
 
     expect_true(any(grepl("Cold start: no warm-start parameters; grid of 2 points",
                           cold_out, fixed = TRUE)))
+
+    ## At final_bayesian_iter = 0, the default, the header says no search ran
+    ## and how to run one, rather than "0 iterations"
+    expect_true(paste0("\u2502  Bayesian: none (`final_bayesian_iter = 0`, the default), so the member keeps ",
+                       "the grid's best; `configure(final_bayesian_iter = )` above 0 searches from the grid") %in% cold_out)
+    expect_false(any(grepl("0 iterations", cold_out, fixed = TRUE)))
     expect_false(cold$models$results$warm_start)
     expect_identical(cold$models$results$start_grid_size, 2L)
 

@@ -122,8 +122,9 @@
 #'
 #' **Tuning ranges:**
 #'
-#' `evaluate()` and `fit()` search each tuned parameter over a range: its
-#' engine's, or horizons' where it sets one, or one given in `tune_ranges`.
+#' `evaluate()` and `fit()`'s re-tune search each tuned parameter over a
+#' range: its engine's, or horizons' where it sets one, or one given in
+#' `tune_ranges`.
 #' horizons sets two: Cubist's `committees` 1 to 25, since a fit's time grows
 #' linearly with its committees and more of them seldom lowered the
 #' cross-validated error by much, and plsr's `num_comp` 1 to 30. A range is
@@ -155,9 +156,10 @@
 #' the engines of the models they fit). An engine's own limits are not
 #' checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
 #' range past them fails those candidates' fits, which the row reports. The
-#' ranges are recorded as `config$tuning$ranges`, so `fit()` re-tunes over
-#' the space `evaluate()` searched, and a checkpoint tuned over other ranges
-#' is not resumed. `ensemble()`'s meta-learners keep their own grids.
+#' ranges are recorded as `config$tuning$ranges`, so `fit()`'s re-tune, when
+#' it runs, searches the space `evaluate()` searched, and a checkpoint tuned
+#' over other ranges is not resumed. `ensemble()`'s meta-learners keep their
+#' own grids.
 #'
 #' **Outcome range:**
 #'
@@ -228,18 +230,22 @@
 #'   fits a fold. Default 15. Minimum 0: 0 turns the search off for every
 #'   model.
 #' @param final_bayesian_iter `integer`. Bayesian optimization iterations for
-#'   `fit()`'s re-tune of each member, at least, raised as `bayesian_iter`
-#'   is, counting the points the re-tune starts from. From `evaluate()`'s
-#'   hyperparameters and d points drawn around them, for d tuned parameters,
-#'   that is 25 up to two tuned parameters, 26 for cubist and mlp, 35 for
-#'   lightgbm and 53 for xgboost; on a cold start, from the grid, 25 up to
-#'   three tuned parameters at the defaults, 30 for lightgbm and 50 for
-#'   xgboost. Each re-tune stops
-#'   once `control_horizons(no_improve = )` iterations in a row have not
-#'   improved on its best. Default 25. Minimum 0: 0 turns the re-tune off,
-#'   so each member keeps `evaluate()`'s hyperparameters, clamped into
-#'   `fit()`'s range and scored by its out-of-fold predictions alone; a cold
-#'   start still grids `grid_size` points.
+#'   `fit()`'s re-tune of each member, at least. Default 0, which turns the
+#'   re-tune off: each member keeps `evaluate()`'s hyperparameters, clamped
+#'   into `fit()`'s range and scored by its out-of-fold predictions alone,
+#'   and a cold start keeps the best of a grid of `grid_size` points. It is
+#'   off by default because on a library-scale and a local benchmark the
+#'   re-tune never moved a member past its margin, so the members kept
+#'   `evaluate()`'s hyperparameters either way, while it took most of
+#'   `fit()`'s run time (see "The re-tune" in [fit()]). Above 0 the re-tune
+#'   runs, its budget raised as `bayesian_iter`'s is, counting the points it
+#'   starts from: from `evaluate()`'s hyperparameters and d points drawn
+#'   around them, for d tuned parameters, 25 iterations run 25 up to two
+#'   tuned parameters, 26 for cubist and mlp, 35 for lightgbm and 53 for
+#'   xgboost; on a cold start, from the grid, 25 up to three tuned parameters
+#'   at the default `grid_size`, 30 for lightgbm and 50 for xgboost. Each
+#'   re-tune stops once `control_horizons(no_improve = )` iterations in a row
+#'   have not improved on its best. Minimum 0.
 #' @param sg_window `integer`. Savitzky-Golay window in grid points, applied
 #'   to every configuration. Default 9. Must be odd, at least 5, and (checked
 #'   by `evaluate()`) smaller than the number of spectral columns. For
@@ -325,7 +331,7 @@ configure <- function(x,
                       cv_folds              = 5L,
                       grid_size             = 10L,
                       bayesian_iter         = 15L,
-                      final_bayesian_iter   = 25L,
+                      final_bayesian_iter   = 0L,
                       sg_window             = 9L,
                       pca_threshold         = 0.995,
                       tune_ranges           = NULL,

@@ -2,11 +2,12 @@
 #'
 #' @description
 #' Inner-loop function for `fit()`. Takes a single config row from the
-#' evaluate() leaderboard, re-tunes it with warm-start Bayesian optimization
-#' from evaluate()'s hyperparameters and d points drawn around them from a
-#' local grid (`build_warmstart_grid()`), for d tuned parameters,
+#' evaluate() leaderboard at evaluate()'s hyperparameters or, with
+#' `final_bayesian_iter` above 0 (by default it is 0), re-tunes it with
+#' warm-start Bayesian optimization from them and d points drawn around them
+#' from a local grid (`build_warmstart_grid()`), for d tuned parameters,
 #' keeping evaluate()'s unless the best candidate beats them by the margin
-#' (`choose_member_params()`), generates OOF predictions, fits a final
+#' (`choose_member_params()`); then generates OOF predictions, fits a final
 #' deployable model, evaluates on the held-out test set, and detects
 #' performance degradation.
 #'

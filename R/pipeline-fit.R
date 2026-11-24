@@ -1,14 +1,12 @@
 #' Fit Top Model Configurations
 #'
 #' @description
-#' Re-tunes the top N configurations from `evaluate()` with warm-start
-#' Bayesian optimization, keeping each one's hyperparameters from
-#' `evaluate()` unless the re-tune's best candidate is better by more than its
-#' standard error (see "The re-tune"), generates out-of-fold (OOF) CV
-#' predictions for
-#' downstream stacking, fits final deployable models, scores them on
-#' `evaluate()`'s held-out test rows, and optionally trains uncertainty
-#' quantification (UQ) components.
+#' Takes the top N configurations from `evaluate()` at the hyperparameters
+#' `evaluate()` chose for them, which by default it keeps (an optional
+#' warm-start Bayesian re-tune can replace them; see "The re-tune"),
+#' generates out-of-fold (OOF) CV predictions for downstream stacking, fits
+#' final deployable models, scores them on `evaluate()`'s held-out test rows,
+#' and optionally trains uncertainty quantification (UQ) components.
 #'
 #' This is the render layer — it owns all console output. The capture layer
 #' (`fit_single_config()`) runs silently and returns structured results.
@@ -67,38 +65,47 @@
 #' `models$results` keeps each member's `error_message` when some succeed.
 #'
 #' @section The re-tune:
-#' Each member's re-tune starts from `evaluate()`'s hyperparameters, clamped
-#' into the range `fit()`'s data allow (a `num_comp` above the cap of fewer
-#' rows, say), and, for a model tuning d parameters, d points drawn at random
-#' from a local grid around them, each parameter's value and its nearby
-#' values crossed. It then runs a Bayesian search with a budget of at least
-#' `final_bayesian_iter` iterations ([configure()]), raised so that the start
-#' and the search try ten points a tuned parameter, which stops once
+#' By default `fit()` does not re-tune: [configure()]'s `final_bayesian_iter`
+#' defaults to 0, so each member keeps `evaluate()`'s hyperparameters,
+#' clamped into the range `fit()`'s data allow (a `num_comp` above the cap of
+#' fewer rows, say), and is scored by its out-of-fold predictions alone, as
+#' `tune::fit_best()` refits a choice. A member whose parameters are unusable
+#' is tuned instead on a space-filling grid of `grid_size` points, as a cold
+#' start is. On a library-scale and a local benchmark the re-tune never moved
+#' a member past its margin (below): every member kept `evaluate()`'s
+#' hyperparameters, the best candidate leading them by at most 0.2 of its
+#' standard errors, while the re-tune took most of `fit()`'s run time.
+#' `configure(final_bayesian_iter = )` above 0 turns it on; the tree's header
+#' says whether it ran. `evaluate()` chose the hyperparameters on its training
+#' rows, which hold `fit()`'s and, with UQ or AD on, the calibration rows, so
+#' a member that keeps them is fitted at hyperparameters the calibration rows
+#' took part in choosing, as they took part in choosing the members (#44).
+#'
+#' With the re-tune on, each member's re-tune starts from `evaluate()`'s
+#' hyperparameters, clamped, and, for a model tuning d parameters, d points
+#' drawn at random from a local grid around them, each parameter's value and
+#' its nearby values crossed. It then runs a Bayesian search with a budget of
+#' at least `final_bayesian_iter` iterations, raised so that the start and
+#' the search try ten points a tuned parameter, which stops once
 #' `control_horizons(no_improve = )` iterations in a row have not improved on
-#' its best. A space small enough is gridded whole
-#' instead (see "Cold start from one configuration"). The member then keeps
-#' `evaluate()`'s hyperparameters unless the best candidate scored on every
-#' fold has a CV RMSE lower than theirs by more than that candidate's
-#' standard error: `tune::select_by_one_std_err()`'s bound, with
-#' `evaluate()`'s choice in the place of the simplest model. That choice was
-#' made on `evaluate()`'s folds and is scored once on `fit()`'s, a fresh
-#' draw, while the best candidate is the best of many tried on `fit()`'s
-#' folds, so it beats the choice by the selection alone even where nothing
-#' is better. The draw is fresh but the rows are not: `evaluate()` chose on
-#' its training rows, which hold `fit()`'s and, with UQ or AD on, the
-#' calibration rows, so a member that keeps the choice is fitted at
-#' hyperparameters the calibration rows took part in choosing, as they took
-#' part in choosing the members (#44).
+#' its best. A space small enough is gridded whole instead (see "Cold start
+#' from one configuration"). The member then keeps `evaluate()`'s
+#' hyperparameters unless the best candidate scored on every fold has a CV
+#' RMSE lower than theirs by more than that candidate's standard error:
+#' `tune::select_by_one_std_err()`'s bound, with `evaluate()`'s choice in the
+#' place of the simplest model. That choice was made on `evaluate()`'s folds
+#' and is scored once on `fit()`'s, a fresh draw, while the best candidate is
+#' the best of many tried on `fit()`'s folds, so it beats the choice by the
+#' selection alone even where nothing is better.
 #' Hyperparameters of `evaluate()`'s that were not scored on every fold take
 #' no part, and the best candidate is taken, which the member's `warnings`
 #' say. The member's out-of-fold predictions are made at the hyperparameters
 #' it keeps, and `models$results$retune_moved` records which it kept:
-#' `FALSE` for `evaluate()`'s, `TRUE` for another candidate, `NA` with none
-#' to keep (a cold start, or parameters that were unusable). The tree says
-#' per member which, and by how many of the best candidate's standard errors
-#' it led. `final_bayesian_iter = 0` turns the re-tune off: each member
-#' keeps `evaluate()`'s hyperparameters, clamped, scored by its out-of-fold
-#' predictions alone, as `tune::fit_best()` refits a choice.
+#' `FALSE` for `evaluate()`'s (with the re-tune off, every member whose
+#' parameters were usable), `TRUE` for another candidate, `NA` with none to
+#' keep (a cold start, or parameters that were unusable). The tree says per
+#' member which, and by how many of the best candidate's standard errors it
+#' led.
 #'
 #' @section What fit() reports:
 #' `fit()` warns once per kind at its end, after writing each warning to the
@@ -130,8 +137,8 @@
 #' iterations in a row have not improved on its best, and `FALSE` runs every
 #' iteration), each member recording the iterations its search began
 #' (`bayes_iter`) and why it ended (`bayes_stop`); and how many members kept
-#' `evaluate()`'s hyperparameters, or, with `final_bayesian_iter = 0`, that
-#' the re-tune was off (see "The re-tune"). The folds are
+#' `evaluate()`'s hyperparameters, or that the re-tune was off, as it is by
+#' default (see "The re-tune"). The folds are
 #' drawn from the rows the members are fitted on, which must outnumber the
 #' folds, or `fit()` refuses, as `evaluate()` does.
 #'
@@ -172,16 +179,18 @@
 #' itself, by the draw `evaluate()` uses, so at the same `seed` it holds out
 #' exactly the rows `evaluate()` would have, and applies a response trim
 #' `validate()` requested as `evaluate()` does, on fences from the training
-#' partition alone. With no parameters from
-#' `evaluate()` to warm-start from, the re-tune starts from a space-filling
-#' grid of `grid_size` points; the console tree says so, and
+#' partition alone. With no parameters from `evaluate()` to keep, the member
+#' is tuned on a space-filling grid of `grid_size` points and keeps the
+#' grid's best by CV RMSE; with `final_bayesian_iter` above 0 a Bayesian
+#' search runs from that grid. The console tree says so, and
 #' `models$results$warm_start` is `FALSE`. On either path, a search space
 #' whose tuned parameters are all whole numbers, costing no more fits than
 #' the grid and the Bayesian iterations together, is gridded whole with no
 #' Bayesian search, as `evaluate()` grids it: a submodel's values share one
 #' fit, so that is every plsr member, each `num_comp` up to its cap tried
-#' from one fit a fold. On the `evaluate()` path that holds unless
-#' `final_bayesian_iter` is 0, which turns the re-tune off. The degradation
+#' from one fit a fold. On the `evaluate()` path that holds only with the
+#' re-tune on; off, as it is by default, each member keeps `evaluate()`'s
+#' hyperparameters (see "The re-tune"). The degradation
 #' check needs
 #' nothing from `evaluate()`, since it compares the test RPD with `fit()`'s
 #' own cross-validation.
@@ -201,7 +210,7 @@
 #' @param x A `horizons_eval` object (output of `evaluate()`), or a
 #'   configured `horizons_data` with exactly one configuration, which `fit()`
 #'   starts cold (see "Cold start from one configuration").
-#' @param n_best Integer. Number of top configurations to re-tune. Default 5.
+#' @param n_best Integer. Number of top configurations to fit. Default 5.
 #'   A cold start has one.
 #' @param metric Character or NULL. Metric for ranking the candidate
 #'   configs, by bare name: one of `"rpd"`, `"rsq"`, `"rmse"`, `"rrmse"`,
@@ -252,8 +261,8 @@
 #' warning a row of the object's `log` and "no dispatcher" on the progress
 #' tree's parallel line. A pool left with no daemon while they run stops the
 #' call with `horizons_error_no_daemons`, every member still to fit. Then
-#' tune runs the CV folds inside each member's re-tune and OOF pass on the
-#' [mirai](https://mirai.r-lib.org) daemons the caller has set
+#' tune runs the CV folds inside each member's re-tune, when it runs, and its
+#' OOF pass on the [mirai](https://mirai.r-lib.org) daemons the caller has set
 #' (`mirai::daemons(4)` before the call); a
 #' `future::plan()` is not used, and `fit()` never sets, resizes or resets
 #' the daemons. With fewer than two connected, `fit()` runs sequentially and
@@ -799,7 +808,7 @@ fit <- function(x,
     } else {
 
       cat(paste0(
-        "\u2502  Re-tuning top ", n_best, " of ",
+        "\u2502  Fitting top ", n_best, " of ",
         nrow(eval_results), " configurations\n"
       ))
 
@@ -901,9 +910,11 @@ fit <- function(x,
 
     cat(paste0("\u2502  ", if (cold_start) {
       paste0("Bayesian: ", paste(c(
-        if (length(searched) > 0) {
+        if (length(searched) > 0 && final_bayesian_iter > 0) {
           paste0(final_bayesian_iter, " iterations from a space-filling grid",
                  if (!is.null(raised)) paste0(" (", raised, ")"))
+        } else if (length(searched) > 0) {
+          retune_off_text(cold = TRUE)
         } else {
           "none"
         },
@@ -1579,12 +1590,25 @@ gridded_whole_text <- function(whole) {
 
 #' What fit() says when its re-tune is off
 #'
+#' Off is the default, which the words say, so a run left at the defaults
+#' does not read as one set up to skip the re-tune.
+#'
+#' @param cold Logical(1). A cold start's words, for its Bayesian search
+#'   from the grid, in place of the re-tune of `evaluate()`'s members.
 #' @return Character(1): the words the tree's header and the log's note share.
 #' @keywords internal
 #' @noRd
-retune_off_text <- function() {
+retune_off_text <- function(cold = FALSE) {
 
-  "off (`final_bayesian_iter = 0`), so each member keeps evaluate()'s hyperparameters; `configure(final_bayesian_iter = )` above 0 turns it on"
+  setting <- paste0("(`final_bayesian_iter = 0`", if (DEFAULT_FINAL_BAYES_ITER == 0L) ", the default", ")")
+
+  if (cold) {
+    return(paste0("none ", setting, ", so the member keeps the grid's best; ",
+                  "`configure(final_bayesian_iter = )` above 0 searches from the grid"))
+  }
+
+  paste0("off ", setting, ", so each member keeps evaluate()'s hyperparameters; ",
+         "`configure(final_bayesian_iter = )` above 0 turns it on")
 
 }
 

@@ -1524,7 +1524,7 @@ describe("fit() - the draw lines and the notes (#91)", {
     out <- fit_header(ev, n_best = 3L, compute_uq = FALSE, compute_ad = FALSE)
 
     header  <- grep("┌ fit", out, fixed = TRUE)
-    members <- grep("│  Re-tuning top 1 of 1 configurations", out, fixed = TRUE)
+    members <- grep("│  Fitting top 1 of 1 configurations", out, fixed = TRUE)
     note    <- grep("Requested n_best = 3 but only 1 successful configs available. Using 1.",
                     out, fixed = TRUE)
 

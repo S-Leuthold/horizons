@@ -19,7 +19,7 @@ fit(
 configured \code{horizons_data} with exactly one configuration, which \code{fit()}
 starts cold (see "Cold start from one configuration").}
 
-\item{n_best}{Integer. Number of top configurations to re-tune. Default 5.
+\item{n_best}{Integer. Number of top configurations to fit. Default 5.
 A cold start has one.}
 
 \item{metric}{Character or NULL. Metric for ranking the candidate
@@ -90,14 +90,12 @@ it started from (\code{NA} with the re-tune off), and \code{retune_moved} (see
 "The re-tune").
 }
 \description{
-Re-tunes the top N configurations from \code{evaluate()} with warm-start
-Bayesian optimization, keeping each one's hyperparameters from
-\code{evaluate()} unless the re-tune's best candidate is better by more than its
-standard error (see "The re-tune"), generates out-of-fold (OOF) CV
-predictions for
-downstream stacking, fits final deployable models, scores them on
-\code{evaluate()}'s held-out test rows, and optionally trains uncertainty
-quantification (UQ) components.
+Takes the top N configurations from \code{evaluate()} at the hyperparameters
+\code{evaluate()} chose for them, which by default it keeps (an optional
+warm-start Bayesian re-tune can replace them; see "The re-tune"),
+generates out-of-fold (OOF) CV predictions for downstream stacking, fits
+final deployable models, scores them on \code{evaluate()}'s held-out test rows,
+and optionally trains uncertainty quantification (UQ) components.
 
 This is the render layer — it owns all console output. The capture layer
 (\code{fit_single_config()}) runs silently and returns structured results.
@@ -157,38 +155,48 @@ per-member results travel on the condition as \code{results}, and
 }
 \section{The re-tune}{
 
-Each member's re-tune starts from \code{evaluate()}'s hyperparameters, clamped
-into the range \code{fit()}'s data allow (a \code{num_comp} above the cap of fewer
-rows, say), and, for a model tuning d parameters, d points drawn at random
-from a local grid around them, each parameter's value and its nearby
-values crossed. It then runs a Bayesian search with a budget of at least
-\code{final_bayesian_iter} iterations (\code{\link[=configure]{configure()}}), raised so that the start
-and the search try ten points a tuned parameter, which stops once
-\code{control_horizons(no_improve = )} iterations in a row have not improved on
-its best. A space small enough is gridded whole
-instead (see "Cold start from one configuration"). The member then keeps
-\code{evaluate()}'s hyperparameters unless the best candidate scored on every
-fold has a CV RMSE lower than theirs by more than that candidate's
-standard error: \code{tune::select_by_one_std_err()}'s bound, with
-\code{evaluate()}'s choice in the place of the simplest model. That choice was
-made on \code{evaluate()}'s folds and is scored once on \code{fit()}'s, a fresh
-draw, while the best candidate is the best of many tried on \code{fit()}'s
-folds, so it beats the choice by the selection alone even where nothing
-is better. The draw is fresh but the rows are not: \code{evaluate()} chose on
-its training rows, which hold \code{fit()}'s and, with UQ or AD on, the
-calibration rows, so a member that keeps the choice is fitted at
+By default \code{fit()} does not re-tune: \code{\link[=configure]{configure()}}'s \code{final_bayesian_iter}
+defaults to 0, so each member keeps \code{evaluate()}'s hyperparameters,
+clamped into the range \code{fit()}'s data allow (a \code{num_comp} above the cap of
+fewer rows, say), and is scored by its out-of-fold predictions alone, as
+\code{tune::fit_best()} refits a choice. A member whose parameters are unusable
+is tuned instead on a space-filling grid of \code{grid_size} points, as a cold
+start is. On a library-scale and a local benchmark the re-tune never moved
+a member past its margin (below): every member kept \code{evaluate()}'s
+hyperparameters, the best candidate leading them by at most 0.2 of its
+standard errors, while the re-tune took most of \code{fit()}'s run time.
+\code{configure(final_bayesian_iter = )} above 0 turns it on; the tree's header
+says whether it ran. \code{evaluate()} chose the
+hyperparameters on its training rows, which hold \code{fit()}'s and, with UQ or
+AD on, the calibration rows, so a member that keeps them is fitted at
 hyperparameters the calibration rows took part in choosing, as they took
 part in choosing the members (#44).
+
+With the re-tune on, each member's re-tune starts from \code{evaluate()}'s
+hyperparameters, clamped, and, for a model tuning d parameters, d points
+drawn at random from a local grid around them, each parameter's value and
+its nearby values crossed. It then runs a Bayesian search with a budget of
+at least \code{final_bayesian_iter} iterations, raised so that the start and
+the search try ten points a tuned parameter, which stops once
+\code{control_horizons(no_improve = )} iterations in a row have not improved on
+its best. A space small enough is gridded whole instead (see "Cold start
+from one configuration"). The member then keeps \code{evaluate()}'s
+hyperparameters unless the best candidate scored on every fold has a CV
+RMSE lower than theirs by more than that candidate's standard error:
+\code{tune::select_by_one_std_err()}'s bound, with \code{evaluate()}'s choice in the
+place of the simplest model. That choice was made on \code{evaluate()}'s folds
+and is scored once on \code{fit()}'s, a fresh draw, while the best candidate is
+the best of many tried on \code{fit()}'s folds, so it beats the choice by the
+selection alone even where nothing is better.
 Hyperparameters of \code{evaluate()}'s that were not scored on every fold take
 no part, and the best candidate is taken, which the member's \code{warnings}
 say. The member's out-of-fold predictions are made at the hyperparameters
 it keeps, and \code{models$results$retune_moved} records which it kept:
-\code{FALSE} for \code{evaluate()}'s, \code{TRUE} for another candidate, \code{NA} with none
-to keep (a cold start, or parameters that were unusable). The tree says
-per member which, and by how many of the best candidate's standard errors
-it led. \code{final_bayesian_iter = 0} turns the re-tune off: each member
-keeps \code{evaluate()}'s hyperparameters, clamped, scored by its out-of-fold
-predictions alone, as \code{tune::fit_best()} refits a choice.
+\code{FALSE} for \code{evaluate()}'s (with the re-tune off, every member whose
+parameters were usable), \code{TRUE} for another candidate, \code{NA} with none to
+keep (a cold start, or parameters that were unusable). The tree says per
+member which, and by how many of the best candidate's standard errors it
+led.
 }
 
 \section{What fit() reports}{
@@ -222,8 +230,8 @@ members' re-tunes the Bayesian search's stopping rule ended early
 iterations in a row have not improved on its best, and \code{FALSE} runs every
 iteration), each member recording the iterations its search began
 (\code{bayes_iter}) and why it ended (\code{bayes_stop}); and how many members kept
-\code{evaluate()}'s hyperparameters, or, with \code{final_bayesian_iter = 0}, that
-the re-tune was off (see "The re-tune"). The folds are
+\code{evaluate()}'s hyperparameters, or that the re-tune was off, as it is by
+default (see "The re-tune"). The folds are
 drawn from the rows the members are fitted on, which must outnumber the
 folds, or \code{fit()} refuses, as \code{evaluate()} does.
 }
@@ -268,16 +276,18 @@ go straight to \code{fit()} (#45). \code{fit()} then draws the train/test split
 itself, by the draw \code{evaluate()} uses, so at the same \code{seed} it holds out
 exactly the rows \code{evaluate()} would have, and applies a response trim
 \code{validate()} requested as \code{evaluate()} does, on fences from the training
-partition alone. With no parameters from
-\code{evaluate()} to warm-start from, the re-tune starts from a space-filling
-grid of \code{grid_size} points; the console tree says so, and
+partition alone. With no parameters from \code{evaluate()} to keep, the member
+is tuned on a space-filling grid of \code{grid_size} points and keeps the
+grid's best by CV RMSE; with \code{final_bayesian_iter} above 0 a Bayesian
+search runs from that grid. The console tree says so, and
 \code{models$results$warm_start} is \code{FALSE}. On either path, a search space
 whose tuned parameters are all whole numbers, costing no more fits than
 the grid and the Bayesian iterations together, is gridded whole with no
 Bayesian search, as \code{evaluate()} grids it: a submodel's values share one
 fit, so that is every plsr member, each \code{num_comp} up to its cap tried
-from one fit a fold. On the \code{evaluate()} path that holds unless
-\code{final_bayesian_iter} is 0, which turns the re-tune off. The degradation
+from one fit a fold. On the \code{evaluate()} path that holds only with the
+re-tune on; off, as it is by default, each member keeps \code{evaluate()}'s
+hyperparameters (see "The re-tune"). The degradation
 check needs
 nothing from \code{evaluate()}, since it compares the test RPD with \code{fit()}'s
 own cross-validation.
@@ -310,7 +320,8 @@ it once, with class \code{horizons_warning_input}, as \code{\link[=evaluate]{eva
 warning a row of the object's \code{log} and "no dispatcher" on the progress
 tree's parallel line. A pool left with no daemon while they run stops the
 call with \code{horizons_error_no_daemons}, every member still to fit. Then
-tune runs the CV folds inside each member's re-tune and OOF pass on the
+tune runs the CV folds inside each member's re-tune, when it runs, and its
+OOF pass on the
 \href{https://mirai.r-lib.org}{mirai} daemons the caller has set
 (\code{mirai::daemons(4)} before the call); a
 \code{future::plan()} is not used, and \code{fit()} never sets, resizes or resets

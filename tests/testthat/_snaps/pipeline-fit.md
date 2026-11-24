@@ -6,11 +6,11 @@
       
       ┌ fit ─────────────────────────────────────────────────────────
       │
-      │  Re-tuning top 2 of 2 configurations
+      │  Fitting top 2 of 2 configurations
       │  Split: 48 train / 12 test (evaluate()'s held-out rows)
       │  CV: 3-fold stratified on SOC
       │  Stratified CV on fewer strata: too little data for 4
-      │  Re-tune: from evaluate()'s hyperparameters and d points drawn around them for d tuned parameters, 25 iterations (raised to 26 for cubist: at least 10 points a tuned parameter); evaluate()'s are kept unless the best candidate is better by more than its standard error
+      │  Re-tune: off (`final_bayesian_iter = 0`, the default), so each member keeps evaluate()'s hyperparameters; `configure(final_bayesian_iter = )` above 0 turns it on
       │  Isolated fits: cubist, each fit in a process of its own (control_horizons(isolate = FALSE) turns it off)
       │
       │  ├─ [1/2] Random Forest + none + raw + none
