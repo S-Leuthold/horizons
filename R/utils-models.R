@@ -4,9 +4,9 @@
 #' Builds a model's tunable parsnip specification from its row of
 #' `MODEL_SPECS`: parsnip's model function `fn`, called with the row's
 #' `fixed` arguments and each of its `tuned` arguments as `tune::tune()`; the
-#' engine `model_engine()` names, with the row's `engine_args` and its
-#' thread argument (`threads$argument`) at `threads`; and the
-#' regression mode. Each argument is captured as parsnip captures one written
+#' engine `model_engine()` names, with the row's `engine_args`, its
+#' thread argument (`threads$argument`) at `threads` and its weight limit
+#' (`weights$argument`) at `max_weights`; and the regression mode. Each argument is captured as parsnip captures one written
 #' in the call (`500`, `tune::tune()`, `"impurity"`). Used by
 #' `evaluate_single_config()` and `fit_single_config()` to build the workflow
 #' for each config.
@@ -20,10 +20,15 @@
 #' @param threads A whole number. The threads an engine with a thread
 #'   argument fits on: `ENGINE_THREADS` (one) on the daemons, and
 #'   `control_horizons(threads = )` on a run in the session.
+#' @param max_weights A whole number, or `Inf`. The most weights a network
+#'   may have, for an engine with a weight limit: `configure(max_weights = )`,
+#'   `DEFAULT_MAX_WEIGHTS` by default. The runners cap `hidden_units` to it
+#'   (`cap_by_data()`), so the engine's limit refuses no candidate.
 #'
 #' @return A `parsnip` model specification with `mode = "regression"`.
 #' @keywords internal
-define_model_spec <- function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+define_model_spec <- function(model, isolate = TRUE, threads = ENGINE_THREADS,
+                              max_weights = DEFAULT_MAX_WEIGHTS) {
 
   row <- MODEL_SPECS[[model]]
 
@@ -40,10 +45,15 @@ define_model_spec <- function(model, isolate = TRUE, threads = ENGINE_THREADS) {
   ## to its own default may set to every core (bonsai's lightgbm does)
   thread_arg <- if (!is.null(row$threads$argument)) stats::setNames(list(as.integer(threads)), row$threads$argument)
 
+  ## A network's weight limit at the budget, which the runners keep every
+  ## candidate within, so the engine's own default never refuses one
+  weights_arg <- if (!is.null(row$weights$argument)) stats::setNames(list(max_weights), row$weights$argument)
+
   ## The model's call is put together from the row and evaluated here, so
   ## parsnip captures every argument as the expression the row holds
   spec <- eval(rlang::call2(row$fn, !!!row$fixed, !!!tuned, .ns = "parsnip"))
-  spec <- parsnip::set_engine(spec, model_engine(model, isolate), !!!row$engine_args, !!!thread_arg)
+  spec <- parsnip::set_engine(spec, model_engine(model, isolate), !!!row$engine_args, !!!thread_arg,
+                              !!!weights_arg)
 
   parsnip::set_mode(spec, "regression")
 

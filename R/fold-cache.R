@@ -611,17 +611,18 @@ fold_bound <- function(entry, inputs) {
 #'   preps keeps: the whole training part's, which the final fit uses, and
 #'   each fold's ([assemble_folds()]'s `n_predictors`).
 #' @param folds The `rset` the configuration is tuned over.
+#' @param max_weights The weight budget, passed to [cap_by_data()].
 #' @return The finalized `parameters` object.
 #' @keywords internal
 #' @noRd
-finalize_bound <- function(param_set, n_predictors, folds) {
+finalize_bound <- function(param_set, n_predictors, folds, max_weights = DEFAULT_MAX_WEIGHTS) {
 
   fewest    <- min(n_predictors)
   frame     <- tibble::new_tibble(stats::setNames(rep(list(double(0)), fewest), paste0("x", seq_len(fewest))),
                                   nrow = 0L)
   finalized <- dials::finalize(param_set, frame)
 
-  cap_by_data(finalized, n_predictors, min_analysis_rows(folds))
+  cap_by_data(finalized, n_predictors, min_analysis_rows(folds), max_weights)
 
 }
 
@@ -634,26 +635,35 @@ finalize_bound <- function(param_set, n_predictors, folds) {
 #' grid or a Bayesian search proposes no value one of its fits cannot take
 #' (#216): a feature selection keeps a different number of predictors in
 #' each fold, and a value above a fold's count would be truncated by one
-#' engine, refused by another and passed over silently by a third. Each
-#' keeps its lower bound and any upper bound already below the cap, so a
-#' range set by `configure(tune_ranges = )` narrows to the data rather than
-#' being replaced, as `num_comp`'s default range always has. A range whose
-#' lower bound is above the cap holds no value the data can fit, and fails
-#' the configuration, naming the range and the cap. A parameter set holding
-#' neither is returned unchanged.
+#' engine, refused by another and passed over silently by a third.
+#' `hidden_units`' upper bound is the most units whose network stays within
+#' the weight budget on the most predictors any prep keeps
+#' ([max_hidden_units()]), since a network's weights grow with its inputs;
+#' when that narrows the range, the configuration says so with a note, for
+#' the budget is a setting (`configure(max_weights = )`) and not a limit of
+#' the data. Each keeps its lower bound and any upper bound already below
+#' the cap, so a range set by `configure(tune_ranges = )` narrows to the
+#' data rather than being replaced, as `num_comp`'s default range always
+#' has. A range whose lower bound is above the cap holds no value the data
+#' (or the budget) admits, and fails the configuration, naming the range
+#' and the cap. A parameter set holding none of them is returned unchanged.
 #'
 #' @param param_set A `parameters` object, after [dials::finalize()].
 #' @param n_predictors Integer. The predictors each of the configuration's
 #'   preps keeps (one count, or one per prep).
 #' @param n_rows Integer. Rows in the smallest analysis set.
+#' @param max_weights A whole number, or `Inf` for no budget. The most
+#'   weights a network may have (`configure(max_weights = )`).
 #' @return The parameter set.
 #' @keywords internal
 #' @noRd
-cap_by_data <- function(param_set, n_predictors, n_rows) {
+cap_by_data <- function(param_set, n_predictors, n_rows, max_weights = DEFAULT_MAX_WEIGHTS) {
 
   fewest <- min(n_predictors)
-  caps   <- c(mtry     = max(1L, fewest),
-              num_comp = pls_components(Inf, fewest, n_rows))
+  most   <- max(n_predictors)
+  caps   <- c(mtry         = max(1L, fewest),
+              num_comp     = pls_components(Inf, fewest, n_rows),
+              hidden_units = max_hidden_units(max_weights, most))
 
   for (id in intersect(names(caps), param_set$id)) {
 
@@ -662,6 +672,15 @@ cap_by_data <- function(param_set, n_predictors, n_rows) {
     upper <- min(param$range$upper, caps[[id]])
 
     if (lower > caps[[id]]) {
+
+      if (id == "hidden_units") {
+
+        abort_horizons(c(
+          "The {.field hidden_units} range {lower} to {param$range$upper} holds no network within the weight budget: at most {caps[[id]]} unit{?s}, for {max_weights} weights on {most} predictor{?s}, the most a fold or the whole training part keeps.",
+          "i" = "Raise the budget with {.code configure(max_weights = )}, or lower the range's lower bound in {.code configure(tune_ranges = )}."
+        ), kind = "run")
+
+      }
 
       held <- if (id == "num_comp") {
         cli::format_inline("{fewest} predictor{?s}, the fewest a fold or the whole training part keeps, and analysis sets of {n_rows} row{?s} at the smallest")
@@ -676,11 +695,43 @@ cap_by_data <- function(param_set, n_predictors, n_rows) {
 
     }
 
+    if (id == "hidden_units" && upper < param$range$upper) {
+
+      note_in_unit(paste0(
+        "The weight budget capped {.field hidden_units} at {upper}, below the range's {param$range$upper}: ",
+        "a network of more units on {most} predictor{?s} holds more than {max_weights} weights. ",
+        "{.code configure(max_weights = )} raises the budget."
+      ))
+
+    }
+
     param_set <- update_parameter(param_set, id, dials::range_set(param, c(lower, upper)))
 
   }
 
   param_set
+
+}
+
+#' The most hidden units a network on so many predictors can have within a
+#' weight budget
+#'
+#' @description
+#' nnet's count of an mlp's weights, for one hidden layer of h units on p
+#' inputs and one linear output with no skip-layer connections, as parsnip's
+#' `mlp()` fits it, is each hidden unit's weight on every input and its
+#' bias, and the output's weight on every hidden unit and its bias:
+#' `h * (p + 2) + 1`. This is the largest `h` for which that is at most
+#' `max_weights`, or `Inf` when the budget is `Inf`.
+#'
+#' @param max_weights A whole number, or `Inf`.
+#' @param n_predictors Integer.
+#' @return Numeric(1).
+#' @keywords internal
+#' @noRd
+max_hidden_units <- function(max_weights, n_predictors) {
+
+  floor((max_weights - 1) / (n_predictors + 2))
 
 }
 

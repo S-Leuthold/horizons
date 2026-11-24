@@ -12,6 +12,7 @@ evaluate_single_config(
   grid_size = DEFAULT_GRID_SIZE,
   bayesian_iter = DEFAULT_BAYES_ITER,
   tune_ranges = TUNE_RANGES,
+  max_weights = DEFAULT_MAX_WEIGHTS,
   no_improve = BAYES_NO_IMPROVE_DEFAULT,
   prune = FALSE,
   prune_threshold = 1,
@@ -56,6 +57,13 @@ is every point and the Bayesian stage does not run
 dials' units: the ranges the model's parameters are searched over, set
 before the data cap them (\code{apply_tune_ranges()}). \code{evaluate()} reads
 them from \code{configure()}'s \code{config$tuning$ranges}. Default \code{TUNE_RANGES}.}
+
+\item{max_weights}{A whole number, or \code{Inf}. The most weights a network
+the search proposes may have: mlp's \code{hidden_units} range is capped so
+none passes it on the most predictors any of the configuration's preps
+keeps, and nnet's \code{MaxNWts} is set to it. \code{evaluate()} reads it from
+\code{configure()}'s \code{config$tuning$max_weights}. Default
+\code{DEFAULT_MAX_WEIGHTS}.}
 
 \item{no_improve}{A whole number of at least 1, or \code{FALSE}: the Bayesian
 iterations without improvement after which the search stops

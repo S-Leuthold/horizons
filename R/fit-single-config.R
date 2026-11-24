@@ -67,6 +67,10 @@
 #'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
 #'   `config$tuning$ranges`, the ranges `evaluate()` searched. Default
 #'   `TUNE_RANGES`.
+#' @param max_weights A whole number, or `Inf`. The weight budget, as
+#'   [evaluate_single_config()] takes it: `fit()` reads it from
+#'   `configure()`'s `config$tuning$max_weights`, the budget `evaluate()`
+#'   searched under. Default `DEFAULT_MAX_WEIGHTS`.
 #' @param no_improve A whole number of at least 1, or `FALSE`: the re-tune's
 #'   Bayesian iterations without improvement after which it stops
 #'   (`control_horizons(no_improve = )`, which `fit()` reads). Default
@@ -163,6 +167,7 @@ fit_single_config <- function(config_row,
                               final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
                               grid_size           = DEFAULT_GRID_SIZE,
                               tune_ranges         = TUNE_RANGES,
+                              max_weights         = DEFAULT_MAX_WEIGHTS,
                               no_improve          = BAYES_NO_IMPROVE_DEFAULT,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
@@ -254,7 +259,8 @@ fit_single_config <- function(config_row,
                                                sg_window     = sg_window,
                                                pca_threshold = pca_threshold))
 
-    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads,
+                                                           max_weights = max_weights))
 
     wflow <- unit_step("workflow", workflows::workflow() |>
                          workflows::add_recipe(recipe) |>
@@ -323,7 +329,8 @@ fit_single_config <- function(config_row,
 
     if (prepped_now) {
       param_set <- unit_step("finalize_parameters",
-                             finalize_bound(param_set, c(length(bound), prepped_folds$n_predictors), cv_resamples))
+                             finalize_bound(param_set, c(length(bound), prepped_folds$n_predictors), cv_resamples,
+                                            max_weights))
     }
 
     rm(fold_inputs, entry_at)

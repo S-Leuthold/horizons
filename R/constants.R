@@ -57,6 +57,13 @@
 #   the PLS engine horizons registers takes its own from here
 #   (register_pls_engine()), and the whole-space rule counts its values as
 #   one fit (exhaustive_grid(), R/fit-warmstart.R).
+# - `weights`: for a network, how its weights are limited: `argument`, the
+#   engine's argument that refuses a network of more weights, which
+#   define_model_spec() sets to configure(max_weights = )'s budget. The
+#   runners cap `hidden_units` so the search proposes no network over that
+#   budget on the most predictors any of a configuration's preps keeps
+#   (cap_by_data(), R/fold-cache.R), so the argument never refuses a
+#   candidate the search asked for.
 #
 # An engine's traits are read through engine_spec() (R/utils-models.R), which
 # finds the row of an isolated twin's engine too.
@@ -127,7 +134,7 @@ MODEL_SPECS <- list(
     label       = "Neural Network",
     packages    = "nnet",
     tuned       = c("hidden_units", "penalty", "epochs"),
-    engine_args = list(MaxNWts = 10000)
+    weights     = list(argument = "MaxNWts")
   ),
 
   lightgbm = list(
@@ -208,6 +215,18 @@ PLS_TOL <- 1e-9
 # 100.
 TUNE_RANGES <- list(committees = c(1, 25), num_comp = c(1, PLS_MAX_COMP))
 
+# The most weights a network the search proposes may have when configure()
+# is not told otherwise (configure(max_weights = ); MODEL_SPECS' `weights`).
+# An mlp's single hidden layer of h units on p predictors, with one linear
+# output, holds h * (p + 2) + 1 weights (max_hidden_units(), R/fold-cache.R),
+# so its `hidden_units` range is capped at the most units that stay within
+# it. 10,000 is the limit nnet was given before the budget was a setting.
+# nnet's optimizer keeps a matrix of the weights squared, so a fit's memory
+# grows as about 4 * weights^2 bytes and an iteration's time the same way: on
+# 800 rows, 1,691 predictors and 5 units (8,466 weights) a fit held 378 MB at
+# 0.26 s an iteration, and at 10 units (16,931 weights) 1.2 GB at 1.2 s.
+DEFAULT_MAX_WEIGHTS <- 10000
+
 ## Transformations ------------------------------------------------------------
 
 # Valid response transformations
@@ -247,11 +266,12 @@ VALID_FEATURE_SELECTION <- c(
 OUTCOME_SELECTIONS <- c("correlation", "boruta", "cars")
 
 ### The tuned parameters whose upper bound is read from the predictors a
-### recipe keeps (dials::finalize(), cap_by_data()), the fewest it keeps in
-### any fold or on the whole training part, so a model that tunes one has its
-### configuration's recipe prepped on the whole training part as well as on
-### each fold (bounded_model(), R/fold-cache.R)
-BOUNDED_PARAMETERS <- c("mtry", "num_comp")
+### recipe keeps (dials::finalize(), cap_by_data()): mtry and num_comp from
+### the fewest it keeps in any fold or on the whole training part, and
+### hidden_units, under the weight budget, from the most. So a model that
+### tunes one has its configuration's recipe prepped on the whole training
+### part as well as on each fold (bounded_model(), R/fold-cache.R)
+BOUNDED_PARAMETERS <- c("mtry", "num_comp", "hidden_units")
 
 ### The seconds one fold's prep takes by its feature selection, the recipe
 ### without the spectral transform on a fold of the coverage grid's training
@@ -447,6 +467,7 @@ SHARED_ARG_NAMES <- c(
   "grid_size",
   "bayesian_iter",
   "tune_ranges",
+  "max_weights",
   "no_improve",
   "prune",
   "prune_threshold",
@@ -678,7 +699,9 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #  10  2026-11-24: mtry and num_comp are capped at the fewest predictors any
 #      fold's prep or the whole training part's keeps, not the training
 #      part's alone, so a feature selection that keeps fewer in a fold no
-#      longer has candidates truncated, passed over or failed there.
+#      longer has candidates truncated, passed over or failed there; and
+#      mlp's hidden_units is capped so no network passes the weight budget
+#      (configure(max_weights = )), where its larger candidates had failed.
 SCORING_SCHEMA <- 10L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every

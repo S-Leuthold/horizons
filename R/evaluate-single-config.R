@@ -49,6 +49,12 @@
 #'   dials' units: the ranges the model's parameters are searched over, set
 #'   before the data cap them (`apply_tune_ranges()`). `evaluate()` reads
 #'   them from `configure()`'s `config$tuning$ranges`. Default `TUNE_RANGES`.
+#' @param max_weights A whole number, or `Inf`. The most weights a network
+#'   the search proposes may have: mlp's `hidden_units` range is capped so
+#'   none passes it on the most predictors any of the configuration's preps
+#'   keeps, and nnet's `MaxNWts` is set to it. `evaluate()` reads it from
+#'   `configure()`'s `config$tuning$max_weights`. Default
+#'   `DEFAULT_MAX_WEIGHTS`.
 #' @param no_improve A whole number of at least 1, or `FALSE`: the Bayesian
 #'   iterations without improvement after which the search stops
 #'   (`control_horizons(no_improve = )`, which `evaluate()` reads). Default
@@ -135,6 +141,7 @@ evaluate_single_config <- function(config_row,
                                    grid_size       = DEFAULT_GRID_SIZE,
                                    bayesian_iter   = DEFAULT_BAYES_ITER,
                                    tune_ranges     = TUNE_RANGES,
+                                   max_weights     = DEFAULT_MAX_WEIGHTS,
                                    no_improve      = BAYES_NO_IMPROVE_DEFAULT,
                                    prune           = FALSE,
                                    prune_threshold = 1.0,
@@ -204,7 +211,8 @@ evaluate_single_config <- function(config_row,
                                                sg_window     = sg_window,
                                                pca_threshold = pca_threshold))
 
-    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads,
+                                                           max_weights = max_weights))
 
     wflow <- unit_step("workflow", workflows::workflow() |>
                          workflows::add_recipe(recipe) |>
@@ -278,7 +286,8 @@ evaluate_single_config <- function(config_row,
 
     if (prepped_now) {
       param_set <- unit_step("finalize_parameters",
-                             finalize_bound(param_set, c(length(bound), prepped_folds$n_predictors), cv_folds))
+                             finalize_bound(param_set, c(length(bound), prepped_folds$n_predictors), cv_folds,
+                                            max_weights))
     }
 
     rm(fold_inputs, entry_at)

@@ -15,6 +15,7 @@ fit_single_config(
   final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
   grid_size = DEFAULT_GRID_SIZE,
   tune_ranges = TUNE_RANGES,
+  max_weights = DEFAULT_MAX_WEIGHTS,
   no_improve = BAYES_NO_IMPROVE_DEFAULT,
   compute_uq = FALSE,
   compute_ad = FALSE,
@@ -78,6 +79,11 @@ dials' units: the ranges the re-tune searches, set before the data cap
 them (\code{apply_tune_ranges()}). \code{fit()} reads them from \code{configure()}'s
 \code{config$tuning$ranges}, the ranges \code{evaluate()} searched. Default
 \code{TUNE_RANGES}.}
+
+\item{max_weights}{A whole number, or \code{Inf}. The weight budget, as
+\code{\link[=evaluate_single_config]{evaluate_single_config()}} takes it: \code{fit()} reads it from
+\code{configure()}'s \code{config$tuning$max_weights}, the budget \code{evaluate()}
+searched under. Default \code{DEFAULT_MAX_WEIGHTS}.}
 
 \item{no_improve}{A whole number of at least 1, or \code{FALSE}: the re-tune's
 Bayesian iterations without improvement after which it stops
