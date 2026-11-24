@@ -1395,7 +1395,7 @@ make_valid_eval <- function() {
                                feature_selection = "none"),
       tuning  = list(cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
                      final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
-                     ranges = merge_ranges(NULL)),
+                     ranges = merge_ranges(NULL), max_weights = DEFAULT_MAX_WEIGHTS),
       recipe  = list(sg_window     = DEFAULT_SG_WINDOW,
                      pca_threshold = DEFAULT_PCA_THRESHOLD),
       outcome_range = DEFAULT_OUTCOME_RANGE
@@ -3337,7 +3337,7 @@ describe("config_findings() at every verb's door", {
 
   })
 
-  it("refuses a missing outcome range, recipe settings configure() would refuse, and a tuning budget below configure()'s minimum, with the remedy (#212)", {
+  it("refuses a missing outcome range, recipe settings configure() would refuse, and a tuning budget or weight budget below configure()'s minimum, with the remedy (#212)", {
 
     refusal <- function(obj) {
       tryCatch(validate_horizons_data(obj), horizons_error_validation = function(e) e)
@@ -3367,6 +3367,21 @@ describe("config_findings() at every verb's door", {
       }
 
     }
+
+    ## The weight budget: a whole number of at least 1, or Inf for none
+    for (bad in list(0, 1.5, -Inf, NA_real_, "5", NULL, c(10, 20))) {
+
+      obj <- configured_object()
+      obj$config$tuning["max_weights"] <- list(bad)
+      expect_true(any(grepl("config$tuning$max_weights must be a whole number of at least 1, or `Inf`",
+                            finding_of(validate_horizons_data(obj)), fixed = TRUE)),
+                  label = paste("max_weights", deparse(bad)))
+
+    }
+
+    obj <- configured_object()
+    obj$config$tuning$max_weights <- Inf
+    expect_identical(validate_horizons_data(obj), obj)
 
     recipes <- list(NULL, c(9, 0.995),
                     list(pca_threshold = 0.995),

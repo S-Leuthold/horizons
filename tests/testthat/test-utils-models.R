@@ -106,14 +106,18 @@ describe("define_model_spec()", {
 
   })
 
-  it("creates mlp with MaxNWts = 10000 engine arg", {
+  it("gives mlp's engine the weight budget as its own limit, 10000 unless told otherwise", {
 
-    spec <- define_model_spec("mlp")
-    expect_equal(spec$eng_args$MaxNWts, rlang::quo(10000))
+    expect_identical(rlang::eval_tidy(define_model_spec("mlp")$eng_args$MaxNWts), 10000)
+    expect_identical(rlang::eval_tidy(define_model_spec("mlp", max_weights = 20)$eng_args$MaxNWts), 20)
+    expect_identical(rlang::eval_tidy(define_model_spec("mlp", max_weights = Inf)$eng_args$MaxNWts), Inf)
+
+    ## A model with no weights trait takes no such argument
+    expect_null(define_model_spec("rf", max_weights = 20)$eng_args$MaxNWts)
 
   })
 
-  it("builds each model's spec from its row: fn's class, the fixed, engine and thread arguments, and a tune() for each tuned one", {
+  it("builds each model's spec from its row: fn's class, the fixed, engine, thread and weight arguments, and a tune() for each tuned one", {
 
     for (model in VALID_MODELS) {
 
@@ -135,9 +139,11 @@ describe("define_model_spec()", {
         expect_identical(rlang::quo_get_expr(spec$args[[arg]]), quote(tune::tune()), label = paste(model, arg))
       }
 
-      ## The engine arguments, and the thread argument at the package's count
+      ## The engine arguments, the thread argument at the package's count,
+      ## and the weight limit at the default budget
       engine_args <- row$engine_args
       if (!is.null(row$threads$argument)) engine_args[[row$threads$argument]] <- ENGINE_THREADS
+      if (!is.null(row$weights$argument)) engine_args[[row$weights$argument]] <- DEFAULT_MAX_WEIGHTS
 
       expect_setequal(names(spec$eng_args) %||% character(0), names(engine_args) %||% character(0))
 

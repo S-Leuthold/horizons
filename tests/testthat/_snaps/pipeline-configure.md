@@ -49,11 +49,15 @@
       i Each range is `c(lower, upper)` in dials' units, e.g. `tune_ranges = list(committees = c(1, 50))`.
       
       `tune_ranges` must be a named list of ranges of parameters the configured models tune.
-      x `tune_ranges`'s num_comp must start at 1 or more, not 0: it counts the predictors or components a fit uses, at least one.
+      x `tune_ranges`'s num_comp must start at 1 or more, not 0: it counts the predictors, components or hidden units a fit uses, at least one.
       i Each range is `c(lower, upper)` in dials' units, e.g. `tune_ranges = list(committees = c(1, 50))`.
       
       `tune_ranges` must be a named list of ranges of parameters the configured models tune.
-      x `tune_ranges`'s mtry must start at 1 or more, not -1: it counts the predictors or components a fit uses, at least one.
+      x `tune_ranges`'s mtry must start at 1 or more, not -1: it counts the predictors, components or hidden units a fit uses, at least one.
+      i Each range is `c(lower, upper)` in dials' units, e.g. `tune_ranges = list(committees = c(1, 50))`.
+      
+      `tune_ranges` must be a named list of ranges of parameters the configured models tune.
+      x `tune_ranges`'s hidden_units must start at 1 or more, not 0: it counts the predictors, components or hidden units a fit uses, at least one.
       i Each range is `c(lower, upper)` in dials' units, e.g. `tune_ranges = list(committees = c(1, 50))`.
       
 

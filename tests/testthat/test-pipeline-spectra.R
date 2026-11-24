@@ -367,7 +367,7 @@ test_that("spectra() from a tibble builds the new_horizons_data() shape", {
   expect_identical(result$config$tuning,
                    list(cv_folds = 5L, grid_size = 10L, bayesian_iter = 15L,
                         final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
-                        ranges = merge_ranges(NULL)))
+                        ranges = merge_ranges(NULL), max_weights = DEFAULT_MAX_WEIGHTS))
   expect_no_error(validate_horizons_data(result))
 
 })

@@ -1431,6 +1431,66 @@ describe("fit_single_config() - the re-tune off", {
 
   })
 
+  it("clamps evaluate()'s mtry to the fewest predictors any of the member's preps keeps", {
+
+    ## Correlation selection on 22 bands, the first fold's prep cut to three
+    ## predictors while the training part's keeps more, as in
+    ## evaluate_single_config()'s tests: evaluate()'s mtry of 20 is clamped
+    ## to the three every out-of-fold fit can take
+    real_prep <- prep_fold_entry
+    training  <- NULL
+    local_mocked_bindings(prep_fold_entry = function(unit, ...) {
+      entry <- real_prep(unit, ...)
+      if (identical(unit$fold_i, 0L)) training <<- length(entry$kept)
+      if (identical(unit$fold_i, 1L)) entry$kept <- entry$kept[1:3]
+      entry
+    })
+
+    setup  <- make_fit_setup(n = 60, n_wn = 30)
+    result <- fit_single_config(
+      config_row          = make_fit_config(feature_selection = "correlation"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = make_fit_best_params(mtry = 20L),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      seed                = 42L
+    )
+
+    expect_gt(training, 3L)
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params$mtry, 3L)
+    expect_false(any(grepl("columns were requested", result$warnings, fixed = TRUE)))
+
+  })
+
+  it("clamps evaluate()'s hidden_units within the weight budget it is given, and says so", {
+
+    skip_if_not_installed("nnet")
+
+    ## Two predictors past the raw step's trim, so a budget of 20 weights
+    ## holds 4 hidden units
+    setup  <- fsc()$setup
+    result <- suppressWarnings(fit_single_config(
+      config_row          = make_fit_config(model = "mlp"),
+      split_F             = setup$split_F,
+      cv_resamples        = setup$folds,
+      role_map            = setup$role_map,
+      best_params_eval    = tibble::tibble(hidden_units = 8L, penalty = 0.01, epochs = 50L),
+      final_bayesian_iter = 0L,
+      grid_size           = 2L,
+      max_weights         = 20,
+      seed                = 42L
+    ))
+
+    expect_identical(result$status, "success")
+    expect_identical(result$best_params$hidden_units, 4L)
+    expect_true(any(grepl("The weight budget capped hidden_units at 4, below the range's 10", result$warnings,
+                          fixed = TRUE)))
+
+  })
+
 })
 
 
@@ -1689,7 +1749,7 @@ describe("fit_single_config() - a PLS member's warnings when one fit serves ever
   run_capped <- function(chosen) {
 
     local_mocked_bindings(
-      finalize_bound  = function(param_set, predictors, folds) {
+      finalize_bound  = function(param_set, ...) {
         stats::update(param_set, num_comp = dials::num_comp(c(1L, 12L)))
       },
       select_complete = function(results, metric, n_folds, debug = FALSE) {

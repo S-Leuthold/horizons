@@ -1593,7 +1593,8 @@ describe("ensemble() - CV+ coverage after a response trim (#103)", {
       )
       obj$config$n_configs     <- 2L
       obj$config$tuning        <- list(cv_folds = 3L, grid_size = 2L, bayesian_iter = 0L,
-                                       final_bayesian_iter = 0L, ranges = merge_ranges(NULL))
+                                       final_bayesian_iter = 0L, ranges = merge_ranges(NULL),
+                                       max_weights = DEFAULT_MAX_WEIGHTS)
       obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,
                                        pca_threshold = DEFAULT_PCA_THRESHOLD)
       obj$config$outcome_range <- c(-Inf, Inf)

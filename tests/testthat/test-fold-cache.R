@@ -106,9 +106,24 @@ describe("assemble_folds()", {
 
     for (selection in c("none", "pca", "correlation")) {
 
-      expect_folds_baked_whole(prep_fold_case(selection), selection)
+      case <- prep_fold_case(selection)
+      expect_folds_baked_whole(case, selection)
+
+      ## Each fold's predictor count, which bounds the tuning parameters:
+      ## the predictors its prep kept, or with no selection every
+      ## transformed predictor
+      kept <- if (selection == "none") rep(list(case$inputs$predictors), nrow(case$folds)) else lapply(case$entries, `[[`, "kept")
+      expect_identical(case$prepped$n_predictors, lengths(kept), label = selection)
+      expect_identical(case$prepped$n_predictors,
+                       vapply(case$prepped$folds$splits, function(s) ncol(s$data) - 1L, integer(1)),
+                       label = selection)
 
     }
+
+    ## The correlation selection keeps fewer than every band in some fold,
+    ## so its counts are the folds' own, not the transformed rows'
+    corr <- prep_fold_case("correlation")
+    expect_true(any(corr$prepped$n_predictors < length(corr$inputs$predictors)))
 
     ## Under a transformed response too: the analysis rows' outcome
     ## transformed, the assessment rows' as measured
@@ -710,7 +725,7 @@ describe("read_fold_entry()", {
 
 describe("finalize_bound()", {
 
-  it("bounds mtry and num_comp from the predictors' names alone, as from the baked frame", {
+  it("bounds mtry and num_comp from the fewest predictors any prep keeps, as from that prep's baked frame", {
 
     ## N20: dials::finalize() reads only the frame's width for both
     case    <- prep_fold_case("correlation")
@@ -728,7 +743,11 @@ describe("finalize_bound()", {
       from_frame <- cap_by_data(dials::finalize(pset, baked[, kept, drop = FALSE]), length(kept),
                                 min_analysis_rows(case$folds))
 
-      expect_identical(finalize_bound(pset, kept, case$folds), from_frame, label = model)
+      ## The same count on every prep gives the set the one prep's frame
+      ## gives, and so does that count as the fewest of several
+      expect_identical(finalize_bound(pset, rep(length(kept), 4L), case$folds), from_frame, label = model)
+      expect_identical(finalize_bound(pset, c(length(kept) + 5L, length(kept), length(kept) + 2L), case$folds),
+                       from_frame, label = model)
 
     }
 
@@ -783,11 +802,93 @@ describe("cap_by_data()", {
 
   })
 
+  it("caps mtry and num_comp at the fewest predictors of the preps given", {
+
+    rf <- workflows::workflow() |>
+      workflows::add_formula(y ~ .) |>
+      workflows::add_model(define_model_spec("rf")) |>
+      workflows::extract_parameter_set_dials() |>
+      apply_tune_ranges(list(mtry = c(1, 200)))
+
+    expect_equal(range_of(cap_by_data(rf, c(500L, 150L, 300L), 40L), "mtry"), c(1, 150))
+    expect_equal(range_of(cap_by_data(pls_params(), c(500L, 12L, 40L), 200L), "num_comp"), c(1, 12))
+
+  })
+
   it("fails a range the data cannot hold at all, naming the range and the cap", {
 
     expect_error(cap_by_data(pls_params(list(num_comp = c(20, 30))), 12L, 200L),
-                 "num_comp.* range 20 to 30 holds no value the data can fit: at most 12, for 12 predictors",
+                 "num_comp.* range 20 to 30 holds no value the data can fit: at most 12, for 12 predictors, the fewest a fold or the whole training part keeps",
                  class = "horizons_error_run")
+
+  })
+
+  ## mlp's parameter set, its hidden_units 1 to 10 unless a range is given
+  mlp_params <- function(ranges = TUNE_RANGES) {
+    workflows::workflow() |>
+      workflows::add_formula(y ~ .) |>
+      workflows::add_model(define_model_spec("mlp")) |>
+      workflows::extract_parameter_set_dials() |>
+      apply_tune_ranges(ranges)
+  }
+
+  it("caps hidden_units at the most units within the weight budget on the most predictors of the preps given", {
+
+    ## 5 units on 1,691 predictors is 8,466 weights and 6 is 10,159
+    expect_equal(range_of(cap_by_data(mlp_params(), c(250L, 1691L), 700L), "hidden_units"), c(1, 5))
+    expect_equal(range_of(cap_by_data(mlp_params(), c(250L, 1691L), 700L, max_weights = 20000), "hidden_units"),
+                 c(1, 10))
+
+    ## A budget the network fits under leaves the range, and Inf sets none
+    expect_equal(range_of(cap_by_data(mlp_params(), c(250L, 240L), 700L), "hidden_units"), c(1, 10))
+    expect_equal(range_of(cap_by_data(mlp_params(), 1e6L, 700L, max_weights = Inf), "hidden_units"), c(1, 10))
+
+    ## A range given narrows to the budget, keeping its lower bound
+    expect_equal(range_of(cap_by_data(mlp_params(list(hidden_units = c(2, 20))), 1691L, 700L), "hidden_units"),
+                 c(2, 5))
+
+  })
+
+  it("notes the budget's cap where it narrows the range, and only there", {
+
+    expect_condition(cap_by_data(mlp_params(), c(250L, 1691L), 700L),
+                     "The weight budget capped hidden_units at 5, below the range's 10: a network of more units on 1691 predictors holds more than 10000 weights",
+                     class = "horizons_note")
+    expect_no_condition(cap_by_data(mlp_params(), c(250L, 240L), 700L), class = "horizons_note")
+    expect_no_condition(cap_by_data(mlp_params(), 1691L, 700L, max_weights = Inf), class = "horizons_note")
+
+  })
+
+  it("fails a hidden_units range the budget cannot hold, naming the budget and how to raise it", {
+
+    err <- expect_error(cap_by_data(mlp_params(list(hidden_units = c(6, 10))), 1691L, 700L),
+                        "hidden_units.* range 6 to 10 holds no network within the weight budget: at most 5 units, for 10000 weights on 1691 predictors",
+                        class = "horizons_error_run")
+    expect_match(conditionMessage(err), "configure(max_weights = )", fixed = TRUE)
+
+  })
+
+  it("counts a network's weights as nnet does", {
+
+    skip_if_not_installed("nnet")
+
+    ## nnet's own count for one hidden layer and a linear output, as
+    ## parsnip's mlp() fits it: the largest budget a network of h units
+    ## takes is that count, and one fewer weight holds h - 1
+    set.seed(1)
+    x <- matrix(stats::rnorm(40 * 7), 40, 7)
+    y <- stats::rnorm(40)
+
+    for (h in c(1L, 3L, 6L)) {
+
+      n_wts <- length(nnet::nnet(x, y, size = h, linout = TRUE, trace = FALSE, maxit = 1)$wts)
+
+      expect_identical(max_hidden_units(n_wts, 7L), as.double(h), label = h)
+      expect_identical(max_hidden_units(n_wts - 1, 7L), as.double(h - 1L), label = h)
+
+    }
+
+    expect_identical(max_hidden_units(Inf, 1691L), Inf)
 
   })
 
