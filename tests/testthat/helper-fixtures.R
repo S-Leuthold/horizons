@@ -3,6 +3,45 @@
 
 
 ## ---------------------------------------------------------------------------
+## Synthetic spectra with an outcome every preprocessing keeps
+## ---------------------------------------------------------------------------
+
+#' `n` synthetic spectra of `n_wn` bands and an outcome they carry, for any
+#' fixture whose rows go through a configuration's recipe. Each spectrum is
+#' one baseline shape shared by every row (half a cosine across the bands), a
+#' peak whose height varies by row, and small noise; the outcome is the
+#' peak's height rescaled, plus measurement noise drawn uniformly within
+#' `outcome_noise` of it.
+#'
+#' The peak's apex is the band just past the middle and its flank the one
+#' before it, so both sit in the bands the default window keeps
+#' (transform_spectra_matrix() trims (window - 1) / 2 bands at each edge,
+#' leaving the middle two of ten): the raw and smoothed bands read the
+#' height, the first derivative the flank's slope, the second the apex's
+#' curvature. The baseline gives SNV a shape to scale each spectrum against,
+#' so the height survives its division. The outcome lies between
+#' 1 - outcome_noise and 3 + outcome_noise by construction, inside the
+#' default outcome_range, as a soil property does. Draws from the session's
+#' random stream, so the caller seeds it. Returns `spectra`, a matrix named on
+#' the fixtures' wavenumber axis, and `outcome`.
+make_signal_spectra <- function(n, n_wn = 10, outcome_noise = 0.4) {
+
+  band     <- seq_len(n_wn)
+  baseline <- cos(pi * (band - 1) / max(n_wn - 1, 1))
+  peak     <- exp(-(band - (n_wn %/% 2 + 1))^2 / 2)
+  height   <- stats::runif(n)
+
+  spectra <- outer(rep(1, n), baseline) + outer(height, peak) +
+    matrix(stats::rnorm(n * n_wn, sd = 0.03), nrow = n)
+  colnames(spectra) <- paste0("wn_", seq(4000, by = -2, length.out = n_wn))
+
+  list(spectra = spectra,
+       outcome = 1 + 2 * height + stats::runif(n, -outcome_noise, outcome_noise))
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## Evaluate Test Object
 ## ---------------------------------------------------------------------------
 
