@@ -2638,6 +2638,46 @@ test_that("a PLS space records, prints and warns, whatever verbose is, that it s
 })
 
 
+test_that("a PLS space warns only where it chooses the rows: every drawing scope, and not global, which keeps every row", {
+
+  fx  <- select_fixture(n_pool = 100)
+  pls <- function(scope, verbose = FALSE) {
+    select_training(fx$targets, fx$pool, k = 10, properties = "clay", space = "pls", ncomp = 3L,
+                    scope = scope, cluster_min = 2, seed = 307,
+                    control = control_horizons(verbose = verbose))
+  }
+
+  for (scope in c("batch", "cluster", "sample")) {
+
+    suppressWarnings(expect_warning(out <- pls(scope), "by their own measured clay",
+                                    fixed = TRUE, class = "horizons_warning_input"))
+    expect_match(out$selection$settings$space_note, "optimistic", fixed = TRUE)
+
+  }
+
+  ## Under global the space reaches the twin report and the target distances,
+  ## never the rows: the set is a PCA space's, row for row, so there is no
+  ## input warning, no note on the record, and none in the tree
+  input <- list()
+  txt   <- utils::capture.output(
+    global <- withCallingHandlers(pls("global", verbose = TRUE), warning = function(w) {
+      if (inherits(w, "horizons_warning_input")) input[[length(input) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    })
+  )
+
+  expect_length(input, 0L)
+  expect_null(global$selection$settings$space_note)
+  expect_false(any(grepl("optimistic", txt, fixed = TRUE)))
+  expect_false(any(grepl("own measured", global$log$message, fixed = TRUE)))
+
+  pca <- suppressWarnings(quiet_select(fx, k = 10, properties = "clay", scope = "global", seed = 307))
+  expect_identical(global$data$analysis$sample_id, pca$data$analysis$sample_id)
+  expect_identical(global$selection$settings$space, "pls")
+
+})
+
+
 test_that("a drawn set says once, in its tree and on its log, that a model evaluated on it is scored on library rows, not the targets", {
 
   fx   <- select_fixture(n_pool = 60)

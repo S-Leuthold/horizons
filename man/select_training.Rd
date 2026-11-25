@@ -169,7 +169,8 @@ column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range},
 pool's, with this call's rows after it: one per warning topic, each
 raised once at the end of the call (\code{horizons_warning_input} for pool
 and targets in different photometric units, and for a PLS space, which
-chose the rows by their own measured values; \code{flagged} for targets an
+chose the rows by their own measured values (not under
+\code{scope = "global"}, which keeps every row); \code{flagged} for targets an
 earlier step flagged, which get no training set; \code{coverage} for target
 columns the library lacks, a search on the overlap and draws short of
 \code{k}; \code{skipped} for a property left out under \code{properties = NULL} (no

@@ -358,7 +358,8 @@
 #'   pool's, with this call's rows after it: one per warning topic, each
 #'   raised once at the end of the call (`horizons_warning_input` for pool
 #'   and targets in different photometric units, and for a PLS space, which
-#'   chose the rows by their own measured values; `flagged` for targets an
+#'   chose the rows by their own measured values (not under
+#'   `scope = "global"`, which keeps every row); `flagged` for targets an
 #'   earlier step flagged, which get no training set; `coverage` for target
 #'   columns the library lacks, a search on the overlap and draws short of
 #'   `k`; `skipped` for a property left out under `properties = NULL` (no
@@ -1341,20 +1342,22 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   window_cm <- if (derivative > 0) (window_points - 1L) * search_res else NA_real_
 
-  ## A PLS space is fit against the pool's own responses, so which rows land
-  ## in the training set was decided by their y. No target leakage, but the
-  ## pool-internal CV downstream is optimistic: a legal request risky enough
-  ## to say so, whatever verbose is, as well as on the record.
+  ## A PLS space is fit against the pool's own responses, so under a drawing
+  ## scope which rows land in the training set was decided by their y. No
+  ## target leakage, but the pool-internal CV downstream is optimistic: a
+  ## legal request risky enough to say so, whatever verbose is, as well as on
+  ## the record. Under global the space chooses no row, since every eligible
+  ## row is kept (Step 5), so there is nothing to say: it reaches only the
+  ## twin report, which global records and does not apply, and the target
+  ## distances.
 
-  space_note <- if (space == "pls") {
-    paste0("The similarity space is PLS against ", properties,
-           ", so rows were selected using their own measured values; ",
-           "pool-internal CV is optimistic and the honest score is against the targets")
-  } else {
-    NULL
-  }
+  space_note <- NULL
 
-  if (space == "pls") {
+  if (space == "pls" && scope != "global") {
+
+    space_note <- paste0("The similarity space is PLS against ", properties,
+                         ", so rows were selected using their own measured values; ",
+                         "pool-internal CV is optimistic and the honest score is against the targets")
 
     log_warning(collector, "input", c(
       "The similarity space is PLS against {.field {properties}}, so the draw chose the training set's rows by their own measured {properties}.",
