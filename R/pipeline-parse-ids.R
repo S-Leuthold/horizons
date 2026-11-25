@@ -62,6 +62,9 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   `"{project}_{sampleid}_{fraction}"`. Mutually exclusive with `patterns`.
 #' @param patterns Named character vector. Regex patterns where names become
 #'   columns and unnamed elements are separators. Mutually exclusive with `format`.
+#'   A pattern may hold groups of its own, capturing or not
+#'   (`sampleid = "S\\d+(-\\d+)?"`): a named pattern's column is the whole
+#'   text it matched.
 #' @param too_few Character. How to handle non-matching filenames:
 #'   * `"keep_original"` (default): Keep original filename as `sample_id`,
 #'     with one `horizons_warning_substitution` naming the files.
@@ -620,12 +623,19 @@ format_to_patterns <- function(format) {
 #' Apply patterns to extract values from filenames
 #'
 #' @description
-#' Builds a full regex from patterns vector and extracts named groups.
+#' Builds one anchored regex from the patterns and reads each named
+#' pattern's text by its group's name. Each named pattern is wrapped as a
+#' PCRE named group of a name of its own (`horizons_tok_<i>`, which no token
+#' name limits), and each unnamed one as a non-capturing group, so a group a
+#' pattern holds, capturing or not, is never read: a named pattern's column
+#' is the whole text it matched.
 #'
 #' @param filenames Character vector of filenames to parse.
 #' @param patterns Named character vector of patterns.
 #'
-#' @return A tibble with one column per named pattern plus `.matched` indicator.
+#' @return A tibble with one column per named pattern plus `.matched`, the
+#'   filename where the regex matched it and `NA` where it did not; a named
+#'   column is `NA` exactly where `.matched` is.
 #'
 #' @noRd
 apply_patterns <- function(filenames, patterns) {
@@ -634,102 +644,42 @@ apply_patterns <- function(filenames, patterns) {
   ## Step 1: Build full regex
   ## -------------------------------------------------------------------------
 
-  ## Get named patterns (capturing groups) -----------------------------------
+  pattern_names <- names(patterns) %||% rep("", length(patterns))
+  named_idx     <- which(pattern_names != "")
+  group_names   <- paste0("horizons_tok_", seq_along(patterns))
 
-  pattern_names <- names(patterns)
-
-  if (is.null(pattern_names)) {
-
-    pattern_names <- rep("", length(patterns))
-
-  }
-
-  named_idx <- which(pattern_names != "")
-
-  ## Build regex with named groups -------------------------------------------
-
-  regex_parts <- character(length(patterns))
-
-  for (i in seq_along(patterns)) {
-
-    if (pattern_names[i] != "") {
-
-      ## Named pattern: ensure capturing group ------------------------------
-
-      ## If pattern doesn't start with (, wrap it in parentheses
-
-      pat <- patterns[i]
-
-      if (!grepl("^\\(", pat)) {
-
-        pat <- paste0("(", pat, ")")
-
-      }
-
-      regex_parts[i] <- pat
-
-    } else {
-
-      ## Unnamed pattern: use non-capturing group ---------------------------
-
-      regex_parts[i] <- paste0("(?:", patterns[i], ")")
-
-    }
-
-  }
+  regex_parts <- ifelse(pattern_names != "",
+                        paste0("(?<", group_names, ">", patterns, ")"),
+                        paste0("(?:", patterns, ")"))
 
   full_regex <- paste0("^", paste(regex_parts, collapse = ""), "$")
 
   ## -------------------------------------------------------------------------
   ## Step 2: Apply regex to filenames
   ## -------------------------------------------------------------------------
+  ## An empty filename, which only an empty match could match, is not one.
 
-  matches <- regmatches(filenames, regexec(full_regex, filenames, perl = TRUE))
+  match   <- regexpr(full_regex, filenames, perl = TRUE)
+  matched <- !is.na(match) & attr(match, "match.length") > 0
 
   ## -------------------------------------------------------------------------
-  ## Step 3: Extract values into tibble
+  ## Step 3: Each named pattern's text, by its group's name
   ## -------------------------------------------------------------------------
 
-  ## Initialize result tibble ------------------------------------------------
+  result <- tibble::tibble(.matched = ifelse(matched, filenames, NA_character_))
 
-  result <- tibble::tibble(.matched = rep(NA_character_, length(filenames)))
+  starts  <- attr(match, "capture.start")
+  lengths <- attr(match, "capture.length")
 
-  ## Add column for each named pattern ---------------------------------------
+  for (i in named_idx) {
 
-  for (name in pattern_names[named_idx]) {
+    group <- group_names[i]
+    first <- starts[matched, group]
 
-    result[[name]] <- NA_character_
+    value          <- rep(NA_character_, length(filenames))
+    value[matched] <- substring(filenames[matched], first, first + lengths[matched, group] - 1L)
 
-  }
-
-  ## Fill in values from matches ---------------------------------------------
-
-  for (i in seq_along(matches)) {
-
-    match_result <- matches[[i]]
-
-    if (length(match_result) > 0 && match_result[1] != "") {
-
-      ## Match succeeded -----------------------------------------------------
-
-      result$.matched[i] <- match_result[1]
-
-      ## Extract captured groups (skip full match at position 1) -------------
-
-      captured <- match_result[-1]
-
-      if (length(captured) == length(named_idx)) {
-
-        for (j in seq_along(named_idx)) {
-
-          col_name <- pattern_names[named_idx[j]]
-          result[[col_name]][i] <- captured[j]
-
-        }
-
-      }
-
-    }
+    result[[pattern_names[i]]] <- value
 
   }
 

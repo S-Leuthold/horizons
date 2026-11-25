@@ -284,6 +284,56 @@ test_that("parse_ids() patterns mode ignores unnamed patterns", {
 })
 
 
+test_that("a named pattern may hold groups of its own: its column is the whole text it matched", {
+
+  hd <- make_test_hd(c("S1-2_x", "S3_x", "T4-1_y"))
+
+  ## An optional replicate suffix, an ordinary capturing group ----------------
+
+  expect_warning(
+    result <- parse_ids(hd, patterns = c(sampleid = "S\\d+(-\\d+)?", "_", tag = "x"), verbose = FALSE),
+    class = "horizons_warning_substitution"
+  )
+
+  expect_identical(result$data$analysis$sample_id, c("S1-2", "S3", "T4-1_y"))
+  expect_identical(result$data$analysis$tag, c("x", "x", NA))
+
+  ### The count is the rows that parsed, which the columns show
+  expect_match(result$log$message[nrow(result$log)], "2 of 3 filenames matched", fixed = TRUE)
+
+  ## A pattern that starts with a group, holds two, or opens non-capturing ----
+
+  cases <- list(
+    c(sampleid = "(S|T)(\\d+)-\\d+", "_", tag = "[a-z]"),
+    c(sampleid = "(S|T)\\d+(-\\d+)?", "_", tag = "[a-z]"),
+    c(sampleid = "(?:S|T)\\d+(?:-\\d+)?", "_", tag = "[a-z]"),
+    c(sampleid = "[ST]\\d+(-\\d+)?", "(_)", tag = "([a-z])")
+  )
+
+  for (patterns in cases) {
+
+    ### One of them needs the suffix, which S3_x lacks
+    result <- parse_ids(hd, patterns = patterns, too_few = "na", verbose = FALSE)
+
+    expect_identical(result$data$analysis$sample_id[c(1, 3)], c("S1-2", "T4-1"), info = patterns[[1]])
+    expect_identical(result$data$analysis$tag[c(1, 3)], c("x", "y"), info = patterns[[1]])
+
+  }
+
+  ## A name outside ASCII is cut where it matched ------------------------------
+
+  hd <- make_test_hd(c("B\u00f6den_S1_x", "B\u00f6den_S2_y"))
+
+  result <- parse_ids(hd, patterns = c(site = "[^_]+", "_", sampleid = "S(\\d)", "_", tag = "."),
+                      verbose = FALSE)
+
+  expect_identical(result$data$analysis$site, rep("B\u00f6den", 2))
+  expect_identical(result$data$analysis$sample_id, c("S1", "S2"))
+  expect_identical(result$data$analysis$tag, c("x", "y"))
+
+})
+
+
 ## ---------------------------------------------------------------------------
 ## parse_ids() — Provenance tracking
 ## ---------------------------------------------------------------------------

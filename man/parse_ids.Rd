@@ -19,7 +19,10 @@ parse_ids(
 \code{"{project}_{sampleid}_{fraction}"}. Mutually exclusive with \code{patterns}.}
 
 \item{patterns}{Named character vector. Regex patterns where names become
-columns and unnamed elements are separators. Mutually exclusive with \code{format}.}
+columns and unnamed elements are separators. Mutually exclusive with \code{format}.
+A pattern may hold groups of its own, capturing or not
+(\code{sampleid = "S\\\\d+(-\\\\d+)?"}): a named pattern's column is the whole
+text it matched.}
 
 \item{too_few}{Character. How to handle non-matching filenames:
 \itemize{
