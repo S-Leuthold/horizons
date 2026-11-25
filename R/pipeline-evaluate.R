@@ -1063,7 +1063,8 @@ evaluate <- function(x,
   ## is scoring, with the data fields and the tuning settings. The monitor
   ## gates checkpoint rows against them, as evaluate() does, and re-reads the
   ## manifest on every poll, so it is written atomically. Each
-  ## configuration's expected cost weights the monitor's ETA.
+  ## configuration's expected cost weights the monitor's ETA, and the ids
+  ## this run sets out to evaluate keep the ones it resumed out of its rate.
 
   if (!is.null(output_dir)) {
 
@@ -1071,6 +1072,7 @@ evaluate <- function(x,
       schema_version               = EVAL_MANIFEST_SCHEMA,
       n_total                      = n_total,
       n_pending                    = n_pending,
+      pending_ids                  = pending_ids,
       config_ids                   = configs$config_id,
       config_cost                  = config_costs(configs, n_train),
       start_time                   = start_time,

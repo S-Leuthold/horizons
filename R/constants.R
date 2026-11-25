@@ -717,9 +717,12 @@ SCORING_SCHEMA <- 11L
 # its fields,
 # and the tuning settings. Schema 5 adds `config_cost`, each configuration's
 # expected cost (config_costs()) in `config_ids`' order, which weights the
-# monitor's ETA. Bump it when a field the monitor reads changes; the
-# monitor refuses a manifest of any other schema.
-EVAL_MANIFEST_SCHEMA <- 5L
+# monitor's ETA. Schema 6 adds `pending_ids`, the configurations the run set
+# out to evaluate (those it did not resume from checkpoints), so the
+# monitor's rate and ETA count this run's work alone. Bump it when a field
+# the monitor reads changes; the monitor refuses a manifest of any other
+# schema.
+EVAL_MANIFEST_SCHEMA <- 6L
 
 # evaluate()'s smallest cross-validation assessment fold, in rows, below which
 # it warns (quality) that the cross-validated metrics rest on few rows. A
