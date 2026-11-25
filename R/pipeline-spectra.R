@@ -250,10 +250,6 @@ spectra <- function(source,
   ## duplicate sample_id here (Bruker's own naming does this: "S100-1.0" and
   ## "S100-1.1" both become "S100-1" once the extension is stripped) passes.
 
-  ## No source column takes a name horizons reserves, such as `.flag`.
-  check_reserved_columns(names(result$data$analysis),
-                         remedy = "Rename the column before reading it with {.fn spectra}.")
-
   sorted_result <- sort_axis_decreasing(result)
   result        <- validate_horizons_data(sorted_result$x, stage = "raw")
 
@@ -1000,6 +996,7 @@ source_kind <- function(file) if (is.null(file)) "input" else "run"
 #' The one check both table loaders (a data frame, a CSV file) use for the
 #' user's `id_col` and `wavelength_cols`: the columns named must exist, no
 #' column but the id may be named `sample_id` (the name the id column takes),
+#' none may take a name horizons reserves ([check_reserved_columns()]),
 #' the wavelength columns must be named by wavenumber (#121), and they must
 #' hold numbers. Either is detected when not
 #' given ([detect_id_column()], [detect_wavelength_columns()]). Each
@@ -1054,6 +1051,13 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
     ), kind = source_kind(file), call = call)
 
   }
+
+  ## No column takes a name horizons reserves, such as `.flag` ----------------
+
+  check_reserved_columns(names(data),
+                         remedy = "Rename the column before reading it with {.fn spectra}.",
+                         kind   = source_kind(file),
+                         call   = call)
 
   ## The wavelength columns ---------------------------------------------------
 

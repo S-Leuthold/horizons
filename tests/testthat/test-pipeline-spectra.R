@@ -379,6 +379,32 @@ test_that("spectra() refuses a source column named .flag, which the steps reserv
 
 })
 
+test_that("a CSV file holding a .flag column fails as that file, and the rest are returned", {
+
+  dir <- withr::local_tempdir()
+  readr::write_csv(tibble::tibble(sample_id = "A", `4000` = 0.1, `3998` = 0.2), file.path(dir, "ok.csv"))
+  readr::write_csv(tibble::tibble(sample_id = "B", .flag = "mine", `4000` = 0.3, `3998` = 0.4),
+                   file.path(dir, "flag.csv"))
+
+  ## Of several, it is dropped by name, with the cause and the remedy
+  w <- expect_warning(out <- spectra(dir, verbose = FALSE), "1 of 2 CSV files could not be read",
+                      fixed = TRUE, class = "horizons_warning_partial_failure")
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_identical(out$data$analysis$sample_id, "A")
+  expect_match(msg, "Column check failed: The source has a column named .flag", fixed = TRUE)
+  expect_match(msg, "Rename the column before reading it with `spectra()`.", fixed = TRUE)
+  expect_identical(out$log$ids[out$log$topic %in% "partial_failure"][[1]], file.path(dir, "flag.csv"))
+
+  ## Alone, it is the read's failure, a run error naming the file's step
+  err <- expect_error(spectra(file.path(dir, "flag.csv"), verbose = FALSE),
+                      class = "horizons_error_read_failed")
+  expect_true(inherits(err, "horizons_error_run"))
+  expect_identical(err$results$step, "file_columns")
+  expect_identical(err$results$class, "horizons_error_run")
+
+})
+
 test_that("spectra() from a tibble builds the new_horizons_data() shape", {
 
   ## Arrange ---------------------------------------------------------------
