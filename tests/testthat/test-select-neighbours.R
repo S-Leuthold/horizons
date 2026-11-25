@@ -346,6 +346,19 @@ test_that("the twin rule does not flag an NA distance", {
 })
 
 
+test_that("twin_reference() has no width of its own: it takes the one the draw gives it", {
+
+  d <- rbind(a = seq(0.1, 2, length.out = 20))
+
+  ## No default to fall back on, so it cannot be taken over a width the draw
+  ## never uses
+  expect_error(twin_reference(d), "k_ref")
+
+  expect_equal(twin_reference(d, k_ref = 8L), c(a = unname(stats::quantile(d[1, 1:8], 0.75))))
+
+})
+
+
 ## =============================================================================
 ## is_exact_copy()
 ## =============================================================================

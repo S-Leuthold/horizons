@@ -211,14 +211,14 @@ collect_released <- function(bytes, at = SELECT_COLLECT_BYTES) {
 #'
 #' @param d [Matrix.] Distances, targets by neighbours, increasing along the
 #'   row.
-#' @param k_ref [Integer or NULL.] Columns to take the percentile over.
-#'   `NULL` uses every column.
+#' @param k_ref [Integer.] Columns to take the percentile over, the draw's
+#'   `twin_reference_width()`; capped at the columns `d` has.
 #'
 #' @return [Numeric.] One reference distance per target row.
 #' @noRd
-twin_reference <- function(d, k_ref = NULL) {
+twin_reference <- function(d, k_ref) {
 
-  n_ref <- if (is.null(k_ref)) ncol(d) else min(as.integer(k_ref), ncol(d))
+  n_ref <- min(as.integer(k_ref), ncol(d))
 
   apply(d[, seq_len(n_ref), drop = FALSE], 1,
         function(z) unname(stats::quantile(z, 0.75, na.rm = TRUE)))
