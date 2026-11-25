@@ -22,7 +22,13 @@
 #' **Join behavior:**
 #'
 #' Left-join semantics matching `dplyr::left_join()` conventions. Strict exact
-#' matching - no case-folding or fuzzy matching. When no sample matches, the
+#' matching - no case-folding or fuzzy matching, and no key converted to
+#' another type: keys that `dplyr::left_join()` cannot join without
+#' converting one are refused at the door, naming both types. An integer key
+#' joins a double one and a
+#' factor joins text; text does not join a number, so a source whose lab ids
+#' `readr::read_csv()` read as numbers is refused against `sample_id`, which
+#' is text (read the key as text instead). When no sample matches, the
 #' join is refused; when fewer than half match, it runs and warns
 #' (`horizons_warning_coverage`, naming the unmatched samples on the
 #' object's log); when half or more match, the unmatched samples are named
@@ -286,6 +292,40 @@ add_response <- function(x,
     abort_horizons(c(
       "The join column {.field {by_source}} is not in the source data.",
       "i" = "Available: {.field {names(source)}}."
+    ), kind = "input")
+
+  }
+
+  ## 1.7b The two keys join without a conversion ------------------------------
+  ## The join's own rule, checked on the keys alone, with no rows: dplyr joins
+  ## an integer key to a double one and a factor to text, but not text to a
+  ## number. Converting one here would not be exact (as.character(1e5) is
+  ## "1e+05"), and %in% below would convert silently, so it is refused.
+
+  horizons_key <- x$data$analysis[[by_horizons]]
+  source_key   <- source[[by_source]]
+
+  key_types_join <- rlang::try_fetch(
+    {
+      dplyr::left_join(tibble::tibble(key = horizons_key[0]),
+                       tibble::tibble(key = source_key[0]), by = "key")
+      TRUE
+    },
+    dplyr_error_join_incompatible_type = function(e) FALSE
+  )
+
+  if (!key_types_join) {
+
+    remedy <- if (is.character(horizons_key)) {
+      "Read the source's {.field {by_source}} as text, as {.code readr::read_csv(file, col_types = readr::cols({by_source} = \"c\"))} does, so each key is kept as written."
+    } else {
+      "Give {.field {by_source}} in the source the type {.field {by_horizons}} has in the horizons data before joining."
+    }
+
+    abort_horizons(c(
+      "The join keys hold different types, so no key can match exactly.",
+      "x" = "{.field {by_horizons}} is {.obj_type_friendly {horizons_key}} in the horizons data and {.field {by_source}} is {.obj_type_friendly {source_key}} in the source.",
+      "i" = remedy
     ), kind = "input")
 
   }

@@ -63,7 +63,13 @@ the tibble.
 \strong{Join behavior:}
 
 Left-join semantics matching \code{dplyr::left_join()} conventions. Strict exact
-matching - no case-folding or fuzzy matching. When no sample matches, the
+matching - no case-folding or fuzzy matching, and no key converted to
+another type: keys that \code{dplyr::left_join()} cannot join without
+converting one are refused at the door, naming both types. An integer key
+joins a double one and a
+factor joins text; text does not join a number, so a source whose lab ids
+\code{readr::read_csv()} read as numbers is refused against \code{sample_id}, which
+is text (read the key as text instead). When no sample matches, the
 join is refused; when fewer than half match, it runs and warns
 (\code{horizons_warning_coverage}, naming the unmatched samples on the
 object's log); when half or more match, the unmatched samples are named
