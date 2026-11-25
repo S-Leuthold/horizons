@@ -239,8 +239,8 @@
 #'   `add_response()`.
 #' @param outcome `character(1) or NULL`. Which response variable to model.
 #'   Auto-selects if exactly one response exists.
-#' @param models `character`. Model algorithms to benchmark, at least one. Default
-#'   `c("rf", "cubist", "plsr")`. See `VALID_MODELS` for options.
+#' @param models `character`. Model algorithms to benchmark, at least one.
+#'   Default `c("rf", "cubist", "plsr")`. See `VALID_MODELS` for options.
 #' @param transformations `character`. Response transformations to test,
 #'   at least one. Default `"none"`.
 #' @param preprocessing `character`. Per-config spectral preprocessing methods,

@@ -30,8 +30,8 @@ configure(
 \item{outcome}{\verb{character(1) or NULL}. Which response variable to model.
 Auto-selects if exactly one response exists.}
 
-\item{models}{\code{character}. Model algorithms to benchmark, at least one. Default
-\code{c("rf", "cubist", "plsr")}. See \code{VALID_MODELS} for options.}
+\item{models}{\code{character}. Model algorithms to benchmark, at least one.
+Default \code{c("rf", "cubist", "plsr")}. See \code{VALID_MODELS} for options.}
 
 \item{transformations}{\code{character}. Response transformations to test,
 at least one. Default \code{"none"}.}

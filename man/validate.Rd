@@ -84,8 +84,9 @@ no step flagged (\code{.flag}). The fold checks read the training part
 apply: P001b is an ERROR when it has no more rows than CV folds, which
 \code{evaluate()} and \code{fit()} refuse, and P002 a WARNING when an even split of
 it into folds leaves fewer than 10 rows in a fold, as the verbs warn. A
-response trim requested here removes training rows after the split, so a
-training part P001b passes can still be refused once it is trimmed.
+training part P001b passes can still be refused once rows leave it after
+the split: a response trim requested here, and \code{fit()}'s calibration set
+when UQ or AD is on.
 
 \strong{Severity levels:}
 \itemize{
@@ -112,25 +113,25 @@ fences on the outcome variable, over the unflagged rows too.
 \strong{Response outliers are trimmed from the training partition, not here:}
 
 Spectral outliers are removed here, since the detector reads no labels.
-They leave before any split, so the test set \code{evaluate()} later draws
-comes from the screened rows; the tree and a note on the object's log say
-how many were removed. Response outliers are not removed here. Fences computed over the whole table would
-include the rows \code{evaluate()} later holds out as its test set, and
-removing the rows outside them before any split exists takes exactly the
-hardest cases out of the test set, chosen by their own labels, so the test
-metrics come out optimistic (#77). So \code{validate()} flags the rows outside
-the whole-table fences for information (\code{response_ids}, check P006) and,
-when \code{remove_outliers} asks for response removal, records the request in
-\code{validation$outliers$response_trim}. \code{evaluate()} then draws its
-train/test split on the untrimmed rows, computes the fences from the
-training partition's labels alone, and trims the training rows outside
-them before any CV fold is drawn; test rows are never removed on their
-labels. \code{fit()} reuses that split and those trimmed rows, and its cold
-start applies the same rule. On an object already evaluated, a request
-that differs from the trim \code{evaluate()} applied makes \code{fit()} refuse until
-\code{evaluate()} runs again. A later \code{configure()} clears the request
-with the rest of the verdict, since it was made for the outcome being
-replaced.
+They leave before any split, so the test set \code{evaluate()} later draws comes
+from the screened rows; the tree and a note on the object's log say how
+many were removed. Response outliers are not removed here. Fences computed
+over the whole table would include the rows \code{evaluate()} later holds out as
+its test set, and removing the rows outside them before any split exists
+takes exactly the hardest cases out of the test set, chosen by their own
+labels, so the test metrics come out optimistic (#77). So \code{validate()}
+flags the rows outside the whole-table fences for information
+(\code{response_ids}, check P006) and, when \code{remove_outliers} asks for response
+removal, records the request in \code{validation$outliers$response_trim}.
+\code{evaluate()} then draws its train/test split on the untrimmed rows,
+computes the fences from the training partition's labels alone, and trims
+the training rows outside them before any CV fold is drawn; test rows are
+never removed on their labels. \code{fit()} reuses that split and those trimmed
+rows, and its cold start applies the same rule. On an object already
+evaluated, a request that differs from the trim \code{evaluate()} applied makes
+\code{fit()} refuse until \code{evaluate()} runs again. A later \code{configure()} clears
+the request with the rest of the verdict, since it was made for the outcome
+being replaced.
 
 \strong{Checks that cannot run:}
 

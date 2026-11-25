@@ -415,11 +415,15 @@ describe("validate()'s sample-size checks and evaluate()'s fold rule", {
       evaluate_single_config = function(...) stop("a configuration ran")
     )
 
+    ### Only the fold rule's refusal counts; any other is an error here
+    fold_rule <- "cross-validation needs more training rows than folds"
+
     refused <- tryCatch({
       suppressWarnings(evaluate(obj, seed = 42L))
       FALSE
-    }, horizons_error_input = function(e) TRUE,
-       error = function(e) if (identical(conditionMessage(e), "past the door")) FALSE else stop(e))
+    }, horizons_error_input = function(e) {
+      if (grepl(fold_rule, gsub("\\s+", " ", conditionMessage(e)), fixed = TRUE)) TRUE else stop(e)
+    }, error = function(e) if (identical(conditionMessage(e), "past the door")) FALSE else stop(e))
 
     if (refused) "refused" else seen
 
