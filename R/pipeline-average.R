@@ -804,7 +804,7 @@ average <- function(x,
       ## group with fewer than two scans left once flagged ones are out, or
       ## none QC can correlate, has nothing to correlate against, so QC never
       ## looked at it; it is not counted clean either, nor is a sample kept
-      ## flagged.
+      ## flagged, which has a line of its own.
 
       n_single <- n_not_qcd
       n_clean  <- n_groups - n_single - n_kept_flagged - n_groups_partial - n_groups_failed
@@ -819,6 +819,14 @@ average <- function(x,
 
           cat(paste0("\u2502  \u2502  \u251C\u2500 ", cli::format_inline(
             "{n_single} group{?s} with fewer than two usable replicates (not QC'd)"
+          ), "\n"))
+
+        }
+
+        if (n_kept_flagged > 0) {
+
+          cat(paste0("\u2502  \u2502  \u251C\u2500 ", cli::format_inline(
+            "{n_kept_flagged} group{?s} flagged on every replicate (not QC'd)"
           ), "\n"))
 
         }

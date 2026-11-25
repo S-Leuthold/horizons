@@ -772,6 +772,25 @@ test_that("average() under keep_best keeps the first of two replicates QC cannot
 
 })
 
+test_that("average()'s QC sub-tree has a line for every group, a sample kept flagged among them", {
+
+  ## S1 clean, S2 with one flagged scan and two QC passes, S3 every scan flagged
+  hd  <- make_test_hd_average(n_samples = 3, n_reps = 3)
+  hd$data$analysis$.flag <- c(NA, NA, NA, "standardize", NA, NA, rep("standardize", 3))
+  hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+  out <- utils::capture.output(average(hd, verbose = TRUE))
+
+  ## The group lines add up to the 3 groups
+  expect_identical(qc_report(out), c(
+    "│  ├─ QC (r > 0.996)",
+    "│  │  ├─ 2/3 groups clean",
+    "│  │  ├─ 1 group flagged on every replicate (not QC'd)",
+    "│  │  └─ 3 samples retained"
+  ))
+
+})
+
 test_that("average() leaves a flagged replicate out of QC and the mean, and flags a sample only when every replicate is (#226)", {
 
   ## Arrange — S2's first scan is flagged, though QC would pass it: it is
