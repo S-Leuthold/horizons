@@ -162,6 +162,51 @@ test_that("parse_ids() too_few='keep_original' keeps filename as sample_id", {
 
 })
 
+test_that("parse_ids() names the unmatched files as the other verbs do, and says what each kept", {
+
+  ## Seven unmatched: five named, and the rest counted, with one "and" ------
+
+  bad <- paste0("odd", 1:7)
+  hd  <- make_test_hd(c("PROJ_S001", bad))
+
+  w   <- expect_warning(parse_ids(hd, format = "{project}_{sampleid}", verbose = FALSE),
+                        class = "horizons_warning_substitution")
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_match(msg, 'Non-matching: "odd1", "odd2", "odd3", "odd4", "odd5" and 2 more.', fixed = TRUE)
+
+  ## With a sampleid token, an unmatched row's sample_id is its filename -----
+
+  expect_match(msg, "Their sample_ids are their filenames.", fixed = TRUE)
+
+  ## Without one, its sample_id is as it was, which for a data frame is not
+  ## the filename
+
+  df <- make_test_hd(c("PROJ_S001", "odd1"))
+  df$data$analysis$sample_id <- c("lab-1", "lab-2")
+
+  w   <- expect_warning(out <- parse_ids(df, format = "{project}_{plate}", verbose = FALSE),
+                        class = "horizons_warning_substitution")
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_identical(out$data$analysis$sample_id, c("lab-1", "lab-2"))
+  expect_identical(out$data$analysis$plate, c("S001", NA))
+  expect_match(msg, "Its sample_id is unchanged, and the parsed columns are `NA` for it.", fixed = TRUE)
+  expect_no_match(msg, "filename as", fixed = TRUE)
+
+  ## The note under too_few = "na", and the refusal, which names ten ---------
+
+  out  <- parse_ids(hd, format = "{project}_{sampleid}", too_few = "na", verbose = FALSE)
+  note <- log_rows_added(hd, out)$message[1]
+  expect_match(note, '"odd5" and 2 more.', fixed = TRUE)
+
+  hd  <- make_test_hd(c("PROJ_S001", paste0("odd", 1:12)))
+  err <- expect_error(parse_ids(hd, format = "{project}_{sampleid}", too_few = "error", verbose = FALSE),
+                      class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), '"odd9", "odd10" and 2 more.', fixed = TRUE)
+
+})
+
 test_that("parse_ids() too_few='na' sets sample_id to NA, with or without a sampleid token", {
 
   ## Arrange ---------------------------------------------------------------

@@ -26,8 +26,11 @@ text it matched.}
 
 \item{too_few}{Character. How to handle non-matching filenames:
 \itemize{
-\item \code{"keep_original"} (default): Keep original filename as \code{sample_id},
-with one \code{horizons_warning_substitution} naming the files.
+\item \code{"keep_original"} (default): A filename the pattern does not match
+is not parsed, and one \code{horizons_warning_substitution} names the
+files. With a \code{sampleid} token its \code{sample_id} is the filename;
+without one its \code{sample_id} is unchanged. Its other tokens' columns
+are \code{NA}.
 \item \code{"error"}: Abort with list of non-matching files.
 \item \code{"na"}: Set \code{sample_id} to NA. As you asked for it, it is not warned:
 the files are counted in verbose output and named in a note on the

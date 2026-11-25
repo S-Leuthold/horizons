@@ -9,7 +9,7 @@
     Condition
       Warning:
       Pattern did not match 1 filename.
-      i Keeping original filename as sample_id.
+      i Its sample_id is unchanged, and the parsed columns are `NA` for it.
       i Non-matching: "no-match".
     Code
       invisible(parse_ids(hd, format = "{first}_{second}", too_few = "na", verbose = TRUE))

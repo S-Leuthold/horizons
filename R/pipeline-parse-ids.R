@@ -66,8 +66,11 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   (`sampleid = "S\\d+(-\\d+)?"`): a named pattern's column is the whole
 #'   text it matched.
 #' @param too_few Character. How to handle non-matching filenames:
-#'   * `"keep_original"` (default): Keep original filename as `sample_id`,
-#'     with one `horizons_warning_substitution` naming the files.
+#'   * `"keep_original"` (default): A filename the pattern does not match
+#'     is not parsed, and one `horizons_warning_substitution` names the
+#'     files. With a `sampleid` token its `sample_id` is the filename;
+#'     without one its `sample_id` is unchanged. Its other tokens' columns
+#'     are `NA`.
 #'   * `"error"`: Abort with list of non-matching files.
 #'   * `"na"`: Set `sample_id` to NA. As you asked for it, it is not warned:
 #'     the files are counted in verbose output and named in a note on the
@@ -253,8 +256,9 @@ parse_ids <- function(x,
   ## The sampleid token writes sample_id, as it is meant to; every other token
   ## adds a column of its name.
 
-  tokens <- names(patterns)[nzchar(names(patterns) %||% character(0))]
-  tokens <- tokens[!tolower(tokens) %in% tolower(SAMPLEID_VARIANTS)]
+  tokens       <- names(patterns)[nzchar(names(patterns) %||% character(0))]
+  has_sampleid <- any(tolower(tokens) %in% tolower(SAMPLEID_VARIANTS))
+  tokens       <- tokens[!tolower(tokens) %in% tolower(SAMPLEID_VARIANTS)]
 
   ## Refuse a token named like a column horizons reserves, such as `.flag` ---
 
@@ -294,25 +298,31 @@ parse_ids <- function(x,
   if (n_unmatched > 0) {
 
     non_match_names <- filenames[non_matches]
-    more_10 <- if (n_unmatched > 10) paste0(" and ", n_unmatched - 10, " more") else ""
-    more_5  <- if (n_unmatched > 5) paste0(" and ", n_unmatched - 5, " more") else ""
 
     if (too_few == "error") {
 
       abort_horizons(c(
         "Pattern did not match {n_unmatched} filename{?s}.",
-        "i" = "Non-matching files: {.val {head(non_match_names, 10)}}{more_10}.",
+        "i" = "Non-matching files: {shown_ids(non_match_names, n_show = 10L)}.",
         "i" = "Change {.arg format} or {.arg patterns} so they match, or set {.arg too_few} to {.val keep_original} or {.val na}."
       ), kind = "input")
 
     } else if (too_few == "keep_original") {
 
-      ### Other than what was asked ran: these ids are filenames, which
-      ### average() will not collapse with their replicates
+      ### Other than what was asked ran. With a sampleid token these ids are
+      ### filenames, which average() will not collapse with their
+      ### replicates; without one the rows keep their ids and lack the
+      ### parsed values
+      kept <- if (has_sampleid) {
+        "{cli::qty(n_unmatched)}{?Its/Their} {.field sample_id}{?/s} {?is its filename/are their filenames}."
+      } else {
+        "{cli::qty(n_unmatched)}{?Its/Their} {.field sample_id} {?is/are} unchanged, and the parsed columns are {.code NA} for {?it/them}."
+      }
+
       log_warning(collector, "substitution", c(
         "Pattern did not match {n_unmatched} filename{?s}.",
-        "i" = "Keeping original filename as sample_id.",
-        "i" = "Non-matching: {.val {head(non_match_names, 5)}}{more_5}."
+        "i" = kept,
+        "i" = "Non-matching: {shown_ids(non_match_names)}."
       ), ids = non_match_names)
 
     } else {
@@ -320,7 +330,7 @@ parse_ids <- function(x,
       ### too_few = "na" is the user's explicit choice: reported, not warned
       log_note(collector, c(
         "Pattern did not match {n_unmatched} filename{?s}, so {?its/their} {.field sample_id} {?is/are} {.code NA}.",
-        "i" = "Non-matching: {.val {head(non_match_names, 5)}}{more_5}."
+        "i" = "Non-matching: {shown_ids(non_match_names)}."
       ), ids = non_match_names)
 
     }
