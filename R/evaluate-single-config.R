@@ -49,6 +49,12 @@
 #'   dials' units: the ranges the model's parameters are searched over, set
 #'   before the data cap them (`apply_tune_ranges()`). `evaluate()` reads
 #'   them from `configure()`'s `config$tuning$ranges`. Default `TUNE_RANGES`.
+#' @param max_weights A whole number, or `Inf`. The most weights a network
+#'   the search proposes may have: mlp's `hidden_units` range is capped so
+#'   none passes it on the most predictors any of the configuration's preps
+#'   keeps, and nnet's `MaxNWts` is set to it. `evaluate()` reads it from
+#'   `configure()`'s `config$tuning$max_weights`. Default
+#'   `DEFAULT_MAX_WEIGHTS`.
 #' @param no_improve A whole number of at least 1, or `FALSE`: the Bayesian
 #'   iterations without improvement after which the search stops
 #'   (`control_horizons(no_improve = )`, which `evaluate()` reads). Default
@@ -135,6 +141,7 @@ evaluate_single_config <- function(config_row,
                                    grid_size       = DEFAULT_GRID_SIZE,
                                    bayesian_iter   = DEFAULT_BAYES_ITER,
                                    tune_ranges     = TUNE_RANGES,
+                                   max_weights     = DEFAULT_MAX_WEIGHTS,
                                    no_improve      = BAYES_NO_IMPROVE_DEFAULT,
                                    prune           = FALSE,
                                    prune_threshold = 1.0,
@@ -200,11 +207,17 @@ evaluate_single_config <- function(config_row,
     ## Step 1: Build recipe, model specification and workflow
     ## -----------------------------------------------------------------------
 
+    ## The selection steps draw under the training part's prep's seed, so the
+    ## final fit, on the same rows, selects what that prep selected and the
+    ## bounds read from it cover the final fit (selection_seed())
     recipe <- unit_step("recipe", build_recipe(config_row, train_data, role_map,
-                                               sg_window     = sg_window,
-                                               pca_threshold = pca_threshold))
+                                               sg_window      = sg_window,
+                                               pca_threshold  = pca_threshold,
+                                               selection_seed = selection_seed(seed, "evaluate", config_row,
+                                                                               "training")))
 
-    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads,
+                                                           max_weights = max_weights))
 
     wflow <- unit_step("workflow", workflows::workflow() |>
                          workflows::add_recipe(recipe) |>
@@ -224,22 +237,25 @@ evaluate_single_config <- function(config_row,
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
     ## -----------------------------------------------------------------------
-    ## Step 2: Finalize parameter set (the ranges, then the mtry and num_comp
-    ## upper bounds)
+    ## Step 2: The parameter set's ranges, and the predictors that bound them
     ## -----------------------------------------------------------------------
     ## The configured ranges come first (configure(tune_ranges = )), so the
     ## bounds fill only an upper bound still unknown and the data cap narrows
     ## a range rather than replacing it. Models with mtry (rf, xgboost,
-    ## lightgbm) need the upper bound set from the actual predictor count
-    ## after recipe preprocessing. Without this, tune_grid() may sample mtry
-    ## values larger than the number of predictors. plsr's num_comp is capped
-    ## by the same count and by the smallest fold's rows (#216).
+    ## lightgbm) need the upper bound set from the predictors the recipe
+    ## keeps, and plsr's num_comp is capped by the same count and by the
+    ## smallest fold's rows (#216). The count is the fewest any prep keeps,
+    ## the whole training part's or a fold's (Step 2b), since a feature
+    ## selection keeps a different number in each fold: a value above a
+    ## fold's count is truncated by ranger, passed over by xgboost and fails
+    ## lightgbm's fit.
     ##
     ## The prep rule: each fold's recipe is prepped once, before tuning, and
     ## every candidate the grid and the Bayesian search try is scored on it.
-    ## The bounds are read from one more prep, of the fold recipe on the whole
-    ## training part. A step's error in either ends the configuration with its
-    ## class; tune preps only inside the final fit (last_fit()).
+    ## The training part's count is read from one more prep, of the fold
+    ## recipe on the whole training part, which the final fit is made on. A
+    ## step's error in either ends the configuration with its class; tune
+    ## preps only inside the final fit (last_fit()).
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
     param_set   <- unit_step("finalize_parameters", apply_tune_ranges(param_set, tune_ranges))
@@ -257,24 +273,27 @@ evaluate_single_config <- function(config_row,
       cv_folds
     )
 
-    if (prepped_now) {
-
-      ## The training part's prep sets the bounds, and is not the model
-      ## returned, so the selection steps' warnings are not taken from it
-      ## (the final fit's record is read instead, below)
-      bound     <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
-      param_set <- unit_step("finalize_parameters", finalize_bound(param_set, bound, cv_folds))
-
-    }
+    ## The training part's prep is read first, so a failed one ends the
+    ## configuration before any fold is prepped. It is not the model
+    ## returned, so the selection steps' warnings are not taken from it (the
+    ## final fit's record is read instead, below)
+    if (prepped_now) bound <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
 
     ## -----------------------------------------------------------------------
-    ## Step 2b: The folds, from each fold's prep
+    ## Step 2b: The folds, from each fold's prep, and the bounds
     ## -----------------------------------------------------------------------
     ## The warnings another package raised in a fold's prep join the row with
-    ## the folds that raised them, as tune's notes did.
+    ## the folds that raised them, as tune's notes did. The bounds are set
+    ## from the training part's prep and every fold's together.
 
     prepped_folds <- unit_step("fold_prep", assemble_folds(entry_at, cv_folds, fold_inputs, role_map))
     warning_log   <- dplyr::bind_rows(warning_log, prepped_folds$warnings)
+
+    if (prepped_now) {
+      param_set <- unit_step("finalize_parameters",
+                             finalize_bound(param_set, c(length(bound), prepped_folds$n_predictors), cv_folds,
+                                            max_weights))
+    }
 
     rm(fold_inputs, entry_at)
 

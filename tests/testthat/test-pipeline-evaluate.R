@@ -1888,6 +1888,12 @@ describe("checkpoint scoring schema", {
       ## Schema 4 scored a "none" configuration's cv_* on unclamped
       ## predictions, so its rows are not ranked beside clamped ones (#104)
       variant("schema_4",    function(r) { r$scoring_schema <- 4L; r }),
+      ## Schema 9 capped mtry and num_comp at the training part's predictors
+      ## alone, so a fold that kept fewer was asked for more than it had
+      variant("schema_9",    function(r) { r$scoring_schema <- 9L; r }),
+      ## Schema 10's final fit drew a Boruta or CARS selection of its own,
+      ## which the bounds did not cover
+      variant("schema_10",   function(r) { r$scoring_schema <- 10L; r }),
       variant("schema_na",   function(r) { r$scoring_schema <- NA_integer_; r }),
       variant("schema_none", function(r) { r$scoring_schema <- NULL; r }),
       variant("no_hash",     function(r) { r$data_hash <- NULL; r }),
@@ -1920,7 +1926,7 @@ describe("checkpoint scoring schema", {
     gated <- gate_checkpoint_rows(candidates, run_fp, settings)
 
     expect_named(gated$kept, "keep")
-    expect_equal(gated$n_foreign, 12L)
+    expect_equal(gated$n_foreign, 14L)
     expect_length(gated$refused, 0)
 
     ## Under the rule's own version the verdict is the schema's, before the
@@ -2270,6 +2276,8 @@ describe("evaluate() - checkpoint data provenance", {
                                    ## horizons' default ranges, in the
                                    ## record's text, and the stopping rule
                                    tune_ranges = "committees 1 to 25; num_comp 1 to 30",
+                                   ## and the weight budget, at its default
+                                   max_weights = 10000,
                                    no_improve = 10L,
                                    prune = FALSE,
                                    prune_threshold = NA_real_, seed = 42L,
@@ -2973,7 +2981,7 @@ describe("evaluate() - tuning-settings provenance", {
 
   })
 
-  it("refuses to resume checkpoints tuned over other ranges, naming them, and evaluates again a row that does not record them", {
+  it("refuses to resume checkpoints tuned over other ranges or under another weight budget, naming them, and evaluates again a row that does not record them", {
 
     ck     <- ck_a()
     obj    <- ck$value$obj
@@ -2996,6 +3004,22 @@ describe("evaluate() - tuning-settings provenance", {
     expect_match(flat_message(err),
                  "tune_ranges = committees 1 to 25; num_comp 1 to 30 (this run: committees 1 to 8; num_comp 1 to 30)",
                  fixed = TRUE)
+
+    ## The weight budget the same way, though no configuration here is an
+    ## mlp: every row records it, as every row records the ranges
+    expect_true(all(vapply(first$evaluation$results$settings, `[[`, numeric(1), "max_weights") == 10000))
+
+    budget <- obj
+    budget$config$tuning$max_weights <- 20
+
+    err <- tryCatch(
+      suppressWarnings(evaluate(budget, prune = FALSE, seed = 42L,
+                                control = control_horizons(output_dir = tmpdir))),
+      horizons_error_input = function(e) e
+    )
+
+    expect_s3_class(err, "horizons_error_input")
+    expect_match(flat_message(err), "max_weights = 10000 (this run: 20)", fixed = TRUE)
 
     ## Rows written before the ranges were recorded are evaluated again, as
     ## a row missing any setting is
@@ -3823,9 +3847,10 @@ describe("evaluate() - threads on a run in this session (#114)", {
   spec_threads <- function(obj, control) {
     seen <- list()
     real <- define_model_spec
-    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS,
+                                                         max_weights = DEFAULT_MAX_WEIGHTS) {
       seen[[length(seen) + 1L]] <<- list(threads = threads, option = getOption("ranger.num.threads"))
-      real(model, isolate, threads)
+      real(model, isolate, threads, max_weights)
     })
     suppressWarnings(evaluate(obj, seed = 42L, control = control))
     seen
@@ -3869,9 +3894,10 @@ describe("evaluate() - threads on a run in this session (#114)", {
 
     seen <- NULL
     real <- define_model_spec
-    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS) {
+    local_mocked_bindings(define_model_spec = function(model, isolate = TRUE, threads = ENGINE_THREADS,
+                                                         max_weights = DEFAULT_MAX_WEIGHTS) {
       seen <<- c(threads = threads, omp = RhpcBLASctl::omp_get_max_threads(), blas = RhpcBLASctl::blas_get_num_procs())
-      real(model, isolate, threads)
+      real(model, isolate, threads, max_weights)
     })
 
     suppressWarnings(evaluate(make_eval_object(n = 60, n_configs = 1), seed = 42L,

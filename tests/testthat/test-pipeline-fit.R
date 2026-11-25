@@ -2118,3 +2118,45 @@ describe("fit() - its fold preparations on the daemons", {
   })
 
 })
+
+
+describe("the weight budget through evaluate() and fit()", {
+
+  it("reaches every mlp configuration and member, each capped within it, and each verb's log says so", {
+
+    skip_if_not_installed("nnet")
+
+    ## Two predictors past the raw step's trim, so a budget of 20 weights
+    ## holds 4 hidden units of mlp's 1 to 10
+    obj <- make_eval_object(n = 60, n_configs = 1)
+    obj$config$configs$model      <- "mlp"
+    obj$config$configs$config_id  <- "cfg_mlp"
+    obj$config$tuning$max_weights <- 20
+
+    note <- "The weight budget capped hidden_units at 4, below the range's 10"
+
+    evaluated <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(verbose = FALSE)))
+    row       <- evaluated$evaluation$results
+
+    expect_identical(row$status, "success")
+    expect_lte(row$best_params[[1]]$hidden_units, 4L)
+    expect_identical(row$settings[[1]]$max_weights, 20)
+
+    logged <- evaluated$log[evaluated$log$verb == "evaluate" & grepl(note, evaluated$log$message, fixed = TRUE), ]
+    expect_identical(nrow(logged), 1L)
+    expect_identical(logged$type, "note")
+    expect_identical(logged$ids[[1]], "cfg_mlp")
+
+    ## fit() reads the same budget: its member's range is capped by it, and
+    ## its log says so too
+    fitted <- suppressWarnings(fit(evaluated, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                                   control = control_horizons(verbose = FALSE)))
+
+    expect_identical(fitted$models$results$status, "success")
+    expect_lte(fitted$models$results$best_params[[1]]$hidden_units, 4L)
+    expect_true(any(fitted$log$verb == "fit" & fitted$log$type == "note" &
+                      grepl(note, fitted$log$message, fixed = TRUE)))
+
+  })
+
+})

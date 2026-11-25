@@ -47,7 +47,7 @@ make_predict_eval <- function(n = 300, n_wn = 10, transformation = "none",
   obj$config$n_configs     <- 1L
   obj$config$tuning        <- list(cv_folds = 3L, grid_size = 3L,
                                    bayesian_iter = 0L, final_bayesian_iter = 0L,
-                                   ranges = merge_ranges(NULL))
+                                   ranges = merge_ranges(NULL), max_weights = DEFAULT_MAX_WEIGHTS)
 
   ## What configure() writes beside the grid, at its defaults
   obj$config$recipe        <- list(sg_window     = DEFAULT_SG_WINDOW,

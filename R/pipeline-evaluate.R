@@ -645,8 +645,10 @@ evaluate <- function(x,
   cv_folds <- tuning$cv_folds
 
   ## The ranges the models' parameters are searched over (configure()'s
-  ## tune_ranges, merged over TUNE_RANGES)
+  ## tune_ranges, merged over TUNE_RANGES), and the most weights a network
+  ## the search proposes may have (configure()'s max_weights)
   tune_ranges <- tuning$ranges
+  max_weights <- tuning$max_weights
 
   ## -----------------------------------------------------------------------
   ## Step 3a: The window has to fit the spectrum
@@ -851,6 +853,9 @@ evaluate <- function(x,
     ## row, as pca_threshold is: a row whose model tunes none of them re-runs
     ## rather than resumes when only a range changed
     tune_ranges     = format_ranges(tune_ranges),
+    ## The weight budget mlp's hidden_units range is capped by, recorded for
+    ## every row as the ranges are
+    max_weights     = max_weights,
     ## How far each Bayesian search goes (control_horizons(no_improve = )):
     ## a row stopped under another limit is another row. The budget rule
     ## (search_budget()) is the package's, not a setting: a change to it
@@ -1155,6 +1160,7 @@ evaluate <- function(x,
       grid_size       = tuning$grid_size,
       bayesian_iter   = tuning$bayesian_iter,
       tune_ranges     = tune_ranges,
+      max_weights     = max_weights,
       no_improve      = control$no_improve,
       prune           = prune,
       prune_threshold = prune_threshold,
@@ -1328,6 +1334,7 @@ evaluate <- function(x,
         grid_size       = tuning$grid_size,
         bayesian_iter   = tuning$bayesian_iter,
         tune_ranges     = tune_ranges,
+        max_weights     = max_weights,
         no_improve      = control$no_improve,
         prune           = prune,
         prune_threshold = prune_threshold,
@@ -4107,6 +4114,7 @@ prepare_worker <- function(models, selections) {
 #'   fixed by `SHARED_ARG_NAMES` in `R/constants.R` and asserted on entry:
 #'   `data`, `resample_idx` (from `resample_indices()`), `configs`, `role_map`,
 #'   `grid_size`, `bayesian_iter`, `tune_ranges` (the ranges searched),
+#'   `max_weights` (the weight budget),
 #'   `no_improve` (the Bayesian searches' stopping rule),
 #'   `prune`, `prune_threshold`, `seed`,
 #'   `sg_window`, `pca_threshold` (the object's recipe settings),
@@ -4266,6 +4274,7 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
       grid_size        = shared$grid_size,
       bayesian_iter    = shared$bayesian_iter,
       tune_ranges      = shared$tune_ranges,
+      max_weights      = shared$max_weights,
       no_improve       = shared$no_improve,
       prune            = shared$prune,
       prune_threshold  = shared$prune_threshold,

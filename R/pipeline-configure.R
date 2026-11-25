@@ -144,14 +144,17 @@
 #'
 #' A range is in dials' units: a parameter searched on a log scale takes its
 #' range in log10 (log2 for `cost`), so `learn_rate = c(-3, -1)` searches
-#' 0.001 to 0.1. The data still cap `mtry` at the predictors a recipe keeps,
-#' and `num_comp` at those and the smallest fold's rows less one, narrowing a
-#' range given here; a range whose lower bound is above that cap fails the
-#' configuration, saying so. `configure()` refuses a name no configured model
-#' tunes, a range that is not two finite numbers with the lower below the
-#' upper, an `mtry` or `num_comp` range starting below 1 (each counts the
-#' predictors or components a fit uses, so 0 is no model), and a fractional
-#' bound on a whole-number parameter (typed where the model's engine is
+#' 0.001 to 0.1. The data still cap `mtry` at the fewest predictors a
+#' configuration's recipe keeps in any cross-validation fold or on the whole
+#' training part, and `num_comp` at those and the smallest fold's rows less
+#' one, narrowing a range given here, so no candidate asks a fold for more
+#' predictors than it kept; a range whose lower bound is above that cap
+#' fails the configuration, saying so. `configure()` refuses a name no
+#' configured model tunes, a range that is not two finite numbers with the
+#' lower below the upper, an `mtry`, `num_comp` or `hidden_units` range
+#' starting below 1 (each counts the predictors, components or hidden units
+#' a fit uses, so 0 is no model), and a fractional bound on a whole-number
+#' parameter (typed where the model's engine is
 #' installed, and again by `evaluate()` and `fit()` once they have checked
 #' the engines of the models they fit). An engine's own limits are not
 #' checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
@@ -160,6 +163,43 @@
 #' it runs, searches the space `evaluate()` searched, and a checkpoint tuned
 #' over other ranges is not resumed. `ensemble()`'s meta-learners keep their
 #' own grids.
+#'
+#' `mtry` has no range of horizons': rf, xgboost and lightgbm search it from
+#' 1 to the predictors the data cap it at, which on full spectra is about
+#' 1,700. A random forest's fit time grows with it: on one cross-validation
+#' fold of full spectra, 500 trees took 148 s at an `mtry` of 41 and 3,051 s
+#' at 1,200, on one thread. Where rf's searches landed has varied. With no
+#' feature selection, 19 saved searches on about 1,700 bands chose a median
+#' of 376: five at or below 41 (the square root of the bands), six above a
+#' third of the bands and four above half. On one data set's Boruta and CARS
+#' selections, nine of ten chose between 0.06 and 0.22 of the bands, and
+#' where one configuration was searched twice the cross-validated error
+#' differed by under half a standard error. A narrower range
+#' (`tune_ranges = list(mtry = c(1, 200))`, for instance), or a feature
+#' selection that keeps fewer bands, searches the faster part of the range
+#' at the cost of the values above it, which more than half of the searches
+#' without a selection chose. The default searches the whole range (#115).
+#'
+#' mlp's networks are kept within a weight budget, `max_weights`. A network
+#' of h hidden units on p predictors holds h(p + 2) + 1 weights, and nnet's
+#' optimizer keeps a matrix of the weights squared, so a fit's memory grows
+#' as about four bytes times the weights squared and its time the same way:
+#' on 800 rows and 1,691 predictors, a fit of 5 units (8,466 weights) held
+#' 378 MB at 0.26 s an iteration, and one of 10 units (16,931 weights)
+#' 1.2 GB at 1.2 s. `hidden_units`' range is capped at the most units whose
+#' network stays within the budget on the most predictors any of a
+#' configuration's preps keeps (a cross-validation fold's or the whole
+#' training part's), and when that narrows the range the configuration's
+#' row and the verb's log say so with a note; nnet is given the budget as
+#' its own limit (`MaxNWts`). At the default of 10,000 weights an mlp on
+#' about 1,700 bands searches up to 5 units, and one on 250 selected bands
+#' up to 39, where its default range of 1 to 10 is not narrowed. Raise
+#' the budget to search larger networks on wide predictors, at that cost,
+#' or set it to `Inf` for none; a feature selection and
+#' `tune_ranges = list(hidden_units = )` are the other levers. The budget is
+#' recorded as `config$tuning$max_weights`, so `fit()` searches under the
+#' budget `evaluate()` searched under, and a checkpoint tuned under another
+#' is not resumed.
 #'
 #' **Outcome range:**
 #'
@@ -260,6 +300,10 @@
 #'   configured model that tunes the parameter and merged over horizons'
 #'   defaults (`committees` 1 to 25, `num_comp` 1 to 30). Default `NULL`, the
 #'   defaults alone. See Tuning ranges.
+#' @param max_weights `numeric(1)`. The most weights an mlp network the
+#'   search proposes may have: a whole number of at least 1, or `Inf` for no
+#'   budget. `hidden_units`' range is capped to it. Default 10000. See Tuning
+#'   ranges.
 #' @param outcome_range `numeric(2)`. The outcome's physical range,
 #'   `c(lower, upper)` with lower < upper; either end may be infinite. Every
 #'   scored and served prediction is clamped to it. Default `c(0, Inf)`,
@@ -276,7 +320,8 @@
 #'   * `config$configs` — tibble of configuration grid (5 columns)
 #'   * `config$n_configs` — integer count
 #'   * `config$tuning` — list of tuning parameters, with `ranges`, the
-#'     ranges searched (see Tuning ranges)
+#'     ranges searched, and `max_weights`, the weight budget (see Tuning
+#'     ranges)
 #'   * `config$expansion` — list of original inputs (for reproducibility)
 #'   * `config$recipe` — the recipe settings every configuration is built
 #'     with: `sg_window` and `pca_threshold`
@@ -337,6 +382,7 @@ configure <- function(x,
                       sg_window             = 9L,
                       pca_threshold         = 0.995,
                       tune_ranges           = NULL,
+                      max_weights           = 10000,
                       outcome_range         = c(0, Inf),
                       verbose               = getOption("horizons.verbose", TRUE)) {
 
@@ -454,6 +500,19 @@ configure <- function(x,
       )
 
     }
+
+  }
+
+  ## 1.4c Validate max_weights -----------------------------------------------
+  ## The weight budget: Inf sets none. The rule is is_valid_max_weights(),
+  ## which the validator applies to the stored budget too.
+
+  if (!is_valid_max_weights(max_weights)) {
+
+    abort_horizons(c(
+      "{.arg max_weights} must be a whole number of at least 1, or {.code Inf} for no budget.",
+      "x" = "Got {.code {paste(deparse(max_weights), collapse = ' ')}}."
+    ), kind = "input")
 
   }
 
@@ -713,7 +772,10 @@ configure <- function(x,
     final_bayesian_iter = as.integer(final_bayesian_iter),
     ## horizons' default ranges with the given ones over them, which
     ## evaluate() and fit() search (apply_tune_ranges())
-    ranges              = merge_ranges(tune_ranges)
+    ranges              = merge_ranges(tune_ranges),
+    ## The weight budget mlp's hidden_units range is capped by
+    ## (cap_by_data())
+    max_weights         = as.double(max_weights)
   )
 
   x$config$expansion <- list(
@@ -769,8 +831,17 @@ configure <- function(x,
                },
                "\n"))
     cat(paste0("\u2502  \u251C\u2500 Models: ", paste(models, collapse = ", "), "\n"))
+    ## A weight budget the user set changes what mlp searches, so it is
+    ## shown, as a non-default outcome range is
+    budget <- x$config$tuning$max_weights
+
     cat(paste0("\u2502  \u251C\u2500 Tuning: ", cv_folds, "-fold CV, grid = ",
-               grid_size, "\n"))
+               grid_size,
+               if (!identical(budget, DEFAULT_MAX_WEIGHTS)) {
+                 if (is.infinite(budget)) ", no weight budget" else
+                   paste0(", at most ", format(budget, scientific = FALSE), " weights a network")
+               },
+               "\n"))
 
     ## The ranges the configured models search where horizons or the user
     ## set one, so the committees cap is seen where it is set
@@ -912,6 +983,25 @@ is_valid_outcome_range <- function(r) {
 }
 
 
+#' Is this a usable weight budget?
+#'
+#' @description
+#' One number, a whole number of at least 1, or `Inf` for no budget.
+#' `configure()` refuses anything else, and every verb's door validator
+#' applies the same rule to the stored budget ([config_findings()]).
+#'
+#' @param x The budget to check.
+#'
+#' @return `TRUE` or `FALSE`.
+#' @keywords internal
+#' @noRd
+is_valid_max_weights <- function(x) {
+
+  is.numeric(x) && length(x) == 1 && !is.na(x) && x >= 1 && (is.infinite(x) || x == round(x))
+
+}
+
+
 #' The outcome range an object's predictions are clamped to
 #'
 #' @description
@@ -1012,7 +1102,7 @@ format_ranges <- function(ranges) {
 #' The one check of a set of ranges' shape, at `configure()`'s door and in
 #' every verb's validator ([config_findings()]): a named list, its names
 #' unique, each element two finite numbers with the lower below the upper,
-#' and an `mtry` or `num_comp` range starting at 1 or more
+#' and an `mtry`, `num_comp` or `hidden_units` range starting at 1 or more
 #' (`BOUNDED_PARAMETERS`, which count what a fit uses). With `check_names`,
 #' each name must be a parameter a model in `models` tunes (their ids in
 #' `MODEL_SPECS`), so a misspelt one is refused rather than ignored. It
@@ -1058,14 +1148,15 @@ tune_range_findings <- function(ranges, models = character(0), arg = "tune_range
   }
 
   ## The parameters the data bound (BOUNDED_PARAMETERS) count the
-  ## predictors or components a fit uses, so a range below 1 holds values
-  ## that are no model: every plsr count fails at num_comp = 0, from the one
-  ## fit the counts share, and ranger reads mtry = 0 as its own default
+  ## predictors, components or hidden units a fit uses, so a range below 1
+  ## holds values that are no model: every plsr count fails at num_comp = 0,
+  ## from the one fit the counts share, ranger reads mtry = 0 as its own
+  ## default, and a network of no hidden units has no hidden layer
   for (id in intersect(ids[shaped], BOUNDED_PARAMETERS)) {
     lower <- ranges[[id]][1]
     if (lower < 1) {
       findings <- c(findings, cli::format_inline(
-        "{.arg {arg}}'s {.field {id}} must start at 1 or more, not {lower}: it counts the predictors or components a fit uses, at least one."
+        "{.arg {arg}}'s {.field {id}} must start at 1 or more, not {lower}: it counts the predictors, components or hidden units a fit uses, at least one."
       ))
     }
   }

@@ -2208,12 +2208,13 @@ describe("evaluate_single_config() - a PLS row's warnings when one fit serves ev
   ## Counts 1 to 12 gridded whole on folds of eight predictors: the grid's
   ## one fit a fold is at 12, which pls_fit() caps at 8 and warns about. The
   ## bound is widened past the data (finalize_bound() mocked), as a fold whose
-  ## selection kept fewer predictors than the training part's prep would
-  ## leave it, and the choice is mocked, so the row's count is the test's.
+  ## selection kept fewer predictors than the training part's prep left it
+  ## before the bound read every fold's, and the choice is mocked, so the
+  ## row's count is the test's.
   run_capped <- function(chosen) {
 
     local_mocked_bindings(
-      finalize_bound  = function(param_set, predictors, folds) {
+      finalize_bound  = function(param_set, ...) {
         stats::update(param_set, num_comp = dials::num_comp(c(1L, 12L)))
       },
       select_complete = function(results, metric, n_folds, debug = FALSE) {
@@ -2254,6 +2255,200 @@ describe("evaluate_single_config() - a PLS row's warnings when one fit serves ev
     expect_identical(row$status, "success")
     expect_true(any(grepl("PLS fitted 8 components, not the 10 asked for: .*3 of 3 folds", lines)))
     expect_false(any(grepl("the 12 asked for", lines, fixed = TRUE)))
+
+  })
+
+})
+
+describe("evaluate_single_config() - the bounds every fold's prep sets", {
+
+  ## Correlation selection on 22 bands (30 past the raw step's trim), its
+  ## first fold's prep cut to three predictors, as a selection that kept
+  ## fewer there leaves it, while the training part's keeps more. The
+  ## parameter set tune is handed is kept for the test, and the search runs.
+  run_fewer_in_fold <- function(model, ...) {
+
+    real_prep <- prep_fold_entry
+    real_grid <- tune::tune_grid
+    seen      <- new.env()
+
+    local_mocked_bindings(prep_fold_entry = function(unit, ...) {
+      entry <- real_prep(unit, ...)
+      if (identical(unit$fold_i, 0L)) seen$training <- length(entry$kept)
+      if (identical(unit$fold_i, 1L)) entry$kept <- entry$kept[1:3]
+      entry
+    })
+    local_mocked_bindings(tune_grid = function(..., param_info) {
+      seen$param_info <- param_info
+      real_grid(..., param_info = param_info)
+    }, .package = "tune")
+
+    setup <- make_eval_setup(n = 60, n_wn = 30)
+
+    row <- evaluate_single_config(
+      config_row    = make_eval_config(model = model, feature_selection = "correlation"),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 4,
+      bayesian_iter = 0,
+      seed          = 42L,
+      ...
+    )
+
+    list(row = row, training = seen$training, param_info = seen$param_info)
+
+  }
+
+  range_of <- function(param_info, id) {
+    r <- param_info$object[[which(param_info$id == id)]]$range
+    c(r$lower, r$upper)
+  }
+
+  it("caps mtry and num_comp at the fewest predictors a fold keeps, so every candidate is fitted as proposed on every fold", {
+
+    models <- c("rf", "xgboost", "plsr",
+                if (requireNamespace("bonsai", quietly = TRUE) && requireNamespace("lightgbm", quietly = TRUE)) "lightgbm")
+
+    for (model in models) {
+
+      got <- run_fewer_in_fold(model)
+      id  <- if (model == "plsr") "num_comp" else "mtry"
+
+      ## The training part kept more than the cut fold, and the range stops
+      ## at the cut fold's three: lightgbm fails a candidate above a fold's
+      ## predictors, ranger truncates it with a warning, and xgboost passes
+      ## over it silently
+      expect_gt(got$training, 3L, label = model)
+      expect_equal(range_of(got$param_info, id)[2], 3, label = model)
+      expect_identical(got$row$status, "success", label = model)
+      expect_false(any(grepl("left out of the choice|columns were requested|feature_fraction",
+                             got$row$warnings[[1]])), label = model)
+      expect_lte(got$row$best_params[[1]][[id]], 3, label = model)
+
+    }
+
+  })
+
+  it("caps mlp's hidden_units within the weight budget on the most predictors a prep keeps, and says so", {
+
+    skip_if_not_installed("nnet")
+
+    ## Two predictors past the raw step's trim: a network of h units holds
+    ## 4h + 1 weights, so a budget of 20 holds 4 units, and nnet, given the
+    ## budget as its limit, would refuse a fifth
+    setup <- make_eval_setup()
+    real  <- tune::tune_grid
+    seen  <- new.env()
+
+    local_mocked_bindings(tune_grid = function(..., param_info) {
+      seen$param_info <- param_info
+      real(..., param_info = param_info)
+    }, .package = "tune")
+
+    mlp_row <- function(max_weights) {
+      suppressWarnings(evaluate_single_config(
+        config_row = make_eval_config(model = "mlp"), split = setup$split, cv_folds = setup$folds,
+        role_map = setup$role_map, grid_size = 6, bayesian_iter = 0, seed = 42L, max_weights = max_weights
+      ))
+    }
+
+    row <- mlp_row(20)
+
+    expect_equal(range_of(seen$param_info, "hidden_units"), c(1, 4))
+    expect_identical(row$status, "success")
+    expect_false(any(grepl("left out of the choice", row$warnings[[1]], fixed = TRUE)))
+
+    note <- "The weight budget capped hidden_units at 4, below the range's 10: a network of more units on 2 predictors holds more than 20 weights."
+    expect_true(any(grepl(note, row$warnings[[1]], fixed = TRUE)))
+
+    ## and its unit records it as a note, for the verb's log
+    records <- attr(row, "unit_records")
+    expect_true(any(records$type == "note" & grepl(note, records$message, fixed = TRUE)))
+
+    ## No budget: the range as dials has it, and nothing to say
+    row <- mlp_row(Inf)
+
+    expect_equal(range_of(seen$param_info, "hidden_units"), c(1, 10))
+    expect_identical(row$status, "success")
+    expect_false(any(grepl("weight budget", row$warnings[[1]], fixed = TRUE)))
+
+  })
+
+})
+
+describe("evaluate_single_config() - the final fit selects what the bounds were read from", {
+
+  ## 80 bands, 72 past the raw step's trim, at run seed 1: Boruta keeps 8 on
+  ## the training part and 7, 10 and 10 on the folds, and CARS 3 and 21, 6
+  ## and 2. A final fit that drew a selection of its own kept 6 under Boruta
+  ## (lightgbm's final fit failed at mtry 7, ranger truncated it) and 9 under
+  ## CARS. What the training part's prep kept and the final fit's recipe
+  ## selected are kept for the test.
+  run_selection <- function(model, selection, ...) {
+
+    real_prep <- prep_fold_entry
+    real_rep  <- selection_reports
+    seen      <- new.env()
+
+    local_mocked_bindings(
+      prep_fold_entry   = function(unit, ...) {
+        entry <- real_prep(unit, ...)
+        if (identical(unit$fold_i, 0L)) seen$training <- entry$kept
+        entry
+      },
+      selection_reports = function(workflow, ...) {
+        steps      <- workflows::extract_recipe(workflow)$steps
+        seen$final <- Filter(function(s) inherits(s, c("step_select_boruta", "step_select_cars")), steps)[[1]]$selected_vars
+        real_rep(workflow, ...)
+      }
+    )
+
+    setup <- make_eval_setup(n = 90, n_wn = 80)
+
+    row <- suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(model = model, feature_selection = selection),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      seed          = 1L,
+      ...
+    ))
+
+    list(row = row, training = seen$training, final = seen$final)
+
+  }
+
+  it("keeps the training part's Boruta or CARS selection in the final fit, so no fit there is truncated", {
+
+    skip_if_not_installed("Boruta")
+
+    for (selection in c("boruta", "cars")) {
+
+      got <- run_selection("rf", selection)
+
+      expect_identical(got$row$status, "success", label = selection)
+      expect_gt(length(got$training), 0L)
+      expect_setequal(got$final, got$training)
+      expect_false(any(grepl("(test set)", got$row$warnings[[1]], fixed = TRUE)), label = selection)
+
+    }
+
+  })
+
+  it("fits lightgbm's final model at the mtry a fold capped, where a Boruta draw of its own had kept fewer", {
+
+    skip_if_not_installed("Boruta")
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    got <- run_selection("lightgbm", "boruta", tune_ranges = list(mtry = c(7, 10)))
+
+    expect_identical(got$row$status, "success")
+    expect_identical(got$row$best_params[[1]]$mtry, 7L)
+    expect_gte(length(got$final), 7L)
 
   })
 

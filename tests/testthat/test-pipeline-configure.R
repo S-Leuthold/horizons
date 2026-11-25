@@ -709,7 +709,9 @@ describe("configure() tune_ranges", {
       ## A count the data bound, starting below 1: every plsr count fails at
       ## 0, and ranger reads mtry = 0 as its default
       list(models = "plsr", tune_ranges = list(num_comp = c(0, 20))),
-      list(models = "rf", tune_ranges = list(mtry = c(-1, 50)))
+      list(models = "rf", tune_ranges = list(mtry = c(-1, 50))),
+      ## and a network of no hidden units, which has no hidden layer
+      list(models = "mlp", tune_ranges = list(hidden_units = c(0, 5)))
     )
 
     said <- vapply(bad, function(args) {
@@ -742,6 +744,51 @@ describe("configure() tune_ranges", {
                                   tune_ranges = list(committees = c(1.5, 25))),
                         class = "horizons_error_input")
     expect_match(conditionMessage(err), "committees.* is not a range of cubist's .*committees")
+
+  })
+
+})
+
+
+describe("configure() max_weights", {
+
+  test_that("records the weight budget as a double, 10000 by default and in the constructor, Inf for none", {
+
+    hd <- make_single_response_hd()
+
+    expect_identical(quiet_configure(hd)$config$tuning$max_weights, 10000)
+    expect_identical(new_horizons_data()$config$tuning$max_weights, DEFAULT_MAX_WEIGHTS)
+    expect_identical(quiet_configure(hd, models = "mlp", max_weights = 20L)$config$tuning$max_weights, 20)
+    expect_identical(quiet_configure(hd, models = "mlp", max_weights = Inf)$config$tuning$max_weights, Inf)
+
+    ## configure()'s default is the package's constant, which the runners
+    ## and the constructor take
+    expect_identical(formals(configure)$max_weights, DEFAULT_MAX_WEIGHTS)
+
+  })
+
+  test_that("shows a weight budget other than the default on its Tuning line", {
+
+    hd   <- make_single_response_hd()
+    line <- function(...) {
+      out <- utils::capture.output(configure(hd, models = "mlp", verbose = TRUE, ...))
+      grep("Tuning:", out, value = TRUE, fixed = TRUE)
+    }
+
+    expect_match(line(max_weights = 40000), "at most 40000 weights a network", fixed = TRUE)
+    expect_match(line(max_weights = Inf), "no weight budget", fixed = TRUE)
+    expect_false(grepl("weight", line(), fixed = TRUE))
+
+  })
+
+  test_that("refuses a budget that is not a whole number of at least 1, or Inf, as an input error", {
+
+    hd <- make_single_response_hd()
+
+    for (bad in list(0, 0.5, 10000.5, -Inf, NA_real_, "10000", c(10, 20), NULL)) {
+      expect_error(configure(hd, models = "mlp", verbose = FALSE, max_weights = bad), "max_weights",
+                   class = "horizons_error_input", label = deparse(bad))
+    }
 
   })
 

@@ -1346,6 +1346,42 @@ describe("fit() - the members axis (#60)", {
     )
   }
 
+  it("hands each member's task the configured weight budget, which caps its mlp there as in this session", {
+
+    skip_if_not_installed("nnet")
+
+    ## Two predictors past the raw step's trim, so a budget of 20 weights
+    ## holds 4 hidden units of mlp's 1 to 10: a budget that differs from the
+    ## default shows whether the task fitted under the object's or its own
+    obj <- make_eval_object(n = 60, n_configs = 1)
+    obj$config$configs$model      <- "mlp"
+    obj$config$configs$config_id  <- "cfg_mlp"
+    obj$config$tuning$max_weights <- 20
+
+    evaluated <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L, control = control_horizons(verbose = FALSE)))
+
+    local_tasks_in_session(2L)
+
+    budgets     <- numeric(0)
+    real_worker <- fit_member_worker
+    local_mocked_bindings(fit_member_worker = function(payload, inner = 1L) {
+      budgets <<- c(budgets, payload$settings$max_weights)
+      real_worker(payload, inner)
+    })
+
+    as_task <- suppressWarnings(fit(evaluated, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L,
+                                    control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                               verbose = FALSE)))
+
+    expect_identical(budgets, 20)
+    expect_identical(as_task$models$parallelize_over, "configs")
+    expect_identical(as_task$models$results$status, "success")
+    expect_lte(as_task$models$results$best_params[[1]]$hidden_units, 4L)
+    expect_true(any(as_task$log$verb == "fit" & as_task$log$type == "note" &
+                      grepl("The weight budget capped hidden_units at 4", as_task$log$message, fixed = TRUE)))
+
+  })
+
   it("takes the members axis on auto by evaluate()'s rule: once there are as many members as folds", {
 
     obj <- members_axis_obj()

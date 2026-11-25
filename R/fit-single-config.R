@@ -67,6 +67,10 @@
 #'   them (`apply_tune_ranges()`). `fit()` reads them from `configure()`'s
 #'   `config$tuning$ranges`, the ranges `evaluate()` searched. Default
 #'   `TUNE_RANGES`.
+#' @param max_weights A whole number, or `Inf`. The weight budget, as
+#'   [evaluate_single_config()] takes it: `fit()` reads it from
+#'   `configure()`'s `config$tuning$max_weights`, the budget `evaluate()`
+#'   searched under. Default `DEFAULT_MAX_WEIGHTS`.
 #' @param no_improve A whole number of at least 1, or `FALSE`: the re-tune's
 #'   Bayesian iterations without improvement after which it stops
 #'   (`control_horizons(no_improve = )`, which `fit()` reads). Default
@@ -163,6 +167,7 @@ fit_single_config <- function(config_row,
                               final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
                               grid_size           = DEFAULT_GRID_SIZE,
                               tune_ranges         = TUNE_RANGES,
+                              max_weights         = DEFAULT_MAX_WEIGHTS,
                               no_improve          = BAYES_NO_IMPROVE_DEFAULT,
                               compute_uq          = FALSE,
                               compute_ad          = FALSE,
@@ -250,11 +255,17 @@ fit_single_config <- function(config_row,
     ## Step 1: Build recipe, model specification and workflow
     ## -----------------------------------------------------------------------
 
+    ## The selection steps draw under the training part's prep's seed, so the
+    ## final fit, on the same rows, selects what that prep selected and the
+    ## bounds read from it cover the final fit (selection_seed())
     recipe <- unit_step("recipe", build_recipe(config_row, train_data, role_map,
-                                               sg_window     = sg_window,
-                                               pca_threshold = pca_threshold))
+                                               sg_window      = sg_window,
+                                               pca_threshold  = pca_threshold,
+                                               selection_seed = selection_seed(seed, "fit", config_row,
+                                                                               "training")))
 
-    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads))
+    model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads,
+                                                           max_weights = max_weights))
 
     wflow <- unit_step("workflow", workflows::workflow() |>
                          workflows::add_recipe(recipe) |>
@@ -274,16 +285,17 @@ fit_single_config <- function(config_row,
     model_wflow <- unit_step("workflow", fold_workflow(model_spec, outcome_col))
 
     ## -----------------------------------------------------------------------
-    ## Step 2: Finalize parameter set (the ranges, then the mtry / num_comp
-    ## upper bound; num_comp also by the smallest fold's rows, #216)
+    ## Step 2: The parameter set's ranges, and the predictors that bound them
     ## -----------------------------------------------------------------------
     ## The configured ranges first, as in evaluate_single_config(), so the
-    ## re-tune searches the space evaluate() did. The prep rule
-    ## evaluate_single_config() follows: each fold's recipe is
+    ## re-tune searches the space evaluate() did, then the bounds, from the
+    ## fewest predictors the whole training part's prep or a fold's keeps
+    ## (num_comp also by the smallest fold's rows, #216), set in Step 2b. The
+    ## prep rule evaluate_single_config() follows: each fold's recipe is
     ## prepped once, before the re-tune, and the re-tune and the out-of-fold
-    ## predictions are scored on it; the bounds are read from one more prep,
-    ## of the fold recipe on the whole training part. A step's error in either
-    ## ends the member with its class.
+    ## predictions are scored on it; the training part's count is read from
+    ## one more prep, of the fold recipe on the whole training part. A step's
+    ## error in either ends the member with its class.
 
     param_set   <- workflows::extract_parameter_set_dials(wflow)
     param_set   <- unit_step("finalize_parameters", apply_tune_ranges(param_set, tune_ranges))
@@ -301,25 +313,30 @@ fit_single_config <- function(config_row,
       cv_resamples
     )
 
-    if (prepped_now) {
-
-      ## The training part's prep sets the bounds, and is not the model
-      ## returned, so the selection steps' warnings are not taken from it
-      ## (the final fit's record is read instead)
-      bound     <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
-      param_set <- unit_step("finalize_parameters", finalize_bound(param_set, bound, cv_resamples))
-
-    }
+    ## The training part's prep is read first, so a failed one ends the
+    ## member before any fold is prepped. It is not the model returned, so
+    ## the selection steps' warnings are not taken from it (the final fit's
+    ## record is read instead)
+    if (prepped_now) bound <- unit_step("prep", fold_bound(entry_at("training"), fold_inputs))
 
     ## -----------------------------------------------------------------------
-    ## Step 2b: The folds, from each fold's prep
+    ## Step 2b: The folds, from each fold's prep, and the bounds
     ## -----------------------------------------------------------------------
     ## Once for the member: the re-tune's grid, its Bayesian iterations and the
     ## out-of-fold predictions all run on these folds. The warnings another
     ## package raised in a fold's prep join the member's with their folds.
+    ## The bounds are set from the training part's prep and every fold's
+    ## together, so with the re-tune off evaluate()'s point is clamped into a
+    ## range every one of this member's fits can take.
 
     prepped_folds <- unit_step("fold_prep", assemble_folds(entry_at, cv_resamples, fold_inputs, role_map))
     warning_log   <- dplyr::bind_rows(warning_log, prepped_folds$warnings)
+
+    if (prepped_now) {
+      param_set <- unit_step("finalize_parameters",
+                             finalize_bound(param_set, c(length(bound), prepped_folds$n_predictors), cv_resamples,
+                                            max_weights))
+    }
 
     rm(fold_inputs, entry_at)
 

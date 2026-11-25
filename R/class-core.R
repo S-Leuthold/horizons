@@ -127,7 +127,8 @@ new_horizons_data <- function(analysis = NULL,
                                 grid_size           = 10L,
                                 bayesian_iter       = 15L,
                                 final_bayesian_iter = DEFAULT_FINAL_BAYES_ITER,
-                                ranges              = merge_ranges(NULL)),
+                                ranges              = merge_ranges(NULL),
+                                max_weights         = DEFAULT_MAX_WEIGHTS),
 
                   ## Written by configure(): list(sg_window, pca_threshold),
                   ## the settings build_recipe() applies to every config.
@@ -370,7 +371,8 @@ new_horizons_data <- function(analysis = NULL,
 #'     the checks in [config_findings()]: unique configuration ids, known
 #'     models, transformations, preprocessing and feature selection, a usable
 #'     outcome range, the four tuning budgets as whole numbers (at least 2
-#'     folds), valid recipe settings, one outcome, and a response-trim
+#'     folds), a weight budget of at least 1 or `Inf`, valid recipe
+#'     settings, one outcome, and a response-trim
 #'     request for that outcome with a usable threshold. Every class
 #'     validator reaches these through the chain.
 #'
@@ -947,7 +949,8 @@ ad_bundle_ok <- function(bundle) {
 #' checked once at the door instead of where each value is used: a usable
 #' outcome range, a tuning record whose four budgets are whole numbers of at
 #' least `configure()`'s minimums, with a grid of at least two points while
-#' either Bayesian search runs, recipe settings `configure()` would accept,
+#' either Bayesian search runs, a weight budget of at least 1 (a whole
+#' number, or `Inf`), recipe settings `configure()` would accept,
 #' a configuration grid with unique ids whose models, transformations,
 #' preprocessing and feature selection are all known, one outcome, and a
 #' response-trim request that is for that outcome and has a usable threshold.
@@ -1051,6 +1054,18 @@ config_findings <- function(x) {
 
     findings <- c(findings, cli::format_inline(
       "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
+    ))
+
+  }
+
+  ### The weight budget (configure(max_weights = )): a whole number of at
+  ### least 1, or Inf for none (is_valid_max_weights(), configure()'s rule)
+  max_weights <- tuning$max_weights
+
+  if (!is_valid_max_weights(max_weights)) {
+
+    findings <- c(findings, cli::format_inline(
+      "{.field config$tuning$max_weights} must be a whole number of at least 1, or {.code Inf}, not {.code {deparse1(max_weights)}}"
     ))
 
   }
