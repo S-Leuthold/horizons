@@ -37,8 +37,9 @@ Default: \code{FALSE}.}
 \value{
 A \code{horizons_data} S3 object with:
 \itemize{
-\item \code{data$analysis}: tibble with \code{sample_id}, \code{filename}, \verb{wn_*} columns, and
-any additional columns
+\item \code{data$analysis}: tibble with \code{sample_id}, the meta columns (\code{filename}
+for OPUS input, or a source column of that name that is not the id,
+and any other columns a source carries), then the \verb{wn_*} columns
 \item \code{data$role_map}: tibble mapping columns to roles
 \item \code{log}: after any warnings, a note recording the call: the source type,
 the files read from the paths given, the scans and predictors, and the
@@ -65,8 +66,10 @@ which \code{\link[=standardize]{standardize()}} flags; a column of text is refus
 \item \strong{Tibble/data.frame}: Same detection logic as CSV.
 }
 
-The \code{filename} column (role: meta) preserves original filenames for traceability
-and later ID parsing via \code{parse_ids()}.
+For OPUS input, a \code{filename} column (role: meta) holds each file's name
+without its extension, for traceability and for \code{\link[=parse_ids]{parse_ids()}}. A data
+frame or a CSV file has one only when its source carries a \code{filename}
+column that is not the id, which is kept as meta like any other column.
 
 \strong{Several files:} \code{source} may be a character vector of files and
 directories, all OPUS or all CSV; a directory is read as the files of
@@ -106,8 +109,8 @@ extension is stripped — and, for CSV or tibble input, a blank or missing
 cell in the detected id column leaves a \code{sample_id} of \code{NA}. Both are
 legitimate before replicate scans are collapsed, so \code{spectra()} passes a
 duplicate or \code{NA} \code{sample_id} silently; use \code{\link[=average]{average()}} to collapse
-replicates before anything that requires unique ids (\code{average()} itself,
-\code{add_response()}, \code{configure()}, and onward, which refuse the object).
+replicates before anything that requires unique ids. \code{average()} refuses
+an \code{NA} id; \code{add_response()}, \code{configure()} and onward refuse either.
 }
 \examples{
 \dontrun{

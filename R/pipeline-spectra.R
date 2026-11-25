@@ -52,8 +52,10 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'
 #' * **Tibble/data.frame**: Same detection logic as CSV.
 #'
-#' The `filename` column (role: meta) preserves original filenames for traceability
-#' and later ID parsing via `parse_ids()`.
+#' For OPUS input, a `filename` column (role: meta) holds each file's name
+#' without its extension, for traceability and for [parse_ids()]. A data
+#' frame or a CSV file has one only when its source carries a `filename`
+#' column that is not the id, which is kept as meta like any other column.
 #'
 #' **Several files:** `source` may be a character vector of files and
 #' directories, all OPUS or all CSV; a directory is read as the files of
@@ -93,8 +95,8 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' cell in the detected id column leaves a `sample_id` of `NA`. Both are
 #' legitimate before replicate scans are collapsed, so `spectra()` passes a
 #' duplicate or `NA` `sample_id` silently; use [average()] to collapse
-#' replicates before anything that requires unique ids (`average()` itself,
-#' `add_response()`, `configure()`, and onward, which refuse the object).
+#' replicates before anything that requires unique ids. `average()` refuses
+#' an `NA` id; `add_response()`, `configure()` and onward refuse either.
 #'
 #' @param source A data frame, or a character vector of paths, each a file
 #'   or a directory (see Details).
@@ -112,8 +114,9 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return A `horizons_data` S3 object with:
-#'   * `data$analysis`: tibble with `sample_id`, `filename`, `wn_*` columns, and
-#'     any additional columns
+#'   * `data$analysis`: tibble with `sample_id`, the meta columns (`filename`
+#'     for OPUS input, or a source column of that name that is not the id,
+#'     and any other columns a source carries), then the `wn_*` columns
 #'   * `data$role_map`: tibble mapping columns to roles
 #'   * `log`: after any warnings, a note recording the call: the source type,
 #'     the files read from the paths given, the scans and predictors, and the
