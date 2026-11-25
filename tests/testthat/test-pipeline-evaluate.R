@@ -767,6 +767,18 @@ describe("evaluate() - NA outcome rows", {
 
   })
 
+  it("modelling_rows() refuses a table with no rows as having none, not as all NA or all flagged", {
+
+    df <- tibble::tibble(sample_id = character(0), y = numeric(0), .flag = character(0))
+
+    err <- expect_error(modelling_rows(df, "y"), "The data has no rows.", fixed = TRUE,
+                        class = "horizons_error_input")
+
+    expect_no_match(conditionMessage(err), "NA", fixed = TRUE)
+    expect_no_match(conditionMessage(err), "flagged", fixed = TRUE)
+
+  })
+
   it("names an outcome column the analysis table lacks, rather than calling it all NA", {
 
     ## evaluate()'s own modelling_rows() check has a dedicated "no such

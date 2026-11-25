@@ -387,6 +387,13 @@ new_horizons_data <- function(analysis = NULL,
 #'     range the hull was fitted over, which `select_training()` compares
 #'     (#107).
 #'
+#' **No rows**: an `analysis` with no rows is refused at either stage,
+#' straight after the pairing gate, as an input error (`horizons_error_input`,
+#' [abort_no_rows()]) rather than a validation error: the object is
+#' well-formed, and the remedy is the step that emptied it. So every verb
+#' that validates at its door refuses zero rows the same way; `predict()`
+#' does not validate `new_data`, and gives zero rows for zero rows.
+#'
 #' Empty objects (both analysis and role_map NULL, and no `config$configs`)
 #' pass validation — this allows for incremental object construction. The
 #' selection record is checked even on an otherwise empty object. A
@@ -407,7 +414,8 @@ new_horizons_data <- function(analysis = NULL,
 #' @param call The frame the error reports: the verb that validated.
 #'
 #' @return `horizons_data`. The input object, unchanged, if validation
-#'   passes. Aborts with class `horizons_error_validation` if it fails.
+#'   passes. Aborts with class `horizons_error_validation` if it fails, and
+#'   with class `horizons_error_input` when `analysis` has no rows.
 #'
 #' @seealso [new_horizons_data()] for object construction.
 #'
@@ -474,6 +482,17 @@ validate_horizons_data <- function(x,
                      call = call)
 
   }
+
+  ## ---------------------------------------------------------------------------
+  ## Gate check: the analysis table has rows
+  ## ---------------------------------------------------------------------------
+  ## Nothing is malformed in a table with no rows, but no verb can work on
+  ## one, and each would otherwise give a cause of its own (an NA outcome, a
+  ## flag, a QC drop) or pass it on. So it is one input refusal, at every
+  ## door this validator guards. predict() reads new_data without it, and
+  ## returns zero rows for zero rows.
+
+  if (nrow(x$data$analysis) == 0) abort_no_rows(call = call)
 
   ## ---------------------------------------------------------------------------
   ## Collect findings
@@ -872,6 +891,29 @@ validate_horizons_data <- function(x,
   }
 
   x
+
+}
+
+
+#' Refuse a table with no rows
+#'
+#' @description
+#' The one refusal for zero rows: [validate_horizons_data()] raises it at the
+#' door of every verb that validates there, and [modelling_rows()] for a
+#' table that reaches it empty. An input error, since the object is
+#' well-formed and the rows went missing upstream; the remedy is the step
+#' that emptied it.
+#'
+#' @param call The frame the refusal reports: the verb's.
+#' @return Does not return; aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+abort_no_rows <- function(call = rlang::caller_env()) {
+
+  abort_horizons(c(
+    "The data has no rows.",
+    "i" = "Check the filter, join or source that left it empty."
+  ), kind = "input", call = call)
 
 }
 

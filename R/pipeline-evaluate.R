@@ -3365,6 +3365,10 @@ log_unranked <- function(collector, candidates, ranked, metric) {
 #' @noRd
 modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 
+  ## The verbs' doors refuse zero rows already; here too, so the checks below
+  ## never read all() of an empty vector, which is TRUE
+  if (nrow(analysis) == 0) abort_no_rows(call = call)
+
   na_mask <- is.na(analysis[[outcome_col]])
   drop    <- !modelling_mask(analysis, outcome_col)
 
