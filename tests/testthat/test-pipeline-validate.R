@@ -1226,6 +1226,19 @@ describe("validate() outlier removal", {
 
   })
 
+  test_that("the NA share and the Cubist check count the rows a spectral removal leaves", {
+
+    hd     <- make_outlier_hd()
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+    checks <- result$validation$checks
+    n_left <- result$data$n_rows
+
+    expect_lt(n_left, 100)
+    expect_identical(checks$value[checks$check_id == "P004"], paste0("0/", n_left, " (0%)"))
+    expect_match(checks$value[checks$check_id == "P010"], paste0("; ", n_left, " x 20 = "), fixed = TRUE)
+
+  })
+
   test_that("remove_outliers='spectral': removes only spectral outliers", {
 
     hd     <- make_outlier_hd()

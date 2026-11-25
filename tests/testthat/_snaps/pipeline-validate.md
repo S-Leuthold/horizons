@@ -44,9 +44,9 @@
       │  ├─ ✓ Samples: 97 (≥ 50)
       │  ├─ ✓ CV feasibility: 77 training rows for 5 folds (need > 5)
       │  ├─ ✓ Outcome variance: 27.09
-      │  ├─ ✓ Missing: 0/100 (0%)
+      │  ├─ ✓ Missing: 0/97 (0%)
       │  ├─ ✓ Near-zero variance: 0
-      │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
+      │  ├─ ✓ Cubist feasibility: 97 x 50 cells, 0 config(s) flagged
       │  ├─ ℹ Spectral outliers: 3
       │  ├─ ℹ Response outliers: 1 on the whole table, not removed
       │  │  └─ Trim requested: evaluate() fences its training partition (1.5 x IQR) and trims training rows only; test rows untouched

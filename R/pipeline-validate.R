@@ -15,10 +15,12 @@
 #' section of the object and sets `validation$passed` based on whether any
 #' ERROR-severity checks failed.
 #'
-#' **The rows counted:** the sample-size and outcome-variance checks count
-#' the rows of the object `validate()` returns, after any spectral removal it
-#' makes, that the modelling verbs model: those with an observed outcome that
-#' no step flagged (`.flag`). The fold checks read the training part
+#' **The rows counted:** the checks read the object `validate()` returns,
+#' after any spectral removal it makes, except the two outlier detections
+#' and the near-zero-variance check, which read the rows the screen ran on.
+#' The sample-size and outcome-variance checks count its rows that the
+#' modelling verbs model: those with an observed outcome that no step flagged
+#' (`.flag`). The fold checks read the training part
 #' `evaluate()`'s train/test split leaves of them, on the rule the verbs
 #' apply: P001b is an ERROR when it has no more rows than CV folds, which
 #' `evaluate()` and `fit()` refuse, and P002 a WARNING when an even split of
@@ -275,14 +277,12 @@ validate <- function(x,
   ## ---------------------------------------------------------------------------
 
   analysis <- x$data$analysis
-  n_total  <- nrow(analysis)
 
   ## Outcome extraction ---------------------------------------------------------
 
   ### The door validator has refused a configured object without exactly one
   ### outcome, or one whose column is not in the analysis table.
-  outcome_col  <- x$data$role_map$variable[x$data$role_map$role == "outcome"]
-  outcome_vals <- analysis[[outcome_col]]
+  outcome_col <- x$data$role_map$variable[x$data$role_map$role == "outcome"]
 
   ## CV folds from tuning config ------------------------------------------------
 
@@ -416,16 +416,19 @@ validate <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 4c: The rows the verbs model, and the training part they fold
+  ## Step 4c: The table returned, and the rows the verbs model
   ## ---------------------------------------------------------------------------
-  ## The sample-size checks count what evaluate() and fit() count, on the
-  ## table validate() returns: the rows with an observed outcome and no flag
-  ## (modelling_mask(), the rule modelling_rows() applies), and the training
-  ## part evaluate()'s split leaves of them, drawn at the root evaluate()
-  ## takes by default. The door validator has refused a configured object
-  ## without exactly one outcome.
+  ## Every check below reads the table validate() returns, but P006's
+  ## detection, which reads the rows the screen ran on, as P007 and P005 do.
+  ## The sample-size checks count what evaluate() and fit() count: the rows
+  ## with an observed outcome and no flag (modelling_mask(), the rule
+  ## modelling_rows() applies), and the training part evaluate()'s split
+  ## leaves of them, drawn at the root evaluate() takes by default.
 
-  returned <- x$data$analysis
+  returned     <- x$data$analysis
+  n_total      <- nrow(returned)
+  outcome_vals <- returned[[outcome_col]]
+
   modelled <- modelling_mask(returned, outcome_col)
   n_model  <- sum(modelled)
   n_train  <- training_part_rows(returned, outcome_col, seed = recorded_seed(x) %||% 0L)
@@ -474,7 +477,7 @@ validate <- function(x,
   ## Step 8: P003 — Outcome variance
   ## ---------------------------------------------------------------------------
 
-  outcome_complete <- returned[[outcome_col]][modelled]
+  outcome_complete <- outcome_vals[modelled]
   outcome_var      <- if (length(outcome_complete) >= 2) stats::var(outcome_complete) else 0
 
   checks <- rbind(checks, run_check(
@@ -658,7 +661,7 @@ validate <- function(x,
     p001 <- checks[checks$check_id == "P001", ]
     sym  <- if (p001$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
     cat(paste0("\u2502  \u251C\u2500 ", sym, " Samples: ", n_model,
-               if (n_model < nrow(returned)) paste0(" of ", nrow(returned), " modelled"),
+               if (n_model < n_total) paste0(" of ", n_total, " modelled"),
                " (\u2265 50)\n"))
 
     p001b <- checks[checks$check_id == "P001b", ]
