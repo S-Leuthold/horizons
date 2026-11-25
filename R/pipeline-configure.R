@@ -1345,7 +1345,9 @@ outcome_range_breach <- function(values, outcome_range) {
 #' `evaluate()`, `fit()` and `ensemble()` call this on entry, before they
 #' draw a split or fit anything, so an object whose outcome no longer fits its
 #' range fails in a second rather than after the tuning cost (#76). The rows
-#' are the ones the verbs model: missing outcomes are ignored.
+#' are the ones the verbs model ([modelling_mask()]): missing outcomes and
+#' flagged rows are ignored, since no model is fitted on them or scored
+#' against them.
 #'
 #' @param x A configured `horizons_data` object.
 #' @param verb `character(1)`. The calling verb, named in the message.
@@ -1376,7 +1378,8 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
   }
 
   outcome_range <- outcome_range_setting(x)
-  breach        <- outcome_range_breach(x$data$analysis[[outcome_col]], outcome_range)
+  modelled      <- modelling_mask(x$data$analysis, outcome_col)
+  breach        <- outcome_range_breach(x$data$analysis[[outcome_col]][modelled], outcome_range)
 
   if (is.null(breach)) return(invisible(NULL))
 
@@ -1483,8 +1486,8 @@ format_outcome_value <- function(value) {
 #' `evaluate()` and `fit()` (on either path) call this beside
 #' [check_outcome_range()], before they draw a split or fit anything, so a
 #' constant outcome fails in a second rather than after the tuning cost or
-#' with an error from inside a model. The rows are the ones the verbs model:
-#' missing outcomes are ignored.
+#' with an error from inside a model. The rows are the ones the verbs model
+#' ([modelling_mask()]): missing outcomes and flagged rows are ignored.
 #'
 #' @param x A configured `horizons_data` object.
 #' @param verb `character(1)`. The calling verb, named in the message.
@@ -1504,15 +1507,19 @@ check_outcome_variance <- function(x, verb, call = rlang::caller_env()) {
 
   }
 
-  constant <- constant_outcome(x$data$analysis[[outcome_col]])
+  modelled <- modelling_mask(x$data$analysis, outcome_col)
+  constant <- constant_outcome(x$data$analysis[[outcome_col]][modelled])
 
   if (is.null(constant)) return(invisible(NULL))
 
   value_text <- format_outcome_value(constant$value)
 
+  ### A flagged row with an outcome is not one of them, so the count says so
+  rows_text <- if (any(!modelled & !is.na(x$data$analysis[[outcome_col]]))) "unflagged rows" else "rows"
+
   abort_horizons(c(
     "{.fn {verb}} cannot model {.field {outcome_col}}: it has zero variance.",
-    "x" = "All {constant$n} rows with an observed {.field {outcome_col}} have the value {value_text}.",
+    "x" = "All {constant$n} {rows_text} with an observed {.field {outcome_col}} have the value {value_text}.",
     "i" = "A model fitted to a constant learns nothing from the spectra. Check that the outcome role names the right column and that its values were joined to the right samples."
   ), kind = "input", call = call)
 

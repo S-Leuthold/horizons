@@ -192,6 +192,24 @@ describe("an outcome with zero variance on the modelled rows", {
 
   })
 
+  it("reads the rows the verbs model: a flagged row's other value does not make the outcome vary", {
+
+    flagged <- make_eval_object(n = 40, n_configs = 1)
+    flagged$data$analysis$SOC    <- 2.5
+    flagged$data$analysis$SOC[1] <- 9
+    flagged$data$analysis$.flag  <- c("standardize", rep(NA_character_, 39))
+    flagged$data$role_map <- tibble::add_row(flagged$data$role_map, variable = ".flag", role = "meta")
+
+    reached <- mock_expensive_steps()
+
+    err <- expect_error(evaluate(flagged), class = "horizons_error_input")
+
+    expect_match(one_line(err), "evaluate() cannot model SOC: it has zero variance", fixed = TRUE)
+    expect_match(one_line(err), "All 39 unflagged rows with an observed SOC have the value 2.5", fixed = TRUE)
+    expect_length(reached$steps, 0)
+
+  })
+
   it("fit() of an evaluated object aborts the same way, before fitting", {
 
     ## The stored fit is an evaluated object; its outcome made constant

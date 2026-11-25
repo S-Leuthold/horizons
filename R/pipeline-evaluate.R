@@ -3402,9 +3402,10 @@ modelling_rows <- function(analysis, outcome_col, call = rlang::caller_env()) {
 #' @description
 #' The row rule [modelling_rows()] applies, as a mask: a row is modelled when
 #' its outcome is observed and no step flagged it ([flagged_rows()]). A check
-#' that counts the modelled rows without taking them, as `validate()`'s
-#' sample-size checks do, reads them here, so it counts the rows the
-#' modelling verbs model.
+#' that reads the modelled rows without taking them, as `validate()`'s
+#' sample-size checks and the outcome's range and variance checks
+#' ([check_outcome_range()], [check_outcome_variance()]) do, reads them here,
+#' so it judges the rows the modelling verbs model.
 #'
 #' @param analysis Data frame. The object's analysis table.
 #' @param outcome_col Character. Name of the outcome column, which the door

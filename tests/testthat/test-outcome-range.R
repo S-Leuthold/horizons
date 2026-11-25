@@ -700,6 +700,33 @@ describe("a negative outcome under the default range", {
 
   })
 
+  it("reads the rows the verbs model: a flagged row outside the range is no model's, and is not refused", {
+
+    ## A non-negative outcome but for one row, which a step flagged
+    flagged <- make_eval_object(n = 60, n_configs = 1)
+    flagged$data$analysis$SOC[1] <- -5
+    flagged$data$analysis$.flag  <- c("standardize", rep(NA_character_, 59))
+    flagged$data$role_map <- tibble::add_row(flagged$data$role_map, variable = ".flag", role = "meta")
+
+    for (verb in c("evaluate", "fit", "ensemble")) {
+      expect_no_error(check_outcome_range(flagged, verb = verb))
+    }
+
+    ## evaluate() and a cold-start fit() go on to draw their split
+    reached <- mock_expensive_steps()
+
+    expect_error(evaluate(flagged), "drew a split", fixed = TRUE)
+    expect_error(fit(flagged), "drew a split", fixed = TRUE)
+    expect_identical(reached$steps, c("draw_eval_split", "draw_eval_split"))
+
+    ## Unflagged, the same row is refused
+    flagged$data$analysis$.flag[1] <- NA_character_
+
+    expect_error(check_outcome_range(flagged, verb = "evaluate"), "outcome_range",
+                 class = "horizons_error_input")
+
+  })
+
 })
 
 
