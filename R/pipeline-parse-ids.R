@@ -32,6 +32,11 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #' columns of their own; `parse_ids()` reads any data with a `filename`
 #' column.
 #'
+#' The filename is parsed as it is stored. [spectra()] stores each OPUS
+#' file's name without its extension (`PROJ-S1.Bulk` for `PROJ-S1.Bulk.0`),
+#' so a dot left in the name is part of it, and a data frame's own
+#' `filename` column is parsed as given.
+#'
 #' The function supports two modes:
 #'
 #' **Format string mode** (`format` parameter):
@@ -227,11 +232,9 @@ parse_ids <- function(x,
 
   collector <- log_open("parse_ids")
 
+  ### Parsed as stored: spectra() stores each OPUS file's name without its
+  ### extension, so a dot left in the stem is part of the name
   filenames <- x$data$analysis$filename
-
-  ## Strip file extensions ---------------------------------------------------
-
-  filenames_clean <- tools::file_path_sans_ext(filenames)
 
   ## -------------------------------------------------------------------------
   ## Step 3: Convert format to patterns (if needed)
@@ -275,7 +278,7 @@ parse_ids <- function(x,
   ## Step 4: Apply patterns to extract values
   ## -------------------------------------------------------------------------
 
-  extracted <- apply_patterns(filenames_clean, patterns)
+  extracted <- apply_patterns(filenames, patterns)
 
   ## -------------------------------------------------------------------------
   ## Step 5: Handle non-matches

@@ -86,8 +86,8 @@ test_that("parse_ids() handles complex filenames", {
   ## Arrange ---------------------------------------------------------------
 
   hd <- make_test_hd(c(
-    "SITE-F_S100-1_GroundBulk_S1_A2.0",
-    "SITE-G_S200-2_IntactBulk_S2_B3.0"
+    "SITE-F_S100-1_GroundBulk_S1_A2",
+    "SITE-G_S200-2_IntactBulk_S2_B3"
   ))
 
   ## Act -------------------------------------------------------------------
@@ -409,25 +409,40 @@ test_that("parse_ids() preserves original filename column", {
 
 
 ## ---------------------------------------------------------------------------
-## parse_ids() — Extension stripping
+## parse_ids() — The filename as stored
 ## ---------------------------------------------------------------------------
+## spectra() stores each OPUS file's name without its extension, so the parse
+## reads the filename as it is, and a stem's own dots are part of it.
 
-test_that("parse_ids() strips file extensions before parsing", {
+test_that("parse_ids() parses the filename as stored, so stems differing after a dot stay apart", {
 
-  ## Arrange ---------------------------------------------------------------
+  ## From OPUS files Soil.A.0 and Soil.B.0 -----------------------------------
 
-  ## Filenames with extensions (as if from OPUS files) ----------------------
+  hd <- make_test_hd(c("Soil.A", "Soil.B"))
+
+  result <- parse_ids(hd, format = "{sampleid}", verbose = FALSE)
+
+  expect_identical(result$data$analysis$sample_id, c("Soil.A", "Soil.B"))
+
+  ## The documented dot-separated format, on stems such as PROJ-S1.Bulk.0's ---
+
+  hd <- make_test_hd(c("PROJ-S1.Bulk", "PROJ-S2.Fine"))
+
+  result <- parse_ids(hd, format = "{project}-{sampleid}.{fraction}", verbose = FALSE)
+
+  expect_identical(result$data$analysis$sample_id, c("S1", "S2"))
+  expect_identical(result$data$analysis$project, c("PROJ", "PROJ"))
+  expect_identical(result$data$analysis$fraction, c("Bulk", "Fine"))
+  expect_match(result$log$message[nrow(result$log)], "2 of 2 filenames matched", fixed = TRUE)
+
+  ## A data frame's own filename column is parsed as it was given ---------------
 
   hd <- make_test_hd(c("PROJ_S001_bulk.0", "PROJ_S002_bulk.0"))
 
-  ## Act -------------------------------------------------------------------
+  result <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}", verbose = FALSE)
 
-  result <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}")
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_equal(result$data$analysis$sample_id, c("S001", "S002"))
-  expect_equal(result$data$analysis$fraction, c("bulk", "bulk"))
+  expect_identical(result$data$analysis$sample_id, c("S001", "S002"))
+  expect_identical(result$data$analysis$fraction, c("bulk.0", "bulk.0"))
 
 })
 

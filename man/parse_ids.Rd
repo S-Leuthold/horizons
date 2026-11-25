@@ -55,6 +55,11 @@ For CSV or tibble data, sample IDs and metadata are usually already in
 columns of their own; \code{parse_ids()} reads any data with a \code{filename}
 column.
 
+The filename is parsed as it is stored. \code{\link[=spectra]{spectra()}} stores each OPUS
+file's name without its extension (\code{PROJ-S1.Bulk} for \code{PROJ-S1.Bulk.0}),
+so a dot left in the name is part of it, and a data frame's own
+\code{filename} column is parsed as given.
+
 The function supports two modes:
 
 \strong{Format string mode} (\code{format} parameter):
