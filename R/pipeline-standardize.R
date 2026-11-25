@@ -1130,7 +1130,7 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' @export
 standardize <- function(x,
                         resample     = 2,
-                        trim         = c(600, 4000),
+                        trim         = MIR_RANGE,
                         remove_water = FALSE,
                         baseline     = FALSE,
                         force        = FALSE,

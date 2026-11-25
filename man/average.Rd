@@ -9,6 +9,7 @@ average(
   by = "sample_id",
   quality_check = TRUE,
   correlation_threshold = 0.996,
+  qc_range = NULL,
   on_all_outliers = c("warn", "drop", "keep_best"),
   verbose = getOption("horizons.verbose", TRUE)
 )
@@ -29,6 +30,16 @@ Default: \code{TRUE}.}
 
 \item{correlation_threshold}{Numeric. Minimum mean pairwise correlation for
 a replicate to pass QC. Default: \code{0.996}. Changing this is rarely needed.}
+
+\item{qc_range}{\code{numeric(2)} or \code{NULL}. The wavenumber range, in cm-1 and
+inclusive, whose bands quality control correlates over; the averaged
+spectra keep every band. \code{NULL} (the default) is the range the spectra
+are modelled over, whichever order \code{average()} and \code{\link[=standardize]{standardize()}} run
+in: on spectra \code{standardize()} has run on, every band they have; on
+spectra it has not, the bands inside its default \code{trim}, 600 to 4000
+cm-1. When no band lies inside the range, quality control correlates
+over every band, and a note on the log says so. The call's note names
+the bands it used.}
 
 \item{on_all_outliers}{Character. Behavior when all replicates fail QC:
 \itemize{
@@ -60,8 +71,8 @@ varies within any sample dropped
 \item \code{log}: The samples whose replicates all failed QC, the metadata
 columns dropped, and the scans QC removed, as a table in the note's
 \code{detail}, then a note recording the call: \code{by}, the scans in and
-samples out, the quality check and the replicates it removed, and any
-flagged replicates left out
+samples out, the quality check, the bands it correlated over and the
+replicates it removed, and any flagged replicates left out
 }
 }
 \description{

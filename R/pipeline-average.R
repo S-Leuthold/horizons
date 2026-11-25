@@ -129,6 +129,15 @@
 #'   Default: `TRUE`.
 #' @param correlation_threshold Numeric. Minimum mean pairwise correlation for
 #'   a replicate to pass QC. Default: `0.996`. Changing this is rarely needed.
+#' @param qc_range `numeric(2)` or `NULL`. The wavenumber range, in cm-1 and
+#'   inclusive, whose bands quality control correlates over; the averaged
+#'   spectra keep every band. `NULL` (the default) is the range the spectra
+#'   are modelled over, whichever order `average()` and [standardize()] run
+#'   in: on spectra `standardize()` has run on, every band they have; on
+#'   spectra it has not, the bands inside its default `trim`, 600 to 4000
+#'   cm-1. When no band lies inside the range, quality control correlates
+#'   over every band, and a note on the log says so. The call's note names
+#'   the bands it used.
 #' @param on_all_outliers Character. Behavior when all replicates fail QC:
 #'   * `"warn"` (default): Keep all replicates and average
 #'   * `"drop"`: Remove the sample entirely
@@ -154,8 +163,8 @@
 #'   * `log`: The samples whose replicates all failed QC, the metadata
 #'     columns dropped, and the scans QC removed, as a table in the note's
 #'     `detail`, then a note recording the call: `by`, the scans in and
-#'     samples out, the quality check and the replicates it removed, and any
-#'     flagged replicates left out
+#'     samples out, the quality check, the bands it correlated over and the
+#'     replicates it removed, and any flagged replicates left out
 #'
 #' @examples
 #' \dontrun{
@@ -177,6 +186,7 @@ average <- function(x,
                     by                    = "sample_id",
                     quality_check         = TRUE,
                     correlation_threshold = 0.996,
+                    qc_range              = NULL,
                     on_all_outliers       = c("warn", "drop", "keep_best"),
                     verbose               = getOption("horizons.verbose", TRUE)) {
 
@@ -241,6 +251,24 @@ average <- function(x,
   check_arg(rlang::check_bool, quality_check)
   check_arg(rlang::check_number_decimal, correlation_threshold, min = 0, max = 1)
 
+  if (!is.null(qc_range) && (!is.numeric(qc_range) || length(qc_range) != 2)) {
+
+    abort_horizons(
+      "{.arg qc_range} must be numeric(2) or {.code NULL}, not {.obj_type_friendly {qc_range}}.",
+      kind = "input"
+    )
+
+  }
+
+  if (!is.null(qc_range) && (!all(is.finite(qc_range)) || qc_range[1] >= qc_range[2])) {
+
+    abort_horizons(c(
+      "{.arg qc_range} must be two finite wavenumbers, the lower first.",
+      "x" = "Got {qc_range[1]} and {qc_range[2]}."
+    ), kind = "input")
+
+  }
+
   outlier_modes <- c("warn", "drop", "keep_best")
 
   ### The default is the vector of modes, as match.arg() reads it.
@@ -275,6 +303,23 @@ average <- function(x,
       "{.arg x} has no spectra to average.",
       "i" = "Average an object with spectra, from {.fn spectra}."
     ), kind = "input")
+
+  }
+
+  ## The bands the quality check correlates over -----------------------------
+  ## The range the user models, whichever order average() and standardize()
+  ## run in; only the correlation reads it, and the mean keeps every band.
+
+  qc_bands <- quality_check_bands(predictor_cols, qc_range,
+                                  standardized = !is.null(x$data$standardization))
+  qc_wn    <- round(range(wn_values(qc_bands$cols)), 2)
+
+  if (quality_check && qc_bands$fallback) {
+
+    log_note(collector, c(
+      "No band lies inside the quality check's range, {qc_bands$asked[1]} to {qc_bands$asked[2]} cm-1, so it correlated over every band, {qc_wn[1]} to {qc_wn[2]} cm-1.",
+      "i" = "Set {.arg qc_range} to the range the spectra are modelled over."
+    ))
 
   }
 
@@ -409,6 +454,7 @@ average <- function(x,
                   group_id            = group_id,
                   by                  = by,
                   predictor_cols      = predictor_cols,
+                  qc_cols             = qc_bands$cols,
                   meta_cols           = meta_cols,
                   response_cols       = response_cols,
                   quality_check       = quality_check,
@@ -697,8 +743,9 @@ average <- function(x,
   ### flagged ones left out, counted once each
   n_before <- nrow(analysis)
   n_after  <- nrow(averaged)
+  n_qc     <- length(qc_bands$cols)
   qc_text  <- if (quality_check) {
-    "quality check on at a correlation of {correlation_threshold}, with {.code on_all_outliers = {.val {on_all_outliers}}}; {n_dropped} replicate{?s} removed by the quality check"
+    "quality check on at a correlation of {correlation_threshold} over {n_qc} band{?s}, {qc_wn[1]} to {qc_wn[2]} cm-1, with {.code on_all_outliers = {.val {on_all_outliers}}}; {n_dropped} replicate{?s} removed by the quality check"
   } else {
     "quality check off"
   }
@@ -816,6 +863,58 @@ average <- function(x,
 ## =============================================================================
 ## Section 3: Helper Functions
 ## =============================================================================
+
+
+## ---------------------------------------------------------------------------
+## quality_check_bands() — The bands QC correlates over
+## ---------------------------------------------------------------------------
+
+#' The bands average()'s quality check correlates over
+#'
+#' @description
+#' The range the user models, whichever order `average()` and
+#' [standardize()] run in. With `qc_range = NULL`, an object `standardize()`
+#' has run on (a `data$standardization` record) is checked over every band
+#' it has, the range it was trimmed to; one it has not run on, over the bands
+#' inside `standardize()`'s default `trim`, `MIR_RANGE`. A `qc_range` given
+#' is the range read either way. The bounds are inclusive, as `trim`'s are.
+#' When no band lies inside the range, the check reads every band.
+#'
+#' @param predictor_cols Character. The predictor columns, named by
+#'   wavenumber.
+#' @param qc_range `average()`'s `qc_range`, checked: `NULL` or two finite
+#'   wavenumbers, the lower first.
+#' @param standardized Logical(1). Whether `standardize()` has run on the
+#'   object.
+#'
+#' @return List: `cols`, the predictor columns QC correlates over; `asked`,
+#'   the range they were chosen from, `NULL` for every band of a
+#'   standardized object; and `fallback`, `TRUE` when no band lay inside
+#'   `asked`, so `cols` is every band.
+#' @keywords internal
+#' @noRd
+quality_check_bands <- function(predictor_cols, qc_range, standardized) {
+
+  asked <- if (!is.null(qc_range)) qc_range else if (standardized) NULL else MIR_RANGE
+
+  if (is.null(asked)) {
+
+    return(list(cols = predictor_cols, asked = NULL, fallback = FALSE))
+
+  }
+
+  wn     <- wn_values(predictor_cols)
+  inside <- wn >= asked[1] & wn <= asked[2]
+
+  if (!any(inside)) {
+
+    return(list(cols = predictor_cols, asked = asked, fallback = TRUE))
+
+  }
+
+  list(cols = predictor_cols[inside], asked = asked, fallback = FALSE)
+
+}
 
 
 ## ---------------------------------------------------------------------------
@@ -1001,6 +1100,9 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #' @param group_id The group identifier value.
 #' @param by Name of grouping column.
 #' @param predictor_cols Character vector of predictor column names.
+#' @param qc_cols Character vector. The predictor columns quality control
+#'   correlates over ([quality_check_bands()]); the mean is over every
+#'   predictor column.
 #' @param meta_cols Character vector of metadata column names.
 #' @param response_cols Character vector of response and outcome column names.
 #'   Numeric columns are averaged over the same rows as the predictors;
@@ -1038,6 +1140,7 @@ average_group <- function(group_data,
                           group_id,
                           by,
                           predictor_cols,
+                          qc_cols       = predictor_cols,
                           meta_cols,
                           response_cols = character(),
                           quality_check,
@@ -1086,9 +1189,9 @@ average_group <- function(group_data,
 
   if (qc_run) {
 
-    ## Extract predictor matrix ----------------------------------------------
+    ## Extract the bands QC correlates over --------------------------------
 
-    predictor_matrix <- as.matrix(group_data[usable, predictor_cols, drop = FALSE])
+    predictor_matrix <- as.matrix(group_data[usable, qc_cols, drop = FALSE])
 
     ## Compute quality, on the usable replicates, in their indexing ------------
 

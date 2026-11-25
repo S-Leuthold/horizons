@@ -7,7 +7,7 @@
 standardize(
   x,
   resample = 2,
-  trim = c(600, 4000),
+  trim = MIR_RANGE,
   remove_water = FALSE,
   baseline = FALSE,
   force = FALSE,

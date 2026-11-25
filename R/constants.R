@@ -842,6 +842,17 @@ SELECT_SPACE_CACHE_VERSION <- 2L
 # never refuses or skips, so it has no override.
 WN_SNAP_FRACTION <- 0.01
 
+## The modelled range ------------------------------------------------------------
+
+# The standard mid-infrared range, in cm-1: standardize()'s default `trim`,
+# and the bands average()'s quality check correlates over on spectra not yet
+# standardized (its `qc_range = NULL`), so the check reads the range the
+# user models whichever order the two verbs run in. On raw spectra whose
+# axis runs past it the range matters: on 4,110 real scans at a correlation
+# of 0.996, QC over the whole raw axis (600 to 7,498 cm-1) removed 4.8% of
+# the scans and QC over 600 to 4,000 cm-1 removed 10.0%.
+MIR_RANGE <- c(600, 4000)
+
 ## validate() Heuristics --------------------------------------------------------
 
 # validate()'s P010 check: cubist without dimension reduction on a large

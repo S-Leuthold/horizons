@@ -42,8 +42,10 @@ make_test_hd_average <- function(n_samples      = 3,
   ## Build spectral data (correlated within samples) -------------------------
 
   ## Decreasing, per invariant I2 (MIR convention: 4000 -> 400). The validator
-  ## enforces this now, so the fixture has to honour it.
-  wn_cols <- paste0("wn_", rev(seq_len(n_wavelengths)) * 100)
+  ## enforces this now, so the fixture has to honour it. Inside the range
+  ## quality control reads on spectra not yet standardized (600 to 4000
+  ## cm-1), so every band takes part in it.
+  wn_cols <- paste0("wn_", 600 + 50 * (rev(seq_len(n_wavelengths)) - 1))
 
   ## Base spectra per sample (rows = samples)
   base_spectra <- matrix(
@@ -202,7 +204,7 @@ test_that("average() computes mean of predictor columns", {
   hd <- make_test_hd_average(n_samples = 1, n_reps = 3, n_wavelengths = 2)
 
   ## Get original values for first wavelength column
-  wn_col <- "wn_100"
+  wn_col <- "wn_600"
   original_values <- hd$data$analysis[[wn_col]]
   expected_mean <- mean(original_values)
 
@@ -802,7 +804,7 @@ test_that("average() leaves a flagged replicate out of QC and the mean, and flag
   ## The record counts the flagged replicate apart from QC's, with QC on
   ## and off
   expect_identical(log_rows_added(hd, result)$message,
-                   'Averaged 9 scans into 3 samples by sample_id: quality check on at a correlation of 0.996, with `on_all_outliers = "warn"`; 0 replicates removed by the quality check; 1 flagged (.flag) replicate left out.')
+                   'Averaged 9 scans into 3 samples by sample_id: quality check on at a correlation of 0.996 over 10 bands, 600 to 1050 cm-1, with `on_all_outliers = "warn"`; 0 replicates removed by the quality check; 1 flagged (.flag) replicate left out.')
   off <- average(hd, quality_check = FALSE, verbose = FALSE)
   expect_identical(log_rows_added(hd, off)$message,
                    "Averaged 9 scans into 3 samples by sample_id: quality check off; 1 flagged (.flag) replicate left out.")
@@ -944,7 +946,7 @@ test_that("average() records the call as its last row, a note with by, the count
   expect_true(is.na(note$topic))
   expect_identical(note$ids[[1]], character(0))
   expect_identical(note$message,
-                   'Averaged 12 scans into 3 samples by sample_id: quality check on at a correlation of 0.99, with `on_all_outliers = "warn"`; 0 replicates removed by the quality check.')
+                   'Averaged 12 scans into 3 samples by sample_id: quality check on at a correlation of 0.99 over 10 bands, 600 to 1050 cm-1, with `on_all_outliers = "warn"`; 0 replicates removed by the quality check.')
 
   ### Without the check, by another column
   hd     <- make_test_hd_average(n_samples = 2, n_reps = 3, add_meta = TRUE, uniform_meta = TRUE)
@@ -1858,7 +1860,7 @@ test_that("average() leaves an unusable spectrum to standardize(), which flags i
   ## standardize() runs, nothing has flagged either
   hd <- make_test_hd_average(n_samples = 3, n_reps = 1)
   wn <- grep("^wn_", names(hd$data$analysis), value = TRUE)
-  hd$data$analysis$wn_500[1] <- NA
+  hd$data$analysis$wn_800[1] <- NA
   hd$data$analysis[2, wn]    <- 0.7
 
   ## Act — average() returns them, and standardize() flags them
@@ -1935,6 +1937,108 @@ test_that("average() gives the same sample whether standardize() runs before or 
     expect_false(any(flagged_rows(readme_order$data$analysis)), info = name)
     expect_false(any(flagged_rows(std_first$data$analysis)), info = name)
 
+  }
+
+})
+
+## ---------------------------------------------------------------------------
+## average() — The bands quality control reads
+## ---------------------------------------------------------------------------
+## QC correlates over the range the user models, whichever order average()
+## and standardize() run in: on raw spectra, the bands inside standardize()'s
+## default trim; on standardized ones, every band they kept.
+
+#' Raw scans on an axis that runs past 4000 cm-1, as an instrument writes
+#' them: three samples of three scans. S2's third differs from its others
+#' only above 4000 cm-1, S3's third only inside 600 to 4000.
+#' @noRd
+make_raw_axis_hd <- function() {
+
+  wn   <- seq(7500, 596, by = -4)
+  base <- ifelse(wn <= 4000, 0.5 + 0.4 * sin(wn / 300), 0.1 + 0.02 * sin(wn / 500))
+
+  set.seed(11)
+  scans <- t(vapply(1:9, function(i) base + stats::rnorm(length(wn), 0, 5e-4), numeric(length(wn))))
+  scans[6, ] <- scans[6, ] + 0.6 * exp(-((wn - 6000) / 400)^2)
+  scans[9, ] <- scans[9, ] + 0.3 * exp(-((wn - 1500) / 150)^2)
+
+  colnames(scans) <- wn
+  df <- tibble::as_tibble(scans)
+  df$sample_id <- rep(c("S1", "S2", "S3"), each = 3)
+
+  spectra(df, verbose = FALSE)
+
+}
+
+test_that("average() gives the same QC verdict in either order with standardize(), at their defaults", {
+
+  hd <- make_raw_axis_hd()
+
+  ## Act — the documented order, and standardize() first
+  readme_order <- suppressWarnings(standardize(average(hd, verbose = FALSE), verbose = FALSE))
+  std_first    <- suppressWarnings(average(standardize(hd, verbose = FALSE), verbose = FALSE))
+
+  ## Assert — the same scans removed, for the same reason: S3's third, which
+  ## differs inside the modelled range, and not S2's, which differs only
+  ## past it
+  removed_a <- dplyr::bind_rows(readme_order$log$detail[readme_order$log$verb == "average"])
+  removed_b <- dplyr::bind_rows(std_first$log$detail[std_first$log$verb == "average"])
+
+  expect_identical(removed_a$row, 9L)
+  expect_identical(removed_a[c("sample_id", "row", "reason")], removed_b[c("sample_id", "row", "reason")])
+  expect_identical(readme_order$data$analysis$sample_id, std_first$data$analysis$sample_id)
+
+})
+
+test_that("average()'s quality control reads the bands qc_range names, its default the range standardize() keeps", {
+
+  hd    <- make_raw_axis_hd()
+  wn    <- grep("^wn_", names(hd$data$analysis), value = TRUE)
+  note  <- function(out) out$log$message[nrow(out$log)]
+  lost  <- function(out) dplyr::bind_rows(out$log$detail[out$log$verb == "average"])$row
+
+  ## The default on raw spectra is standardize()'s default trim, one value
+  expect_identical(formals(standardize)$trim, quote(MIR_RANGE))
+
+  out <- average(hd, verbose = FALSE)
+  expect_identical(lost(out), 9L)
+  expect_match(note(out), "correlation of 0.996 over 851 bands, 600 to 4000 cm-1,", fixed = TRUE)
+
+  ### Only the correlation reads the range: the averaged spectra keep every band
+  expect_identical(grep("^wn_", names(out$data$analysis), value = TRUE), wn)
+
+  ## A range given is the range read
+  out <- average(hd, qc_range = c(4000, 7500), verbose = FALSE)
+  expect_identical(lost(out), 6L)
+  expect_match(note(out), "over 876 bands, 4000 to 7500 cm-1,", fixed = TRUE)
+
+  ## On standardized spectra the default is every band they kept, here not
+  ## the band where S3's third scan differs
+  std <- suppressWarnings(standardize(hd, resample = NULL, trim = c(2000, 7500), verbose = FALSE))
+  out <- average(std, verbose = FALSE)
+  expect_identical(lost(out), 6L)
+  expect_match(note(out), "over 1376 bands, 2000 to 7500 cm-1,", fixed = TRUE)
+
+  ## With no band inside the range, every band, and a note that says so
+  nir <- hd
+  names(nir$data$analysis)[match(wn, names(nir$data$analysis))] <- paste0("wn_", wn_values(wn) + 5000)
+  nir$data$role_map$variable[match(wn, nir$data$role_map$variable)] <- paste0("wn_", wn_values(wn) + 5000)
+
+  out  <- average(nir, verbose = FALSE)
+  rows <- log_rows_added(nir, out)
+
+  expect_identical(lost(out), c(6L, 9L))
+  expect_match(rows$message[1], "No band lies inside the quality check's range, 600 to 4000 cm-1, so it correlated over every band, 5596 to 12500 cm-1.", fixed = TRUE)
+  expect_match(note(out), "over 1727 bands, 5596 to 12500 cm-1,", fixed = TRUE)
+
+  ### Without the check there is nothing to say
+  off <- average(nir, quality_check = FALSE, verbose = FALSE)
+  expect_identical(nrow(log_rows_added(nir, off)), 1L)
+
+  ## Refused at the door: not two numbers, not finite, not low then high
+  for (bad in list("600", c(600, 2000, 4000), c(600, NA), c(4000, 600), c(600, 600))) {
+    expect_error(average(hd, qc_range = bad, verbose = FALSE), "qc_range",
+                 class = "horizons_error_input", info = paste(bad, collapse = " "))
   }
 
 })
