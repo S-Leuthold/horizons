@@ -78,7 +78,11 @@ ensure_rng_stream <- function() {
 #' @description
 #' The first seven hex digits of [digest::digest()] of `"<root>/<name>"`, as
 #' an integer in `[0, 2^28)`: digest's defaults, as `generate_config_id()`
-#' calls it, so the package has one hashing rule. The root is taken as an
+#' calls it, so the package has one hashing rule, with the key serialized
+#' under version 2 whatever `options(serializeVersion = )` says, which would
+#' otherwise give a session that set it other seeds from the same root.
+#' Version 2 is the option's default, so these are the seeds the rule has
+#' always given. The root is taken as an
 #' integer, so `307` and `307L` give the same seed. A pure function of its
 #' arguments: any unit can be re-run alone by recomputing its seed.
 #'
@@ -101,7 +105,7 @@ unit_seed <- function(seed, name) {
 
   key <- paste(c(as.integer(seed), name), collapse = "/")
 
-  strtoi(substr(digest::digest(key), 1L, 7L), base = 16L)
+  strtoi(substr(digest::digest(key, serializeVersion = 2L), 1L, 7L), base = 16L)
 
 }
 

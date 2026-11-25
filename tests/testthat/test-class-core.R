@@ -3322,24 +3322,44 @@ test_that("print() heads a fitted object with its class, and gives the best conf
 
 })
 
-test_that("summary() gives the best configuration with its model and test metrics, and counts failed members only when there are some", {
+test_that("summary() gives the best configuration with its model, its CV and test values of the rank metric as print() labels them, and its other test metrics, and counts failed members only when there are some", {
 
   fx       <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
   ev       <- fx$evaluation
   best_row <- ev$results[ev$results$config_id == ev$best_config, ]
   expect_identical(fx$config$configs$model[fx$config$configs$config_id == ev$best_config], "rf")
   expect_identical(fx$models$results$status, rep("success", 3))
+  expect_identical(ev$rank_metric, "rpd")
 
-  ## The best configuration and its test metrics
+  ## The best configuration: the CV value of the rank metric, which ranked
+  ## it, beside its held-out test value, each labelled, then its other test
+  ## metrics, labelled as test metrics
   section <- models_section(utils::capture.output(summary(fx)), "Evaluation")
   at      <- which(section == paste0("   ├─ Best: ", ev$best_config, " (Random Forest)"))
 
   expect_length(at, 1)
-  expect_identical(section[at + 1],
-                   paste0("   │     └─ RMSE = ", round(best_row$rmse, 3),
-                          ", RPD = ", round(best_row$rpd, 3),
-                          ", RSQ = ", round(best_row$rsq, 3),
-                          ", CCC = ", round(best_row$ccc, 3)))
+  expect_identical(section[at + 1:2],
+                   c(paste0("   │     ├─ CV RPD = ", round(best_row$cv_rpd, 3),
+                            " (test RPD = ", round(best_row$rpd, 3), ")"),
+                     paste0("   │     └─ Test RMSE = ", round(best_row$rmse, 3),
+                            ", RSQ = ", round(best_row$rsq, 3),
+                            ", CCC = ", round(best_row$ccc, 3))))
+
+  ## Ranked on a metric outside those four, the rank metric is still the one
+  ## shown, as print() shows it
+  fx$evaluation$rank_metric <- "mae"
+  section <- models_section(utils::capture.output(summary(fx)), "Evaluation")
+  printed <- models_section(utils::capture.output(print(fx)), "Evaluation")
+
+  expect_identical(section[at + 1:2],
+                   c(paste0("   │     ├─ CV MAE = ", round(best_row$cv_mae, 3),
+                            " (test MAE = ", round(best_row$mae, 3), ")"),
+                     paste0("   │     └─ Test RMSE = ", round(best_row$rmse, 3),
+                            ", RPD = ", round(best_row$rpd, 3),
+                            ", RSQ = ", round(best_row$rsq, 3),
+                            ", CCC = ", round(best_row$ccc, 3))))
+  expect_identical(printed[length(printed)],
+                   paste0("   └─ Best: ", ev$best_config, " — ", sub("^.*├─ ", "", section[at + 1])))
 
   ## Every member succeeded: no failed count; one failed: counted. None is
   ## marked degraded here, so the line counts successes and failures alone.

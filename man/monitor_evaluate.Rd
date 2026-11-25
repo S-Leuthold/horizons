@@ -18,8 +18,8 @@ Default 10.}
 }
 \value{
 Invisibly returns a list with completion stats (n_complete,
-n_total, rate in configs per hour, eta weighted by each config's
-expected time, best_config, best_metric), \code{ignored} (the number of
+n_total, rate in configs this run finished per hour, eta weighted by
+each config's expected time, best_config, best_metric), \code{ignored} (the number of
 rows refused, by reason: \code{other_data}, \code{other_settings},
 \code{earlier_schema} (another scoring schema, or recording less than the
 manifest), \code{not_in_grid}) and \code{unreadable} (checkpoint files that could
@@ -45,5 +45,7 @@ The ETA counts each config by the time it is expected to take (the
 estimate the configs axis starts the longest first by: the seconds its
 model and feature selection took on a measured grid, scaled to the run's
 rows), not as one, since configs differ in length by orders of
-magnitude.
+magnitude. The rate and the ETA count only the configs this run has
+finished since it started: on a resumed run, those it resumed from
+checkpoints count towards the progress but not as its work.
 }

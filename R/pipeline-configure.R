@@ -903,7 +903,8 @@ configure <- function(x,
 #' @param transformation Character. Response transformation.
 #' @param feature_selection Character. Feature selection method.
 #'
-#' @return Character. Config ID in format `{model}_{preprocessing}_{transformation}_{feature_selection}_{6-char hash}`.
+#' @return Character. Config ID in format `{model}_{preprocessing}_{transformation}_{feature_selection}_{6-char hash}`,
+#'   the same in every session (`unit_seed()`'s hashing rule).
 #' @keywords internal
 
 generate_config_id <- function(model, preprocessing, transformation,
@@ -919,7 +920,10 @@ generate_config_id <- function(model, preprocessing, transformation,
     feature_selection = feature_selection
   )
 
-  hash <- substr(digest::digest(hash_input), 1, 6)
+  ## Serialized under version 2 whatever options(serializeVersion = ) says,
+  ## as unit_seed() hashes its key, so a session that set it names every
+  ## configuration as any other does
+  hash <- substr(digest::digest(hash_input, serializeVersion = 2L), 1, 6)
   paste(base, hash, sep = "_")
 
 }

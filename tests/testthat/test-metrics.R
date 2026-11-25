@@ -377,3 +377,36 @@ describe("tuning_metric_set()", {
   ## the metric set checks neither.
 
 })
+
+describe("make_original_scale_metric()", {
+
+  it("carries nothing of its caller's frame, so a tune task stays small", {
+
+    ## tune serializes the metric set to a worker with every task, and the
+    ## metric's functions keep make_original_scale_metric()'s frame, so an
+    ## argument left a promise there would carry its caller's frame with it:
+    ## here 40 MB, in the verbs the folds and the training rows. Each
+    ## argument is the caller's own variable, so any left a promise carries
+    ## the frame.
+    in_a_heavy_frame <- function() {
+      heavy          <- numeric(5e6)
+      name           <- "rmse"
+      vec_fn         <- yardstick::rmse_vec
+      direction      <- "minimize"
+      transformation <- "log"
+      outcome_range  <- c(0, Inf)
+      make_original_scale_metric(name, vec_fn, direction, transformation, outcome_range)
+    }
+
+    metric <- in_a_heavy_frame()
+
+    expect_lt(length(serialize(metric, NULL)), 1e6)
+
+    ## And it still scores the back-transformed estimate under its name
+    scored <- metric(data.frame(truth = c(1, 2, 4), estimate = log1p(c(1, 2, 4))), truth, estimate)
+    expect_identical(scored$.metric, "rmse")
+    expect_equal(scored$.estimate, 0)
+
+  })
+
+})

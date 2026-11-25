@@ -1311,6 +1311,11 @@ describe("fit() - what it reports at its end", {
     expect_match(conditionMessage(w[[1]]),
                  "Prediction intervals (UQ) and the applicability domain (AD) were not computed for any member: the calibration set has 10 rows, fewer than `min_calib_rows` (30).",
                  fixed = TRUE)
+    ## Ten rows reach the floor control_horizons() holds min_calib_rows to,
+    ## so lowering it to ten would let both run
+    expect_match(conditionMessage(w[[1]]),
+                 "Fit on more rows, or lower `control_horizons(min_calib_rows = )` to 10 or fewer; the calibration set needs at least 9 rows.",
+                 fixed = TRUE)
 
     ## The record names the one member, whichever configuration ranked first
     log <- both$value$log[both$value$log$verb == "fit", ]
@@ -1329,6 +1334,31 @@ describe("fit() - what it reports at its end", {
     neither <- fit_reports(mfo(), compute_uq = FALSE, compute_ad = FALSE)
     expect_false("horizons_warning_skipped" %in% neither$classes)
     expect_true(length(neither$classes) == 0 || !any(grepl("calibration", vapply(neither$warnings, conditionMessage, ""))))
+
+  })
+
+  it("offers lowering min_calib_rows only when an allowed value would let the calibration run, as ensemble() does", {
+
+    remedy <- function(n_calib, compute_uq = TRUE) {
+      collector <- log_open("fit")
+      log_calibration_skip(collector, compute_uq, TRUE, n_calib, 30L, "cfg_001")
+      gsub("\\s+", " ", log_close(collector)$message)
+    }
+
+    ## At the floor control_horizons() holds min_calib_rows to, nine rows,
+    ## lowering it to the rows drawn would let the calibration run
+    expect_match(remedy(9L),
+                 "Fit on more rows, or lower `control_horizons(min_calib_rows = )` to 9 or fewer; the calibration set needs at least 9 rows.",
+                 fixed = TRUE)
+
+    ## Below it no value helps, with the applicability domain alone too,
+    ## since the floor is min_calib_rows' own
+    for (compute_uq in c(TRUE, FALSE)) {
+      short <- remedy(8L, compute_uq)
+      expect_match(short, "Fit on more rows: the calibration set needs at least 9 rows whatever `min_calib_rows` is.",
+                   fixed = TRUE)
+      expect_false(grepl("lower", short, fixed = TRUE))
+    }
 
   })
 

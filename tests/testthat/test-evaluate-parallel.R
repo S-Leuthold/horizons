@@ -157,7 +157,7 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("runs its configuration with data.table and each engine thread option on one thread", {
+  it("runs its configuration with data.table and each engine thread option on one thread, and puts them back as its task ends", {
 
     skip_if_not_installed("RhpcBLASctl")
     skip_if_not_installed("data.table")
@@ -195,6 +195,67 @@ describe("evaluate() parallel worker footprint", {
     horizons:::evaluate_config_worker(1L, worker_payload_file())
 
     expect_identical(seen, c(dt = 1L, ranger = 1L, other = 1L))
+
+    ## The process stands in for the user's daemon, so each is back as the
+    ## task found it
+    expect_identical(c(dt = data.table::getDTthreads(), ranger = getOption("ranger.num.threads"),
+                       other = getOption("horizons.test.threads")),
+                     c(dt = 2L, ranger = 7L, other = 7L))
+
+  })
+
+  it("leaves a user's daemon with the data.table threads and engine thread options it had, once a task has set it up (installed build)", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("data.table")
+
+    ## A real daemon, which loads the build R_LIBS names
+    local_test_daemons(1)
+
+    ## What a task reads on the daemon. A quoted call, so a task carries no
+    ## frame of this test's
+    threads <- quote(list(
+      dt     = data.table::getDTthreads(),
+      ranger = getOption("ranger.num.threads"),
+      blas   = if (requireNamespace("RhpcBLASctl", quietly = TRUE)) RhpcBLASctl::blas_get_num_procs() else NA
+    ))
+
+    ## The daemon as its user left it, in a task of their own: data.table and
+    ## BLAS on two threads, and ranger's option unset, so ranger uses every
+    ## core. mirai's cleanup after each task puts back only the options a
+    ## daemon started with, so a thread option a task sets stays. data.table
+    ## caps at OMP_NUM_THREADS, which an R installation's Renviron.site may
+    ## set in every process, and at OpenMP's count, so both go first.
+    with_deadline(mirai::mirai({
+      Sys.unsetenv("OMP_NUM_THREADS")
+      if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+        RhpcBLASctl::omp_set_num_threads(2L)
+        RhpcBLASctl::blas_set_num_threads(2L)
+      }
+      data.table::setDTthreads(2L)
+      TRUE
+    })[], 30)
+
+    before <- with_deadline(mirai::mirai(eval(threads), threads = threads)[], 30)
+    skip_if_not(identical(before$dt, 2L), "data.table's threads cannot be raised on a daemon here")
+    expect_null(before$ranger)
+
+    ## A horizons task sets the daemon up as every worker does, runs, and
+    ## calls the put-back as its task ends
+    inside <- with_deadline(mirai::mirai({
+      unpin  <- prepare(models, selections)
+      inside <- eval(threads)
+      unpin()
+      inside
+    }, prepare = prepare_worker, threads = threads, models = "rf", selections = "pca")[], 60)
+
+    after <- with_deadline(mirai::mirai(eval(threads), threads = threads)[], 30)
+
+    expect_identical(inside$dt, 1L)
+    expect_identical(inside$ranger, 1L)
+    expect_identical(after, before)
+    if (!is.na(before$blas) && before$blas == 2) expect_equal(inside$blas, 1)
 
   })
 
@@ -903,7 +964,7 @@ build_configs_axis_run <- function(dir) {
 
 describe("evaluate() - configs axis", {
 
-  it("writes a schema-5 manifest describing the daemons, the axis, the data and the settings, one result and one checkpoint per config, and leaves the user's daemons exactly as it found them", {
+  it("writes a schema-6 manifest describing the daemons, the axis, the data and the settings, one result and one checkpoint per config, and leaves the user's daemons exactly as it found them", {
 
     skip_unless_slow_tier()
     skip_on_cran()
@@ -914,7 +975,7 @@ describe("evaluate() - configs axis", {
     result <- run$value$result
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_identical(manifest$schema_version, 5L)
+    expect_identical(manifest$schema_version, 6L)
     expect_identical(manifest$data_hash, result$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, result$evaluation$n_train)
 
@@ -2853,6 +2914,52 @@ describe("monitor_evaluate()", {
     expect_identical(none$rate, 0)
     expect_identical(none$eta, NA_character_)
     expect_identical(none$recent, character(0))
+
+  })
+
+  it("counts in its rate and ETA only the configs this run finished, not the ones it resumed", {
+
+    skip_on_cran()
+    run    <- seq_checkpoints()
+    tmpdir <- run$dir
+    ckpt   <- file.path(tmpdir, "checkpoints")
+    path   <- file.path(tmpdir, "eval_manifest.rds")
+
+    ## The manifest names the configs each run set out to evaluate: every one
+    ## on a fresh run, none on a run that resumes them all
+    expect_identical(readRDS(path)$pending_ids, readRDS(path)$config_ids)
+
+    suppressWarnings(evaluate(run$value$obj, seed = 42L,
+                              control = control_horizons(output_dir = tmpdir, verbose = FALSE)))
+    expect_identical(readRDS(path)$pending_ids, character(0))
+
+    ## Made to describe a run started an hour ago that resumed cfg_001 and
+    ## cfg_002 and has finished cfg_003 since, with cfg_004, twice the cost
+    ## of each of the others, still to run: one config and one unit of cost
+    ## an hour, so two hours left, where counting the resumed rows as this
+    ## run's work would say three configs an hour and 40 minutes
+    manifest <- readRDS(path)
+    manifest$config_cost <- c(1, 1, 1, 2)
+    manifest$pending_ids <- c("cfg_003", "cfg_004")
+    manifest$start_time  <- Sys.time() - 3600
+    saveRDS(manifest, path)
+    unlink(file.path(ckpt, "cfg_004.rds"))
+
+    invisible(utils::capture.output(resumed <- monitor_evaluate(tmpdir)))
+
+    expect_identical(resumed$n_complete, 3L)
+    expect_identical(resumed$pct, 75)
+    expect_equal(resumed$rate, 1, tolerance = 0.01)
+    expect_identical(resumed$eta, "2 hr")
+
+    ## Nothing finished by this run yet: a rate of zero, and no ETA
+    unlink(file.path(ckpt, "cfg_003.rds"))
+
+    invisible(utils::capture.output(started <- monitor_evaluate(tmpdir)))
+
+    expect_identical(started$n_complete, 2L)
+    expect_identical(started$rate, 0)
+    expect_identical(started$eta, NA_character_)
 
   })
 

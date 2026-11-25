@@ -1775,8 +1775,8 @@ abort_run_file_unread <- function(unread, unit, results, output_dir = NULL, verb
 #' `n` to connect, polling, up to `seconds`; past it the profile is reset and
 #' the configuration runs its folds here instead. Once they are connected,
 #' each is set up as a daemon is for a unit ([prepare_worker()]: BLAS and
-#' OpenMP pinned at run time too, the engines' thread options and the
-#' configuration's packages), through
+#' OpenMP pinned at run time too, data.table's threads, the engines' thread
+#' options and the configuration's packages), through
 #' `mirai::everywhere()`, whose settings outlast a daemon's cleanup and
 #' which tune's tasks wait behind; this waits for it, so what the inner
 #' daemons have completed is their set-up alone. The caller registers the
@@ -1959,15 +1959,18 @@ in_config_order <- function(rows, config_ids) {
 ## Thread pinning (parent side)
 ## ---------------------------------------------------------------------------
 
-#' Pin BLAS, OpenMP, data.table and the engines' threads in the parent
+#' Pin BLAS, OpenMP, data.table and the engines' threads in this process
 #'
 #' @description
-#' Pinning has to happen in the parent before workers are forked or spawned.
+#' The one set-and-restore of every thread count horizons pins, for the
+#' session before dispatch (in the parent, before workers are forked or
+#' spawned) and for each daemon a unit's task sets up (`prepare_worker()`),
+#' so a daemon, which is the user's, is left as the task found it.
 #' OpenBLAS reads its thread count when it loads, so setting
 #' `OPENBLAS_NUM_THREADS` inside a worker after the library is loaded is dead
 #' code (proven 2026-09-15: the environment variable changed nothing, the
 #' runtime call did). `RhpcBLASctl` provides the runtime call and is a
-#' Suggests; without it the parent relies on the environment variables being
+#' Suggests; without it a process relies on the environment variables being
 #' set before R starts. The engines' thread options are the ones
 #' `MODEL_SPECS` declares (`engine_thread_options()`), set to one.
 #'

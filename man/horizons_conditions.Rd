@@ -55,9 +55,10 @@ One row per failure travels as \code{results}: its \code{unit} (\code{"configura
 combination), \code{step}, \code{class} and \code{error_message}.}
 \item{\code{horizons_error_read_failed}}{(run) \code{\link[=spectra]{spectra()}} could read none
 of the files it was given. One row per file travels as \code{results}: its
-\code{file}, the \code{step} that failed (\code{"file_read"}, or \code{"file_block"} for
-a file with no absorbance block), the \code{class} of the root cause, and
-the \code{cause}.}
+\code{file}, the \code{step} that failed (\code{"file_read"}; \code{"file_block"} for a
+file with no absorbance block; \code{"file_columns"} for a CSV file whose
+columns cannot be read as spectra; \code{NA} for a failure outside every
+step), the \code{class} of the root cause, and the \code{cause}.}
 \item{\code{horizons_error_selection_failed}}{(run) \code{\link[=select_training]{select_training()}} had
 nothing to return: the twin subtraction left no training rows for any
 property it drew for. One row per property travels as \code{results}: its
@@ -155,8 +156,11 @@ returned.}
 \item{\code{horizons_warning_coverage}}{The data only partly covers what is
 asked of it, such as a wavenumber range, or \code{\link[=add_response]{add_response()}}'s source
 matching fewer than half the samples.}
-\item{\code{horizons_warning_applicability}}{Predictions outside the
-applicability domain.}
+\item{\code{horizons_warning_applicability}}{Predictions or targets beyond
+what the model or the library covers: \code{predict()}'s predictions
+winsorized to the response bound, and \code{\link[=select_training]{select_training()}}'s targets
+beyond the library's own nearest-neighbour spread. An out-of-domain
+prediction is not warned: it is the \code{.ad_flag} column.}
 \item{\code{horizons_warning_input}}{A request that is legal but risky enough
 to say so, such as \code{\link[=configure]{configure()}} discarding an evaluation or a fit, or
 configuring an outcome a \code{\link[=select_training]{select_training()}} draw was not made for.}

@@ -79,7 +79,7 @@ register_pls_engine <- function() {
       pre  = NULL,
       post = NULL,
       func = c(pkg = "horizons", fun = "pls_predict"),
-      args = list(object = rlang::expr(object$fit), new_data = rlang::expr(new_data))
+      args = list(object = quote(object$fit), new_data = quote(new_data))
     )
   )
 

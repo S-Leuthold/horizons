@@ -1734,9 +1734,10 @@ member_task_payload <- function(shared, config_row, best_params, fold_entries) {
 #'
 #' The version is checked first, since another version's payload keys may
 #' differ, then the payload's keys ([check_worker_payload()]). The daemon is
-#' set up for the member as for any unit ([prepare_worker()]: BLAS and
-#' OpenMP on one thread, put back as the task ends, the engines' thread
-#' options and the member's packages); its split, its fit and calibration
+#' set up for the member as for any unit ([prepare_worker()]: BLAS's,
+#' OpenMP's and data.table's threads and the engines' thread options at
+#' one, all put back as the task ends, and the member's packages); its
+#' split, its fit and calibration
 #' rows and its folds are rebuilt from the rows and their positions
 #' ([rebuild_resamples()]), the rows sent once. A warning raised in those
 #' steps, outside the member's unit, is caught and rendered with the
@@ -1786,12 +1787,13 @@ fit_member_worker <- function(payload, inner = 1L) {
 
   check_worker_payload(payload, FIT_ARG_NAMES)
 
-  ## BLAS and OpenMP go on one thread as the daemon is set up below, as the
-  ## inner daemons run them, and are put back as the task ends, since the
-  ## daemon is the user's. The put-back is registered first and bound once
-  ## the pin is made.
-  unpin_blas <- function() invisible(NULL)
-  on.exit(unpin_blas(), add = TRUE)
+  ## The daemon's threads go to one as it is set up below (BLAS's, OpenMP's
+  ## and data.table's, and the engines' thread options), as the inner
+  ## daemons run them, and all of them are put back as the task ends, since
+  ## the daemon is the user's. The put-back is registered first and bound
+  ## once the pin is made.
+  unpin_threads <- function() invisible(NULL)
+  on.exit(unpin_threads(), add = TRUE)
 
   cfg     <- payload$config_row
   outside <- character(0)
@@ -1799,7 +1801,7 @@ fit_member_worker <- function(payload, inner = 1L) {
   rows <- withCallingHandlers({
 
     ## The daemon's threads pinned, and the member's packages loaded
-    unpin_blas <- prepare_worker(cfg$model, cfg$feature_selection)
+    unpin_threads <- prepare_worker(cfg$model, cfg$feature_selection)
 
     ## The split, the fit and calibration rows and the folds, from one copy
     ## of the rows and their positions
@@ -2646,6 +2648,14 @@ log_members_below_threshold <- function(collector, members, fallback, bayesian_i
 
 #' Record that UQ and AD were turned off for a small calibration set
 #'
+#' @description
+#' The remedy follows `ensemble()`'s CV+ gate for the same shortfall: it
+#' offers lowering `min_calib_rows` only when an allowed value would let the
+#' calibration run, and names the number that does. `control_horizons()`
+#' takes no `min_calib_rows` below the split-conformal floor
+#' (`conformal_min_rows()` at `DEFAULT_UQ_LEVEL`, 9 rows), which holds for
+#' the applicability domain alone too, so below it the remedy is more rows.
+#'
 #' @param collector `fit()`'s collector.
 #' @param compute_uq,compute_ad Logical. What was asked for.
 #' @param n_calib Integer(1). The calibration rows drawn.
@@ -2663,9 +2673,17 @@ log_calibration_skip <- function(collector, compute_uq, compute_ad, n_calib,
   ## The verb follows the subject: intervals are plural, the domain is not
   verb <- if (compute_uq) "were" else "was"
 
+  floor_rows <- conformal_min_rows(DEFAULT_UQ_LEVEL)
+
+  remedy <- if (n_calib >= floor_rows) {
+    "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )} to {n_calib} or fewer; the calibration set needs at least {floor_rows} rows."
+  } else {
+    "Fit on more rows: the calibration set needs at least {floor_rows} rows whatever {.code min_calib_rows} is."
+  }
+
   log_warning(collector, "skipped", c(
     "{what} {verb} not computed for any member: the calibration set has {n_calib} row{?s}, fewer than {.code min_calib_rows} ({min_calib_rows}).",
-    "i" = "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )}, to {conformal_min_rows(DEFAULT_UQ_LEVEL)} at least."
+    "i" = remedy
   ), ids = ids)
 
   invisible(collector)

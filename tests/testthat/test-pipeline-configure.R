@@ -467,6 +467,22 @@ describe("configure() config grid", {
 
   })
 
+  test_that("config IDs do not depend on the session's serialization version", {
+
+    ## digest() serializes its input under options(serializeVersion = ),
+    ## which would rename every configuration; the hash pins version 2,
+    ## today's default
+    id <- function(version) {
+      withr::with_options(list(serializeVersion = version),
+                          generate_config_id("rf", "snv", "log", "pca"))
+    }
+
+    expect_identical(id(3L), id(2L))
+    expect_identical(id(2L), withr::with_options(list(serializeVersion = NULL),
+                                                 generate_config_id("rf", "snv", "log", "pca")))
+
+  })
+
   test_that("config IDs do not depend on the recipe settings (#62)", {
 
     ## The settings are object-level, so two objects that differ only in them

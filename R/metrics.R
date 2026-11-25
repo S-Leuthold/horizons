@@ -337,6 +337,14 @@ tuning_metric_set <- function(transformation,
 make_original_scale_metric <- function(name, vec_fn, direction, transformation,
                                        outcome_range = DEFAULT_OUTCOME_RANGE) {
 
+  ## Forced here, as tuning_metric_set() forces what its metrics close over:
+  ## the metric's functions keep this frame, and tune serializes the metric
+  ## set to a worker with every task, so an argument left a promise (each is
+  ## read only when the metric scores) would carry the caller's frame, its
+  ## folds and training rows, along with it. direction is read below.
+  force(name)
+  force(vec_fn)
+  force(transformation)
   force(outcome_range)
 
   ### The estimate arrives on the transformed scale (under "none", the original

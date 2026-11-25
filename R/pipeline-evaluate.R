@@ -1063,14 +1063,15 @@ evaluate <- function(x,
   ## is scoring, with the data fields and the tuning settings. The monitor
   ## gates checkpoint rows against them, as evaluate() does, and re-reads the
   ## manifest on every poll, so it is written atomically. Each
-  ## configuration's expected cost weights the monitor's ETA.
+  ## configuration's expected cost weights the monitor's ETA, and the ids
+  ## this run sets out to evaluate keep the ones it resumed out of its rate.
 
   if (!is.null(output_dir)) {
 
     manifest <- list(
       schema_version               = EVAL_MANIFEST_SCHEMA,
       n_total                      = n_total,
-      n_pending                    = n_pending,
+      pending_ids                  = pending_ids,
       config_ids                   = configs$config_id,
       config_cost                  = config_costs(configs, n_train),
       start_time                   = start_time,
@@ -3273,7 +3274,8 @@ unranked_reason <- function(results, metric, how) {
 #' Orders result rows best-first by `cv_<metric>`, the cross-validated mean at
 #' each config's selected hyperparameters. This is the single ranking rule for
 #' `evaluate()`'s `best_config` and `fit()`'s member selection, so the two can
-#' never disagree, and neither touches a test-set column (#50).
+#' never disagree, and neither touches a test-set column (#50). A tie goes to
+#' the first `config_id` in radix order, whatever the session's locale.
 #'
 #' Rows whose `cv_<metric>` is `NA` cannot be ranked and are left out,
 #' silently: the verbs that rank say so once, with the ids, and the monitor
@@ -3295,10 +3297,12 @@ rank_configs_by_cv <- function(results, metric) {
 
   ## Explicit tie-break on config_id so a fresh run, a resumed run (whose row
   ## order follows the checkpoint directory) and monitor_evaluate() all name
-  ## the same winner when two configs tie.
+  ## the same winner when two configs tie. In radix order, as the package
+  ## sorts ids everywhere, since the default is the locale's collation and a
+  ## monitor may run in another locale.
   key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
 
-  results[order(key, results$config_id), , drop = FALSE]
+  results[order(key, results$config_id, method = "radix"), , drop = FALSE]
 
 }
 
@@ -4128,17 +4132,18 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' Set a daemon up to run a unit: its threads, and the packages it needs
 #'
 #' @description
-#' Every process that fits runs one thread. OpenBLAS reads its thread count
-#' when it loads, so setting OPENBLAS_NUM_THREADS on a daemon, after the
-#' library is loaded, changed nothing when measured (2026-09-15): BLAS and
-#' OpenMP are pinned here at run time through RhpcBLASctl instead
-#' ([pin_blas_threads()]), and the function that puts them back is
-#' returned, for the worker to call as its task ends, since the daemon is
-#' the user's. Without RhpcBLASctl the daemon keeps the threads it started
-#' with. Also set here: data.table's threads, and the thread options the
-#' model table declares for its engines (ranger's, which Boruta's forests
-#' read too). A daemon starts with the session's environment variables from
-#' when daemons() was called, not its in-process settings.
+#' Every process that fits runs one thread. The daemon's threads are pinned
+#' by the one pin the session's are ([pin_parent_threads()]): BLAS and
+#' OpenMP at run time through RhpcBLASctl, since OpenBLAS reads its thread
+#' count when it loads and setting OPENBLAS_NUM_THREADS on a daemon, after
+#' the library is loaded, changed nothing when measured (2026-09-15);
+#' data.table's threads; and the thread options the model table declares
+#' for its engines (ranger's, which Boruta's forests read too). The function
+#' that puts all of them back is returned, for the worker to call as its
+#' task ends, since the daemon is the user's. Without RhpcBLASctl the daemon
+#' keeps the BLAS and OpenMP threads it started with. A daemon starts with
+#' the session's environment variables from when daemons() was called, not
+#' its in-process settings.
 #'
 #' Then the packages the unit needs are loaded, as the verb's door check
 #' loaded them in the session. A daemon is a fresh process, and some of them
@@ -4152,21 +4157,18 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #'
 #' @param models,selections The unit's models and feature selections
 #'   ([needed_packages()]).
-#' @return A function of no arguments that puts BLAS's and OpenMP's threads
-#'   back as they were ([pin_blas_threads()]), invisibly.
+#' @return A function of no arguments that puts BLAS's, OpenMP's and
+#'   data.table's threads and the engines' thread options back as they were
+#'   ([pin_parent_threads()]), invisibly.
 #' @keywords internal
 #' @noRd
 prepare_worker <- function(models, selections) {
 
-  unpin_blas <- pin_blas_threads()
-
-  if (requireNamespace("data.table", quietly = TRUE)) data.table::setDTthreads(1L)
-
-  options(engine_thread_options())
+  unpin <- pin_parent_threads()
 
   for (pkg in names(needed_packages(models, selections))) requireNamespace(pkg, quietly = TRUE)
 
-  invisible(unpin_blas)
+  invisible(unpin)
 
 }
 
@@ -4310,12 +4312,14 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
   ## transport changed the payload.
   check_worker_payload(shared, SHARED_ARG_NAMES)
 
-  ## BLAS and OpenMP go on one thread as the daemon is set up below, as the
-  ## inner daemons run them, so the configuration's folds and its final fit
-  ## compute alike whether it is split or not; put back as the task ends.
-  ## The put-back is registered first and bound once the pin is made.
-  unpin_blas <- function() invisible(NULL)
-  on.exit(unpin_blas(), add = TRUE)
+  ## The daemon's threads go to one as it is set up below (BLAS's, OpenMP's
+  ## and data.table's, and the engines' thread options), as the inner
+  ## daemons run them, so the configuration's folds and its final fit
+  ## compute alike whether it is split or not; all of them are put back as
+  ## the task ends, since the daemon is the user's. The put-back is
+  ## registered first and bound once the pin is made.
+  unpin_threads <- function() invisible(NULL)
+  on.exit(unpin_threads(), add = TRUE)
 
   ## mirai relays no condition from a task, so a warning raised in the
   ## worker's own steps before the configuration's unit runs (a package's
@@ -4330,7 +4334,7 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
     cfg <- shared$configs[config_i, ]
 
     ## The daemon's threads pinned, and the configuration's packages loaded
-    unpin_blas <- prepare_worker(cfg$model, cfg$feature_selection)
+    unpin_threads <- prepare_worker(cfg$model, cfg$feature_selection)
 
     ## Reconstruct the split and folds from indices. Fold membership is
     ## reproduced by construction, not by replaying the RNG.

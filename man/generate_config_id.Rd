@@ -16,7 +16,8 @@ generate_config_id(model, preprocessing, transformation, feature_selection)
 \item{feature_selection}{Character. Feature selection method.}
 }
 \value{
-Character. Config ID in format \verb{\{model\}_\{preprocessing\}_\{transformation\}_\{feature_selection\}_\{6-char hash\}}.
+Character. Config ID in format \verb{\{model\}_\{preprocessing\}_\{transformation\}_\{feature_selection\}_\{6-char hash\}},
+the same in every session (\code{unit_seed()}'s hashing rule).
 }
 \description{
 Generate a deterministic config ID

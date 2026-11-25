@@ -20,7 +20,8 @@ shape).}
 Orders result rows best-first by \verb{cv_<metric>}, the cross-validated mean at
 each config's selected hyperparameters. This is the single ranking rule for
 \code{evaluate()}'s \code{best_config} and \code{fit()}'s member selection, so the two can
-never disagree, and neither touches a test-set column (#50).
+never disagree, and neither touches a test-set column (#50). A tie goes to
+the first \code{config_id} in radix order, whatever the session's locale.
 
 Rows whose \verb{cv_<metric>} is \code{NA} cannot be ranked and are left out,
 silently: the verbs that rank say so once, with the ids, and the monitor

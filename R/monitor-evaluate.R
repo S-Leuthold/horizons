@@ -20,7 +20,9 @@
 #' estimate the configs axis starts the longest first by: the seconds its
 #' model and feature selection took on a measured grid, scaled to the run's
 #' rows), not as one, since configs differ in length by orders of
-#' magnitude.
+#' magnitude. The rate and the ETA count only the configs this run has
+#' finished since it started: on a resumed run, those it resumed from
+#' checkpoints count towards the progress but not as its work.
 #'
 #' @param output_dir Character. Path to the output directory given to
 #'   `evaluate()` as `control_horizons(output_dir = )`.
@@ -30,8 +32,8 @@
 #'   Default 10.
 #'
 #' @return Invisibly returns a list with completion stats (n_complete,
-#'   n_total, rate in configs per hour, eta weighted by each config's
-#'   expected time, best_config, best_metric), `ignored` (the number of
+#'   n_total, rate in configs this run finished per hour, eta weighted by
+#'   each config's expected time, best_config, best_metric), `ignored` (the number of
 #'   rows refused, by reason: `other_data`, `other_settings`,
 #'   `earlier_schema` (another scoring schema, or recording less than the
 #'   manifest), `not_in_grid`) and `unreadable` (checkpoint files that could
@@ -162,17 +164,24 @@ monitor_evaluate <- function(output_dir, watch = FALSE, interval = 10) {
     not_in_grid    = gated$n_stale
   )
 
+  ## The progress counts every row kept, the resumed ones included; the
+  ## rate and the ETA count only the configurations this run finished, the
+  ## ones it set out to evaluate, since the elapsed time is this run's: on a
+  ## resumed run the checkpoints from before it would otherwise read as work
+  ## done in minutes
   n_complete <- length(gated$kept)
+  this_run   <- intersect(names(gated$kept), manifest$pending_ids)
   elapsed    <- as.numeric(difftime(Sys.time(), manifest$start_time,
                                      units = "hours"))
-  rate       <- if (elapsed > 0) n_complete / elapsed else NA_real_
+  rate       <- if (elapsed > 0) length(this_run) / elapsed else NA_real_
 
   ## The ETA weights each configuration by its expected cost, since their
   ## lengths differ by orders of magnitude: counted alone, the few long
   ## configurations the configs axis starts first would put every one left
   ## at their length
-  cost_done <- sum(manifest$config_cost[match(names(gated$kept), manifest$config_ids)])
-  cost_left <- sum(manifest$config_cost) - cost_done
+  cost      <- stats::setNames(manifest$config_cost, manifest$config_ids)
+  cost_done <- sum(cost[this_run])
+  cost_left <- sum(cost) - sum(cost[names(gated$kept)])
 
   eta <- if (!is.na(rate) && rate > 0) {
     hrs <- cost_left * elapsed / cost_done

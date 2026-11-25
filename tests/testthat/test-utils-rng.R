@@ -120,6 +120,18 @@ describe("unit_seed()", {
 
   })
 
+  it("gives the seed it always has whatever the session's serialization version", {
+
+    ## digest() serializes the key under options(serializeVersion = ), which
+    ## would move every unit's seed; the hash pins version 2, today's
+    ## default, so SEED_RULE stays
+    v2 <- withr::with_options(list(serializeVersion = 2L), unit_seed(307, "evaluate/split"))
+    v3 <- withr::with_options(list(serializeVersion = 3L), unit_seed(307, "evaluate/split"))
+
+    expect_identical(v3, v2)
+
+  })
+
   it("gives one seed for a whole-number double and its integer, and for a name as one string or its parts", {
 
     expect_identical(unit_seed(307, c("evaluate", "rf_ab12cd", "tune")),
