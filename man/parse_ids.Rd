@@ -22,7 +22,9 @@ parse_ids(
 columns and unnamed elements are separators. Mutually exclusive with \code{format}.
 A pattern may hold groups of its own, capturing or not
 (\code{sampleid = "S\\\\d+(-\\\\d+)?"}): a named pattern's column is the whole
-text it matched.}
+text it matched. A backreference must name its group
+(\code{"(?<r>\\\\w)\\\\k<r>"}), since each named pattern is wrapped in a group of
+its own and a numbered one such as \verb{\\\\1} points at the wrong group.}
 
 \item{too_few}{Character. How to handle non-matching filenames:
 \itemize{

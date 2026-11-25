@@ -64,7 +64,9 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   columns and unnamed elements are separators. Mutually exclusive with `format`.
 #'   A pattern may hold groups of its own, capturing or not
 #'   (`sampleid = "S\\d+(-\\d+)?"`): a named pattern's column is the whole
-#'   text it matched.
+#'   text it matched. A backreference must name its group
+#'   (`"(?<r>\\w)\\k<r>"`), since each named pattern is wrapped in a group of
+#'   its own and a numbered one such as `\\1` points at the wrong group.
 #' @param too_few Character. How to handle non-matching filenames:
 #'   * `"keep_original"` (default): A filename the pattern does not match
 #'     is not parsed, and one `horizons_warning_substitution` names the
