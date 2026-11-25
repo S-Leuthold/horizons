@@ -188,6 +188,41 @@ test_that("spectra() allows explicit id_col override", {
 
 })
 
+test_that("spectra() refuses a source column named sample_id beside another id column, never overwriting the ids", {
+
+  d <- tibble::tibble(SampleName = c("A", "B", "C"), sample_id = c(11, 12, 13),
+                      `4000` = c(0.1, 0.2, 0.3), `3998` = c(0.2, 0.3, 0.4))
+
+  ## A data frame's columns are the caller's: refused at the door, with the
+  ## remedy
+  err <- expect_error(spectra(d, id_col = "SampleName", verbose = FALSE),
+                      class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "spectra")
+  expect_match(msg, "a column named sample_id that is not its id column, SampleName.", fixed = TRUE)
+  expect_match(msg, "Rename or drop the sample_id column, or pass it as `id_col`.", fixed = TRUE)
+
+  ## Taken as the id, or detected as one, the column is the id
+  expect_identical(spectra(d, id_col = "sample_id", verbose = FALSE)$data$analysis$sample_id,
+                   c("11", "12", "13"))
+  expect_identical(spectra(d, verbose = FALSE)$data$analysis$sample_id, c("11", "12", "13"))
+
+  ## A CSV file holding one fails as that file, and the rest are returned
+  dir <- withr::local_tempdir()
+  readr::write_csv(d, file.path(dir, "clash.csv"))
+  readr::write_csv(d[, c("SampleName", "4000", "3998")], file.path(dir, "ok.csv"))
+
+  w <- expect_warning(out <- spectra(dir, id_col = "SampleName", verbose = FALSE),
+                      "1 of 2 CSV files could not be read", fixed = TRUE,
+                      class = "horizons_warning_partial_failure")
+
+  expect_match(gsub("\\s+", " ", conditionMessage(w)), "pass it as `id_col`", fixed = TRUE)
+  expect_identical(out$data$analysis$sample_id, c("A", "B", "C"))
+  expect_identical(out$log$ids[out$log$topic %in% "partial_failure"][[1]], file.path(dir, "clash.csv"))
+
+})
+
 test_that("spectra() detects wavelength columns with numeric names", {
 
   ## Arrange ---------------------------------------------------------------

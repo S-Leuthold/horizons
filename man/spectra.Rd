@@ -21,7 +21,9 @@ or a directory (see Details).}
 Default: \code{NULL}.}
 
 \item{id_col}{Character. Column name to use as sample ID. If \code{NULL},
-auto-detects from common aliases. Default: \code{NULL}.}
+auto-detects from common aliases. Default: \code{NULL}. The id column becomes
+\code{sample_id}, so a source that also has a \code{sample_id} column, which is
+not the id, is refused rather than having it overwrite the ids.}
 
 \item{wavelength_cols}{Character vector. Column names containing spectral data.
 If \code{NULL}, auto-detects numeric column names or \verb{wn_*} prefix. Default: \code{NULL}.}

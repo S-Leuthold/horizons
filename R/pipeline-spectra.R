@@ -101,7 +101,9 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' @param type Character. One of `"opus"`, `"csv"`, or `NULL` for auto-detect.
 #'   Default: `NULL`.
 #' @param id_col Character. Column name to use as sample ID. If `NULL`,
-#'   auto-detects from common aliases. Default: `NULL`.
+#'   auto-detects from common aliases. Default: `NULL`. The id column becomes
+#'   `sample_id`, so a source that also has a `sample_id` column, which is
+#'   not the id, is refused rather than having it overwrite the ids.
 #' @param wavelength_cols Character vector. Column names containing spectral data.
 #'   If `NULL`, auto-detects numeric column names or `wn_*` prefix. Default: `NULL`.
 #' @param recursive Logical. For directory paths, search subdirectories.
@@ -993,8 +995,9 @@ source_kind <- function(file) if (is.null(file)) "input" else "run"
 #'
 #' @description
 #' The one check both table loaders (a data frame, a CSV file) use for the
-#' user's `id_col` and `wavelength_cols`: the columns named must exist, the
-#' wavelength columns must be named by wavenumber (#121), and they must
+#' user's `id_col` and `wavelength_cols`: the columns named must exist, no
+#' column but the id may be named `sample_id` (the name the id column takes),
+#' the wavelength columns must be named by wavenumber (#121), and they must
 #' hold numbers. Either is detected when not
 #' given ([detect_id_column()], [detect_wavelength_columns()]). Each
 #' problem keeps its remedy in its bullets and reports as `spectra()`. For
@@ -1031,6 +1034,21 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
   } else {
 
     id_column <- detect_id_column(names(data), file = file, call = call)
+
+  }
+
+  ## No other column takes the id's name ---------------------------------------
+  ## The id column is written as `sample_id`, so a source column of that name
+  ## that is not the id would overwrite the ids. Refused, as parse_ids()
+  ## refuses a token named like a column, rather than overwriting.
+
+  if (id_column != "sample_id" && "sample_id" %in% names(data)) {
+
+    abort_horizons(c(
+      "The source has a column named {.field sample_id} that is not its id column, {.field {id_column}}.",
+      "i" = "The id column becomes {.field sample_id}, so the two would collide.",
+      "i" = "Rename or drop the {.field sample_id} column, or pass it as {.arg id_col}."
+    ), kind = source_kind(file), call = call)
 
   }
 
