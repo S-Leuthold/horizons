@@ -3885,8 +3885,12 @@ render_response_trim <- function(trim) {
 #' @noRd
 evaluation_recipe <- function(x, call = rlang::caller_env()) {
 
+  ## The window runs along the whole axis, masked columns included
+  ## (axis_columns()), and the columns it leaves less the masked ones are
+  ## what the model reads
   recipe_cfg <- recipe_settings(x)
-  n_spectral <- sum(x$data$role_map$role == "predictor")
+  axis       <- axis_columns(x$data$role_map)
+  n_spectral <- length(axis)
   window_cm  <- recipe_cfg$sg_window * axis_spacing_cm(x)
 
   if (recipe_cfg$sg_window >= n_spectral) {
@@ -3899,6 +3903,20 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
       "The Savitzky-Golay window is at least as wide as the spectrum.",
       "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points{width}; the object has {n_spectral} spectral column{?s}.",
       "i" = "The window must be narrower than the spectrum. Re-run {.fn configure} with a smaller {.arg sg_window}, or keep more of the spectrum."
+    ), kind = "input", call = call)
+
+  }
+
+  half_window <- (recipe_cfg$sg_window - 1) / 2
+  trimmed     <- axis[seq.int(1 + half_window, n_spectral - half_window)]
+  n_modelled  <- sum(!trimmed %in% masked_columns(x$data$role_map))
+
+  if (n_modelled == 0) {
+
+    abort_horizons(c(
+      "Every spectral column the Savitzky-Golay window leaves is masked, so no configuration would have a predictor.",
+      "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points; it trims {half_window} column{?s} from each end of the {n_spectral} on the axis, and the {length(trimmed)} left are all masked.",
+      "i" = "Keep more of the spectrum outside the masked bands, or re-run {.fn configure} with a smaller {.arg sg_window}."
     ), kind = "input", call = call)
 
   }
@@ -3921,7 +3939,9 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' @description
 #' The Savitzky-Golay methods ([WINDOW_PREPROCESSING]) convolve adjacent
 #' columns whatever their spacing, so on an axis with a gap in it the columns
-#' beside the gap hold a window that treats its two sides as neighbours.
+#' beside the gap hold a window that treats its two sides as neighbours. The
+#' axis is the whole of it ([axis_columns()]): a masked band is no gap, since
+#' its columns are there for the window to read.
 #' A gap is `grid_summary()`'s, the rule `select_training()` refuses one by
 #' (`check_select_axis()`): a spacing over three times the median and over
 #' 30 cm-1. An axis whose names do not parse as wavenumbers has no gap here;
@@ -3938,9 +3958,7 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' @noRd
 window_gaps <- function(x, preprocessing = x$config$configs$preprocessing) {
 
-  role_map <- x$data$role_map
-  wn       <- wn_values(role_map$variable[role_map$role == "predictor"])
-
+  wn   <- wn_values(axis_columns(x$data$role_map))
   gaps <- if (length(wn) > 1L && !anyNA(wn)) grid_summary(wn)$gaps
 
   list(gaps = gaps, methods = intersect(WINDOW_PREPROCESSING, preprocessing))

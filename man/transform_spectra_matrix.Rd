@@ -4,7 +4,7 @@
 \alias{transform_spectra_matrix}
 \title{Transform a Spectral Matrix}
 \usage{
-transform_spectra_matrix(X, preprocessing, window_size = 9)
+transform_spectra_matrix(X, preprocessing, window_size = 9, masked = NULL)
 }
 \arguments{
 \item{X}{Numeric matrix (or something \code{as.matrix()} turns into one). One
@@ -14,10 +14,14 @@ spectrum per row.}
 \code{\link[=step_transform_spectra]{step_transform_spectra()}}, which checks it.}
 
 \item{window_size}{Odd integer. Savitzky-Golay window size. Default 9.}
+
+\item{masked}{Logical, one per column of \code{X}, or \code{NULL} (the default)
+for none: the masked columns.}
 }
 \value{
 A numeric matrix with \code{nrow(X)} rows and
-\code{ncol(X) - (window_size - 1)} columns, without dimnames. Rows whose input
+\code{ncol(X) - (window_size - 1)} columns, less the masked columns among
+them, without dimnames. Rows whose input
 is entirely non-finite come back entirely \code{NA}; no error is raised for
 them, and a flat row comes back as whatever the method makes of it, so
 the step's \code{bake()} applies \code{\link[=standardize]{standardize()}}'s rule to the rows itself.
@@ -34,5 +38,11 @@ depend on which other rows are present. Output width is
 \code{ncol(X) - (window_size - 1)} for every method: \code{raw} and \code{snv} drop
 \code{(window_size - 1) / 2} columns from each edge explicitly, the
 Savitzky-Golay methods lose the same edge inside \code{prospectr::savitzkyGolay()}.
+
+With \code{masked}, the method still runs over every column, so a window beside
+a masked band reads its real values; SNV's mean and spread come from the
+unmasked columns (\code{\link[=snv_unmasked]{snv_unmasked()}}); and the masked columns are dropped
+from the result, after the edge trim. With nothing masked the result is
+the one without the argument, to the bit.
 }
 \keyword{internal}

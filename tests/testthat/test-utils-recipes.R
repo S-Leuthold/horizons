@@ -624,14 +624,31 @@ describe("tidy() on step_transform_spectra() (#109)", {
       step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv1", window_size = 7)
 
     before <- recipes::tidy(rec, number = 1)
-    expect_identical(names(before), c("terms", "preprocessing", "window_size", "id"))
+    expect_identical(names(before), c("terms", "preprocessing", "window_size", "masked", "id"))
     expect_identical(before$terms, 'dplyr::starts_with("wn_")')
+    expect_identical(before$masked, NA)
 
     after <- recipes::tidy(recipes::prep(rec), number = 1)
     expect_identical(after$terms, grep("^wn_", names(dat), value = TRUE))
     expect_identical(unique(after$preprocessing), "deriv1")
     expect_identical(unique(after$window_size), 7)
+    expect_identical(after$masked, rep(FALSE, 20))
     expect_identical(unique(after$id), rec$steps[[1]]$id)
+
+  })
+
+  it("says which columns the step masks once it is prepped", {
+
+    td  <- make_test_data(n = 10, n_wn = 20)
+    dat <- dplyr::select(td$data, -sample_id)
+    rec <- recipes::recipe(SOC ~ ., data = dat) |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv1", window_size = 7,
+                             masked = c("wn_3980", "wn_3978"))
+
+    after <- recipes::tidy(recipes::prep(rec), number = 1)
+
+    expect_identical(after$terms[after$masked], c("wn_3980", "wn_3978"))
+    expect_output(print(recipes::prep(rec)$steps[[1]]), "2 masked columns dropped after it", fixed = TRUE)
 
   })
 
@@ -805,6 +822,221 @@ describe("transform_spectra_matrix() against prospectr", {
                    label = paste("window", w))
 
     }
+
+  })
+
+})
+
+
+## =========================================================================
+## transform_spectra_matrix() with masked columns: cut after the transform
+## =========================================================================
+##
+## A masked band is transformed with the rest of the axis, so every window
+## reads real neighbours, and dropped afterwards; SNV's statistics come from
+## the unmasked columns. Deleting the band first, as standardize() used to,
+## put a window across the cut at the columns beside it.
+
+describe("transform_spectra_matrix() with masked columns", {
+
+  window_methods <- c("sg", "deriv1", "deriv2", "snv_deriv1", "snv_deriv2")
+  sg <- function(M, m, p, w) prospectr::savitzkyGolay(M, m = m, p = p, w = w)
+
+  ## Smooth spectra over 61 columns, two masked bands inside them
+  set.seed(31)
+  X <- t(replicate(12, cumsum(rnorm(61, sd = 0.1)) + sin(seq(0, 3, length.out = 61))))
+  masked <- seq_len(61) %in% c(20:27, 44:49)
+
+  ## The full-axis transform, every column, SNV's statistics from the
+  ## unmasked columns: what the masked result is cut from
+  full_axis <- function(m, w) {
+    s <- function(M) snv_unmasked(M, masked)
+    switch(m,
+           sg = sg(X, 0, 1, w), deriv1 = sg(X, 1, 1, w), deriv2 = sg(X, 2, 3, w),
+           snv_deriv1 = sg(s(X), 1, 1, w), snv_deriv2 = sg(s(X), 2, 3, w))
+  }
+
+  it("is the full-axis transform's unmasked columns, and differs from the cut axis's beside each cut", {
+
+    for (w in c(5, 9)) {
+
+      h        <- (w - 1) / 2
+      returned <- !masked[seq.int(1 + h, 61 - h)]
+
+      ## The unmasked columns the edge trim leaves, and the first h of them on
+      ## each side of each band
+      kept_at <- which(!masked)[which(!masked) > h & which(!masked) <= 61 - h]
+      beside  <- kept_at %in% c(20 - seq_len(h), 27 + seq_len(h), 44 - seq_len(h), 49 + seq_len(h))
+
+      for (m in window_methods) {
+
+        got <- transform_spectra_matrix(X, m, w, masked = masked)
+        ref <- unname(as.matrix(full_axis(m, w)))[, returned, drop = FALSE]
+
+        expect_identical(got, ref, label = paste(m, w))
+
+        ## The band deleted before the method, as standardize() used to,
+        ## gives another number at every column beside a cut, and the same
+        ## number, to the bit, everywhere else
+        cut <- transform_spectra_matrix(X[, !masked], m, w)
+
+        expect_identical(ncol(cut), ncol(got), label = paste(m, w, "width"))
+        expect_true(all(colSums(got[, beside] != cut[, beside]) > 0), label = paste(m, w, "beside"))
+        expect_identical(got[, !beside], cut[, !beside], label = paste(m, w, "elsewhere"))
+
+      }
+
+    }
+
+  })
+
+  it("leaves raw and snv bit-identical to the cut axis's, since neither reads a neighbour", {
+
+    for (m in c("raw", "snv")) {
+
+      expect_identical(transform_spectra_matrix(X, m, 9, masked = masked),
+                       transform_spectra_matrix(X[, !masked], m, 9), label = m)
+
+    }
+
+  })
+
+  it("takes SNV's statistics from the unmasked columns alone", {
+
+    ## A large bump in each band's interior, more than a window from its
+    ## edges, reaches no returned column of an SNV method
+    bumped <- X
+    bumped[, c(24:23, 46:47)] <- bumped[, c(24:23, 46:47)] + 50
+
+    for (m in c("snv", "snv_deriv1", "snv_deriv2")) {
+
+      expect_identical(transform_spectra_matrix(bumped, m, 5, masked = masked),
+                       transform_spectra_matrix(X, m, 5, masked = masked), label = m)
+
+    }
+
+    ## Taken over every column, the bump would rescale every spectrum
+    expect_false(identical(prospectr::standardNormalVariate(bumped)[, !masked],
+                           prospectr::standardNormalVariate(X)[, !masked]))
+
+  })
+
+  it("is prospectr's SNV to the bit with nothing masked, and on the unmasked columns with a mask, flat and missing rows included", {
+
+    Y <- rbind(X, rep(0.5, 61), replace(X[1, ], 30, NA_real_), replace(X[2, ], 22, NA_real_))
+
+    expect_identical(snv_unmasked(Y, rep(FALSE, 61)), prospectr::standardNormalVariate(Y))
+    expect_identical(snv_unmasked(Y, masked)[, !masked], prospectr::standardNormalVariate(Y[, !masked]))
+
+  })
+
+  it("is the transform without a mask, to the bit, when nothing is masked", {
+
+    for (m in VALID_PREPROCESSING) {
+
+      expect_identical(transform_spectra_matrix(X, m, 9, masked = rep(FALSE, 61)),
+                       transform_spectra_matrix(X, m, 9), label = m)
+
+    }
+
+    expect_identical(dim(transform_spectra_matrix(X[0, ], "deriv1", 9, masked = masked)),
+                     c(0L, sum(!masked[5:57])))
+
+  })
+
+})
+
+
+## =========================================================================
+## step_transform_spectra() with masked columns
+## =========================================================================
+
+describe("step_transform_spectra() with masked columns", {
+
+  td <- make_test_data(n = 12, n_wn = 40)
+  masked_cols <- paste0("wn_", seq(3960, 3950, by = -2))
+
+  bake_with <- function(masked, preprocessing = "deriv1", data = td$data) {
+    rec <- recipes::recipe(SOC ~ ., data = data) |>
+      recipes::update_role(sample_id, new_role = "id") |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = preprocessing, masked = masked)
+    recipes::bake(recipes::prep(rec), new_data = NULL)
+  }
+
+  it("returns the unmasked columns the trim leaves, named in order, and none of the masked ones", {
+
+    baked <- bake_with(masked_cols)
+    spec  <- grep("^spec", names(baked), value = TRUE)
+
+    ## 40 columns, 4 trimmed from each end by the default window, 6 masked
+    expect_identical(spec, recipes::names0(26, "spec"))
+    expect_false(any(masked_cols %in% names(baked)))
+
+    X   <- as.matrix(td$data[, grep("^wn_", names(td$data))])
+    ref <- transform_spectra_matrix(X, "deriv1", 9, masked = colnames(X) %in% masked_cols)
+
+    expect_identical(unname(as.matrix(baked[, spec])), ref)
+
+  })
+
+  it("is the step without a mask, names included, when given none: NULL, nothing, or a step trained before the argument existed", {
+
+    plain <- bake_with(NULL)
+
+    expect_identical(bake_with(character(0)), plain)
+
+    rec <- recipes::recipe(SOC ~ ., data = td$data) |>
+      recipes::update_role(sample_id, new_role = "id") |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "deriv1")
+    trained <- recipes::prep(rec)
+    trained$steps[[1]]["masked"] <- NULL
+
+    expect_false("masked" %in% names(trained$steps[[1]]))
+    expect_identical(recipes::bake(trained, new_data = NULL), plain)
+
+  })
+
+  it("flags a spectrum missing a value in a masked column, which a window reads", {
+
+    holed <- td$data
+    holed$wn_3956[4] <- NA_real_
+
+    rec <- recipes::recipe(SOC ~ ., data = td$data) |>
+      recipes::update_role(sample_id, new_role = "id") |>
+      step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "snv", masked = masked_cols)
+
+    expect_warning(baked <- recipes::bake(recipes::prep(rec), new_data = holed),
+                   'not finite: "S004"', fixed = TRUE, class = "horizons_warning_flagged")
+    expect_true(all(is.na(unlist(baked[4, grep("^spec", names(baked))]))))
+
+  })
+
+  it("refuses a masked column it does not select, and a mask that leaves nothing", {
+
+    expect_error(bake_with(c(masked_cols, "SOC")), "1 masked column it does not select",
+                 fixed = TRUE, class = "horizons_error_input")
+
+    everything <- paste0("wn_", seq(4000, by = -2, length.out = 40))
+
+    expect_error(bake_with(everything[5:36]), "every column the window's edge trim leaves is masked",
+                 fixed = TRUE, class = "horizons_error_input")
+
+    expect_error(step_transform_spectra(recipes::recipe(SOC ~ ., data = td$data), dplyr::starts_with("wn_"),
+                                        preprocessing = "raw", masked = 3),
+                 "must be the names of the masked columns", fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("is what build_recipe() adds over an object's axis, its masked columns from the role map", {
+
+    rm <- td$role_map
+    rm$role[rm$variable %in% masked_cols] <- "masked"
+
+    rec   <- build_recipe(make_config_row(preprocessing = "deriv1"), td$data, rm)
+    baked <- recipes::bake(recipes::prep(rec), new_data = NULL)
+
+    expect_identical(baked[, grep("^spec", names(baked))], bake_with(masked_cols)[, grep("^spec", names(baked))])
+    expect_identical(rec$steps[[1]]$masked, masked_cols)
 
   })
 

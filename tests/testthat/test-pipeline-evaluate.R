@@ -1973,6 +1973,33 @@ describe("evaluate() - no window method across a gap in the axis", {
 
   })
 
+  it("runs every window method on an axis whose band is masked rather than deleted", {
+
+    ## The 15 bands deleted above, kept and masked: the window reads them
+    masked <- mask_axis_columns(make_eval_object(n_wn = 40, n_configs = 3),
+                                paste0("wn_", seq(3954, 3926, by = -2)))
+    out    <- runs(masked, c("deriv1", "snv_deriv2", "sg"))
+
+    expect_s3_class(out$error, "horizons_error_all_configs_failed")
+    expect_identical(out$ran, 3L)
+
+  })
+
+  it("refuses a mask that leaves the window nothing to model, before any configuration runs", {
+
+    ## The window of 9 keeps bands 5 to 36 of 40; all of them masked
+    keeps  <- paste0("wn_", seq(4000, by = -2, length.out = 40))[5:36]
+    out    <- runs(mask_axis_columns(make_eval_object(n_wn = 40, n_configs = 3), keeps),
+                   c("raw", "raw", "raw"))
+    msg    <- gsub("\\s+", " ", conditionMessage(out$error))
+
+    expect_s3_class(out$error, "horizons_error_input")
+    expect_match(msg, "Every spectral column the Savitzky-Golay window leaves is masked", fixed = TRUE)
+    expect_match(msg, "it trims 4 columns from each end of the 40 on the axis", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
 })
 
 ## =========================================================================

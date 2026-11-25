@@ -23,6 +23,10 @@
 #'   grid points; it also sets the edge trimmed for `"raw"` and `"snv"`.
 #'   Default 9. Checked here, so a direct caller cannot build the step with a
 #'   window some method cannot run.
+#' @param masked Character or `NULL`. The names of the selected columns that
+#'   are masked: transformed with the rest of the axis, so a window beside
+#'   them reads real neighbours, and then dropped. `NULL` (the default)
+#'   masks nothing.
 #' @param role Character. Role for output columns. Default "predictor".
 #' @param trained Logical. Internal recipes flag.
 #' @param skip Logical. Skip during bake()? Default FALSE.
@@ -38,9 +42,21 @@
 #' otherwise, in one `horizons_warning_flagged`, which carries the field
 #' `step`.
 #'
+#' **Masked columns.** The method runs over every selected column, masked
+#' ones included, so a Savitzky-Golay window beside a masked band reads the
+#' real values there rather than jumping the band. SNV's mean and spread are
+#' taken over the unmasked columns alone and applied to every column. The
+#' masked columns are then dropped: the output holds the unmasked columns
+#' the window's edge trim leaves, named `spec1`, `spec2`, ... in axis order,
+#' so nothing after the step sees a masked column. A missing value in a
+#' masked column makes the spectrum unusable, since a window reads it; its
+#' spread is judged over the unmasked columns. With nothing masked the step
+#' is what it was before the argument existed.
+#'
 #' When you `tidy()` this step, a tibble is returned with columns `terms`,
-#' `preprocessing`, `window_size` and `id`: before `prep()`, `terms` holds
-#' the selectors; after, the columns the step transforms.
+#' `preprocessing`, `window_size`, `masked` and `id`: before `prep()`,
+#' `terms` holds the selectors and `masked` is `NA`; after, the columns the
+#' step transforms, and whether each is masked.
 #'
 #' @return Updated recipe with spectral preprocessing step.
 #' @keywords internal
@@ -49,6 +65,7 @@ step_transform_spectra <- function(recipe,
                                    ...,
                                    preprocessing,
                                    window_size = 9,
+                                   masked      = NULL,
                                    role        = "predictor",
                                    trained     = FALSE,
                                    skip        = FALSE,
@@ -78,6 +95,15 @@ step_transform_spectra <- function(recipe,
 
   }
 
+  if (!is.null(masked) && !is.character(masked)) {
+
+    abort_horizons(c(
+      "{.arg masked} must be the names of the masked columns, or {.code NULL}.",
+      "x" = "Got {.obj_type_friendly {masked}}."
+    ), kind = "input")
+
+  }
+
   recipes::add_step(
     recipe,
     step_transform_spectra_new(
@@ -85,6 +111,7 @@ step_transform_spectra <- function(recipe,
       columns       = NULL,
       preprocessing = preprocessing,
       window_size   = window_size,
+      masked        = masked,
       role          = role,
       trained       = trained,
       skip          = skip,
@@ -101,6 +128,10 @@ step_transform_spectra <- function(recipe,
 ## Follows recipes' own contract: `terms` holds the selector quosures and
 ## survives prep, so a trained recipe can be re-prepped (`fresh = TRUE`);
 ## `columns` holds the names prep resolved them to, and is what bake reads.
+## `masked` holds the names of the masked columns among them, which prep
+## keeps in `columns`' order: with `columns` and the window it fixes the
+## columns bake returns, whose names are `trained_columns`. A step trained
+## before `masked` existed has none, which is no mask.
 
 #' @keywords internal
 #' @noRd
@@ -113,13 +144,15 @@ step_transform_spectra_new <- function(terms,
                                        skip,
                                        id,
                                        trained_columns = NULL,
-                                       id_column       = NULL) {
+                                       id_column       = NULL,
+                                       masked          = NULL) {
 
   out <- list(
     terms           = terms,
     columns         = columns,
     preprocessing   = preprocessing,
     window_size     = window_size,
+    masked          = masked,
     role            = role,
     trained         = trained,
     skip            = skip,
@@ -175,6 +208,45 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 
   }
 
+  ## The masked columns, and the columns bake() returns ---------------------
+  ## Every selected column is transformed; of those the edge trim leaves,
+  ## the masked ones are dropped. Nothing masked is the step as it was, its
+  ## width and names included.
+
+  masked <- x$masked %||% character(0)
+  stray  <- setdiff(masked, col_names)
+
+  if (length(stray) > 0) {
+
+    abort_horizons(c(
+      "{.fn step_transform_spectra} was given {length(stray)} masked column{?s} it does not select.",
+      "x" = "Not selected: {.val {utils::head(stray, 5)}}{if (length(stray) > 5) ', ...' else ''}.",
+      "i" = "{.arg masked} names columns among the spectra the step transforms."
+    ), kind = "input")
+
+  }
+
+  is_masked <- col_names %in% masked
+
+  if (any(is_masked)) {
+
+    window_kept <- seq.int(1 + half_window, input_len - half_window)
+    kept        <- window_kept[!is_masked[window_kept]]
+
+    if (length(kept) == 0) {
+
+      abort_horizons(c(
+        "{.fn step_transform_spectra} would return no column: every column the window's edge trim leaves is masked.",
+        "x" = "{sum(is_masked)} of {input_len} spectral column{?s} {?is/are} masked, with {.code window_size = {x$window_size}}.",
+        "i" = "Keep more of the spectrum outside the masked bands."
+      ), kind = "input")
+
+    }
+
+    out_len <- length(kept)
+
+  }
+
   new_colnames <- recipes::names0(out_len, prefix = "spec")
 
   ## The generated names must not collide with a column this step passes
@@ -200,7 +272,8 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
     skip            = x$skip,
     id              = x$id,
     trained_columns = new_colnames,
-    id_column       = if (is.na(id_column)) NULL else id_column
+    id_column       = if (is.na(id_column)) NULL else id_column,
+    masked          = if (length(masked)) col_names[is_masked] else x$masked
   )
 
 }
@@ -214,6 +287,10 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
 
   spectral_matrix <- as.matrix(new_data[, object$columns])
 
+  ## The masked columns prep() kept, by position among those it transforms;
+  ## NULL with none, which is the step as it was before masking existed
+  is_masked <- if (length(object$masked)) object$columns %in% object$masked
+
   ## The whole matrix goes through prospectr in one call. Every supported
   ## method is row-wise (SNV normalizes a spectrum by its own mean and SD; the
   ## Savitzky-Golay filter convolves along the wavenumber axis within one
@@ -226,7 +303,8 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
   transformed_matrix <- rlang::try_fetch(
     transform_spectra_matrix(spectral_matrix,
                              preprocessing = object$preprocessing,
-                             window_size   = object$window_size),
+                             window_size   = object$window_size,
+                             masked        = is_masked),
     error = function(e) {
       abort_horizons(c(
         "{.fn step_transform_spectra} could not transform its spectra.",
@@ -245,7 +323,7 @@ bake.step_transform_spectra <- function(object, new_data, ...) {
   ## Without this a malformed sample returns NA predictions, or injects NA
   ## rows into the model matrix, with no signal either way. See #52.
 
-  unusable <- unusable_spectra(spectral_matrix)
+  unusable <- unusable_spectra(spectral_matrix, masked = is_masked)
   bad      <- !is.na(unusable)
 
   if (any(bad)) {
@@ -362,19 +440,23 @@ is_valid_sg_window <- function(w) {
 #'
 #' @description
 #' Follows recipes' convention: before `prep()`, `terms` holds the
-#' selectors as text; after, the columns the step transforms (#109).
+#' selectors as text; after, the columns the step transforms (#109), and
+#' `masked` whether each is masked (transformed, then dropped); before
+#' `prep()` that is not known, so `NA`.
 #'
 #' @param x A `step_transform_spectra` step.
 #' @param ... Not used.
-#' @return Tibble with `terms`, `preprocessing`, `window_size` and `id`, one
-#'   row per term.
+#' @return Tibble with `terms`, `preprocessing`, `window_size`, `masked` and
+#'   `id`, one row per term.
 #' @importFrom recipes tidy
 #' @keywords internal
 #' @noRd
 #' @export
 tidy.step_transform_spectra <- function(x, ...) {
 
-  terms <- if (isTRUE(x$trained)) {
+  trained <- isTRUE(x$trained)
+
+  terms <- if (trained) {
     x$columns
   } else {
     recipes::sel2char(x$terms)
@@ -386,6 +468,7 @@ tidy.step_transform_spectra <- function(x, ...) {
     terms         = as.character(terms),
     preprocessing = rep(x$preprocessing, n),
     window_size   = rep(x$window_size, n),
+    masked        = if (trained) terms %in% x$masked else rep(NA, n),
     id            = rep(x$id, n)
   )
 
@@ -398,7 +481,10 @@ tidy.step_transform_spectra <- function(x, ...) {
 #' @export
 print.step_transform_spectra <- function(x, width = max(20, options()$width - 30), ...) {
 
-  cat("Spectral transformation step using", x$preprocessing, "\n")
+  n_masked <- length(x$masked)
+
+  cat("Spectral transformation step using", x$preprocessing,
+      if (n_masked > 0) paste0("(", n_masked, " masked columns dropped after it)"), "\n")
   invisible(x)
 
 }
@@ -422,19 +508,28 @@ print.step_transform_spectra <- function(x, width = max(20, options()$width - 30
 #' `(window_size - 1) / 2` columns from each edge explicitly, the
 #' Savitzky-Golay methods lose the same edge inside `prospectr::savitzkyGolay()`.
 #'
+#' With `masked`, the method still runs over every column, so a window beside
+#' a masked band reads its real values; SNV's mean and spread come from the
+#' unmasked columns ([snv_unmasked()]); and the masked columns are dropped
+#' from the result, after the edge trim. With nothing masked the result is
+#' the one without the argument, to the bit.
+#'
 #' @param X Numeric matrix (or something `as.matrix()` turns into one). One
 #'   spectrum per row.
 #' @param preprocessing Character. One of the methods documented in
 #'   [step_transform_spectra()], which checks it.
 #' @param window_size Odd integer. Savitzky-Golay window size. Default 9.
+#' @param masked Logical, one per column of `X`, or `NULL` (the default)
+#'   for none: the masked columns.
 #'
 #' @return A numeric matrix with `nrow(X)` rows and
-#'   `ncol(X) - (window_size - 1)` columns, without dimnames. Rows whose input
+#'   `ncol(X) - (window_size - 1)` columns, less the masked columns among
+#'   them, without dimnames. Rows whose input
 #'   is entirely non-finite come back entirely `NA`; no error is raised for
 #'   them, and a flat row comes back as whatever the method makes of it, so
 #'   the step's `bake()` applies [standardize()]'s rule to the rows itself.
 #' @keywords internal
-transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
+transform_spectra_matrix <- function(X, preprocessing, window_size = 9, masked = NULL) {
 
   X <- as.matrix(X)
   if (!is.double(X)) storage.mode(X) <- "double"
@@ -442,14 +537,22 @@ transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
   half_window <- (window_size - 1) / 2
   keep        <- seq.int(1 + half_window, ncol(X) - half_window)
 
+  ### The columns returned: the edge trim's, less the masked ones
+  masking  <- !is.null(masked) && any(masked)
+  returned <- if (masking) !masked[keep] else rep(TRUE, length(keep))
+
   ## prospectr's convolution has nothing to do on an empty matrix; return the
   ## right shape rather than letting it error.
   if (nrow(X) == 0L) {
-    return(matrix(numeric(0), nrow = 0L, ncol = length(keep)))
+    return(matrix(numeric(0), nrow = 0L, ncol = sum(returned)))
   }
 
   sg  <- function(M, m, p) prospectr::savitzkyGolay(M, m = m, p = p, w = window_size)
-  snv <- function(M) prospectr::standardNormalVariate(M)
+  snv <- if (masking) {
+    function(M) snv_unmasked(M, masked)
+  } else {
+    function(M) prospectr::standardNormalVariate(M)
+  }
 
   out <- switch(as.character(preprocessing),
 
@@ -468,7 +571,51 @@ transform_spectra_matrix <- function(X, preprocessing, window_size = 9) {
 
   out <- as.matrix(out)
   dimnames(out) <- NULL
+
+  ## Dropped after the method, so it ran over their values
+  if (masking) out <- out[, returned, drop = FALSE]
+
   out
+
+}
+
+#' Standard normal variate with its statistics from the unmasked columns
+#'
+#' @description
+#' Each spectrum is centred on its mean and scaled by its standard deviation
+#' (divisor `n - 1`), both taken over the unmasked columns alone, and the
+#' result is applied to every column, so a derivative after it has the
+#' masked columns too. This is prospectr's own arithmetic
+#' (`prospectr::standardNormalVariate()`, 0.2.11) with the statistics read
+#' from a subset: a missing value is left out of both, and a spread of zero
+#' or one that cannot be computed is set to `Inf`, which returns zeros.
+#' With nothing masked it equals prospectr's result to the bit, and with a
+#' mask its unmasked columns equal prospectr's on the matrix without the
+#' masked columns; a test holds both, so a change in prospectr's arithmetic
+#' fails the suite rather than moving results quietly. The statistics are
+#' taken from the unmasked bands so a constituent that varies only inside
+#' the masked bands (water, at the water bands) does not set the scale of
+#' the rest.
+#'
+#' @param M Numeric matrix, one spectrum per row.
+#' @param masked Logical, one per column of `M`.
+#' @return `M`, centred and scaled row by row, with its dimnames.
+#' @keywords internal
+#' @noRd
+snv_unmasked <- function(M, masked) {
+
+  M <- as.matrix(M)
+  U <- M[, !masked, drop = FALSE]
+
+  mn    <- rowMeans(U, na.rm = TRUE)
+  U     <- U - mn
+  n_obs <- rowSums(!is.na(U))
+  sds   <- sqrt(rowSums(U^2, na.rm = TRUE) / (n_obs - 1))
+
+  zero_var <- sds == 0 | is.na(sds)
+  if (any(zero_var)) sds[zero_var] <- Inf
+
+  (M - mn) / sds
 
 }
 

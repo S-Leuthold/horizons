@@ -51,7 +51,8 @@ the recipe constructor for \code{evaluate_single_config()}.
 Recipe step order:
 \enumerate{
 \item Response transformation (step_log/step_sqrt with skip = TRUE)
-\item Spectral preprocessing (step_transform_spectra on predictor_cols only)
+\item Spectral preprocessing (step_transform_spectra on the axis's columns only,
+any masked ones dropped after it)
 \item Feature selection (pca/boruta/cars/correlation/none), on spectral
 columns only
 }
