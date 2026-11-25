@@ -32,8 +32,9 @@
 #'
 #' * `"batch"` (default): one training set, the union over every target.
 #' * `"cluster"`: the targets are clustered in the similarity space
-#'   (k-means, count by silhouette unless `clusters` fixes it, clusters
-#'   under `cluster_min` merged into the nearest); one group per cluster.
+#'   (k-means, count by silhouette unless `clusters` fixes it; each target
+#'   of a cluster under `cluster_min` moves to its own nearest remaining
+#'   centroid); one group per cluster.
 #' * `"sample"`: one group per target, its own `k` nearest.
 #' * `"global"`: no draw; every row the others draw from (the library's
 #'   rows at the depth asked for, less the flagged ones), kept so the

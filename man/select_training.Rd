@@ -201,8 +201,9 @@ the record (\code{x$selection$groups}), not in the shape of the return:
 \itemize{
 \item \code{"batch"} (default): one training set, the union over every target.
 \item \code{"cluster"}: the targets are clustered in the similarity space
-(k-means, count by silhouette unless \code{clusters} fixes it, clusters
-under \code{cluster_min} merged into the nearest); one group per cluster.
+(k-means, count by silhouette unless \code{clusters} fixes it; each target
+of a cluster under \code{cluster_min} moves to its own nearest remaining
+centroid); one group per cluster.
 \item \code{"sample"}: one group per target, its own \code{k} nearest.
 \item \code{"global"}: no draw; every row the others draw from (the library's
 rows at the depth asked for, less the flagged ones), kept so the
