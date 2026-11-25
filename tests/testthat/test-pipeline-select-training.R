@@ -3055,6 +3055,36 @@ test_that("select_training() draws in this session under isolate = FALSE, load_a
 
 })
 
+test_that("the draw's process is seeded from the run's seed, not the session's stream", {
+
+  fx <- select_fixture()
+
+  ## The draw sent to a process of its own and stopped as it is sent,
+  ## carrying the seed the process would have started from
+  local_mocked_bindings(running_under_load_all = function() FALSE,
+                        in_session_library = function() list(lib = .libPaths()[1], built = loaded_build$built))
+  local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .compute = NULL) {
+    rlang::abort("sent", class = "draw_sent", seed = .args$.horizons_seed)
+  }, .package = "mirai")
+
+  sent_seed <- function(session_seed) {
+    set.seed(session_seed)
+    before <- .Random.seed
+    sent   <- rlang::catch_cnd(
+      select_training(fx$targets, fx$pool, k = 10, seed = 307L, control = control_horizons(isolate = TRUE)),
+      classes = "draw_sent"
+    )
+    ## The caller's stream is left as found
+    expect_identical(.Random.seed, before)
+    sent$seed
+  }
+
+  ## The same root, whatever the session's stream: the unit's own draw
+  expect_identical(sent_seed(1L), sent_seed(2L))
+  expect_identical(sent_seed(1L), with_unit_seed(307L, "select_training/draw", sample.int(100000L, 1L)))
+
+})
+
 test_that("the draw's process is given this session's horizons options, the download's and the tree's", {
 
   withr::local_options(horizons.cache_dir = "a-cache", timeout = 1234, download.file.method = "libcurl",

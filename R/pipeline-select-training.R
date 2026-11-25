@@ -1743,7 +1743,10 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 #' `devtools::load_all()`, where a process would load the installed horizons
 #' rather than this source, and when the library horizons was loaded from
 #' now holds another build of it ([draw_in_session()]). Its record's
-#' `control$isolate` is then `FALSE`, since the draw was not isolated.
+#' `control$isolate` is then `FALSE`, since the draw was not isolated. The
+#' process's random stream is seeded from the unit `select_training/draw`
+#' ([with_unit_seed()]), so it follows the run's seed; every draw inside it
+#' is a unit of its own besides.
 #'
 #' A registered library not cached yet, or cached by another build, needs
 #' consent, which a process of its own cannot ask for: it says so instead
@@ -1791,10 +1794,15 @@ run_draw <- function(args, in_session, control, call) {
   libraries <- unique(c(in_session_library()$lib, .libPaths()))
   options   <- draw_options()
 
+  ## The process's seed is one draw (run_isolated()), made in a unit of its
+  ## own, so it follows the run's root as every draw does, not the session's
+  ## stream
   send <- function(consent) {
     sent <- c(args, list(consent = consent))
-    run_isolated(call_by_name(call(":::", as.name("horizons"), as.name("draw_training_set")), sent), sent,
-                 what = "the library draw", options = options, libraries = libraries, call = call)
+    with_unit_seed(args$seed, "select_training/draw", run_isolated(
+      call_by_name(call(":::", as.name("horizons"), as.name("draw_training_set")), sent), sent,
+      what = "the library draw", options = options, libraries = libraries, call = call
+    ))
   }
 
   rlang::try_fetch(
