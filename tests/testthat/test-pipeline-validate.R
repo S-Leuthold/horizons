@@ -299,29 +299,44 @@ describe("validate() sample count checks", {
 
   })
 
-  ## P001b — CV feasibility (n_model >= cv_folds * 2) --------------------------
+  ## P001b — CV feasibility (the training part has more rows than folds) ------
 
-  test_that("P001b passes at boundary (n_model=10, folds=5)", {
+  test_that("P001b passes at the fold rule's boundary (8 rows, a training part of 6, folds=5)", {
 
-    result <- quiet_validate(make_configured_hd(n_samples = 10, cv_folds = 5L))
+    result <- quiet_validate(make_configured_hd(n_samples = 8, cv_folds = 5L))
 
     p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
     expect_equal(p001b$status, "pass")
-    expect_identical(p001b$value, "10 (need >= 10)")
+    expect_identical(p001b$value, "6 training rows (need > 5)")
+    expect_true(result$validation$passed)
 
   })
 
-  test_that("P001b fails below boundary (n_model=9, folds=5) -> passed=FALSE, and shows it", {
+  test_that("P001b fails below the boundary (7 rows, a training part of 5, folds=5) -> passed=FALSE, and shows it", {
 
     out <- capture.output(result <- suppressWarnings(
-      validate(make_configured_hd(n_samples = 9, cv_folds = 5L), verbose = TRUE)
+      validate(make_configured_hd(n_samples = 7, cv_folds = 5L), verbose = TRUE)
     ))
 
     p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
     expect_equal(p001b$status, "fail")
     expect_equal(p001b$severity, "ERROR")
+    expect_identical(p001b$value, "5 training rows (need > 5)")
     expect_false(result$validation$passed)
-    expect_true(any(grepl("\u2717 CV feasibility: 9 \u2265 10", out, fixed = TRUE)))
+    expect_true(any(grepl("\u2717 CV feasibility: 5 training rows for 5 folds (need > 5)", out, fixed = TRUE)))
+
+  })
+
+  test_that("P001b and P002 count the training part without moving the session's random stream", {
+
+    hd <- make_configured_hd(n_samples = 60, cv_folds = 5L)
+
+    set.seed(11)
+    quiet_validate(hd)
+    after <- stats::runif(1)
+
+    set.seed(11)
+    expect_identical(stats::runif(1), after)
 
   })
 
@@ -354,12 +369,113 @@ describe("validate() sample count checks", {
 
   test_that("P002 fails below 10 per fold", {
 
-    ## n=49, folds=5 → 9 per fold → fail
+    ## n=49, folds=5 → a training part of 39, 7 per fold → fail
     result <- quiet_validate(make_configured_hd(n_samples = 49, cv_folds = 5L))
 
     p002 <- result$validation$checks[result$validation$checks$check_id == "P002", ]
     expect_equal(p002$status, "fail")
     expect_equal(p002$severity, "WARNING")
+
+  })
+
+  test_that("P002 divides the training part into folds, not every row", {
+
+    ## 55 rows are 11 a fold over all of them, but the split's training part
+    ## of 43 gives folds of 8
+    result <- quiet_validate(make_configured_hd(n_samples = 55, cv_folds = 5L))
+
+    p002 <- result$validation$checks[result$validation$checks$check_id == "P002", ]
+    expect_equal(p002$status, "fail")
+    expect_identical(p002$value, "~8")
+
+  })
+
+})
+
+
+## ===========================================================================
+## 2b. The sample-size verdict agrees with evaluate()'s door
+## ===========================================================================
+
+describe("validate()'s sample-size checks and evaluate()'s fold rule", {
+
+  ## What evaluate() does with the object at its door: "refused" when the fold
+  ## rule refuses it, else the rows of its smallest assessment fold, read
+  ## where it decides whether to warn (no configuration is tuned)
+  evaluate_door <- function(obj) {
+
+    real_small_folds <- log_small_folds
+    seen <- NULL
+
+    local_mocked_bindings(
+      log_small_folds = function(collector, folds) {
+        seen <<- real_small_folds(collector, folds)
+        stop("past the door")
+      },
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    refused <- tryCatch({
+      suppressWarnings(evaluate(obj, seed = 42L))
+      FALSE
+    }, horizons_error_input = function(e) TRUE,
+       error = function(e) if (identical(conditionMessage(e), "past the door")) FALSE else stop(e))
+
+    if (refused) "refused" else seen
+
+  }
+
+  verdict <- function(obj) {
+
+    checks <- quiet_validate(obj)$validation$checks
+    stats::setNames(checks$status, checks$check_id)
+
+  }
+
+  ## Flag rows as standardize() does
+  flag <- function(obj, rows) {
+
+    obj$data$analysis$.flag <- ifelse(seq_len(nrow(obj$data$analysis)) %in% rows,
+                                      "standardize", NA_character_)
+    obj$data$role_map <- tibble::add_row(obj$data$role_map, variable = ".flag", role = "meta")
+    obj
+
+  }
+
+  it("passes 8 rows at 5 folds, which evaluate() runs", {
+
+    obj <- make_eval_object(n = 8)
+    obj$config$tuning$cv_folds <- 5L
+
+    expect_identical(verdict(obj)[["P001b"]], "pass")
+    expect_type(evaluate_door(obj), "integer")
+
+  })
+
+  it("fails 20 rows of which 16 are flagged at 5 folds, which evaluate() refuses", {
+
+    obj <- flag(make_eval_object(n = 20), rows = 1:16)
+    obj$config$tuning$cv_folds <- 5L
+
+    expect_identical(verdict(obj)[["P001b"]], "fail")
+    expect_identical(evaluate_door(obj), "refused")
+
+  })
+
+  it("warns of small folds where evaluate() warns, on the training part's folds", {
+
+    ## 55 rows: folds of 8 or fewer, so both warn; 80: folds of 12, neither
+    for (n in c(55L, 80L)) {
+
+      obj <- make_eval_object(n = n)
+      obj$config$tuning$cv_folds <- 5L
+
+      smallest <- evaluate_door(obj)
+
+      expect_identical(smallest < SMALL_FOLD_ROWS, n == 55L, info = n)
+      expect_identical(verdict(obj)[["P002"]] == "pass", smallest >= SMALL_FOLD_ROWS, info = n)
+
+    }
 
   })
 

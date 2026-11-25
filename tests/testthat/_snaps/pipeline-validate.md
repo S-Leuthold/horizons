@@ -5,7 +5,7 @@
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)
-      │  ├─ ✓ CV feasibility: 100 ≥ 10
+      │  ├─ ✓ CV feasibility: 80 training rows for 5 folds (need > 5)
       │  ├─ ✓ Outcome variance: 26.61
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
@@ -22,7 +22,7 @@
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)
-      │  ├─ ✓ CV feasibility: 100 ≥ 10
+      │  ├─ ✓ CV feasibility: 80 training rows for 5 folds (need > 5)
       │  ├─ ✗ Outcome variance: 0
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
@@ -42,7 +42,7 @@
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)
-      │  ├─ ✓ CV feasibility: 100 ≥ 10
+      │  ├─ ✓ CV feasibility: 80 training rows for 5 folds (need > 5)
       │  ├─ ✓ Outcome variance: 26.61
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0

@@ -9,11 +9,21 @@
 #' `validate()` is an advisory pre-flight report, run between `configure()`
 #' and `evaluate()`. Running it is optional and nothing gates on its verdict:
 #' `evaluate()` and `fit()` refuse invalid input themselves, including the
-#' problems its ERROR checks report (too few rows for the CV folds, and an
-#' outcome with zero variance). Detection is mandatory; outlier removal is
-#' opt-in. The function populates the `validation` section of the object
-#' and sets `validation$passed` based on whether any ERROR-severity checks
-#' failed.
+#' problems its ERROR checks report (a training part without more rows than
+#' CV folds, and an outcome with zero variance). Detection is mandatory;
+#' outlier removal is opt-in. The function populates the `validation`
+#' section of the object and sets `validation$passed` based on whether any
+#' ERROR-severity checks failed.
+#'
+#' **The rows counted:** the sample-size and outcome-variance checks count
+#' the rows the modelling verbs model, those with an observed outcome that no
+#' step flagged (`.flag`). The fold checks read the training part
+#' `evaluate()`'s train/test split leaves of them, on the rule the verbs
+#' apply: P001b is an ERROR when it has no more rows than CV folds, which
+#' `evaluate()` and `fit()` refuse, and P002 a WARNING when an even split of
+#' it into folds leaves fewer than 10 rows in a fold, as the verbs warn. A
+#' response trim requested here removes training rows after the split, so a
+#' training part P001b passes can still be refused once it is trimmed.
 #'
 #' **Severity levels:**
 #'
@@ -271,22 +281,23 @@ validate <- function(x,
 
   has_outcome <- length(outcome_col) == 1
 
-  if (has_outcome) {
-
-    outcome_vals <- analysis[[outcome_col]]
-    n_model      <- sum(!is.na(outcome_vals))
-
-  } else {
-
-    outcome_vals <- NULL
-    n_model      <- n_total
-
-  }
+  outcome_vals <- if (has_outcome) analysis[[outcome_col]]
 
   ## CV folds from tuning config ------------------------------------------------
 
   ### A whole number of at least 2, which the door validator checks.
   cv_folds <- x$config$tuning$cv_folds
+
+  ## The rows the verbs model, and the training part they fold -------------------
+  ## The sample-size checks count what evaluate() and fit() count: the rows
+  ## with an observed outcome and no flag (modelling_mask(), the rule
+  ## modelling_rows() applies), and the training part evaluate()'s split
+  ## leaves of them, drawn at the root evaluate() takes by default. The door
+  ## validator has refused a configured object without exactly one outcome.
+
+  modelled <- modelling_mask(analysis, outcome_col)
+  n_model  <- sum(modelled)
+  n_train  <- training_part_rows(analysis, outcome_col, seed = recorded_seed(x) %||% 0L)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Initialize checks collector
@@ -339,36 +350,41 @@ validate <- function(x,
   ))
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: P001 — Recommended sample count (n_total)
+  ## Step 5: P001 — Recommended sample count (n_model)
   ## ---------------------------------------------------------------------------
 
   checks <- rbind(checks, run_check(
     "P001", "Recommended sample count",
-    condition = n_total >= 50,
+    condition = n_model >= 50,
     severity  = "WARNING",
-    value     = as.character(n_total)
+    value     = as.character(n_model)
   ))
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: P001b — CV feasibility (n_model)
+  ## Step 6: P001b — CV feasibility (n_train)
   ## ---------------------------------------------------------------------------
+  ## The fold rule evaluate() and fit() refuse on (check_fold_rows()).
 
   checks <- rbind(checks, run_check(
     "P001b", "Feasible CV split",
-    condition = n_model >= cv_folds * 2,
+    condition = is_foldable(n_train, cv_folds),
     severity  = "ERROR",
-    value     = paste0(n_model, " (need >= ", cv_folds * 2, ")")
+    value     = paste0(n_train, " training rows (need > ", cv_folds, ")")
   ))
 
   ## ---------------------------------------------------------------------------
-  ## Step 7: P002 — Samples per CV fold (n_model)
+  ## Step 7: P002 — Samples per CV fold (n_train)
   ## ---------------------------------------------------------------------------
+  ## The verbs warn when the smallest assessment fold has fewer than
+  ## SMALL_FOLD_ROWS rows (log_small_folds()). An even split of the training
+  ## part has floor(n_train / cv_folds) in its smallest fold; a stratified one
+  ## can have a row or so fewer.
 
-  samples_per_fold <- floor(n_model / cv_folds)
+  samples_per_fold <- floor(n_train / cv_folds)
 
   checks <- rbind(checks, run_check(
     "P002", "Samples per CV fold",
-    condition = samples_per_fold >= 10,
+    condition = samples_per_fold >= SMALL_FOLD_ROWS,
     severity  = "WARNING",
     value     = paste0("~", samples_per_fold)
   ))
@@ -379,7 +395,7 @@ validate <- function(x,
 
   if (has_outcome) {
 
-    outcome_complete <- outcome_vals[!is.na(outcome_vals)]
+    outcome_complete <- outcome_vals[modelled]
     outcome_var      <- if (length(outcome_complete) >= 2) stats::var(outcome_complete) else 0
 
     checks <- rbind(checks, run_check(
@@ -632,14 +648,17 @@ validate <- function(x,
 
     ## Sample checks --------------------------------------------------------------
 
+    ### The rows the verbs model, of all of them when some are left out
     p001 <- checks[checks$check_id == "P001", ]
     sym  <- if (p001$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-    cat(paste0("\u2502  \u251C\u2500 ", sym, " Samples: ", n_total, " (\u2265 50)\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " Samples: ", n_model,
+               if (n_model < n_total) paste0(" of ", n_total, " modelled"),
+               " (\u2265 50)\n"))
 
     p001b <- checks[checks$check_id == "P001b", ]
     sym   <- if (p001b$status == "pass") cli::col_green("\u2713") else cli::col_red("\u2717")
-    cat(paste0("\u2502  \u251C\u2500 ", sym, " CV feasibility: ", n_model,
-               " \u2265 ", cv_folds * 2, "\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " CV feasibility: ", n_train,
+               " training rows for ", cv_folds, " folds (need > ", cv_folds, ")\n"))
 
     ## Outcome checks (gated) ----------------------------------------------------
 

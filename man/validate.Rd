@@ -70,11 +70,21 @@ predictor quality, and detects spectral and response outliers.
 \code{validate()} is an advisory pre-flight report, run between \code{configure()}
 and \code{evaluate()}. Running it is optional and nothing gates on its verdict:
 \code{evaluate()} and \code{fit()} refuse invalid input themselves, including the
-problems its ERROR checks report (too few rows for the CV folds, and an
-outcome with zero variance). Detection is mandatory; outlier removal is
-opt-in. The function populates the \code{validation} section of the object
-and sets \code{validation$passed} based on whether any ERROR-severity checks
-failed.
+problems its ERROR checks report (a training part without more rows than
+CV folds, and an outcome with zero variance). Detection is mandatory;
+outlier removal is opt-in. The function populates the \code{validation}
+section of the object and sets \code{validation$passed} based on whether any
+ERROR-severity checks failed.
+
+\strong{The rows counted:} the sample-size and outcome-variance checks count
+the rows the modelling verbs model, those with an observed outcome that no
+step flagged (\code{.flag}). The fold checks read the training part
+\code{evaluate()}'s train/test split leaves of them, on the rule the verbs
+apply: P001b is an ERROR when it has no more rows than CV folds, which
+\code{evaluate()} and \code{fit()} refuse, and P002 a WARNING when an even split of
+it into folds leaves fewer than 10 rows in a fold, as the verbs warn. A
+response trim requested here removes training rows after the split, so a
+training part P001b passes can still be refused once it is trimmed.
 
 \strong{Severity levels:}
 \itemize{
