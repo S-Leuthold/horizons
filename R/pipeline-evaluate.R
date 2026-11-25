@@ -4214,12 +4214,14 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
   ## transport changed the payload.
   check_worker_payload(shared, SHARED_ARG_NAMES)
 
-  ## BLAS and OpenMP go on one thread as the daemon is set up below, as the
-  ## inner daemons run them, so the configuration's folds and its final fit
-  ## compute alike whether it is split or not; put back as the task ends.
-  ## The put-back is registered first and bound once the pin is made.
-  unpin_blas <- function() invisible(NULL)
-  on.exit(unpin_blas(), add = TRUE)
+  ## The daemon's threads go to one as it is set up below (BLAS's, OpenMP's
+  ## and data.table's, and the engines' thread options), as the inner
+  ## daemons run them, so the configuration's folds and its final fit
+  ## compute alike whether it is split or not; all of them are put back as
+  ## the task ends, since the daemon is the user's. The put-back is
+  ## registered first and bound once the pin is made.
+  unpin_threads <- function() invisible(NULL)
+  on.exit(unpin_threads(), add = TRUE)
 
   ## mirai relays no condition from a task, so a warning raised in the
   ## worker's own steps before the configuration's unit runs (a package's
@@ -4234,7 +4236,7 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
     cfg <- shared$configs[config_i, ]
 
     ## The daemon's threads pinned, and the configuration's packages loaded
-    unpin_blas <- prepare_worker(cfg$model, cfg$feature_selection)
+    unpin_threads <- prepare_worker(cfg$model, cfg$feature_selection)
 
     ## Reconstruct the split and folds from indices. Fold membership is
     ## reproduced by construction, not by replaying the RNG.

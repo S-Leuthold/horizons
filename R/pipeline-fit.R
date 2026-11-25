@@ -1734,9 +1734,10 @@ member_task_payload <- function(shared, config_row, best_params, fold_entries) {
 #'
 #' The version is checked first, since another version's payload keys may
 #' differ, then the payload's keys ([check_worker_payload()]). The daemon is
-#' set up for the member as for any unit ([prepare_worker()]: BLAS and
-#' OpenMP on one thread, put back as the task ends, the engines' thread
-#' options and the member's packages); its split, its fit and calibration
+#' set up for the member as for any unit ([prepare_worker()]: BLAS's,
+#' OpenMP's and data.table's threads and the engines' thread options at
+#' one, all put back as the task ends, and the member's packages); its
+#' split, its fit and calibration
 #' rows and its folds are rebuilt from the rows and their positions
 #' ([rebuild_resamples()]), the rows sent once. A warning raised in those
 #' steps, outside the member's unit, is caught and rendered with the
@@ -1786,12 +1787,13 @@ fit_member_worker <- function(payload, inner = 1L) {
 
   check_worker_payload(payload, FIT_ARG_NAMES)
 
-  ## BLAS and OpenMP go on one thread as the daemon is set up below, as the
-  ## inner daemons run them, and are put back as the task ends, since the
-  ## daemon is the user's. The put-back is registered first and bound once
-  ## the pin is made.
-  unpin_blas <- function() invisible(NULL)
-  on.exit(unpin_blas(), add = TRUE)
+  ## The daemon's threads go to one as it is set up below (BLAS's, OpenMP's
+  ## and data.table's, and the engines' thread options), as the inner
+  ## daemons run them, and all of them are put back as the task ends, since
+  ## the daemon is the user's. The put-back is registered first and bound
+  ## once the pin is made.
+  unpin_threads <- function() invisible(NULL)
+  on.exit(unpin_threads(), add = TRUE)
 
   cfg     <- payload$config_row
   outside <- character(0)
@@ -1799,7 +1801,7 @@ fit_member_worker <- function(payload, inner = 1L) {
   rows <- withCallingHandlers({
 
     ## The daemon's threads pinned, and the member's packages loaded
-    unpin_blas <- prepare_worker(cfg$model, cfg$feature_selection)
+    unpin_threads <- prepare_worker(cfg$model, cfg$feature_selection)
 
     ## The split, the fit and calibration rows and the folds, from one copy
     ## of the rows and their positions
