@@ -32,8 +32,9 @@
 #'
 #' * `"batch"` (default): one training set, the union over every target.
 #' * `"cluster"`: the targets are clustered in the similarity space
-#'   (k-means, count by silhouette unless `clusters` fixes it, clusters
-#'   under `cluster_min` merged into the nearest); one group per cluster.
+#'   (k-means, count by silhouette unless `clusters` fixes it; each target
+#'   of a cluster under `cluster_min` moves to its own nearest remaining
+#'   centroid); one group per cluster.
 #' * `"sample"`: one group per target, its own `k` nearest.
 #' * `"global"`: no draw; every row the others draw from (the library's
 #'   rows at the depth asked for, less the flagged ones), kept so the
@@ -188,7 +189,11 @@
 #' The first draw downloads OSSL's public files (about 436 MB), verifies their
 #' published MD5s, builds the library and caches it; it asks first in an
 #' interactive session, and a non-interactive one needs
-#' `options(horizons.library_download = TRUE)`. The option
+#' `options(horizons.library_download = TRUE)`. Before anything is
+#' downloaded, the call is checked against what horizons records of the
+#' library: `properties`, a named `k` and a PLS space's one property against
+#' its properties, `window` against `poly` at its grid's spacing, and the
+#' targets against its columns and standardization. The option
 #' `horizons.cache_dir` moves the cache. Every later draw reads the cache,
 #' until a version of horizons that builds the library differently: a
 #' library cached by an earlier build is built again, after asking as on
@@ -352,7 +357,9 @@
 #'   `target_only`, the targets' wavenumbers the library lacks. `x$log` is the
 #'   pool's, with this call's rows after it: one per warning topic, each
 #'   raised once at the end of the call (`horizons_warning_input` for pool
-#'   and targets in different photometric units; `flagged` for targets an
+#'   and targets in different photometric units, and for a PLS space, which
+#'   chose the rows by their own measured values (not under
+#'   `scope = "global"`, which keeps every row); `flagged` for targets an
 #'   earlier step flagged, which get no training set; `coverage` for target
 #'   columns the library lacks, a search on the overlap and draws short of
 #'   `k`; `skipped` for a property left out under `properties = NULL` (no
@@ -360,9 +367,11 @@
 #'   similarity space or library that could not be cached; `partial_failure`
 #'   for a property every drawn row of which was some target's twin, left
 #'   out, so the call did not complete in full; `applicability` for targets
-#'   beyond the library's spread), and a note for each cost paid once (a
-#'   cached library or similarity space rebuilt, a first-use space not
-#'   built).
+#'   beyond the library's spread), a note that a model evaluated on the
+#'   training set is scored on library rows drawn near the targets, not on
+#'   the targets, which the tree says too, and a note for each cost paid
+#'   once (a cached library or similarity space rebuilt, a first-use space
+#'   not built).
 #'
 #' @examples
 #' \dontrun{
@@ -565,15 +574,41 @@ select_training <- function(x, library,
 
   if (registered && window_ok && deriv_ok && poly_ok && derivative > 0) {
 
-    lib_res <- library_registry()[[library]]$filters$wn_step
-    pts     <- window_to_points(window, lib_res)
+    errors <- c(errors, window_poly_finding(window, library_registry()[[library]]$filters$wn_step, poly,
+                                            grid = paste0("the ", library, " library's")))
 
-    if (pts <= poly) {
+  }
 
-      errors <- c(errors, cli::format_inline(
-        "A {.arg window} of {window} cm\u207B\u00B9 is {pts} point{?s} on the {library} library's {lib_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}; widen {.arg window} or lower {.arg poly}"))
+  ## properties, a named k, and a PLS space's one property. A registered
+  ## library's property map is what its pinned release builds: the build
+  ## keeps the mapped properties the release holds, and the release's files
+  ## are fixed by their MD5s, so the map is the built library's responses.
+  ## All three are checked here against the map, before the download. Any
+  ## other library's responses are known only once it is read, and the draw
+  ## checks them then, by the same rules.
+
+  props_ok <- is.null(properties) ||
+              (is.character(properties) && length(properties) >= 1L && !anyNA(properties))
+
+  if (!props_ok) {
+
+    errors <- c(errors, cli::format_inline("{.arg properties} must be NULL or a character vector of property names"))
+
+  } else {
+
+    known     <- if (registered) library_registry()[[library]]$properties$property
+    drawn_for <- properties %||% known
+
+    if (registered) {
+
+      errors <- c(errors, unknown_properties_finding(properties, known,
+                                                     where = paste0("the ", library, " library's properties")))
 
     }
+
+    if (k_ok) errors <- c(errors, missing_k(k, drawn_for))
+
+    if (!is.null(drawn_for)) errors <- c(errors, pls_property_finding(space, drawn_for))
 
   }
 
@@ -602,12 +637,6 @@ select_training <- function(x, library,
   if (identical(space, "pls") && ncomp_ok && ncomp < 1) {
 
     errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} needs a whole-number {.arg ncomp}; a variance proportion has no meaning for PLS"))
-
-  }
-
-  if (identical(space, "pls") && !is.null(properties) && length(properties) != 1L) {
-
-    errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
 
   }
 
@@ -746,6 +775,10 @@ select_training <- function(x, library,
   if (verbose) report_selection(out$selection, n_targets = drawn$n_targets,
                                 seed_line = seed_tree_line(root),
                                 draw_line = draw_tree_line(in_session))
+
+  ## What a model evaluated on the training set is scored on, said once: in
+  ## the tree above and as a note on the log, whatever verbose is
+  log_note(collector, paste0(selection_scored_on(scope), "."))
 
   ## Draws short of k: too few measured rows left after the twin
   ## subtraction, or, under cosine, no defined distance at all. One coverage
@@ -896,24 +929,13 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   } else {
 
-    unknown <- setdiff(properties, responses)
-
-    if (length(unknown)) {
-
-      errors <- c(errors, cli::format_inline("{.arg properties} not in the pool's responses: {.val {unknown}} (available: {.val {responses}})"))
-
-    }
+    errors <- c(errors, unknown_properties_finding(properties, responses, where = "the pool's responses"))
 
   }
 
-  ## One rule for a named k, which resolve_k() relies on below
-  errors <- c(errors, missing_k(k, properties))
-
-  if (identical(space, "pls") && length(properties) != 1L) {
-
-    errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
-
-  }
+  ## The door's rules, on the pool's responses: a named k, which resolve_k()
+  ## relies on below, and a PLS space's one property
+  errors <- c(errors, missing_k(k, properties), pls_property_finding(space, properties))
 
   ## A prior selection's provenance columns would collide on bind_cols ------
 
@@ -1227,12 +1249,12 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   window_points <- if (derivative > 0) window_to_points(window, search_res) else NA_integer_
 
-  if (derivative > 0 && window_points <= poly) {
+  ## The door's rule for a registered library's grid, on this library's
+  if (derivative > 0) {
 
-    abort_horizons(c(
-      "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the library's {search_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}.",
-      "i" = "Widen {.arg window} or lower {.arg poly}."
-    ), kind = "input")
+    too_few <- window_poly_finding(window, search_res, poly, grid = "the library's")
+
+    if (length(too_few)) abort_select_inputs(too_few)
 
   }
 
@@ -1322,16 +1344,28 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   window_cm <- if (derivative > 0) (window_points - 1L) * search_res else NA_real_
 
-  ## A PLS space is fit against the pool's own responses, so which rows land
-  ## in the training set was decided by their y. No target leakage, but the
-  ## pool-internal CV downstream is optimistic. Stated, not fixed here.
+  ## A PLS space is fit against the pool's own responses, so under a drawing
+  ## scope which rows land in the training set was decided by their y. No
+  ## target leakage, but the pool-internal CV downstream is optimistic: a
+  ## legal request risky enough to say so, whatever verbose is, as well as on
+  ## the record. Under global the space chooses no row, since every eligible
+  ## row is kept (Step 5), so there is nothing to say: it reaches only the
+  ## twin report, which global records and does not apply, and the target
+  ## distances.
 
-  space_note <- if (space == "pls") {
-    paste0("The similarity space is PLS against ", properties,
-           ", so rows were selected using their own measured values; ",
-           "pool-internal CV is optimistic and the honest score is against the targets")
-  } else {
-    NULL
+  space_note <- NULL
+
+  if (space == "pls" && scope != "global") {
+
+    space_note <- paste0("The similarity space is PLS against ", properties,
+                         ", so rows were selected using their own measured values; ",
+                         "pool-internal CV is optimistic and the honest score is against the targets")
+
+    log_warning(collector, "input", c(
+      "The similarity space is PLS against {.field {properties}}, so the draw chose the training set's rows by their own measured {properties}.",
+      "i" = "A model evaluated on them is scored optimistically. Score it against measured targets, or draw with {.code space = \"pca\"}, which reads no outcome."
+    ), ids = properties)
+
   }
 
   if (verbose) {
@@ -1731,7 +1765,10 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 #' `devtools::load_all()`, where a process would load the installed horizons
 #' rather than this source, and when the library horizons was loaded from
 #' now holds another build of it ([draw_in_session()]). Its record's
-#' `control$isolate` is then `FALSE`, since the draw was not isolated.
+#' `control$isolate` is then `FALSE`, since the draw was not isolated. The
+#' process's random stream is seeded from the unit `select_training/draw`
+#' ([with_unit_seed()]), so it follows the run's seed; every draw inside it
+#' is a unit of its own besides.
 #'
 #' A registered library not cached yet, or cached by another build, needs
 #' consent, which a process of its own cannot ask for: it says so instead
@@ -1779,10 +1816,15 @@ run_draw <- function(args, in_session, control, call) {
   libraries <- unique(c(in_session_library()$lib, .libPaths()))
   options   <- draw_options()
 
+  ## The process's seed is one draw (run_isolated()), made in a unit of its
+  ## own, so it follows the run's root as every draw does, not the session's
+  ## stream
   send <- function(consent) {
     sent <- c(args, list(consent = consent))
-    run_isolated(call_by_name(call(":::", as.name("horizons"), as.name("draw_training_set")), sent), sent,
-                 what = "the library draw", options = options, libraries = libraries, call = call)
+    with_unit_seed(args$seed, "select_training/draw", run_isolated(
+      call_by_name(call(":::", as.name("horizons"), as.name("draw_training_set")), sent), sent,
+      what = "the library draw", options = options, libraries = libraries, call = call
+    ))
   }
 
   rlang::try_fetch(
@@ -1790,7 +1832,7 @@ run_draw <- function(args, in_session, control, call) {
       send("defer"),
       horizons_consent_needed = function(cnd) {
         library_consent(args$registry_entry, cnd$path, ask = interactive(), rebuild = cnd$rebuild,
-                        call = call)
+                        verbose = isTRUE(control$verbose), call = call)
         ### The download and the build take minutes, and the process's own
         ### tree prints only once it returns
         if (isTRUE(control$verbose)) {
@@ -1868,6 +1910,29 @@ draw_tree_line <- function(in_session) {
   }
 
   paste0("Draw: in this session, ", draw_in_session_reason(in_session, markup = FALSE))
+
+}
+
+
+#' What a model evaluated on a drawn set is scored on
+#'
+#' @description
+#' The one sentence the selection tree and its note on the log say: a model
+#' evaluated on the training set, by [evaluate()] and [fit()], is scored on
+#' its library rows held out of it, chosen for their nearness to the targets
+#' (under `scope = "global"`, every library row the draw could reach), not on
+#' the targets, so only measured targets show how it predicts them.
+#'
+#' @param scope The draw's scope.
+#' @return Character(1), without a closing full stop.
+#' @keywords internal
+#' @noRd
+selection_scored_on <- function(scope) {
+
+  rows <- if (identical(scope, "global")) "the library's rows" else "library rows drawn near the targets"
+
+  paste0("A model evaluated on this training set is scored on ", rows,
+         ", not on the targets; only measured targets show how well it predicts them")
 
 }
 
@@ -2020,6 +2085,31 @@ sg_window_fits <- function(points, n_columns) {
 }
 
 
+#' A window too few points on a grid for the polynomial, as a finding
+#'
+#' @description
+#' The one rule for the verb's door, on a registered library's grid before
+#' the download, and for the draw, on the library's own grid once it is
+#' read: the window's points ([window_to_points()]) must exceed `poly`.
+#'
+#' @param window [Numeric.] The window's width in cm-1.
+#' @param resolution [Numeric.] The grid's spacing in cm-1.
+#' @param poly [Integer.] The polynomial's order.
+#' @param grid [Character.] Whose grid, for the message: `"the library's"`.
+#' @return [Character.] Zero or one finding.
+#' @noRd
+window_poly_finding <- function(window, resolution, poly, grid) {
+
+  points <- window_to_points(window, resolution)
+
+  if (points > poly) return(character())
+
+  cli::format_inline(
+    "A {.arg window} of {window} cm\u207B\u00B9 is {points} point{?s} on {grid} {resolution} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}; widen {.arg window} or lower {.arg poly}")
+
+}
+
+
 ## ---------------------------------------------------------------------------
 ## abort_select_inputs() — every collected argument problem, in one error
 ## ---------------------------------------------------------------------------
@@ -2041,6 +2131,48 @@ abort_select_inputs <- function(findings, call = rlang::caller_env()) {
 
   abort_findings(findings, "The inputs failed {length(findings)} check{?s}.",
                  kind = "input", call = call)
+
+}
+
+
+#' Properties a library does not hold, as a finding
+#'
+#' @description
+#' The one rule for the verb's door, against a registered library's property
+#' map, and for the draw, against the pool's responses.
+#'
+#' @param properties [Character.] The properties named.
+#' @param available [Character.] Those the library holds.
+#' @param where [Character.] What `available` is, for the message: `"the
+#'   pool's responses"`.
+#' @return [Character.] Zero or one finding.
+#' @noRd
+unknown_properties_finding <- function(properties, available, where) {
+
+  unknown <- setdiff(properties, available)
+
+  if (!length(unknown)) return(character())
+
+  cli::format_inline("{.arg properties} not in {where}: {.val {unknown}} (available: {.val {available}})")
+
+}
+
+
+#' A PLS space without exactly one property, as a finding
+#'
+#' @description
+#' The one rule for the verb's door, on the properties named or a registered
+#' library's property map, and for the draw, on the properties it resolved.
+#'
+#' @param space [Character.] The similarity space.
+#' @param properties [Character.] The properties drawn for.
+#' @return [Character.] Zero or one finding.
+#' @noRd
+pls_property_finding <- function(space, properties) {
+
+  if (!identical(space, "pls") || length(properties) == 1L) return(character())
+
+  cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}")
 
 }
 
@@ -2796,6 +2928,8 @@ report_selection <- function(sel, n_targets, seed_line = NULL, draw_line = NULL)
     nrow(sel$resemblance$beyond)
   }
   cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ", far, "\n"))
+
+  cat(paste0("\u2502  \u251C\u2500 ", selection_scored_on(scope), "\n"))
 
   n_groups <- nrow(sel$groups)
   n_rows   <- length(unique(unlist(sel$groups$pool_ids)))

@@ -168,7 +168,9 @@ column is returned, else \code{"subset"}), \code{n_shared}, \code{shared_range},
 \code{target_only}, the targets' wavenumbers the library lacks. \code{x$log} is the
 pool's, with this call's rows after it: one per warning topic, each
 raised once at the end of the call (\code{horizons_warning_input} for pool
-and targets in different photometric units; \code{flagged} for targets an
+and targets in different photometric units, and for a PLS space, which
+chose the rows by their own measured values (not under
+\code{scope = "global"}, which keeps every row); \code{flagged} for targets an
 earlier step flagged, which get no training set; \code{coverage} for target
 columns the library lacks, a search on the overlap and draws short of
 \code{k}; \code{skipped} for a property left out under \code{properties = NULL} (no
@@ -176,9 +178,11 @@ measured rows, or fewer than \code{k}), the resemblance check not run, and a
 similarity space or library that could not be cached; \code{partial_failure}
 for a property every drawn row of which was some target's twin, left
 out, so the call did not complete in full; \code{applicability} for targets
-beyond the library's spread), and a note for each cost paid once (a
-cached library or similarity space rebuilt, a first-use space not
-built).
+beyond the library's spread), a note that a model evaluated on the
+training set is scored on library rows drawn near the targets, not on
+the targets, which the tree says too, and a note for each cost paid
+once (a cached library or similarity space rebuilt, a first-use space
+not built).
 }
 \description{
 Draws a training set from a reference pool (a spectral library with
@@ -201,8 +205,9 @@ the record (\code{x$selection$groups}), not in the shape of the return:
 \itemize{
 \item \code{"batch"} (default): one training set, the union over every target.
 \item \code{"cluster"}: the targets are clustered in the similarity space
-(k-means, count by silhouette unless \code{clusters} fixes it, clusters
-under \code{cluster_min} merged into the nearest); one group per cluster.
+(k-means, count by silhouette unless \code{clusters} fixes it; each target
+of a cluster under \code{cluster_min} moves to its own nearest remaining
+centroid); one group per cluster.
 \item \code{"sample"}: one group per target, its own \code{k} nearest.
 \item \code{"global"}: no draw; every row the others draw from (the library's
 rows at the depth asked for, less the flagged ones), kept so the
@@ -358,7 +363,11 @@ on its native 600 to 4000 cm-1 grid at 2 cm-1. horizons does not host it.
 The first draw downloads OSSL's public files (about 436 MB), verifies their
 published MD5s, builds the library and caches it; it asks first in an
 interactive session, and a non-interactive one needs
-\code{options(horizons.library_download = TRUE)}. The option
+\code{options(horizons.library_download = TRUE)}. Before anything is
+downloaded, the call is checked against what horizons records of the
+library: \code{properties}, a named \code{k} and a PLS space's one property against
+its properties, \code{window} against \code{poly} at its grid's spacing, and the
+targets against its columns and standardization. The option
 \code{horizons.cache_dir} moves the cache. Every later draw reads the cache,
 until a version of horizons that builds the library differently: a
 library cached by an earlier build is built again, after asking as on

@@ -2602,23 +2602,105 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
 })
 
 
-test_that("a PLS space records and prints that it selected on the pool's own responses", {
+test_that("a PLS space records, prints and warns, whatever verbose is, that it selected on the pool's own responses", {
 
-  fx  <- select_fixture(n_pool = 100)
-  out <- quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L)
+  fx <- select_fixture(n_pool = 100)
+
+  ## Raised quiet or not, an input warning carrying its row, which names the
+  ## property
+  for (verbose in c(FALSE, TRUE)) {
+
+    txt <- utils::capture.output(
+      w <- expect_warning(
+        out <- select_training(fx$targets, fx$pool, k = 10, properties = "clay", space = "pls", ncomp = 3L,
+                               control = control_horizons(verbose = verbose)),
+        class = "horizons_warning_input"
+      )
+    )
+
+    expect_match(conditionMessage(w), "so the draw chose the training set's rows by their own measured clay", fixed = TRUE)
+    expect_match(conditionMessage(w), "Score it against measured targets", fixed = TRUE)
+    expect_identical(w$log$topic, "input")
+    expect_identical(w$log$ids[[1]], "clay")
+    expect_identical(any(grepl("optimistic", txt)), verbose)
+
+  }
 
   note <- out$selection$settings$space_note
   expect_true(is.character(note))
   expect_match(note, "optimistic")
   expect_match(note, "clay")
 
-  ## A PCA run carries no such note
-  expect_null(quiet_select(fx, k = 10, properties = "clay")$selection$settings$space_note)
+  ## A PCA run carries no such note, and raises no such warning
+  expect_no_warning(pca <- quiet_select(fx, k = 10, properties = "clay"), class = "horizons_warning_input")
+  expect_null(pca$selection$settings$space_note)
 
-  txt <- utils::capture.output(select_training(fx$targets, fx$pool, k = 10, properties = "clay",
-                                               space = "pls", ncomp = 3L,
-                                               control = control_horizons(verbose = TRUE)))
-  expect_true(any(grepl("optimistic", txt)))
+})
+
+
+test_that("a PLS space warns only where it chooses the rows: every drawing scope, and not global, which keeps every row", {
+
+  fx  <- select_fixture(n_pool = 100)
+  pls <- function(scope, verbose = FALSE) {
+    select_training(fx$targets, fx$pool, k = 10, properties = "clay", space = "pls", ncomp = 3L,
+                    scope = scope, cluster_min = 2, seed = 307,
+                    control = control_horizons(verbose = verbose))
+  }
+
+  for (scope in c("batch", "cluster", "sample")) {
+
+    suppressWarnings(expect_warning(out <- pls(scope), "by their own measured clay",
+                                    fixed = TRUE, class = "horizons_warning_input"))
+    expect_match(out$selection$settings$space_note, "optimistic", fixed = TRUE)
+
+  }
+
+  ## Under global the space reaches the twin report and the target distances,
+  ## never the rows: the set is a PCA space's, row for row, so there is no
+  ## input warning, no note on the record, and none in the tree
+  input <- list()
+  txt   <- utils::capture.output(
+    global <- withCallingHandlers(pls("global", verbose = TRUE), warning = function(w) {
+      if (inherits(w, "horizons_warning_input")) input[[length(input) + 1L]] <<- w
+      invokeRestart("muffleWarning")
+    })
+  )
+
+  expect_length(input, 0L)
+  expect_null(global$selection$settings$space_note)
+  expect_false(any(grepl("optimistic", txt, fixed = TRUE)))
+  expect_false(any(grepl("own measured", global$log$message, fixed = TRUE)))
+
+  pca <- suppressWarnings(quiet_select(fx, k = 10, properties = "clay", scope = "global", seed = 307))
+  expect_identical(global$data$analysis$sample_id, pca$data$analysis$sample_id)
+  expect_identical(global$selection$settings$space, "pls")
+
+})
+
+
+test_that("a drawn set says once, in its tree and on its log, that a model evaluated on it is scored on library rows, not the targets", {
+
+  fx   <- select_fixture(n_pool = 60)
+  said <- "A model evaluated on this training set is scored on library rows drawn near the targets, not on the targets"
+
+  txt <- utils::capture.output(
+    out <- select_training(fx$targets, fx$pool, k = 5, properties = "clay",
+                           control = control_horizons(verbose = TRUE))
+  )
+
+  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+
+  expect_length(grep(said, txt, fixed = TRUE), 1L)
+  expect_identical(sum(grepl(said, notes$message, fixed = TRUE)), 1L)
+  expect_match(notes$message[grepl(said, notes$message, fixed = TRUE)],
+               "only measured targets show how well it predicts them.", fixed = TRUE)
+
+  ## Quiet, the log still says it; under global the rows are the library's
+  quiet  <- quiet_select(fx, k = 5, properties = "clay")
+  global <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay", scope = "global"))
+
+  expect_identical(sum(grepl(said, quiet$log$message, fixed = TRUE)), 1L)
+  expect_identical(sum(grepl("is scored on the library's rows, not on the targets", global$log$message, fixed = TRUE)), 1L)
 
 })
 
@@ -2774,7 +2856,8 @@ test_that("metric and space levers change which rows are drawn", {
   base <- quiet_select(fx, k = 10, properties = "clay")
   maha <- quiet_select(fx, k = 10, properties = "clay", metric = "mahalanobis")
   cosn <- quiet_select(fx, k = 10, properties = "clay", metric = "cosine")
-  pls  <- quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L)
+  pls  <- suppressWarnings(quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L),
+                           classes = "horizons_warning_input")
 
   ids <- function(o) o$selection$membership$pool_id
 
@@ -3052,6 +3135,36 @@ test_that("select_training() draws in this session under isolate = FALSE, load_a
   ## And on the build it was loaded from, in a process of its own
   local_mocked_bindings(in_session_library = function() list(lib = .libPaths()[1], built = loaded_build$built))
   expect_error(draw(), "a process was started")
+
+})
+
+test_that("the draw's process is seeded from the run's seed, not the session's stream", {
+
+  fx <- select_fixture()
+
+  ## The draw sent to a process of its own and stopped as it is sent,
+  ## carrying the seed the process would have started from
+  local_mocked_bindings(running_under_load_all = function() FALSE,
+                        in_session_library = function() list(lib = .libPaths()[1], built = loaded_build$built))
+  local_mocked_bindings(mirai = function(.expr, ..., .args = list(), .compute = NULL) {
+    rlang::abort("sent", class = "draw_sent", seed = .args$.horizons_seed)
+  }, .package = "mirai")
+
+  sent_seed <- function(session_seed) {
+    set.seed(session_seed)
+    before <- .Random.seed
+    sent   <- rlang::catch_cnd(
+      select_training(fx$targets, fx$pool, k = 10, seed = 307L, control = control_horizons(isolate = TRUE)),
+      classes = "draw_sent"
+    )
+    ## The caller's stream is left as found
+    expect_identical(.Random.seed, before)
+    sent$seed
+  }
+
+  ## The same root, whatever the session's stream: the unit's own draw
+  expect_identical(sent_seed(1L), sent_seed(2L))
+  expect_identical(sent_seed(1L), with_unit_seed(307L, "select_training/draw", sample.int(100000L, 1L)))
 
 })
 

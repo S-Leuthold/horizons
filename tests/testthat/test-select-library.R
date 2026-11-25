@@ -109,6 +109,70 @@ test_that("the credit and the download's size are printed before any download", 
 
 })
 
+test_that("consent the option gives is said in the tree, silent under verbose = FALSE; a question asked always shows its notice", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  local_mini_registry(entry)
+  path  <- library_cache_path(entry)
+
+  ## The option consents, so nothing is asked: the notice is tree lines like
+  ## any other, printed under verbose and silent otherwise
+  withr::local_options(horizons.library_download = TRUE)
+
+  expect_silent(library_consent(entry, path, verbose = FALSE))
+
+  expect_no_message(txt <- utils::capture.output(library_consent(entry, path, verbose = TRUE)))
+  txt <- cli::ansi_strip(paste(txt, collapse = " "))
+  expect_match(txt, "The \"mini\" library is not cached yet.", fixed = TRUE)
+  expect_match(txt, "Soil Spectroscopy for Global Good", fixed = TRUE)
+  expect_match(txt, "Please cite: Safanelli", fixed = TRUE)
+
+  ## So a quiet first use builds the library without a word
+  expect_silent(resolve_source("mini", verbose = FALSE))
+
+  ## A question asked shows its notice whatever verbose is, and so does the
+  ## refusal of a session that cannot ask
+  withr::local_options(horizons.library_download = NULL)
+  local_mocked_bindings(askYesNo = function(...) TRUE, .package = "utils")
+
+  expect_message(library_consent(entry, path, ask = TRUE, verbose = FALSE),
+                 "is not cached yet", fixed = TRUE)
+  expect_message(
+    expect_error(library_consent(entry, path, ask = FALSE, verbose = FALSE), class = "horizons_error_consent"),
+    "is not cached yet", fixed = TRUE
+  )
+
+})
+
+test_that("the download notice is one text: the tree says what the question says, on first use and on a rebuild", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  local_mini_registry(entry)
+  path  <- library_cache_path(entry)
+
+  ## The words, without the tree's prefixes, the question's bullet or the
+  ## message's wrapping
+  words <- function(s) trimws(gsub("\\s+", " ", gsub("[\u251C\u2500\u2502]", " ", paste(cli::ansi_strip(s), collapse = " "))))
+
+  for (rebuild in c(FALSE, TRUE)) {
+
+    tree <- withr::with_options(list(horizons.library_download = TRUE),
+                                utils::capture.output(library_consent(entry, path, rebuild = rebuild, verbose = TRUE)))
+
+    m <- withr::with_options(list(horizons.library_download = NULL), expect_message(
+      expect_error(library_consent(entry, path, ask = FALSE, rebuild = rebuild, verbose = FALSE),
+                   class = "horizons_error_consent")
+    ))
+    asked <- sub("^\\S+\\s+", "", words(conditionMessage(m)))
+
+    expect_identical(words(tree), asked)
+    expect_match(asked, if (rebuild) "was built by an earlier version of horizons" else "is not cached yet", fixed = TRUE)
+    expect_match(asked, paste0(entry$credit, " Please cite: ", entry$citation), fixed = TRUE)
+
+  }
+
+})
+
 test_that("first use builds and caches; later uses read the cache", {
 
   entry <- make_mini_ossl(withr::local_tempdir())
@@ -352,9 +416,10 @@ test_that("a cached library from another build is built again, after asking why,
 
   collector <- log_open("select_training")
 
-  expect_message(
-    rebuilt <- resolve_source("mini", verbose = FALSE, collector = collector),
-    "built by an earlier version of horizons, so it has to be built again", fixed = TRUE
+  ## The option consents, so the tree says why it is built again
+  expect_output(
+    rebuilt <- resolve_source("mini", verbose = TRUE, collector = collector),
+    "The cached \"mini\" library was built by an earlier version of horizons, so it has to be built again.", fixed = TRUE
   )
 
   expect_identical(nrow(rebuilt$pool$data$analysis), 2L)
@@ -868,6 +933,47 @@ test_that("a bad argument is reported before a registered library is fetched", {
                class = "horizons_error_input", regexp = "control_horizons", fixed = TRUE)
   expect_error(select_training(fx$targets, "mini", control = control_horizons(allow_par = TRUE)),
                class = "horizons_error_input", regexp = "allow_par: evaluate(), fit(), ensemble()", fixed = TRUE)
+
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+
+})
+
+test_that("properties, a named k and a PLS space's one property are checked against a registered library before it is fetched", {
+
+  fx    <- select_fixture()
+  entry <- make_mini_ossl(withr::local_tempdir())
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  ## The registry's property map names every response the library can hold,
+  ## so each mistake is refused at the door, the library never resolved
+  local_mocked_bindings(resolve_registered = function(...) stop("the library was resolved"))
+
+  cases <- list(
+    list(args    = list(properties = "caly"),
+         finding = "`properties` not in the mini library's properties: \"caly\" (available: \"clay\", \"sand\""),
+    list(args    = list(properties = 1),
+         finding = "`properties` must be NULL or a character vector of property names"),
+    list(args    = list(properties = character(0)),
+         finding = "`properties` must be NULL or a character vector of property names"),
+    list(args    = list(k = c(clay = 5, snad = 5), properties = c("clay", "sand")),
+         finding = "A named `k` needs an entry for every property; missing \"sand\""),
+    ## properties = NULL draws for every property the map names
+    list(args    = list(k = c(clay = 5, oc = 5)),
+         finding = "A named `k` needs an entry for every property; missing \"sand\", \"silt\""),
+    list(args    = list(space = "pls", ncomp = 3L),
+         finding = "`space = \"pls\"` selects against one property; name exactly one in `properties`")
+  )
+
+  for (case in cases) {
+
+    err <- expect_error(do.call(select_training, c(list(fx$targets, "mini"), case$args)),
+                        class = "horizons_error_input", inherit = FALSE)
+
+    expect_length(err$findings, 1L)
+    expect_match(err$findings, case$finding, fixed = TRUE, info = case$finding)
+
+  }
 
   expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
 

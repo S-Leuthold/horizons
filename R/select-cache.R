@@ -144,26 +144,79 @@ cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = 
                         built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")),
                    class = "horizons_space_cache")
 
-  written <- tryCatch({
+  not_written <- write_cache_file(obj, path, tmp_prefix = ".space-")
 
-    dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-    tmp <- tempfile(".space-", tmpdir = dirname(path), fileext = ".qs2.tmp")
-    on.exit(unlink(tmp), add = TRUE)
-    qs2::qs_save(obj, tmp)
-    file.rename(tmp, path)
-
-  }, error = function(e) FALSE)
-
-  if (!isTRUE(written)) {
+  if (!is.null(not_written)) {
 
     log_warning(collector, "skipped", c(
       "The similarity space was built but could not be cached, so every draw at these settings builds it again.",
+      "x" = "{not_written}",
       "i" = "Cache directory: {.path {dirname(path)}}; set {.code options(horizons.cache_dir = )} to a writable directory."
     ))
 
   }
 
-  list(space = space, hit = FALSE, key = key, path = if (isTRUE(written)) path else NULL)
+  list(space = space, hit = FALSE, key = key, path = if (is.null(not_written)) path)
+
+}
+
+
+## ---------------------------------------------------------------------------
+## write_cache_file() — the one writer for the cache
+## ---------------------------------------------------------------------------
+
+#' Write a file into the cache, whole or not at all
+#'
+#' @description
+#' The one writer for what library mode caches: a registered library
+#' ([resolve_registered()]) and a similarity space ([cached_space()]). The
+#' file is saved with qs2 under a temporary name in the cache directory,
+#' created if it is missing, and renamed into place, so an interrupted write
+#' never leaves a file the next draw would take for a finished one. A save or
+#' a rename that fails leaves no temporary file behind, and what base R or
+#' qs2 said about it is returned rather than raised, as `write_output_file()`
+#' returns it for `evaluate()`'s output directory: a cache that cannot be
+#' written costs later draws their time, not this one its result, so the
+#' caller reports it as a `skipped` warning and carries on.
+#'
+#' @param value The object to save.
+#' @param path [Character.] The cache file.
+#' @param tmp_prefix [Character.] The temporary file's name starts with it;
+#'   a library's is the one [clear_stale_builds()] removes when a killed
+#'   build leaves it.
+#' @return `NULL` when the file was written; otherwise Character(1), why it
+#'   could not be.
+#' @noRd
+write_cache_file <- function(value, path, tmp_prefix) {
+
+  tmp     <- tempfile(tmp_prefix, tmpdir = dirname(path), fileext = ".qs2.tmp")
+  reasons <- character(0)
+
+  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
+
+  written <- tryCatch(
+    withCallingHandlers(
+      {
+        dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+        qs2::qs_save(value, tmp)
+        file.rename(tmp, path)
+      },
+      warning = function(w) {
+        reasons <<- c(reasons, condition_summary(w))
+        rlang::cnd_muffle(w)
+      }
+    ),
+    error = function(e) {
+      reasons <<- c(reasons, condition_summary(e))
+      FALSE
+    }
+  )
+
+  if (isTRUE(written)) return(NULL)
+
+  if (length(reasons) == 0) reasons <- "the file could not be renamed into place"
+
+  paste(unique(reasons), collapse = "; ")
 
 }
 

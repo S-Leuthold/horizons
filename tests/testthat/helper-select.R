@@ -343,19 +343,23 @@ space_on <- function(M, wn, snv = TRUE, derivative = 1L, window = 11L,
 
 
 ## ---------------------------------------------------------------------------
-## The note a draw in the session writes
+## The notes every draw in these files writes
 ## ---------------------------------------------------------------------------
 ## select_training() notes on the log a draw that ran in the session rather
 ## than in a process of its own (log_draw_in_session()), which every draw in
 ## the selection test files does: they set horizons.isolate = FALSE, so the
-## session's mocks reach the draw. A test of the other rows reads around it.
+## session's mocks reach the draw. Every draw also notes what a model
+## evaluated on it is scored on (selection_scored_on()). A test of the other
+## rows reads around both.
 
-draw_note_text <- "The draw ran in this session"
+draw_note_text   <- "The draw ran in this session"
+scored_note_text <- "A model evaluated on this training set is scored on"
 
 draw_notes <- function(log) {
   log[log$type == "note" & grepl(draw_note_text, log$message, fixed = TRUE), ]
 }
 
 without_draw_note <- function(log) {
-  log[!(log$type == "note" & grepl(draw_note_text, log$message, fixed = TRUE)), ]
+  ours <- grepl(draw_note_text, log$message, fixed = TRUE) | grepl(scored_note_text, log$message, fixed = TRUE)
+  log[!(log$type == "note" & ours), ]
 }
