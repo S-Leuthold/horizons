@@ -1,5 +1,5 @@
 # tests/testthat/test-select-neighbours.R
-# Tests for nearest_neighbours(), find_twins(), draw_neighbours() and
+# Tests for nearest_neighbours(), the twin rule, draw_neighbours() and
 # cluster_targets(): the rule of select_training().
 
 
@@ -214,114 +214,134 @@ test_that("nearest_neighbours() returns the k in the recomputed order, not the s
 
 
 ## =============================================================================
-## find_twins()
+## The twin rule: twin_reference(), twin_flags() and twin_tibble()
 ## =============================================================================
+## As draw_neighbours() composes them: the reference over the draw's width
+## (twin_reference_width() of the measured rows), the flags against it.
 
-test_that("find_twins() flags the exact twin and nothing else", {
+test_that("the twin rule flags the exact twin and nothing else", {
 
-  s  <- fixture_scores()
-  nn <- nearest_neighbours(s$St, s$Sp, k = 6L, metric = "euclidean")
+  s     <- fixture_scores()
+  n_ref <- twin_reference_width(nrow(s$Sp))
+  nn    <- nearest_neighbours(s$St, s$Sp, k = n_ref, metric = "euclidean")
 
   ## nearest_neighbours() puts the exact twin first, at distance zero
   expect_identical(unname(nn$ids[s$fx$twin_id, 1]), s$fx$twin_pool_id)
   expect_lt(unname(nn$dist[s$fx$twin_id, 1]), 1e-8)
 
-  tw <- find_twins(nn, ratio = 0.05)
+  ref  <- twin_reference(nn$dist, k_ref = n_ref)
+  flag <- twin_flags(nn$dist, ref, ratio = 0.05)
+
+  expect_identical(sum(flag), 1L)
+  expect_true(flag[s$fx$twin_id, 1])
+
+  tw <- twin_tibble(target_id = s$fx$twin_id, pool_id = nn$ids[flag], distance = nn$dist[flag],
+                    rank = 1L, reference = unname(ref[s$fx$twin_id]))
 
   expect_s3_class(tw, "tbl_df")
   expect_named(tw, c("target_id", "pool_id", "distance", "rank", "reference_distance", "reason"))
-  expect_identical(nrow(tw), 1L)
-  expect_identical(tw$target_id, s$fx$twin_id)
-  expect_identical(tw$pool_id,   s$fx$twin_pool_id)
-  expect_lt(tw$distance, 1e-8)
+  expect_identical(tw$pool_id, s$fx$twin_pool_id)
   expect_identical(tw$reason, "exact")
 
 })
 
 
-test_that("find_twins() measures each neighbour against the reference distance", {
+test_that("the twin reference is the 75th percentile, and each neighbour is measured against it", {
 
-  ## Arrange: a hand-built neighbour set. Target a has one close row against
-  ## a 75th percentile of 1.1; target b's neighbourhood is uniformly tight.
-  nn <- list(
-    ids  = rbind(a = c("x", "y", "z"), b = c("p", "q", "r")),
-    dist = rbind(a = c(0.10, 1.00, 1.2), b = c(0.5, 0.6, 0.7))
-  )
+  ## Arrange: a pool of three measured rows, whose width is all three. Target
+  ## a has one close row against a 75th percentile of 1.1; target b's
+  ## neighbourhood is uniformly tight.
+  d     <- rbind(a = c(0.10, 1.00, 1.2), b = c(0.5, 0.6, 0.7))
+  n_ref <- twin_reference_width(3L)
 
-  expect_identical(find_twins(nn, ratio = 0.05)$target_id, character(0))
+  ref <- twin_reference(d, k_ref = n_ref)
 
-  hit <- find_twins(nn, ratio = 0.20)
-  expect_identical(hit$target_id, "a")
-  expect_identical(hit$pool_id,   "x")
-  expect_identical(hit$rank,      1L)
-  expect_identical(hit$reason,    "neighbourhood")
-  expect_equal(hit$reference_distance, 1.1)
+  expect_identical(n_ref, 3L)
+  expect_equal(ref, c(a = 1.1, b = 0.65))
+  expect_false(any(twin_flags(d, ref, ratio = 0.05)))
 
-})
+  hit <- twin_flags(d, ref, ratio = 0.20)
+  expect_identical(which(hit), 1L)
 
-
-test_that("find_twins() survives a replicate majority the median could not", {
-
-  ## Arrange: four replicate scans of the target, then five ordinary rows.
-  ## Over the first five columns alone the cluster is the majority and sets
-  ## its own reference; over all nine it does not.
-  d  <- c(0, 9e-4, 9.5e-4, 1.2e-3, 0.29, 0.30, 0.31, 0.33, 0.35)
-  nn <- list(ids = rbind(a = paste0("n", 1:9)), dist = rbind(a = d))
-
-  ## The neighbourhood-width reference the rule used to take: a replicate's
-  ## own distance, and 5 % of it is below every other replicate.
-  narrow <- find_twins(nn, ratio = 0.05, k_ref = 5L)
-  expect_identical(narrow$pool_id, "n1")
-
-  ## Widened past the cluster, the whole cluster is flagged.
-  wide <- find_twins(nn, ratio = 0.05)
-  expect_identical(wide$pool_id, paste0("n", 1:4))
-  expect_true(all(wide$reference_distance == stats::quantile(d, 0.75)))
+  tw <- twin_tibble(target_id = "a", pool_id = "x", distance = d[["a", 1]], rank = 1L,
+                    reference = ref[["a"]])
+  expect_identical(tw$reason, "neighbourhood")
+  expect_equal(tw$reference_distance, 1.1)
 
 })
 
 
-test_that("find_twins() flags every member of a replicate cluster, not just the first", {
+test_that("a replicate majority of the draw's width cannot set its own reference", {
+
+  ## Arrange: a library-sized pool, so the width is SELECT_TWIN_REF (50).
+  ## Thirty scans of the target among its 50 nearest, one of them an exact
+  ## copy, then twenty ordinary rows: the replicates are the majority, so
+  ## the median is a replicate's own distance; the 75th percentile is not.
+  d     <- rbind(a = c(0, rep(1e-3, 29), seq(0.3, 0.5, length.out = 20)))
+  n_ref <- twin_reference_width(200L)
+
+  ref <- twin_reference(d, k_ref = n_ref)
+
+  expect_identical(n_ref, SELECT_TWIN_REF)
+  expect_equal(unname(ref), unname(stats::quantile(d[1, ], 0.75)))
+  expect_identical(which(twin_flags(d, ref, ratio = 0.05)[1, ]), 1:30)
+
+  ## Over a width the cluster fills, the cluster is its own reference, and
+  ## only the exact copy is flagged
+  narrow <- twin_reference(d, k_ref = 5L)
+  expect_identical(which(twin_flags(d, narrow, ratio = 0.05)[1, ]), 1L)
+
+})
+
+
+test_that("the twin rule flags every member of a replicate cluster, not just the first", {
 
   ## The case a first-to-second-nearest gap rule cannot see: three rows all
-  ## at essentially zero, so d1 / d2 is about one and no gap opens.
-  nn <- list(
-    ids  = rbind(a = c("r1", "r2", "r3", "s", "t", "u", "v")),
-    dist = rbind(a = c(0.001, 0.0012, 0.0015, 1.0, 1.1, 1.2, 1.3))
-  )
+  ## at essentially zero, so d1 / d2 is about one and no gap opens. A pool of
+  ## seven measured rows, whose width is four.
+  d     <- rbind(a = c(0.001, 0.0012, 0.0015, 1.0, 1.1, 1.2, 1.3))
+  n_ref <- twin_reference_width(7L)
 
-  hit <- find_twins(nn, ratio = 0.05)
+  ref  <- twin_reference(d, k_ref = n_ref)
+  flag <- twin_flags(d, ref, ratio = 0.05)
 
-  expect_identical(hit$pool_id, c("r1", "r2", "r3"))
-  expect_true(all(hit$reason == "neighbourhood"))
+  expect_identical(n_ref, 4L)
+  expect_identical(which(flag[1, ]), 1:3)
 
-})
-
-
-test_that("find_twins() takes its reference over k_ref only, so spares do not move the flags", {
-
-  nn_core  <- list(ids  = rbind(a = c("x", "y", "z")),
-                   dist = rbind(a = c(0.01, 1.00, 1.20)))
-  nn_spare <- list(ids  = rbind(a = c("x", "y", "z", "w", "v")),
-                   dist = rbind(a = c(0.01, 1.00, 1.20, 1.4, 1.6)))
-
-  a <- find_twins(nn_core,  ratio = 0.05)
-  b <- find_twins(nn_spare, ratio = 0.05, k_ref = 3L)
-
-  expect_identical(a$pool_id, b$pool_id)
-  expect_equal(a$reference_distance, b$reference_distance)
+  tw <- twin_tibble(target_id = rep("a", 3), pool_id = c("r1", "r2", "r3"), distance = d[1, 1:3],
+                    rank = 1:3, reference = rep(unname(ref), 3))
+  expect_true(all(tw$reason == "neighbourhood"))
 
 })
 
 
-test_that("find_twins() does not flag an NA distance", {
+test_that("the twin reference is taken over the draw's width, so a wider fetch does not move the flags", {
+
+  ## A target short of k fetches past the width (draw_neighbours()'s spares);
+  ## its reference and flags are those of the width alone
+  core  <- rbind(a = c(0.01, seq(1, 2, length.out = 49)))
+  spare <- cbind(core, rbind(a = seq(2.1, 3, length.out = 10)))
+  n_ref <- twin_reference_width(200L)
+
+  a <- twin_reference(core,  k_ref = n_ref)
+  b <- twin_reference(spare, k_ref = n_ref)
+
+  expect_identical(a, b)
+  expect_identical(which(twin_flags(core, a, ratio = 0.05)), 1L)
+  expect_identical(which(twin_flags(spare, b, ratio = 0.05)), 1L)
+
+})
+
+
+test_that("the twin rule does not flag an NA distance", {
 
   ## A cosine target on the pool's centroid has no defined angle to anything.
   ## NA is not zero and not below the reference; it is unknown.
-  nn <- list(ids  = rbind(a = c("x", "y", "z")),
-             dist = rbind(a = c(NA_real_, NA_real_, NA_real_)))
+  d <- rbind(a = c(NA_real_, NA_real_, NA_real_))
 
-  expect_identical(nrow(find_twins(nn, ratio = 0.05)), 0L)
+  ref <- twin_reference(d, k_ref = twin_reference_width(3L))
+
+  expect_false(any(twin_flags(d, ref, ratio = 0.05)))
 
 })
 

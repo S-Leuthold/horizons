@@ -49,7 +49,7 @@
 #'   target ids) and `dist` (numeric matrix, same shape), both ordered by
 #'   increasing distance.
 #'
-#' @seealso [draw_neighbours()], [find_twins()]
+#' @seealso [draw_neighbours()], [twin_reference()]
 #' @noRd
 nearest_neighbours <- function(St, Sp, k,
                                metric     = c("euclidean", "mahalanobis", "cosine"),
@@ -180,16 +180,17 @@ collect_released <- function(bytes, at = SELECT_COLLECT_BYTES) {
 
 
 ## ---------------------------------------------------------------------------
-## find_twins() — Self-leakage on spectra
+## The twin rule — Self-leakage on spectra
 ## ---------------------------------------------------------------------------
 
-#' Flag pool rows that are a target's twin
+#' The per-target reference distance: the 75th percentile of `k_ref` columns
 #'
 #' @description
 #' A pool row is a target's twin when it sits far closer to that target than
-#' the target's own surroundings do: distance zero, or below `ratio` times the
-#' reference distance, the 75th percentile of the target's `k_ref` nearest
-#' rows. The same sample, scanned twice, or present in both sets.
+#' the target's own surroundings do: distance zero, or below `twin_ratio`
+#' times this reference distance ([twin_flags()]). The same sample, scanned
+#' twice, or present in both sets. [draw_neighbours()] applies the rule to
+#' every target and property.
 #'
 #' @details
 #' The rule is neighbourhood-relative rather than a gap between the first and
@@ -207,54 +208,6 @@ collect_released <- function(bytes, at = SELECT_COLLECT_BYTES) {
 #' is taken over `k_ref` columns, which `draw_neighbours()` sets by
 #' `twin_reference_width()` regardless of the `k` being drawn, and the flag is
 #' then independent of how many rows the caller happens to want.
-#'
-#' @param nn [List.] From `nearest_neighbours()`.
-#' @param ratio [Numeric.] The fraction of the reference distance below which
-#'   a neighbour is a twin. Default: `SELECT_TWIN_RATIO`.
-#' @param k_ref [Integer or NULL.] Columns the reference percentile is taken
-#'   over. `NULL` uses every column. Default: `NULL`.
-#'
-#' @return [Tibble.] `target_id`, `pool_id`, `distance`, `rank`,
-#'   `reference_distance`, `reason` (`"exact"` for a distance of zero to
-#'   rounding, see `is_exact_copy()`, or `"neighbourhood"`); zero
-#'   rows when there are no twins.
-#'
-#' @seealso [nearest_neighbours()], [twin_reference()], [draw_neighbours()]
-#' @noRd
-find_twins <- function(nn, ratio = SELECT_TWIN_RATIO, k_ref = NULL) {
-
-  d   <- nn$dist
-  ref <- twin_reference(d, k_ref = k_ref)
-
-  is_twin <- twin_flags(d, ref, ratio = ratio)
-  hit     <- which(is_twin, arr.ind = TRUE)
-
-  if (!nrow(hit)) {
-
-    return(empty_twins())
-
-  }
-
-  ## which() on a matrix gives (row, col) in column order; sort so a target's
-  ## exclusions come out nearest first, which is how they are reported.
-
-  hit <- cbind(row = as.integer(hit[, "row"]), col = as.integer(hit[, "col"]))
-  hit <- hit[order(hit[, "row"], hit[, "col"]), , drop = FALSE]
-
-  distance <- d[hit]
-
-  twin_tibble(
-    target_id = rownames(nn$ids)[hit[, "row"]],
-    pool_id   = nn$ids[hit],
-    distance  = distance,
-    rank      = as.integer(hit[, "col"]),
-    reference = unname(ref[hit[, "row"]])
-  )
-
-}
-
-
-#' The per-target reference distance: the 75th percentile of `k_ref` columns
 #'
 #' @param d [Matrix.] Distances, targets by neighbours, increasing along the
 #'   row.
@@ -388,7 +341,7 @@ empty_twins <- function() {
 }
 
 
-#' The zero-row exclusion table: `find_twins()`'s columns with property first
+#' The zero-row exclusion table: the twin table's columns ([twin_tibble()]) with property first
 #' @noRd
 empty_exclusions <- function() {
 
@@ -532,11 +485,11 @@ missing_k <- function(k, properties) {
 #'   `k` rows kept and the other targets' twins passed on the way, in
 #'   distance order), `target_distances` (tibble: `target_id`, `property`,
 #'   `space`, `nearest`, `mean_k`, over the rows kept), `exclusions`
-#'   (tibble: `property` plus `find_twins()`'s columns), `short_draws`
+#'   (tibble: `property` plus the twin table's columns, [twin_tibble()]), `short_draws`
 #'   (tibble: `target_id`, `property`, `k_requested`, `k_drawn`, `reason`),
 #'   and `k` (the resolved per-property vector).
 #'
-#' @seealso [nearest_neighbours()], [find_twins()], [resolve_k()]
+#' @seealso [nearest_neighbours()], [twin_reference()], [resolve_k()]
 #' @noRd
 draw_neighbours <- function(St, Sp, responses, k, properties,
                             metric      = "mahalanobis",
