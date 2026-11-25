@@ -337,11 +337,9 @@ average <- function(x,
 
     if (length(dup_ids) > 0) {
 
-      shown <- utils::head(dup_ids, 5)
-
       abort_horizons(c(
         "{.arg by} column {.field {by}} has values that become the same {.field sample_id} as text.",
-        "x" = "Repeated as text: {.val {shown}}.",
+        "x" = "Repeated as text: {shown_ids(dup_ids)}.",
         "i" = "Make {.field {by}} character, or round it, before averaging."
       ), kind = "input")
 

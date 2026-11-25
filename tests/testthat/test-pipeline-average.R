@@ -1715,6 +1715,25 @@ test_that("average() aborts when promoting `by` would produce duplicate ids", {
 })
 
 
+test_that("average()'s refusal of colliding `by` values names five and counts the rest", {
+
+  ## Fourteen samples of one scan, whose `by` values are seven pairs of
+  ## doubles that differ by a couple of ulps and print alike
+  hd <- make_test_hd_average(n_samples = 14, n_reps = 1)
+  hd$data$analysis$plot_number <- c(1:7, 1:7 + 2e-15)
+  hd$data$role_map <- dplyr::bind_rows(
+    hd$data$role_map,
+    tibble::tibble(variable = "plot_number", role = "meta")
+  )
+
+  local_mocked_bindings(average_group = function(...) stop("averaged a group"))
+  expect_error(average(hd, by = "plot_number", quality_check = FALSE, verbose = FALSE),
+               'Repeated as text: "1", "2", "3", "4", "5" and 2 more.', fixed = TRUE,
+               class  = "horizons_error_input")
+
+})
+
+
 test_that("average() refuses to promote `by` over an existing sample_id column", {
 
   ## Arrange — force the condition the rename previously assumed away
