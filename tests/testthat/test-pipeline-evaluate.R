@@ -2278,7 +2278,7 @@ describe("evaluate() - checkpoint data provenance", {
                       res$evaluation$n_train))
 
     manifest <- readRDS(file.path(tmpdir, "eval_manifest.rds"))
-    expect_identical(manifest$schema_version, 5L)
+    expect_identical(manifest$schema_version, 6L)
     expect_identical(manifest$data_hash, res$evaluation$results$data_hash[1])
     expect_identical(manifest$data_n_rows, res$evaluation$n_train)
 
