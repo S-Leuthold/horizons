@@ -3273,7 +3273,8 @@ unranked_reason <- function(results, metric, how) {
 #' Orders result rows best-first by `cv_<metric>`, the cross-validated mean at
 #' each config's selected hyperparameters. This is the single ranking rule for
 #' `evaluate()`'s `best_config` and `fit()`'s member selection, so the two can
-#' never disagree, and neither touches a test-set column (#50).
+#' never disagree, and neither touches a test-set column (#50). A tie goes to
+#' the first `config_id` in radix order, whatever the session's locale.
 #'
 #' Rows whose `cv_<metric>` is `NA` cannot be ranked and are left out,
 #' silently: the verbs that rank say so once, with the ids, and the monitor
@@ -3295,10 +3296,12 @@ rank_configs_by_cv <- function(results, metric) {
 
   ## Explicit tie-break on config_id so a fresh run, a resumed run (whose row
   ## order follows the checkpoint directory) and monitor_evaluate() all name
-  ## the same winner when two configs tie.
+  ## the same winner when two configs tie. In radix order, as the package
+  ## sorts ids everywhere, since the default is the locale's collation and a
+  ## monitor may run in another locale.
   key <- if (metric %in% HIGHER_BETTER_METRICS) -vals else vals
 
-  results[order(key, results$config_id), , drop = FALSE]
+  results[order(key, results$config_id, method = "radix"), , drop = FALSE]
 
 }
 

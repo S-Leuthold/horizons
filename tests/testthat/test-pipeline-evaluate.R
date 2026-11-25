@@ -646,6 +646,22 @@ describe("rank_configs_by_cv()", {
 
   })
 
+  it("breaks a tie on config_id in radix order, so a session in any locale names the same winner", {
+
+    ## Radix order puts "B" before "a"; a locale's collation puts "a" first
+    tied <- tibble::tibble(config_id = c("cfg_a", "cfg_B"), status = "success", cv_rpd = 2)
+
+    in_c <- withr::with_collate("C", rank_configs_by_cv(tied, "rpd")$config_id)
+    expect_identical(in_c, c("cfg_B", "cfg_a"))
+
+    suppressWarnings(withr::local_collate("en_US.UTF-8"))
+    skip_if(identical(sort(tied$config_id), sort(tied$config_id, method = "radix")),
+            "no locale here that collates case apart from radix order")
+
+    expect_identical(rank_configs_by_cv(tied, "rpd")$config_id, in_c)
+
+  })
+
 })
 
 ## =========================================================================
