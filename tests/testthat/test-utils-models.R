@@ -109,16 +109,21 @@ describe("define_model_spec()", {
   it("carries nothing of its caller's frame, so a tune task stays small, whatever it leaves unread", {
 
     ## tune serializes the spec to a worker with every task, and its tune()
-    ## arguments keep define_model_spec()'s frame. rf has no weight limit,
-    ## so it never reads max_weights; left a promise, the argument would
-    ## carry its caller's frame with it: here 40 MB, in the verbs the folds
-    ## and the training rows.
+    ## arguments keep define_model_spec()'s frame. A model with no weight
+    ## limit never reads max_weights, and one with no thread argument never
+    ## reads threads; left a promise, the argument would carry its caller's
+    ## frame with it: here 40 MB, in the verbs the folds and the training
+    ## rows.
     in_a_heavy_frame <- function(model) {
       heavy <- numeric(5e6)
-      define_model_spec(model, isolate = FALSE, threads = length(heavy[1]), max_weights = heavy[1] + 10000)
+      define_model_spec(model, isolate = length(heavy) < 0, threads = length(heavy[1]),
+                        max_weights = heavy[1] + 10000)
     }
 
-    for (model in c("rf", "mlp")) {
+    ## Every model, since which argument a model leaves unread follows from
+    ## its row of MODEL_SPECS; and each argument an expression on the heavy
+    ## frame, so any of them left a promise would carry it
+    for (model in VALID_MODELS) {
       expect_lt(length(serialize(in_a_heavy_frame(model), NULL)), 1e6, label = model)
     }
 

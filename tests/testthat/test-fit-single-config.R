@@ -1465,6 +1465,52 @@ describe("fit_single_config() - the re-tune off", {
 
   })
 
+  it("keeps the training part's Boruta or CARS selection in its final fit", {
+
+    skip_if_not_installed("Boruta")
+
+    ## The setup evaluate_single_config()'s test reads: 80 bands at run seed
+    ## 1, where a final fit drawing a selection of its own kept other bands
+    real_prep <- prep_fold_entry
+    real_rep  <- selection_reports
+    seen      <- new.env()
+    local_mocked_bindings(
+      prep_fold_entry   = function(unit, ...) {
+        entry <- real_prep(unit, ...)
+        if (identical(unit$fold_i, 0L)) seen$training <- entry$kept
+        entry
+      },
+      selection_reports = function(workflow, ...) {
+        steps      <- workflows::extract_recipe(workflow)$steps
+        seen$final <- Filter(function(s) inherits(s, c("step_select_boruta", "step_select_cars")), steps)[[1]]$selected_vars
+        real_rep(workflow, ...)
+      }
+    )
+
+    setup <- make_fit_setup(n = 90, n_wn = 80)
+
+    for (selection in c("boruta", "cars")) {
+
+      seen$training <- seen$final <- NULL
+      result <- suppressWarnings(fit_single_config(
+        config_row          = make_fit_config(feature_selection = selection),
+        split_F             = setup$split_F,
+        cv_resamples        = setup$folds,
+        role_map            = setup$role_map,
+        best_params_eval    = make_fit_best_params(mtry = 1L),
+        final_bayesian_iter = 0L,
+        grid_size           = 2L,
+        seed                = 1L
+      ))
+
+      expect_identical(result$status, "success", label = selection)
+      expect_gt(length(seen$training), 0L)
+      expect_setequal(seen$final, seen$training)
+
+    }
+
+  })
+
   it("clamps evaluate()'s hidden_units within the weight budget it is given, and says so", {
 
     skip_if_not_installed("nnet")

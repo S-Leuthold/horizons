@@ -102,9 +102,12 @@ expect_folds_baked_whole <- function(case, label, recipe = NULL) {
 
 describe("assemble_folds()", {
 
-  it("assembles every fold as the configuration's fold recipe baked whole, for no selection, PCA and correlation", {
+  it("assembles every fold as the configuration's fold recipe baked whole, for no selection, PCA, correlation and CARS", {
 
-    for (selection in c("none", "pca", "correlation")) {
+    ## CARS draws: its fold's step draws under the seed its unit gives it
+    ## (selection_seed()), which is what a prep under the unit's own seed
+    ## draws, so the fold is the same as before steps took a seed
+    for (selection in c("none", "pca", "correlation", "cars")) {
 
       case <- prep_fold_case(selection)
       expect_folds_baked_whole(case, selection)

@@ -640,6 +640,45 @@ describe("step_select_boruta() with too few bands to select from", {
 })
 
 
+describe("step_select_boruta()'s seed", {
+
+  it("draws under the seed it was built with, whatever stream it is prepped in, as a prep seeded with it draws", {
+
+    skip_if_not_installed("Boruta")
+
+    ## Weak signal, so Boruta's decisions follow its draws
+    d     <- boruta_signal_data(seed = 4)
+    d$SOC <- d$SOC / 6 + withr::with_seed(4, stats::rnorm(nrow(d)))
+
+    rec <- function(seed = NULL) {
+      recipes::recipe(SOC ~ ., data = d) |>
+        step_select_boruta(dplyr::matches("^spec[0-9]+$"), outcome = "SOC", seed = seed)
+    }
+
+    record <- function(prepped) prepped$steps[[1]][c("selected_vars", "boruta")]
+
+    one   <- withr::with_seed(1, record(recipes::prep(rec(11L), training = d)))
+    two   <- withr::with_seed(2, record(recipes::prep(rec(11L), training = d)))
+    ## Built first, since adding a step draws its id from the stream
+    unseeded <- rec()
+    as_if    <- withr::with_seed(11, record(recipes::prep(unseeded, training = d)))
+
+    expect_identical(one, two)
+    expect_identical(one, as_if)
+
+    ## The stream it was prepped in is left as it found it (the recipe is
+    ## built first, since adding a step draws its id)
+    seeded <- rec(11L)
+    withr::with_seed(3, {
+      before <- .Random.seed
+      recipes::prep(seeded, training = d)
+      expect_identical(.Random.seed, before)
+    })
+
+  })
+
+})
+
 describe("step_select_boruta()'s tidy() (#109)", {
 
   it("tidies to its selectors before prep and the columns it removed after", {

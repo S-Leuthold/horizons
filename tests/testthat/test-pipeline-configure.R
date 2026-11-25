@@ -761,6 +761,24 @@ describe("configure() max_weights", {
     expect_identical(quiet_configure(hd, models = "mlp", max_weights = 20L)$config$tuning$max_weights, 20)
     expect_identical(quiet_configure(hd, models = "mlp", max_weights = Inf)$config$tuning$max_weights, Inf)
 
+    ## configure()'s default is the package's constant, which the runners
+    ## and the constructor take
+    expect_identical(formals(configure)$max_weights, DEFAULT_MAX_WEIGHTS)
+
+  })
+
+  test_that("shows a weight budget other than the default on its Tuning line", {
+
+    hd   <- make_single_response_hd()
+    line <- function(...) {
+      out <- utils::capture.output(configure(hd, models = "mlp", verbose = TRUE, ...))
+      grep("Tuning:", out, value = TRUE, fixed = TRUE)
+    }
+
+    expect_match(line(max_weights = 40000), "at most 40000 weights a network", fixed = TRUE)
+    expect_match(line(max_weights = Inf), "no weight budget", fixed = TRUE)
+    expect_false(grepl("weight", line(), fixed = TRUE))
+
   })
 
   test_that("refuses a budget that is not a whole number of at least 1, or Inf, as an input error", {

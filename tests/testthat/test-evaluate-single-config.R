@@ -2377,6 +2377,83 @@ describe("evaluate_single_config() - the bounds every fold's prep sets", {
 
 })
 
+describe("evaluate_single_config() - the final fit selects what the bounds were read from", {
+
+  ## 80 bands, 72 past the raw step's trim, at run seed 1: Boruta keeps 8 on
+  ## the training part and 7, 10 and 10 on the folds, and CARS 3 and 21, 6
+  ## and 2. A final fit that drew a selection of its own kept 6 under Boruta
+  ## (lightgbm's final fit failed at mtry 7, ranger truncated it) and 9 under
+  ## CARS. What the training part's prep kept and the final fit's recipe
+  ## selected are kept for the test.
+  run_selection <- function(model, selection, ...) {
+
+    real_prep <- prep_fold_entry
+    real_rep  <- selection_reports
+    seen      <- new.env()
+
+    local_mocked_bindings(
+      prep_fold_entry   = function(unit, ...) {
+        entry <- real_prep(unit, ...)
+        if (identical(unit$fold_i, 0L)) seen$training <- entry$kept
+        entry
+      },
+      selection_reports = function(workflow, ...) {
+        steps      <- workflows::extract_recipe(workflow)$steps
+        seen$final <- Filter(function(s) inherits(s, c("step_select_boruta", "step_select_cars")), steps)[[1]]$selected_vars
+        real_rep(workflow, ...)
+      }
+    )
+
+    setup <- make_eval_setup(n = 90, n_wn = 80)
+
+    row <- suppressWarnings(evaluate_single_config(
+      config_row    = make_eval_config(model = model, feature_selection = selection),
+      split         = setup$split,
+      cv_folds      = setup$folds,
+      role_map      = setup$role_map,
+      grid_size     = 2,
+      bayesian_iter = 0,
+      seed          = 1L,
+      ...
+    ))
+
+    list(row = row, training = seen$training, final = seen$final)
+
+  }
+
+  it("keeps the training part's Boruta or CARS selection in the final fit, so no fit there is truncated", {
+
+    skip_if_not_installed("Boruta")
+
+    for (selection in c("boruta", "cars")) {
+
+      got <- run_selection("rf", selection)
+
+      expect_identical(got$row$status, "success", label = selection)
+      expect_gt(length(got$training), 0L)
+      expect_setequal(got$final, got$training)
+      expect_false(any(grepl("(test set)", got$row$warnings[[1]], fixed = TRUE)), label = selection)
+
+    }
+
+  })
+
+  it("fits lightgbm's final model at the mtry a fold capped, where a Boruta draw of its own had kept fewer", {
+
+    skip_if_not_installed("Boruta")
+    skip_if_not_installed("bonsai")
+    skip_if_not_installed("lightgbm")
+
+    got <- run_selection("lightgbm", "boruta", tune_ranges = list(mtry = c(7, 10)))
+
+    expect_identical(got$row$status, "success")
+    expect_identical(got$row$best_params[[1]]$mtry, 7L)
+    expect_gte(length(got$final), 7L)
+
+  })
+
+})
+
 describe("evaluate_single_config() - a selection step's warning comes from the final fit's recipe", {
 
   it("raises Boruta keeping every band once, for every model, read from the final fit", {

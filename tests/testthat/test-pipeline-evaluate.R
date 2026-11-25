@@ -1891,6 +1891,9 @@ describe("checkpoint scoring schema", {
       ## Schema 9 capped mtry and num_comp at the training part's predictors
       ## alone, so a fold that kept fewer was asked for more than it had
       variant("schema_9",    function(r) { r$scoring_schema <- 9L; r }),
+      ## Schema 10's final fit drew a Boruta or CARS selection of its own,
+      ## which the bounds did not cover
+      variant("schema_10",   function(r) { r$scoring_schema <- 10L; r }),
       variant("schema_na",   function(r) { r$scoring_schema <- NA_integer_; r }),
       variant("schema_none", function(r) { r$scoring_schema <- NULL; r }),
       variant("no_hash",     function(r) { r$data_hash <- NULL; r }),
@@ -1923,7 +1926,7 @@ describe("checkpoint scoring schema", {
     gated <- gate_checkpoint_rows(candidates, run_fp, settings)
 
     expect_named(gated$kept, "keep")
-    expect_equal(gated$n_foreign, 13L)
+    expect_equal(gated$n_foreign, 14L)
     expect_length(gated$refused, 0)
 
     ## Under the rule's own version the verdict is the schema's, before the

@@ -818,6 +818,43 @@ describe("step_select_cars() with too few bands to select from", {
 })
 
 
+describe("step_select_cars()'s seed", {
+
+  it("draws under the seed it was built with, whatever stream it is prepped in, as a prep seeded with it draws", {
+
+    skip_if_not_installed("pls")
+
+    d <- withr::with_seed(5, cars_data(n = 40, p = 30))
+
+    rec <- function(seed = NULL) {
+      recipes::recipe(SOC ~ ., data = d) |>
+        step_select_cars(dplyr::starts_with("wn_"), outcome = "SOC", seed = seed)
+    }
+
+    record <- function(prepped) prepped$steps[[1]][c("selected_vars", "cars")]
+
+    one   <- withr::with_seed(1, record(suppressMessages(recipes::prep(rec(11L), training = d))))
+    two   <- withr::with_seed(2, record(suppressMessages(recipes::prep(rec(11L), training = d))))
+    ## Built first, since adding a step draws its id from the stream
+    unseeded <- rec()
+    as_if    <- withr::with_seed(11, record(suppressMessages(recipes::prep(unseeded, training = d))))
+
+    expect_identical(one, two)
+    expect_identical(one, as_if)
+
+    ## The stream it was prepped in is left as it found it (the recipe is
+    ## built first, since adding a step draws its id)
+    seeded <- rec(11L)
+    withr::with_seed(3, {
+      before <- .Random.seed
+      suppressMessages(recipes::prep(seeded, training = d))
+      expect_identical(.Random.seed, before)
+    })
+
+  })
+
+})
+
 describe("step_select_cars()'s tidy() and print() (#109)", {
 
   it("tidies to its selectors before prep and the columns it removed after", {
