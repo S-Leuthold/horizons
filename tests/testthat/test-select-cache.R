@@ -802,7 +802,7 @@ test_that("a first use drawn in its own process asks in the session and builds t
 
   expect_s3_class(out, "horizons_data")
   expect_length(grep("is not cached yet", said, fixed = TRUE), 0L)
-  notice <- grep("Library mini v0 is not cached yet", cli::ansi_strip(txt), fixed = TRUE)
+  notice <- grep("The \"mini\" library is not cached yet", cli::ansi_strip(txt), fixed = TRUE)
   expect_length(notice, 1L)
 
   ## The session says what the process is doing before it waits on it, and

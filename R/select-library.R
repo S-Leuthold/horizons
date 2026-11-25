@@ -543,7 +543,20 @@ library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
 
   }
 
-  mb <- round(sum(entry$sources$bytes) / 1e6)
+  ## The notice, written once: why the library is built, the download, the
+  ## credit and the citation, one line each, for the tree or the question
+
+  mb     <- round(sum(entry$sources$bytes) / 1e6)
+  notice <- c(
+    if (rebuild) {
+      cli::format_inline("The cached {.val {entry$name}} library was built by an earlier version of horizons, so it has to be built again.")
+    } else {
+      cli::format_inline("The {.val {entry$name}} library is not cached yet.")
+    },
+    cli::format_inline("horizons will download {mb} MB of public source files, verify them, and build the library in {.path {dirname(path)}}. The raw downloads are removed once it is built."),
+    entry$credit,
+    cli::format_inline("Please cite: {entry$citation} ({entry$license}).")
+  )
 
   ## Consented by the option: nothing is asked, so the notice is the tree's
 
@@ -551,13 +564,7 @@ library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
 
     if (isTRUE(verbose)) {
 
-      cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,
-                 if (rebuild) " was built by an earlier version of horizons" else " is not cached yet",
-                 ": downloading ", mb, " MB of public source files to verify them and build the library in ",
-                 dirname(path), ". The raw downloads are removed once it is built.\n"),
-          paste0("\u2502  ", entry$credit, "\n"),
-          paste0("\u2502  Please cite: ", entry$citation, " (", entry$license, ").\n"),
-          sep = "")
+      cat(paste0(c("\u251C\u2500 ", rep("\u2502  ", length(notice) - 1L)), notice, "\n"), sep = "")
 
     }
 
@@ -565,17 +572,14 @@ library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
 
   }
 
+  ### Interpolated as values, so nothing in the credit is read as markup
   cli::cli_inform(c(
-    "i" = if (rebuild) {
-      "The cached {.val {entry$name}} library was built by an earlier version of horizons, so it has to be built again."
-    } else {
-      "The {.val {entry$name}} library is not cached yet."
-    },
-    " " = "horizons will download {mb} MB of public source files, verify them, and build the library in {.path {dirname(path)}}. The raw downloads are removed once it is built.",
+    "i" = "{notice[1]}",
+    " " = "{notice[2]}",
     " " = "",
-    " " = entry$credit,
+    " " = "{notice[3]}",
     " " = "",
-    " " = "Please cite: {entry$citation} ({entry$license}).",
+    " " = "{notice[4]}",
     " " = ""
   ))
 

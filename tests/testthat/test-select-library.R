@@ -123,7 +123,7 @@ test_that("consent the option gives is said in the tree, silent under verbose = 
 
   expect_no_message(txt <- utils::capture.output(library_consent(entry, path, verbose = TRUE)))
   txt <- cli::ansi_strip(paste(txt, collapse = " "))
-  expect_match(txt, "Library mini v0 is not cached yet: downloading", fixed = TRUE)
+  expect_match(txt, "The \"mini\" library is not cached yet.", fixed = TRUE)
   expect_match(txt, "Soil Spectroscopy for Global Good", fixed = TRUE)
   expect_match(txt, "Please cite: Safanelli", fixed = TRUE)
 
@@ -141,6 +141,35 @@ test_that("consent the option gives is said in the tree, silent under verbose = 
     expect_error(library_consent(entry, path, ask = FALSE, verbose = FALSE), class = "horizons_error_consent"),
     "is not cached yet", fixed = TRUE
   )
+
+})
+
+test_that("the download notice is one text: the tree says what the question says, on first use and on a rebuild", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  local_mini_registry(entry)
+  path  <- library_cache_path(entry)
+
+  ## The words, without the tree's prefixes, the question's bullet or the
+  ## message's wrapping
+  words <- function(s) trimws(gsub("\\s+", " ", gsub("[\u251C\u2500\u2502]", " ", paste(cli::ansi_strip(s), collapse = " "))))
+
+  for (rebuild in c(FALSE, TRUE)) {
+
+    tree <- withr::with_options(list(horizons.library_download = TRUE),
+                                utils::capture.output(library_consent(entry, path, rebuild = rebuild, verbose = TRUE)))
+
+    m <- withr::with_options(list(horizons.library_download = NULL), expect_message(
+      expect_error(library_consent(entry, path, ask = FALSE, rebuild = rebuild, verbose = FALSE),
+                   class = "horizons_error_consent")
+    ))
+    asked <- sub("^\\S+\\s+", "", words(conditionMessage(m)))
+
+    expect_identical(words(tree), asked)
+    expect_match(asked, if (rebuild) "was built by an earlier version of horizons" else "is not cached yet", fixed = TRUE)
+    expect_match(asked, paste0(entry$credit, " Please cite: ", entry$citation), fixed = TRUE)
+
+  }
 
 })
 
@@ -390,7 +419,7 @@ test_that("a cached library from another build is built again, after asking why,
   ## The option consents, so the tree says why it is built again
   expect_output(
     rebuilt <- resolve_source("mini", verbose = TRUE, collector = collector),
-    "Library mini v0 was built by an earlier version of horizons: downloading", fixed = TRUE
+    "The cached \"mini\" library was built by an earlier version of horizons, so it has to be built again.", fixed = TRUE
   )
 
   expect_identical(nrow(rebuilt$pool$data$analysis), 2L)
