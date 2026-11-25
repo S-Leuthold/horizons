@@ -55,10 +55,11 @@ recorded as \code{models$seed}, which \code{\link[=ensemble]{ensemble()}} takes.
 
 \item{control}{A \code{\link[=control_horizons]{control_horizons()}} object: how the run goes, and,
 through \code{isolate} and \code{no_improve}, part of what it computes (see
-\code{\link[=control_horizons]{control_horizons()}}). \code{fit()} reads \code{allow_par}, \code{verbose}, \code{debug},
-\code{breaker}, \code{keep_traces}, \code{isolate}, \code{threads}, \code{no_improve},
-\code{min_calib_rows}, \code{min_ad_rows} and \code{min_degradation_rows}, and refuses
-any other field that is set. The control it ran with, defaults filled in, is recorded
+\code{\link[=control_horizons]{control_horizons()}}). \code{fit()} reads \code{allow_par}, \code{parallelize_over},
+\code{verbose}, \code{debug}, \code{breaker}, \code{keep_traces}, \code{isolate},
+\code{inner_daemons}, \code{threads}, \code{no_improve}, \code{min_calib_rows},
+\code{min_ad_rows} and \code{min_degradation_rows}, and refuses any other field
+that is set. The control it ran with, defaults filled in, is recorded
 as \code{models$control}.}
 }
 \value{
@@ -326,15 +327,44 @@ transformation), as \code{\link[=evaluate]{evaluate()}} prepares its configurati
 there); the preparations are held in this session and dropped when the
 call returns. With \code{control_horizons(allow_par = TRUE)} they are prepared
 on the daemons, one task each, longest first, each carrying its rows, and
-those still running are cancelled when the call stops; both need mirai's
-dispatcher, so on daemons set with \code{dispatcher = FALSE} \code{fit()} warns of
-it once, with class \code{horizons_warning_input}, as \code{\link[=evaluate]{evaluate()}} does, the
+those still running are cancelled when the call stops, as the members'
+tasks are on the members axis (below); both need mirai's dispatcher, so
+on daemons set with \code{dispatcher = FALSE} \code{fit()} warns of it once, with class \code{horizons_warning_input}, as \code{\link[=evaluate]{evaluate()}} does, the
 warning a row of the object's \code{log} and "no dispatcher" on the progress
 tree's parallel line. A pool left with no daemon while they run stops the
 call with \code{horizons_error_no_daemons}, every member still to fit. Then
-tune runs the CV folds inside each member's re-tune, when it runs, and its
-OOF pass on the \href{https://mirai.r-lib.org}{mirai} daemons the caller has set
-(\code{mirai::daemons(4)} before the call); a
+the members run on the \href{https://mirai.r-lib.org}{mirai} daemons the
+caller has set (\code{mirai::daemons(4)} before the call), on one of two axes,
+\code{control_horizons(parallelize_over = )}, by the rule \code{\link[=evaluate]{evaluate()}} applies
+to its configurations ("Parallelism" there):
+\itemize{
+\item \code{"resamples"}: the members are fitted one after another in this
+session, and tune runs the CV folds of each member's re-tune, when it
+runs, and of its out-of-fold pass on the daemons.
+\item \code{"configs"}: each member is a task of its own on a daemon, its re-tune,
+out-of-fold pass, final fit, intervals and applicability domain all
+there, started longest first by an estimate of each one's time, at most
+one member per daemon connected; its result comes back to this session
+when it is done, and the members keep their rank whatever order they
+finish in. Each task carries its member's rows, as the fold
+preparations' tasks do, so this session holds a copy of the modelled
+rows for each member in flight. A member whose share of the work is
+large runs its folds on inner daemons its task starts on its daemon,
+within the daemons set, as \code{\link[=evaluate]{evaluate()}}'s configurations do ("Inner
+daemons" there; \code{control_horizons(inner_daemons = FALSE)} runs every
+member on one daemon). The progress tree prints each member's block, in
+rank order, once every member is in.
+\item \code{"auto"} (default): \code{"configs"} when there are at least as many members
+as \code{cv_folds}, otherwise \code{"resamples"}, so the default five members on
+\code{\link[=configure]{configure()}}'s default five folds are fitted on the members axis, and
+on ten folds on the folds axis. \code{fit()} checkpoints nothing, so neither
+axis needs an \code{output_dir}.
+}
+
+The results are the same on either axis and on any number of daemons:
+each member's draws are seeded from the run's seed and their own names,
+wherever they run. The run's axis and the daemons it began with are
+recorded as \code{models$parallelize_over} and \code{models$workers}. A
 \code{future::plan()} is not used, and \code{fit()} never sets, resizes or resets
 the daemons. With fewer than two connected, \code{fit()} runs sequentially and
 warns, with class \code{horizons_warning_substitution}; the warning is also a
@@ -342,22 +372,25 @@ row of the object's \code{log}. A run in this session fits \code{rf}, \code{xgbo
 \code{lightgbm} members on \code{control_horizons(threads = )} threads, one by
 default, and the results are the same on any number; on the daemons each
 fits on one, and \code{threads} above one with \code{allow_par} is refused, as in
-\code{\link[=evaluate]{evaluate()}}. A daemon that dies during a member, read as
-fewer daemons connected after it than before, stops the call with
-\code{horizons_error_systemic} and the members so far; so does one exiting
-under \code{maxtasks}, \code{idletime} or \code{walltime}, which the count cannot tell
-apart, and with fewer than two connected as a member starts (tune would
-fit it sequentially) the call stops with \code{horizons_error_no_daemons}. A
-pool whose daemons all exit during one of
-tune's calls waits inside tune, and a daemon whose library loses a package
-after the check before the run fails the member with tune's "Argument 1
-must be a data frame or a named atomic vector". \code{fit()} parallelises folds
-only in this version; a configs axis across the \code{n_best} members is gated
-on the fitted-object memory contract (a fitted object is hundreds of MB
-and would cross to workers). Before anything is fitted, a parallel \code{fit()}
-checks that the daemons on this machine fit in its memory, as
-\code{\link[=evaluate]{evaluate()}} does ("Parallelism" there), warning with class
-\code{horizons_warning_input} when they would not.
+\code{\link[=evaluate]{evaluate()}}. A daemon that dies during a member stops the call with
+\code{horizons_error_systemic} and the members so far, on either axis: on the
+folds axis read as fewer daemons connected after the member than before,
+which a daemon exiting under \code{maxtasks}, \code{idletime} or \code{walltime} also
+gives and the count cannot tell apart, and with fewer than two connected
+as a member starts (tune would fit it sequentially) the call stops with
+\code{horizons_error_no_daemons}; on the members axis read from the member's
+task, which ends in mirai's \code{errorValue} 19, and the members in flight are
+cancelled, as a pool left with no daemon stops the call with
+\code{horizons_error_no_daemons}. The finished members' rows are the error's
+\code{results} and their models are not kept, since \code{fit()} has no
+checkpoints: a run after the stop fits every member again. A pool whose
+daemons all exit during one of tune's calls waits inside tune, and a
+daemon whose library loses a package after the check before the run
+fails the member with tune's "Argument 1 must be a data frame or a named
+atomic vector". Before anything is fitted, a parallel \code{fit()} checks that
+the daemons on this machine fit in its memory, as \code{\link[=evaluate]{evaluate()}} does
+("Parallelism" there), warning with class \code{horizons_warning_input} when
+they would not.
 
 Each \code{cubist} fit runs in a process of its own, wherever it runs, as in
 \code{\link[=evaluate]{evaluate()}} ("Isolated fits" there), so a member's results depend on the

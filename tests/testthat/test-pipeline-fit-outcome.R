@@ -279,6 +279,58 @@ describe("fit() - evaluate()'s response trim (#77)", {
 
   })
 
+  ## What fit() hands its member with UQ on, whose calibration set is drawn
+  ## from the untrimmed training part: the fit rows, the calibration rows
+  ## and the folds
+  rows_handed <- function(control) {
+
+    seen <- NULL
+
+    testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(fit(ev, n_best = 1L, compute_uq = TRUE, compute_ad = FALSE, seed = 307L,
+                             control = control)),
+        horizons_error_all_members_failed = function(e) NULL
+      ),
+      fit_single_config = function(...) {
+        args <- list(...)
+        seen <<- list(train = args$train_data, calib = args$calib_data, folds = args$cv_resamples)
+        list(config_id = args$config_row$config_id, status = "failed",
+             error_message = "mocked", runtime_secs = 0)
+      },
+      .package = "horizons"
+    )
+
+    seen
+
+  }
+
+  it("hands a member on the members axis the rows and folds it has in this session, the trimmed rows calibrating and never fitting (#60)", {
+
+    ## At 60 rows the calibration set holds 9 rows, a trimmed one among them
+    session <- rows_handed(control_horizons(min_calib_rows = 9))
+
+    ## A members-axis task rebuilds its rows from what it carries
+    ## (member_payload(), rebuild_resamples()), run here as it is sent
+    local_tasks_in_session(2L)
+    task <- rows_handed(control_horizons(min_calib_rows = 9, allow_par = TRUE, parallelize_over = "configs"))
+
+    expect_true(any(trimmed %in% session$calib$sample_id))
+
+    expect_identical(task$train, session$train)
+    expect_identical(task$calib, session$calib)
+    expect_identical(lapply(task$folds$splits, rsample::analysis), lapply(session$folds$splits, rsample::analysis))
+    expect_identical(lapply(task$folds$splits, rsample::assessment), lapply(session$folds$splits, rsample::assessment))
+
+    ## The out-of-fold predictions are made on the folds' assessment rows,
+    ## so no trimmed row reaches them
+    held_out <- unlist(lapply(task$folds$splits, function(s) rsample::assessment(s)$sample_id))
+
+    expect_false(any(trimmed %in% task$train$sample_id))
+    expect_false(any(trimmed %in% held_out))
+
+  })
+
 })
 
 

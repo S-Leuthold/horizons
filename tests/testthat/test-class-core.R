@@ -1457,6 +1457,8 @@ make_valid_fit <- function() {
     selection_present = FALSE,
     seed              = 42L,
     seed_rule         = SEED_RULE,
+    workers           = 1L,
+    parallelize_over  = "sequential",
     control           = NULL,
     timestamp         = Sys.time(),
     runtime_secs      = 30.1

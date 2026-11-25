@@ -176,6 +176,90 @@ describe("resample_indices() / rebuild_resamples()", {
 
 
 ## =========================================================================
+## fit()'s calibration rows, through the same transport
+## =========================================================================
+## fit() carves its calibration set out of the training part and the rows a
+## response trim left out, and cuts its folds from what is left: a member's
+## task on the members axis rebuilds all three from one copy of the rows and
+## the calibration split's positions.
+
+describe("resample_indices() / rebuild_resamples() with fit()'s calibration split", {
+
+  ## fit()'s shapes: a trimmed set of training rows, a calibration split over
+  ## the training part and them, and folds over the fit rows
+  calibrated <- function(n_trim, n_wn = 6) {
+
+    fx      <- make_resample_fixture(n = 120, n_wn = n_wn, v = 3, strata = FALSE)
+    train   <- rsample::training(fx$split)
+    trimmed <- if (n_trim > 0) {
+      out <- train[seq_len(n_trim), ]
+      out$sample_id <- paste0("T", seq_len(n_trim))
+      out
+    }
+
+    set.seed(11)
+    split_C <- rsample::initial_split(calibration_pool(train, trimmed), prop = 0.8)
+    parts   <- calibration_parts(split_C, trimmed, "sample_id")
+    folds   <- rsample::vfold_cv(parts$train, v = 3)
+    idx     <- resample_indices(fx$split, folds, calib = split_C)
+
+    list(fx = fx, trimmed = trimmed, parts = parts, folds = folds, idx = idx,
+         rebuilt = rebuild_resamples(fx$split$data, idx, trimmed = trimmed, id_col = "sample_id"))
+
+  }
+
+  it("rebuilds the fit rows, the calibration rows and the folds fit() cut, with a trim and without", {
+
+    for (n_trim in c(0L, 5L)) {
+
+      cal <- calibrated(n_trim)
+      rb  <- cal$rebuilt
+
+      expect_identical(rb$train, cal$parts$train, label = paste("fit rows, trim", n_trim))
+      expect_identical(rb$calib, cal$parts$calib, label = paste("calibration rows, trim", n_trim))
+      expect_identical(rsample::testing(rb$split), rsample::testing(cal$fx$split))
+      expect_identical(rb$cv_folds$splits[[1]]$data, cal$parts$train)
+
+      for (i in seq_along(cal$folds$splits)) {
+        expect_identical(rsample::analysis(rb$cv_folds$splits[[i]]), rsample::analysis(cal$folds$splits[[i]]))
+        expect_identical(rsample::assessment(rb$cv_folds$splits[[i]]), rsample::assessment(cal$folds$splits[[i]]))
+      }
+
+      expect_equal(rsample::.get_split_args(rb$cv_folds), rsample::.get_split_args(cal$folds))
+
+    }
+
+    ## A trimmed row calibrates and never trains
+    cal <- calibrated(5L)
+    expect_false(any(cal$rebuilt$train$sample_id %in% cal$trimmed$sample_id))
+
+  })
+
+  it("rebuilds the training part and no calibration rows without a calibration split", {
+
+    fx <- make_resample_fixture(n = 60, n_wn = 5, strata = FALSE)
+    rb <- rebuild_resamples(fx$split$data, resample_indices(fx$split, fx$folds))
+
+    expect_identical(rb$train, rsample::training(rb$split))
+    expect_null(rb$calib)
+
+  })
+
+  it("carries no data in the calibration split's positions, and refuses a pool of another size", {
+
+    cal <- calibrated(5L, n_wn = 300)
+
+    expect_lt(serialized_size(cal$idx), serialized_size(cal$fx$split$data) / 10)
+
+    expect_error(rebuild_resamples(cal$fx$split$data, cal$idx, trimmed = cal$trimmed[-1, ], id_col = "sample_id"),
+                 "calibration split was drawn on", class = "horizons_error_internal")
+
+  })
+
+})
+
+
+## =========================================================================
 ## Partition invariants — absolute, not relative to the original
 ## =========================================================================
 ##

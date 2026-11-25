@@ -477,6 +477,27 @@ FOLD_PREP_ARG_NAMES <- c(
   "pkg_version"
 )
 
+# The keys of what a member's task carries on fit()'s members axis
+# (fit_member_worker()), which has no payload file: the modelled rows once
+# and the training rows a response trim left out, the positions its split,
+# calibration rows and folds are rebuilt from, the role map, the settings
+# every member is fitted with (one list, fit()'s `member_settings`, which the
+# session's members are fitted with too), and the member's own configuration,
+# evaluate()'s parameters for it and its fold preparations. Asserted in the
+# worker as SHARED_ARG_NAMES is.
+
+FIT_ARG_NAMES <- c(
+  "data",
+  "trimmed",
+  "resample_idx",
+  "role_map",
+  "settings",
+  "config_row",
+  "best_params",
+  "fold_entries",
+  "pkg_version"
+)
+
 # What one mirai daemon on this machine needs for a run, in bytes, by the
 # processes it holds: the daemon itself, and, when the run fits a model whose
 # fits are isolated (MODEL_SPECS' `isolate`), that fit's process beside it.

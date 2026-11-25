@@ -111,6 +111,12 @@
 #'   argument fits on ([define_model_spec()]): `control_horizons(threads = )`
 #'   on a run in the session, `ENGINE_THREADS` (one), the default, where tune
 #'   runs the folds on daemons.
+#' @param outside_warnings Character. Warnings the caller caught outside the
+#'   member's unit before it ran, as `condition_summary()` lines: the members
+#'   axis's worker's, from loading the member's packages and rebuilding its
+#'   rows (`fit_member_worker()`). They are rendered with the member's own,
+#'   deduplicated and capped as one list (#96), as
+#'   [evaluate_single_config()] renders a configuration's.
 #' @param fold_entries The entries of the member's fold preps, as `fit()`
 #'   built them, shaped as [evaluate_single_config()] takes them. `NULL`
 #'   (default) builds them here, with the same code.
@@ -173,6 +179,7 @@ fit_single_config <- function(config_row,
                               keep_traces          = FALSE,
                               isolate              = TRUE,
                               threads              = ENGINE_THREADS,
+                              outside_warnings     = character(0),
                               fold_entries         = NULL) {
 
   start_time <- Sys.time()
@@ -716,10 +723,12 @@ fit_single_config <- function(config_row,
   ## The member, fitted or failed
   ## -------------------------------------------------------------------------
   ## The warnings the unit caught join the notes, so a warning caught as it
-  ## was raised and the same warning in tune's notes are one line.
+  ## was raised and the same warning in tune's notes are one line, and so do
+  ## the caller's from outside the unit.
 
   records     <- dplyr::bind_rows(unit$records, addon_records)
-  warning_log <- dplyr::bind_rows(unit_warning_records(records), warning_log)
+  warning_log <- dplyr::bind_rows(unit_warning_records(records), warning_log,
+                                  text_records(outside_warnings))
 
   result <- if (unit$failed) {
 

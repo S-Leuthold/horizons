@@ -31,6 +31,7 @@ fit_single_config(
   keep_traces = FALSE,
   isolate = TRUE,
   threads = ENGINE_THREADS,
+  outside_warnings = character(0),
   fold_entries = NULL
 )
 }
@@ -135,6 +136,13 @@ member's \code{trace}.}
 argument fits on (\code{\link[=define_model_spec]{define_model_spec()}}): \code{control_horizons(threads = )}
 on a run in the session, \code{ENGINE_THREADS} (one), the default, where tune
 runs the folds on daemons.}
+
+\item{outside_warnings}{Character. Warnings the caller caught outside the
+member's unit before it ran, as \code{condition_summary()} lines: the members
+axis's worker's, from loading the member's packages and rebuilding its
+rows (\code{fit_member_worker()}). They are rendered with the member's own,
+deduplicated and capped as one list (#96), as
+\code{\link[=evaluate_single_config]{evaluate_single_config()}} renders a configuration's.}
 
 \item{fold_entries}{The entries of the member's fold preps, as \code{fit()}
 built them, shaped as \code{\link[=evaluate_single_config]{evaluate_single_config()}} takes them. \code{NULL}

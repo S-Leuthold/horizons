@@ -32,10 +32,15 @@ with \code{mirai::daemons(4)} before the call; the verb never sets, resizes or
 resets them, and a \code{future::plan()} is not used. Default \code{FALSE}.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=ensemble]{ensemble()}}.}
 
-\item{parallelize_over}{\code{character(1)}. The axis of \code{\link[=evaluate]{evaluate()}}'s work the
-daemons are applied to: \code{"auto"} (the default), \code{"configs"} or \code{"resamples"}.
-\code{"auto"} never chooses \code{"configs"} without \code{output_dir}, and
-\code{"configs"} asked for explicitly needs one.}
+\item{parallelize_over}{\code{character(1)}. The axis of the work the daemons
+are applied to: \code{"auto"} (the default), \code{"configs"} or \code{"resamples"}.
+\code{\link[=evaluate]{evaluate()}}: its configurations, one task each, or tune's folds inside
+each; \code{"auto"} takes \code{"configs"} when there are at least as many
+configurations as folds and an \code{output_dir} to checkpoint them into,
+and \code{"configs"} asked for explicitly needs one. \code{\link[=fit]{fit()}}: its members,
+one task each, or tune's folds inside each, by the same rule with the
+members in place of the configurations; \code{fit()} checkpoints nothing, so
+it needs no \code{output_dir}.}
 
 \item{verbose}{\code{logical(1)}. Print the verb's progress tree. Default
 \code{getOption("horizons.verbose", TRUE)}, so a script can quiet the four
@@ -98,12 +103,14 @@ them, and the run says so. Default \code{getOption("horizons.isolate", TRUE)}.
 configuration whose share of the run's work is large run its folds on
 inner daemons that \code{evaluate()} starts on that configuration's daemon,
 taking as many of the daemons set, so the run does not wait on its
-longest configurations. The results are the same either way where
-BLAS runs on one thread, which \code{evaluate()} sets on its daemons through
+longest configurations; on \code{\link[=fit]{fit()}}'s members axis, a member the same
+way. The results are the same either way where
+BLAS runs on one thread, which the verb sets on its daemons through
 \code{RhpcBLASctl} when it is installed; without it they can differ in
 floating-point rounding, which the run says (see \code{\link[=evaluate]{evaluate()}}'s
-"Inner daemons"). \code{FALSE} runs every configuration on one daemon.
-Default \code{getOption("horizons.inner_daemons", TRUE)}. \code{\link[=evaluate]{evaluate()}}.}
+"Inner daemons"). \code{FALSE} runs every configuration or member on one
+daemon. Default \code{getOption("horizons.inner_daemons", TRUE)}.
+\code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}.}
 
 \item{threads}{A whole number. The threads \code{rf}, \code{xgboost} and \code{lightgbm}
 fit and predict on when the verb runs in this session; the results are

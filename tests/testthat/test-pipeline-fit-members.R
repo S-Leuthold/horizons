@@ -18,6 +18,30 @@ member_of <- function(obj, model) {
   obj$config$configs$config_id[obj$config$configs$model == model]
 }
 
+## fit_obj(2L) with `n` evaluated configurations, its two repeated, ranked in
+## config_id order, whose models are `models` repeated in that order: rf,
+## cubist, rf, cubist, ... by default. Read inside an it() block, before
+## anything is mocked.
+ranked_members <- function(n, models = c("rf", "cubist")) {
+
+  obj  <- fit_obj(2L)
+  ids  <- sprintf("cfg_%03d", seq_len(n))
+  from <- rep(obj$config$configs$config_id, length.out = n)
+
+  configs <- obj$config$configs[match(from, obj$config$configs$config_id), ]
+  results <- obj$evaluation$results[match(from, obj$evaluation$results$config_id), ]
+
+  configs$config_id <- results$config_id <- ids
+  configs$model     <- rep(models, length.out = n)
+
+  obj$config$configs     <- configs
+  obj$config$n_configs   <- as.integer(n)
+  obj$evaluation$results <- results
+
+  rank_configs_as(obj, ids)
+
+}
+
 
 ## =========================================================================
 ## No config passed the prune gate: fit() takes evaluate()'s fallback (#38)
@@ -381,27 +405,9 @@ describe("fit() - member failures", {
 
 describe("fit() - each member is one unit", {
 
-  ## make_fit_object() with four evaluated configurations, ranked in
-  ## config_id order, whose models are `models` repeated in that order: rf,
-  ## cubist, rf, cubist by default
-  four_members <- function(models = c("rf", "cubist")) {
-
-    obj  <- fit_obj(2L)
-    more <- obj$config$configs
-    more$config_id <- c("cfg_003", "cfg_004")
-
-    res <- obj$evaluation$results
-    add <- res
-    add$config_id <- more$config_id
-
-    obj$config$configs    <- dplyr::bind_rows(obj$config$configs, more)
-    obj$config$configs$model <- rep(models, length.out = 4L)
-    obj$config$n_configs  <- 4L
-    obj$evaluation$results <- dplyr::bind_rows(res, add)
-
-    rank_configs_as(obj, obj$config$configs$config_id)
-
-  }
+  ## Four members, ranked in config_id order: rf, cubist, rf, cubist by
+  ## default (ranked_members())
+  four_members <- function(models = c("rf", "cubist")) ranked_members(4L, models)
 
   fitted_member <- function(config_row, ...) {
 
@@ -1087,6 +1093,491 @@ describe("fit() - the members' packages", {
     expect_identical(err$results$status, "success")
     expect_match(gsub("\\s+", " ", conditionMessage(err)),
                  "A package `fit()` needs is not installed where its work ran", fixed = TRUE)
+
+  })
+
+})
+
+
+## =========================================================================
+## A member's fit as a task: fit_member_worker()
+## =========================================================================
+## What the members axis sends a daemon for each member (#60), called here in
+## this session: it needs no daemon, so these run under load_all() too, but
+## for the split member, whose inner daemons load the installed horizons. The
+## task carries its member's data, as fit()'s fold preparations' tasks do,
+## since fit() has no output_dir to write a payload file to.
+
+## One member, rf on PCA, so the task carries fold preparations and the
+## training part's that bounds mtry, with UQ and AD on, so it carries the
+## calibration split's positions too: what fit() hands it and what it
+## returns, recorded as it is fitted in this session, its calibration split,
+## and the task fit() would send for it, through a serialization round trip
+## as mirai sends it
+build_member_task <- function() {
+
+  obj <- make_fit_object(n = 100, n_configs = 1, feature_selection = "pca")
+
+  seen       <- NULL
+  split_C    <- NULL
+  real_fit   <- fit_member
+  real_parts <- calibration_parts
+
+  fitted <- testthat::with_mocked_bindings(
+    suppressWarnings(fit(obj, n_best = 1L, seed = 42L, control = control_horizons(min_calib_rows = 10))),
+    fit_member = function(config_row, best_params_eval, fold_entries, inputs, settings, ...) {
+      value <- real_fit(config_row, best_params_eval, fold_entries, inputs, settings, ...)
+      seen  <<- list(config_row = config_row, best_params = best_params_eval, fold_entries = fold_entries,
+                     inputs = inputs, settings = settings, value = value)
+      value
+    },
+    calibration_parts = function(split, ...) {
+      split_C <<- split
+      real_parts(split, ...)
+    }
+  )
+
+  shared  <- member_payload(seen$inputs$split_F, NULL, seen$inputs$cv_resamples, split_C, seen$inputs$role_map,
+                            seen$settings)
+  payload <- unserialize(serialize(member_task_payload(shared, seen$config_row, seen$best_params,
+                                                       seen$fold_entries), NULL))
+
+  list(fitted = fitted, seen = seen, split_C = split_C, payload = payload)
+
+}
+
+member_task <- function() memo_fixture("member_task", build_member_task)
+
+describe("fit_member_worker() - a member's fit as a task", {
+
+  it("keeps its body out of fit()'s frame and takes its inputs as arguments", {
+
+    expect_true(isNamespace(environment(fit_member_worker)))
+    expect_named(formals(fit_member_worker), c("payload", "inner"))
+
+  })
+
+  it("fits its member as this session fits it, its intervals and its domain among them, and keeps a warning raised outside the member's unit", {
+
+    skip_unless_slow_tier()
+
+    member <- member_task()
+    seen   <- member$seen
+
+    expect_fits_nontrivial(member$fitted)
+    expect_false(is.null(seen$fold_entries))
+    expect_false(is.null(member$split_C))
+    expect_setequal(names(member$payload), FIT_ARG_NAMES)
+
+    ## A package's warning as the daemon loads the member's packages, which
+    ## mirai would drop
+    real_prepare <- prepare_worker
+    local_mocked_bindings(prepare_worker = function(...) {
+      warning("a package warned as it loaded")
+      real_prepare(...)
+    })
+
+    task <- fit_member_worker(member$payload)
+
+    expect_identical(attr(task, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
+    expect_true(any(grepl("a package warned as it loaded", task$warnings, fixed = TRUE)))
+    expect_true(all(seen$value$warnings %in% task$warnings))
+
+    same <- setdiff(names(seen$value), c("fitted_workflow", "warnings", "uq", "ad", "runtime_secs"))
+
+    expect_identical(task[same], seen$value[same])
+    expect_equal(task$uq, seen$value$uq)
+    expect_equal(task$ad, seen$value$ad)
+
+    test_rows <- rsample::testing(seen$inputs$split_F)
+    expect_identical(predict(task$fitted_workflow, test_rows), predict(seen$value$fitted_workflow, test_rows))
+
+  })
+
+  it("fits a split member's folds on its inner daemons as an unsplit one's on its own, and counts their tasks (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## The worker in this session, which stands in for its daemon
+    mirai::daemons(0)
+    member <- member_task()
+
+    split   <- with_deadline(fit_member_worker(member$payload, inner = 3L), 120)
+    unsplit <- with_deadline(fit_member_worker(member$payload, inner = 1L), 120)
+
+    ## The member's folds went to its inner daemons, tune sending a call's
+    ## three folds together, so the count is a multiple of three, which the
+    ## inner daemons' three set-up tasks would not leave it
+    expect_true(attr(split, "inner_daemons")$started)
+    expect_gte(attr(split, "inner_daemons")$completed, 3L)
+    expect_identical(attr(split, "inner_daemons")$completed %% 3L, 0L)
+    expect_identical(attr(unsplit, "inner_daemons"), list(daemons = 1L, started = FALSE, completed = 0L))
+    expect_false(mirai::daemons_set())
+
+    same <- setdiff(names(unsplit), c("fitted_workflow", "uq", "ad", "runtime_secs"))
+    attr(split, "inner_daemons") <- attr(unsplit, "inner_daemons") <- NULL
+
+    expect_identical(split[same], unsplit[same])
+    expect_equal(split$uq, unsplit$uq)
+    expect_equal(split$ad, unsplit$ad)
+
+    test_rows <- rsample::testing(member$seen$inputs$split_F)
+    expect_identical(predict(split$fitted_workflow, test_rows), predict(unsplit$fitted_workflow, test_rows))
+
+  })
+
+  it("refuses a payload with a key missing, and a worker on another version, as the configuration worker does", {
+
+    good <- stats::setNames(vector("list", length(FIT_ARG_NAMES)), FIT_ARG_NAMES)
+    good$pkg_version <- as.character(utils::packageVersion("horizons"))
+
+    err <- expect_error(fit_member_worker(good[setdiff(names(good), "settings")]),
+                        "Malformed worker payload", class = "horizons_error_internal")
+    expect_match(conditionMessage(err), "Missing: settings; unexpected: -", fixed = TRUE)
+
+    ## The version first: another version's keys may differ, and that is
+    ## not a bug
+    other <- good[setdiff(names(good), "settings")]
+    other$pkg_version <- "0.0.0"
+
+    expect_error(fit_member_worker(other), "but this session runs 0.0.0.", fixed = TRUE,
+                 class = "horizons_error_dependency")
+
+  })
+
+})
+
+
+## =========================================================================
+## The members axis: each member a task of its own (#60)
+## =========================================================================
+## fit()'s members on the daemons, through the window evaluate()'s configs
+## axis runs through. The tests in this session run the real window with
+## each task computed as it is sent (local_tasks_in_session(),
+## helper-parallel.R); those on daemons need an installed build.
+
+## Three members of three kinds: rf on PCA (a seeded engine, with fold
+## preparations and the training part's prep that bounds mtry), plsr (a
+## submodel engine) and cubist (each fit in a process of its own). Read
+## inside each it() block, before anything is mocked.
+members_axis_obj <- function() {
+  memo_fixture("members_axis_obj", make_fit_object, n = 100, n_configs = 3,
+               models = c("rf", "plsr", "cubist"), feature_selection = c("pca", "none", "none"))
+}
+
+## UQ and AD on, at a calibration minimum these rows meet
+members_control <- function(...) control_horizons(min_calib_rows = 10, ...)
+
+## The parts of two fits of the same members that must be identical
+## whatever axis they ran on: the members table without its run times, the
+## out-of-fold predictions, each member's intervals and domain, the chosen
+## member, and what predict() serves from them
+expect_same_members <- function(got, want) {
+
+  keep <- setdiff(names(want$models$results), "runtime_secs")
+
+  expect_identical(got$models$results[keep], want$models$results[keep])
+  expect_identical(got$models$best_config, want$models$best_config)
+  expect_identical(got$models$cv_predictions, want$models$cv_predictions)
+  expect_equal(got$models$uq, want$models$uq)
+  expect_equal(got$models$ad, want$models$ad)
+
+  new_rows <- rsample::testing(rebuild_split(want)$split)
+  expect_identical(suppressWarnings(predict(got, new_rows)), suppressWarnings(predict(want, new_rows)))
+
+}
+
+describe("fit() - the members axis (#60)", {
+
+  it("fits every member as this session does, each a task of its own, and keeps them in rank order when they finish out of it", {
+
+    skip_unless_slow_tier()
+    skip_if_not_installed("Cubist")
+
+    obj     <- members_axis_obj()
+    in_turn <- suppressWarnings(fit(obj, n_best = 3L, seed = 42L, control = members_control()))
+
+    ## The members compared learned something, so a difference would show
+    expect_fits_nontrivial(in_turn)
+
+    ## Costs rising with rank, so the window sends the last-ranked member
+    ## first and the best last: collected out of rank
+    local_tasks_in_session(2L)
+    local_mocked_bindings(config_costs = function(configs, n_rows) as.numeric(seq_len(nrow(configs))))
+
+    sent <- character(0)
+    real_worker <- fit_member_worker
+    local_mocked_bindings(fit_member_worker = function(payload, inner = 1L) {
+      sent <<- c(sent, payload$config_row$config_id)
+      real_worker(payload, inner)
+    })
+
+    as_tasks <- suppressWarnings(fit(obj, n_best = 3L, seed = 42L,
+                                     control = members_control(allow_par = TRUE, parallelize_over = "configs")))
+
+    expect_identical(sent, rev(in_turn$models$results$config_id))
+    expect_same_members(as_tasks, in_turn)
+
+    ## The run's record: the axis and the daemons it began with
+    expect_identical(as_tasks$models[c("parallelize_over", "workers")], list(parallelize_over = "configs", workers = 2L))
+    expect_identical(in_turn$models[c("parallelize_over", "workers")], list(parallelize_over = "sequential", workers = 1L))
+
+    ## Nothing the members say is lost on the way
+    expect_identical(without_time(log_rows_added(obj, as_tasks)), without_time(log_rows_added(obj, in_turn)))
+
+  })
+
+  ## A member as fit_single_config() returns one, fitted or failed, for the
+  ## tests of what fit() does with them; the fitted workflow is a stand-in,
+  ## which nothing past the validator reads
+  stand_in <- function(config_row, failed = FALSE) {
+    list(
+      config_id = config_row$config_id, status = if (failed) "failed" else "success",
+      degraded = if (failed) NA else FALSE, degraded_reason = NA_character_,
+      fitted_workflow = if (!failed) "fitted workflow", best_params = if (!failed) tibble::tibble(mtry = 2L),
+      warm_start = TRUE, start_grid_size = NA_integer_, cv_predictions = NULL,
+      test_metrics = if (!failed) tibble::tibble(rmse = 0.5, rrmse = 20, rsq = 0.6, ccc = 0.7, rpd = 1.5, mae = 0.4),
+      cv_metrics = if (!failed) tibble::tibble(.metric = c("rmse", "rpd"), mean = c(0.45, 1.6), std_err = c(0.03, 0.1)),
+      uq = NULL, ad = NULL, warnings = NULL,
+      error_message = if (failed) "Final model fit failed: the engine broke on 12 rows" else NA_character_,
+      class = if (failed) "simpleError" else NA_character_, trace = NULL, runtime_secs = 1
+    )
+  }
+
+  it("takes the members axis on auto by evaluate()'s rule: once there are as many members as folds", {
+
+    obj <- members_axis_obj()
+
+    local_tasks_in_session(2L)
+    local_mocked_bindings(fit_single_config = function(config_row, ...) stand_in(config_row))
+
+    axis_at <- function(n_best) {
+      suppressWarnings(fit(obj, n_best = n_best, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+                           control = control_horizons(allow_par = TRUE)))$models$parallelize_over
+    }
+
+    ## Three folds: two members stay on the folds axis, three go out as tasks
+    expect_identical(obj$config$tuning$cv_folds, 3L)
+    expect_identical(axis_at(2L), "resamples")
+    expect_identical(axis_at(3L), "configs")
+
+  })
+
+  it("takes the members axis at the defaults: fit()'s n_best members on configure()'s cv_folds", {
+
+    ## Read from the two functions, not restated, so a change to either
+    ## default that moves the axis fails here, and ?fit's "Parallelism" with it
+    n_best   <- eval(formals(fit)$n_best)
+    cv_folds <- eval(formals(configure)$cv_folds)
+
+    obj <- ranked_members(n_best)
+    obj$config$tuning$cv_folds <- cv_folds
+
+    local_tasks_in_session(2L)
+    local_mocked_bindings(fit_single_config = function(config_row, ...) stand_in(config_row))
+
+    fitted <- suppressWarnings(fit(obj, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+                                   control = control_horizons(allow_par = TRUE)))
+
+    expect_identical(nrow(fitted$models$results), as.integer(n_best))
+    expect_identical(fitted$models$parallelize_over, "configs")
+
+  })
+
+  it("stops when the first members to come in fail the same way across two models, and not when a success comes in with them", {
+
+    ## Five members ranked rf, cubist, rf, cubist, rf: the first three fail
+    ## alike, the last two succeed
+    obj   <- ranked_members(5L)
+    fails <- c("cfg_001", "cfg_002", "cfg_003")
+
+    ## Equal costs, so the window starts them in rank order; and each member
+    ## on one daemon, since split_plan() would give each rf member inner
+    ## daemons, which would bring them in over more passes and start real
+    ## inner daemons in this session
+    local_mocked_bindings(
+      fit_single_config = function(config_row, ...) stand_in(config_row, config_row$config_id %in% fails),
+      config_costs      = function(configs, n_rows) rep(1, nrow(configs))
+    )
+
+    run <- function(n) {
+      local_tasks_in_session(n)
+      suppressWarnings(fit(obj, n_best = 5L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+                           control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                      inner_daemons = FALSE)))
+    }
+
+    ## On one daemon they come in one a pass, in rank order: the third
+    ## failure trips it with two members still to fit
+    err <- expect_error(run(1L), class = "horizons_error_systemic")
+
+    expect_identical(err$results$config_id, fails)
+    expect_match(conditionMessage(err), "The first 3 members to run all failed the same way, across 2 models",
+                 fixed = TRUE)
+    expect_match(conditionMessage(err), "`fit()` stopped rather than run the other 2", fixed = TRUE)
+
+    ## On four the first four come in in one pass, the three failures and a
+    ## success, while the fifth waits: the success is read first, so the
+    ## failures are ordinary ones and the fit returns. Read failures first,
+    ## they would trip it with the fifth still to fit.
+    fitted <- run(4L)
+
+    expect_identical(fitted$models$results$status, c("failed", "failed", "failed", "success", "success"))
+    expect_identical(fitted$models$best_config, "cfg_004")
+
+  })
+
+  it("runs a debug run in this session, as one asked for in parallel on the members axis", {
+
+    obj <- members_axis_obj()
+
+    local_mocked_bindings(
+      fit_single_config      = function(config_row, ...) stand_in(config_row),
+      check_parallel_backend = function(...) stop("the backend was checked"),
+      fit_member_worker      = function(...) stop("a member was sent out")
+    )
+
+    fitted <- suppressWarnings(fit(obj, n_best = 3L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+                                   control = control_horizons(allow_par = TRUE, parallelize_over = "configs",
+                                                              debug = TRUE)))
+
+    expect_identical(fitted$models[c("parallelize_over", "workers")], list(parallelize_over = "sequential", workers = 1L))
+
+  })
+
+})
+
+
+## The members fitted in this session, read once per process: what every
+## members-axis run is compared with
+members_in_turn <- function() {
+  memo_fixture("members_axis_in_turn", function() {
+    suppressWarnings(fit(members_axis_obj(), n_best = 3L, seed = 42L, control = members_control()))
+  })
+}
+
+describe("fit() - the members axis on daemons (#60)", {
+
+  it("fits every member on two daemons as this session does, and leaves the daemons as it found them (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("Cubist")
+
+    obj     <- members_axis_obj()
+    in_turn <- members_in_turn()
+    expect_fits_nontrivial(in_turn)
+
+    local_test_daemons(2)
+    before <- daemons_record()
+
+    on_two <- with_deadline(suppressWarnings(
+      fit(obj, n_best = 3L, seed = 42L, control = members_control(allow_par = TRUE, parallelize_over = "configs"))
+    ), 300)
+
+    expect_identical(daemons_record(), before)
+    ## The members ran on the daemons: more tasks completed than the one each
+    ## the check at the door spends and rf's fold preparations
+    expect_gt(mirai::info()[["completed"]], 2L + 4L)
+
+    expect_same_members(on_two, in_turn)
+    expect_identical(on_two$models[c("parallelize_over", "workers")], list(parallelize_over = "configs", workers = 2L))
+
+  })
+
+  it("fits a member whose folds run on inner daemons as this session does, and says so on the log (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("Cubist")
+
+    obj     <- members_axis_obj()
+    in_turn <- members_in_turn()
+    first   <- in_turn$models$results$config_id[1]
+
+    ## The plan splits the best-ranked member's three folds over three inner
+    ## daemons, which take the whole window while it runs
+    local_mocked_bindings(split_plan = function(costs, n, folds) c(3L, rep(1L, length(costs) - 1L)))
+    local_test_daemons(3)
+
+    split <- with_deadline(suppressWarnings(
+      fit(obj, n_best = 3L, seed = 42L, control = members_control(allow_par = TRUE, parallelize_over = "configs"))
+    ), 300)
+
+    expect_same_members(split, in_turn)
+
+    note <- split$log[split$log$type == "note" & grepl("on inner daemons it started", split$log$message, fixed = TRUE), ]
+
+    expect_identical(nrow(note), 1L)
+    expect_match(note$message, paste0("`fit()` ran the folds of 1 long member on inner daemons it started on its daemon, within the daemons set: ",
+                                      first, " on 3."), fixed = TRUE)
+
+  })
+
+  it("stops as systemic, with the members so far, when a member's daemon dies, and cancels the member in flight (installed build)", {
+
+    skip_unless_slow_tier()
+    skip_on_cran()
+    skip_if_dev_package()
+
+    ## Ranked, and started, in config order: the first two together, the
+    ## third once a daemon is free
+    obj <- rank_configs_as(members_axis_obj(), c("cfg_001", "cfg_002", "cfg_003"))
+    local_mocked_bindings(config_costs = function(configs, n_rows) as.numeric(rev(seq_len(nrow(configs)))))
+
+    local_test_daemons(2)
+    marks <- withr::local_tempdir()
+
+    ## On the daemons, through the file system, every wait with a deadline:
+    ## the first member finishes; the second holds its daemon until the run
+    ## has stopped; the third, started on the first's daemon, kills it once
+    ## the first is in, a poll later
+    with_deadline(mirai::everywhere({
+      ns   <- asNamespace("horizons")
+      real <- get("fit_single_config", envir = ns)
+      utils::assignInNamespace("fit_single_config", function(config_row, ...) {
+        id    <- config_row$config_id
+        until <- Sys.time() + 100
+        file.create(file.path(marks, paste0(id, "-started")))
+        if (id == "cfg_002") {
+          while (Sys.time() < until) Sys.sleep(0.05)
+        }
+        if (id == "cfg_003") {
+          while (!file.exists(file.path(marks, "cfg_001-done")) && Sys.time() < until) Sys.sleep(0.05)
+          Sys.sleep(1)
+          tools::pskill(Sys.getpid(), tools::SIGKILL)
+        }
+        value <- real(config_row, ...)
+        file.create(file.path(marks, paste0(id, "-done")))
+        value
+      }, ns = "horizons")
+    }, marks = marks)[], 30)
+
+    err <- expect_error(
+      with_deadline(suppressWarnings(fit(obj, n_best = 3L, seed = 42L, compute_uq = FALSE, compute_ad = FALSE,
+                                         control = control_horizons(allow_par = TRUE, parallelize_over = "configs"))), 120),
+      class = "horizons_error_systemic"
+    )
+
+    ## Raised once, by the window, naming the member and the transport's
+    ## error value
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, paste("The mirai daemon running member \"cfg_003\" stopped while it ran",
+                            "(`errorValue` 19, Connection reset), so `fit()` cannot go on."),
+                 fixed = TRUE)
+    expect_match(msg, "in this error's results field", fixed = TRUE)
+    expect_null(err$parent)
+    expect_identical(err$results$config_id, "cfg_001")
+    expect_identical(err$results$status, "success")
+
+    ## The second member was cancelled, not run on: once the daemon left is
+    ## idle, it has not finished
+    with_deadline(while (mirai::info()[["executing"]] > 0L) Sys.sleep(0.1), 60)
+    expect_setequal(list.files(marks), c("cfg_001-started", "cfg_001-done", "cfg_002-started", "cfg_003-started"))
 
   })
 

@@ -680,14 +680,14 @@ evaluate <- function(x,
   axis <- resolve_parallel_axis(parallelize_over, dispatch,
                                 n_configs      = nrow(configs),
                                 cv_folds       = cv_folds,
-                                has_output_dir = !is.null(output_dir))
+                                configs_runnable = !is.null(output_dir))
 
   if (dispatch && !check_parallel_backend("evaluate", collector)) {
 
     axis <- resolve_parallel_axis(parallelize_over, allow_par = FALSE,
                                   n_configs      = nrow(configs),
                                   cv_folds       = cv_folds,
-                                  has_output_dir = !is.null(output_dir))
+                                  configs_runnable = !is.null(output_dir))
 
   }
 
@@ -1431,42 +1431,22 @@ evaluate <- function(x,
     ## tests of what a task carries in test-evaluate-parallel.R guard both.
 
     ## The pending configurations' costs, which the window starts them
-    ## longest first by, and the daemons each one's folds run on
-    ## (split_plan()), from the daemons connected now
+    ## longest first by, and the daemons each one's folds run on, from the
+    ## daemons connected now (inner_daemon_plan())
     pending_costs <- config_costs(pending_configs, n_train)
-    n_now         <- connected_daemons()
-    planned       <- split_plan(pending_costs, n_now, cv_folds)
-    inner_plan    <- planned
-
-    if (!isTRUE(control$inner_daemons)) {
-
-      inner_plan[] <- 1L
-
-    } else if (any(inner_plan > 1L)) {
-
-      ## A split is made only when its inner daemons fit in this machine's
-      ## memory beside the daemons, which the log notes when they do not
-      processes <- daemon_processes(configs$model, control$isolate)
-      extra     <- split_need(inner_plan, dispatch_order(pending_costs), n_now, processes,
-                              n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
-                              n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
-                              folds = cv_folds)
-
-      if (!check_split_memory(reports, extra, processes, n_rows = nrow(analysis),
-                              n_predictors = sum(role_map$role == "predictor"),
-                              n_split = sum(inner_plan > 1L), collector = collector, verb = "evaluate")) {
-        inner_plan[] <- 1L
-      }
-
-    }
+    plan          <- inner_daemon_plan(pending_costs, configs$model, cv_folds, control, reports,
+                                       n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
+                                       n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
+                                       collector = collector, verb = "evaluate", unit = "configuration")
+    planned       <- plan$planned
+    inner_plan    <- plan$inner
+    blas_pinned   <- plan$pinned
 
     ## Which configurations run their folds on inner daemons, said in the
     ## tree from the plan, or that the setting kept them whole; and whether
     ## BLAS can be pinned on the daemons, without which a split can differ
     ## from the unsplit run in rounding. The log says it once the window has
     ## run, from what started.
-    blas_pinned <- blas_pinnable()
-
     if (verbose) {
 
       inner_lines <- inner_daemons_tree_line(planned, inner_plan, control$inner_daemons, blas_pinned)
@@ -4142,8 +4122,9 @@ prepare_worker <- function(models, selections) {
 #' @param inner Integer(1). The daemons the configuration's folds run on
 #'   ([split_plan()]). With 1, tune runs them sequentially in this task.
 #'   With more, the task starts that many inner daemons on its own daemon
-#'   ([start_inner_daemons()]) once its folds are rebuilt, tune runs the
-#'   folds on them, and they are reset as the task ends, however it ends. A
+#'   once its folds are rebuilt, tune runs the folds on them, and they are
+#'   reset as the configuration returns, however it ends
+#'   ([run_on_inner_daemons()], the bracket both verbs' workers share). A
 #'   pool that does not come up runs the folds here, and the row says so.
 #'
 #' @return A one-row result tibble from [evaluate_single_config()], its unit's
@@ -4269,21 +4250,15 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
   ## The configuration, its folds on inner daemons when the plan splits it
   ## -------------------------------------------------------------------------
   ## The inner daemons are this daemon's own profile, which tune reads, and
-  ## are reset as the task ends, however it ends: the reset is registered
-  ## before they start. A pool that does not come up runs the folds here.
-  on_inner <- FALSE
-
-  if (inner > 1L) {
-    on.exit(mirai::daemons(0, .compute = NULL), add = TRUE)
-    on_inner <- start_inner_daemons(inner, cfg$model, cfg$feature_selection)
-  }
-
-  ## The tasks the inner daemons ran before the configuration (their set-up),
-  ## so its row counts only its own
-  completed_before <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) else 0L
-
-  run <- function() {
-    evaluate_single_config(
+  ## are reset as the bracket returns (run_on_inner_daemons()). A pool that
+  ## does not come up runs the folds here.
+  ##
+  ## Both provenance records are sent rather than rebuilt. The data
+  ## fingerprint hashes the whole predictor matrix, which is a once-per-run
+  ## cost, not a per-config one; and a setting added to the list in
+  ## evaluate() reaches the worker's rows with no change here.
+  run <- function(on_inner) {
+    result_row <- evaluate_single_config(
       config_row       = cfg,
       split            = resamples$split,
       cv_folds         = resamples$cv_folds,
@@ -4304,24 +4279,12 @@ evaluate_config_worker <- function(config_i, payload_path, inner = 1L) {
       outside_warnings = outside,
       fold_entries     = resamples$fold_entries
     )
+    result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
+    stamp_eval_settings(result_row, shared$settings)
   }
 
-  result_row <- if (on_inner) watch_inner_daemons(run(), inner, cfg$config_id) else run()
-
-  if (inherits(result_row, "horizons_inner_daemon_died")) return(result_row)
-
-  completed <- if (on_inner) as.integer(mirai::info(.compute = NULL)[["completed"]]) - completed_before else 0L
-
-  ## Both provenance records are sent rather than rebuilt. The data
-  ## fingerprint hashes the whole predictor matrix, which is a once-per-run
-  ## cost, not a per-config one; and a setting added to the list in
-  ## evaluate() reaches the worker's rows with no change here.
-  result_row <- stamp_data_fingerprint(result_row, shared$data_fp)
-  result_row <- stamp_eval_settings(result_row, shared$settings)
-
-  ## Told the session, which keeps it apart from the row
-  attr(result_row, "inner_daemons") <- list(daemons = as.integer(inner), started = on_inner, completed = completed)
-
-  result_row
+  ## The row, and what its inner daemons did, told the session, which keeps
+  ## it apart from the row
+  run_on_inner_daemons(run, inner, cfg)
 
 }
