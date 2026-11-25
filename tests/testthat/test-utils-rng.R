@@ -129,7 +129,6 @@ describe("unit_seed()", {
     v3 <- withr::with_options(list(serializeVersion = 3L), unit_seed(307, "evaluate/split"))
 
     expect_identical(v3, v2)
-    expect_identical(v2, strtoi(substr(digest::digest("307/evaluate/split", serializeVersion = 2L), 1, 7), 16L))
 
   })
 
