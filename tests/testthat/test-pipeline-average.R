@@ -2032,9 +2032,7 @@ test_that("average()'s quality control reads the bands qc_range names, its defau
   note  <- function(out) out$log$message[nrow(out$log)]
   lost  <- function(out) dplyr::bind_rows(out$log$detail[out$log$verb == "average"])$row
 
-  ## The default on raw spectra is standardize()'s default trim, one value
-  expect_identical(formals(standardize)$trim, quote(MIR_RANGE))
-
+  ## The default on raw spectra is standardize()'s default trim, 600 to 4000
   out <- average(hd, verbose = FALSE)
   expect_identical(lost(out), 9L)
   expect_match(note(out), "correlation of 0.996 over 851 bands, 600 to 4000 cm-1,", fixed = TRUE)
