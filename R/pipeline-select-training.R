@@ -1802,7 +1802,7 @@ run_draw <- function(args, in_session, control, call) {
       send("defer"),
       horizons_consent_needed = function(cnd) {
         library_consent(args$registry_entry, cnd$path, ask = interactive(), rebuild = cnd$rebuild,
-                        call = call)
+                        verbose = isTRUE(control$verbose), call = call)
         ### The download and the build take minutes, and the process's own
         ### tree prints only once it returns
         if (isTRUE(control$verbose)) {

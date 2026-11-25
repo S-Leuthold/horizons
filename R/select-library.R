@@ -388,13 +388,13 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
 
     }
 
-    library_consent(entry, path, ask = ask, rebuild = TRUE, consent = consent, call = call)
+    library_consent(entry, path, ask = ask, rebuild = TRUE, consent = consent, verbose = verbose, call = call)
 
     log_note(collector, "The cached {.val {entry$name}} library at {.path {path}} was built by an earlier version of horizons, so it was rebuilt.")
 
   } else {
 
-    library_consent(entry, path, ask = ask, consent = consent, call = call)
+    library_consent(entry, path, ask = ask, consent = consent, verbose = verbose, call = call)
 
   }
 
@@ -506,10 +506,13 @@ clear_stale_builds <- function(entry, dir, max_age_hours = 24) {
 #' Ask before a registered library's first download
 #'
 #' @description
-#' Always prints what is about to happen, its size and where it goes, and
-#' the credit. Proceeds without asking when `horizons.library_download` is
-#' `TRUE`; otherwise asks in an interactive session and stops in a
-#' non-interactive one, naming the option.
+#' Says what is about to happen, its size and where it goes, and the credit.
+#' Proceeds without asking when `horizons.library_download` is `TRUE`, and
+#' then nothing is being asked, so the notice is lines of the verb's tree
+#' like any other, silent under `verbose = FALSE`. Otherwise it asks in an
+#' interactive session and stops in a non-interactive one, naming the
+#' option; there the notice is the question's context, a message shown
+#' whatever `verbose` is.
 #'
 #' The draw in a process of its own cannot ask, so it is given `consent =
 #' "defer"`, and stops here with a `horizons_consent_needed` condition
@@ -522,12 +525,14 @@ clear_stale_builds <- function(entry, dir, max_age_hours = 24) {
 #'   yet".
 #' @param consent `character(1).` `"ask"` (the above), `"defer"` or
 #'   `"given"`.
+#' @param verbose `logical.` Print the notice as tree lines when the option
+#'   has consented.
 #' @param call The frame a refusal reports: the verb's.
 #' @return `NULL`, invisibly, once consent is given; aborts with
 #'   `horizons_error_consent` otherwise.
 #' @noRd
 library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
-                            consent = "ask", call = rlang::caller_env()) {
+                            consent = "ask", verbose = TRUE, call = rlang::caller_env()) {
 
   if (identical(consent, "given")) return(invisible(NULL))
 
@@ -539,6 +544,26 @@ library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
   }
 
   mb <- round(sum(entry$sources$bytes) / 1e6)
+
+  ## Consented by the option: nothing is asked, so the notice is the tree's
+
+  if (isTRUE(getOption("horizons.library_download"))) {
+
+    if (isTRUE(verbose)) {
+
+      cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,
+                 if (rebuild) " was built by an earlier version of horizons" else " is not cached yet",
+                 ": downloading ", mb, " MB of public source files to verify them and build the library in ",
+                 dirname(path), ". The raw downloads are removed once it is built.\n"),
+          paste0("\u2502  ", entry$credit, "\n"),
+          paste0("\u2502  Please cite: ", entry$citation, " (", entry$license, ").\n"),
+          sep = "")
+
+    }
+
+    return(invisible(NULL))
+
+  }
 
   cli::cli_inform(c(
     "i" = if (rebuild) {
@@ -553,8 +578,6 @@ library_consent <- function(entry, path, ask = interactive(), rebuild = FALSE,
     " " = "Please cite: {entry$citation} ({entry$license}).",
     " " = ""
   ))
-
-  if (isTRUE(getOption("horizons.library_download"))) return(invisible(NULL))
 
   if (!isTRUE(ask)) {
 

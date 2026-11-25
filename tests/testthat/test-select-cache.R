@@ -789,8 +789,9 @@ test_that("a first use drawn in its own process asks in the session and builds t
   ## The process was asked once, and deferred to the session
   expect_length(sent, 1L)
 
-  ## With the option, the message is the session's, once, and the library is
-  ## built where the session's option points
+  ## With the option nothing is asked, so the notice is the session's tree,
+  ## once, and no message; the library is built where the session's option
+  ## points
   withr::local_options(horizons.library_download = TRUE)
 
   said <- character()
@@ -800,12 +801,15 @@ test_that("a first use drawn in its own process asks in the session and builds t
   })))
 
   expect_s3_class(out, "horizons_data")
-  expect_length(grep("is not cached yet", said, fixed = TRUE), 1L)
+  expect_length(grep("is not cached yet", said, fixed = TRUE), 0L)
+  notice <- grep("Library mini v0 is not cached yet", cli::ansi_strip(txt), fixed = TRUE)
+  expect_length(notice, 1L)
 
   ## The session says what the process is doing before it waits on it, and
   ## the process's own tree follows once it returns
   said_first <- grep("Downloading and building the mini library in the draw's process", txt, fixed = TRUE)
   expect_length(said_first, 1L)
+  expect_lt(notice, said_first)
   expect_lt(said_first, grep("Selecting training set", txt, fixed = TRUE)[1])
   expect_true(file.exists(file.path(empty, "mini_v0.qs2")))
   expect_identical(out$selection$library$name, "mini")
