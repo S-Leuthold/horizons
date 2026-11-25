@@ -90,7 +90,8 @@
 #' * Non-uniform within any sample: column dropped from every row, and named
 #'   in a note on the object's log
 #' * `filename`, the OPUS input's meta column: always dropped (not meaningful
-#'   after averaging). A response of that name is averaged like any other
+#'   after averaging), unless it is `by`, when it becomes `sample_id` as any
+#'   `by` column does. A response of that name is averaged like any other
 #'
 #' **The log:**
 #' Every sample whose replicates all failed QC is named on the object's
@@ -608,9 +609,10 @@ average <- function(x,
 
   ## filename is always dropped (not in meta_cols already) -------------------
   ## The OPUS input's meta column, that is: a response of that name is a
-  ## response, kept and averaged like any other
+  ## response, kept and averaged like any other. As `by` it is the grouping
+  ## column, which becomes sample_id below, so it is not dropped.
 
-  if ("filename" %in% role_map$variable[role_map$role == "meta"]) {
+  if (by != "filename" && "filename" %in% role_map$variable[role_map$role == "meta"]) {
 
     dropped_meta <- c("filename", dropped_meta)
 

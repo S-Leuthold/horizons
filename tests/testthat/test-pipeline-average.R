@@ -1250,6 +1250,22 @@ test_that("average() works with custom by column", {
 })
 
 
+test_that("average(by = \"filename\") makes each scan's file its sample id, rather than failing", {
+
+  ## Each scan its own group: the filenames are the new ids
+  hd <- make_test_hd_average(n_samples = 2, n_reps = 2)
+
+  result <- average(hd, by = "filename", verbose = FALSE)
+
+  expect_identical(result$data$analysis$sample_id, hd$data$analysis$filename)
+  expect_false("filename" %in% names(result$data$analysis))
+  expect_identical(result$data$role_map$variable[result$data$role_map$role == "id"], "sample_id")
+  expect_no_error(validate_horizons_data(result))
+  expect_match(log_rows_added(hd, result)$message, "Averaged 4 scans into 4 samples by filename:", fixed = TRUE)
+
+})
+
+
 ## ---------------------------------------------------------------------------
 ## average() — Input validation
 ## ---------------------------------------------------------------------------
