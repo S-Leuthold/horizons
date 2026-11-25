@@ -1934,6 +1934,25 @@ describe("evaluate() - no window method across a gap in the axis", {
 
   })
 
+  it("names the gaps as select_training() does: five in cm-1, and a count of the rest", {
+
+    ## 200 bands 2 cm-1 apart less seven runs of 15: seven 32 cm-1 holes
+    starts <- seq(3980, by = -50, length.out = 7)
+    seven  <- delete_axis_columns(make_eval_object(n_wn = 200, n_configs = 3),
+                                  paste0("wn_", unlist(lapply(starts, function(s) seq(s, s - 28, by = -2)))))
+
+    out <- runs(seven, c("raw", "deriv1", "snv_deriv2"))
+    msg <- gsub("\\s+", " ", conditionMessage(out$error))
+
+    expect_s3_class(out$error, "horizons_error_input")
+    expect_match(msg, "The wavenumber axis has 7 gaps", fixed = TRUE)
+    expect_match(msg, paste0("3650 to 3682, 3700 to 3732, 3750 to 3782, 3800 to 3832, ",
+                             "3850 to 3882 cm-1 and 2 more."), fixed = TRUE)
+    expect_no_match(msg, "3900 to 3932", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
   it("runs raw and snv on the same axis", {
 
     out <- runs(gapped, c("raw", "snv", "raw"))

@@ -3976,12 +3976,12 @@ check_window_gaps <- function(x, preprocessing = x$config$configs$preprocessing,
   gaps     <- found$gaps
   methods  <- found$methods
   n_gaps   <- nrow(gaps)
-  shown    <- paste(sprintf("%g to %g", gaps[, "low"], gaps[, "high"]), collapse = ", ")
+  shown    <- shown_gaps(gaps)
   n_beside <- recipe_settings(x)$sg_window - 1L
 
   abort_horizons(c(
     "The wavenumber axis has {n_gaps} gap{?s}, and {.val {methods}} {cli::qty(length(methods))}run{?s/} a window along it.",
-    "x" = "{shown} cm\u207B\u00B9.",
+    "x" = "{shown}.",
     "i" = "A Savitzky-Golay window would run across each gap as if its two sides were neighbours, so the {n_beside} columns beside it would hold features that are not in the spectra.",
     "i" = "If an earlier {.code standardize(remove_water = TRUE)} deleted these bands, re-run the pipeline from {.fn spectra} with {.code remove_water = FALSE}.",
     "i" = "Otherwise configure {.val raw} or {.val snv}, or trim the spectra to one side of each gap ({.fn standardize}'s {.arg trim})."

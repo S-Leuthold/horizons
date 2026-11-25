@@ -139,6 +139,28 @@ grid_summary <- function(wn, gap_ratio = 3, gap_width = 30) {
 
 }
 
+#' The first gaps of an axis, and how many more
+#'
+#' @description
+#' How a condition names an axis's gaps, so every door that refuses one says
+#' it the same way: each gap low to high, in increasing order, the unit once,
+#' the first five and a count of the rest, as `shown_ids()` names ids.
+#'
+#' @param gaps [Matrix.] `grid_summary()`'s `gaps`: columns `low` and
+#'   `high`, one row a gap.
+#' @param n_show [Integer.] How many to name. Default: `5`.
+#'
+#' @return [Character(1).] For example `"1578 to 1722, 3098 to 3702 cm-1"`.
+#' @noRd
+shown_gaps <- function(gaps, n_show = 5L) {
+
+  shown <- utils::head(sprintf("%g to %g", gaps[, "low"], gaps[, "high"]), n_show)
+  more  <- nrow(gaps) - n_show
+
+  paste0(paste(shown, collapse = ", "), " cm-1", if (more > 0) paste0(" and ", more, " more"))
+
+}
+
 
 ## ---------------------------------------------------------------------------
 ## check_select_axis() — refuse an axis the search cannot use
@@ -183,12 +205,11 @@ check_select_axis <- function(wn, arg, what, call = rlang::caller_env()) {
   if (isTRUE(grid$contiguous)) return(invisible(grid))
 
   gaps  <- grid$gaps
-  shown <- utils::head(sprintf("%g to %g cm-1", gaps[, "low"], gaps[, "high"]), 3)
-  more  <- if (nrow(gaps) > 3) ", ..." else ""
+  shown <- shown_gaps(gaps)
 
   abort_horizons(c(
     "The wavenumber axis of {.arg {arg}}, {what}, has {nrow(gaps)} gap{?s} in it.",
-    "x" = "{shown}{more}, each more than three times and more than 30 cm-1 above the median spacing of {grid$resolution} cm-1.",
+    "x" = "{shown}, each more than three times and more than 30 cm-1 above the median spacing of {grid$resolution} cm-1.",
     "i" = "Resampling would spline-fill the gap and the derivative would run straight across it, inventing absorbance at every edge.",
     "i" = "Handle water bands with {.arg mask}, which masks after the derivative; never by deleting columns upstream."
   ), kind = "input", call = call)
