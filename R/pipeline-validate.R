@@ -16,8 +16,9 @@
 #' ERROR-severity checks failed.
 #'
 #' **The rows counted:** the sample-size and outcome-variance checks count
-#' the rows the modelling verbs model, those with an observed outcome that no
-#' step flagged (`.flag`). The fold checks read the training part
+#' the rows of the object `validate()` returns, after any spectral removal it
+#' makes, that the modelling verbs model: those with an observed outcome that
+#' no step flagged (`.flag`). The fold checks read the training part
 #' `evaluate()`'s train/test split leaves of them, on the rule the verbs
 #' apply: P001b is an ERROR when it has no more rows than CV folds, which
 #' `evaluate()` and `fit()` refuse, and P002 a WARNING when an even split of
@@ -269,7 +270,7 @@ validate <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Compute sample counts + extract outcome
+  ## Step 2: The table as it arrives, its outcome and the folds
   ## ---------------------------------------------------------------------------
 
   analysis <- x$data$analysis
@@ -289,17 +290,6 @@ validate <- function(x,
 
   ### A whole number of at least 2, which the door validator checks.
   cv_folds <- x$config$tuning$cv_folds
-
-  ## The rows the verbs model, and the training part they fold -------------------
-  ## The sample-size checks count what evaluate() and fit() count: the rows
-  ## with an observed outcome and no flag (modelling_mask(), the rule
-  ## modelling_rows() applies), and the training part evaluate()'s split
-  ## leaves of them, drawn at the root evaluate() takes by default. The door
-  ## validator has refused a configured object without exactly one outcome.
-
-  modelled <- modelling_mask(analysis, outcome_col)
-  n_model  <- sum(modelled)
-  n_train  <- training_part_rows(analysis, outcome_col, seed = recorded_seed(x) %||% 0L)
 
   ## ---------------------------------------------------------------------------
   ## Step 3: Initialize checks collector
@@ -352,6 +342,97 @@ validate <- function(x,
   ))
 
   ## ---------------------------------------------------------------------------
+  ## Step 4b: Spectral outliers, detected and, when asked, removed
+  ## ---------------------------------------------------------------------------
+  ## Before anything is counted, so the sample-size and outcome-variance
+  ## checks below score the rows validate() returns, the ones evaluate() gets.
+  ## Only spectral outliers leave the object here, since that detector reads
+  ## no labels; response outliers are never removed here (Step 12, #77).
+
+  spectral <- detect_spectral_outliers(
+    analysis       = clean_analysis,
+    predictor_cols = predictor_cols,
+    nzv_cols       = nzv_cols,
+    threshold      = spectral_threshold
+  )
+
+  spectral_outlier_ids <- spectral$ids
+
+  ### A check that could not run says so, here and in the report, rather
+  ### than reading as one that found nothing.
+  if (!is.null(spectral$skipped)) {
+
+    log_warning(collector, "skipped",
+                "Spectral outlier detection did not run: {spectral$skipped}.")
+
+  }
+
+  remove_spectral <- isTRUE(remove_outliers) || identical(remove_outliers, "spectral")
+  trim_response   <- isTRUE(remove_outliers) || identical(remove_outliers, "response")
+
+  removed_ids    <- character(0)
+  removal_detail <- NULL
+  did_remove     <- FALSE
+
+  if (remove_spectral && length(spectral_outlier_ids) > 0) {
+
+    ## A low threshold can flag every row the check saw, and removing them
+    ## would leave nothing to model. The threshold is the user's, so it is
+    ## refused here, by name, rather than reaching subset_rows()'s tripwire
+    ## as a bug. Flagged rows are never removed, and never modelled either.
+    if (length(spectral_outlier_ids) == nrow(clean_analysis)) {
+
+      abort_horizons(c(
+        "{.arg spectral_threshold} = {spectral_threshold} flags every sample the check reads as a spectral outlier, so removing them would leave none to model.",
+        "i" = "Raise {.arg spectral_threshold} (the default is 0.975), or keep the samples with {.code remove_outliers = FALSE}."
+      ), kind = "input")
+
+    }
+
+    ## Removing rows from an evaluated or fitted object would strand its
+    ## splits; refused here, where the rows would change, so an object with
+    ## nothing to remove is still validated.
+    check_unpromoted(x)
+
+    ## validate() records the removal in x$validation$outliers below.
+    x <- subset_rows(x, keep = !x$data$analysis$sample_id %in% spectral_outlier_ids)
+
+    removal_detail <- tibble::tibble(
+      sample_id          = spectral_outlier_ids,
+      reason             = "spectral",
+      spectral_threshold = as.numeric(spectral_threshold)
+    )
+
+    removed_ids <- spectral_outlier_ids
+    did_remove  <- TRUE
+
+    ## The screen runs before any split, so a later test set is drawn from
+    ## the rows it leaves. Said on the log, which every later verb carries,
+    ## and in the tree; a note, since removing them was the user's call.
+    log_note(collector, c(
+      "Removed {length(removed_ids)} spectral outlier{?s} before any split: the rows a later test set is drawn from are the ones left.",
+      "i" = "Samples: {shown_ids(removed_ids)}.",
+      "i" = "Each sample and the threshold it was removed at are in this row's {.field detail}."
+    ), ids = removed_ids, detail = removal_detail)
+
+  }
+
+  ## ---------------------------------------------------------------------------
+  ## Step 4c: The rows the verbs model, and the training part they fold
+  ## ---------------------------------------------------------------------------
+  ## The sample-size checks count what evaluate() and fit() count, on the
+  ## table validate() returns: the rows with an observed outcome and no flag
+  ## (modelling_mask(), the rule modelling_rows() applies), and the training
+  ## part evaluate()'s split leaves of them, drawn at the root evaluate()
+  ## takes by default. The door validator has refused a configured object
+  ## without exactly one outcome.
+
+  returned <- x$data$analysis
+  modelled <- modelling_mask(returned, outcome_col)
+  n_model  <- sum(modelled)
+  n_train  <- training_part_rows(returned, outcome_col, seed = recorded_seed(x) %||% 0L)
+
+  ## ---------------------------------------------------------------------------
   ## Step 5: P001 — Recommended sample count (n_model)
   ## ---------------------------------------------------------------------------
 
@@ -397,7 +478,7 @@ validate <- function(x,
 
   if (has_outcome) {
 
-    outcome_complete <- outcome_vals[modelled]
+    outcome_complete <- returned[[outcome_col]][modelled]
     outcome_var      <- if (length(outcome_complete) >= 2) stats::var(outcome_complete) else 0
 
     checks <- rbind(checks, run_check(
@@ -428,26 +509,8 @@ validate <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 10: P005 — Spectral outlier detection
+  ## Step 10: P005 — Spectral outliers (detected in Step 4b)
   ## ---------------------------------------------------------------------------
-
-  spectral <- detect_spectral_outliers(
-    analysis       = clean_analysis,
-    predictor_cols = predictor_cols,
-    nzv_cols       = nzv_cols,
-    threshold      = spectral_threshold
-  )
-
-  spectral_outlier_ids <- spectral$ids
-
-  ### A check that could not run says so, here and in the report, rather
-  ### than reading as one that found nothing.
-  if (!is.null(spectral$skipped)) {
-
-    log_warning(collector, "skipped",
-                "Spectral outlier detection did not run: {spectral$skipped}.")
-
-  }
 
   checks <- rbind(checks, run_check(
     "P005", "Spectral outliers",
@@ -523,65 +586,14 @@ validate <- function(x,
   ))
 
   ## ---------------------------------------------------------------------------
-  ## Step 12: Outlier removal (if requested)
+  ## Step 12: The response-trim request
   ## ---------------------------------------------------------------------------
-  ## Only spectral outliers leave the object here, since that detector reads
-  ## no labels. Response outliers are never removed here (#77): the fences
-  ## above span every row, including the rows evaluate() will hold out, so
-  ## removing on them would take the test set's hardest cases out by their
-  ## own labels. A response request is recorded instead, and evaluate()
-  ## trims the training partition on fences from its labels alone.
-
-  remove_spectral <- isTRUE(remove_outliers) || identical(remove_outliers, "spectral")
-  trim_response   <- isTRUE(remove_outliers) || identical(remove_outliers, "response")
-
-  removed_ids    <- character(0)
-  removal_detail <- NULL
-  did_remove     <- FALSE
-
-  if (remove_spectral && length(spectral_outlier_ids) > 0) {
-
-    ## A low threshold can flag every row the check saw, and removing them
-    ## would leave nothing to model. The threshold is the user's, so it is
-    ## refused here, by name, rather than reaching subset_rows()'s tripwire
-    ## as a bug. Flagged rows are never removed, and never modelled either.
-    if (length(spectral_outlier_ids) == nrow(clean_analysis)) {
-
-      abort_horizons(c(
-        "{.arg spectral_threshold} = {spectral_threshold} flags every sample the check reads as a spectral outlier, so removing them would leave none to model.",
-        "i" = "Raise {.arg spectral_threshold} (the default is 0.975), or keep the samples with {.code remove_outliers = FALSE}."
-      ), kind = "input")
-
-    }
-
-    ## Removing rows from an evaluated or fitted object would strand its
-    ## splits; refused here, where the rows would change, so an object with
-    ## nothing to remove is still validated.
-    check_unpromoted(x)
-
-    ## validate() records the removal in x$validation$outliers below.
-    x <- subset_rows(x, keep = !x$data$analysis$sample_id %in% spectral_outlier_ids)
-
-    removal_detail <- tibble::tibble(
-      sample_id          = spectral_outlier_ids,
-      reason             = "spectral",
-      spectral_threshold = as.numeric(spectral_threshold)
-    )
-
-    removed_ids <- spectral_outlier_ids
-    did_remove  <- TRUE
-
-    ## The screen runs before any split, so a later test set is drawn from
-    ## the rows it leaves. Said on the log, which every later verb carries,
-    ## and in the tree; a note, since removing them was the user's call.
-    log_note(collector, c(
-      "Removed {length(removed_ids)} spectral outlier{?s} before any split: the rows a later test set is drawn from are the ones left.",
-      "i" = "Samples: {shown_ids(removed_ids)}.",
-      "i" = "Each sample and the threshold it was removed at are in this row's {.field detail}."
-    ), ids = removed_ids, detail = removal_detail)
-
-  }
-
+  ## Response outliers are never removed here (#77): the fences above span
+  ## every row, including the rows evaluate() will hold out, so removing on
+  ## them would take the test set's hardest cases out by their own labels. A
+  ## response request is recorded instead, and evaluate() trims the training
+  ## partition on fences from its labels alone.
+  ##
   ## The request evaluate() and fit()'s cold start read. The outcome is
   ## recorded so a request can never be applied to another outcome's labels;
   ## configure() clears it with the verdict anyway.
@@ -659,11 +671,11 @@ validate <- function(x,
 
     ## Sample checks --------------------------------------------------------------
 
-    ### The rows the verbs model, of all of them when some are left out
+    ### The rows the verbs model, of the rows returned when some are left out
     p001 <- checks[checks$check_id == "P001", ]
     sym  <- if (p001$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
     cat(paste0("\u2502  \u251C\u2500 ", sym, " Samples: ", n_model,
-               if (n_model < n_total) paste0(" of ", n_total, " modelled"),
+               if (n_model < nrow(returned)) paste0(" of ", nrow(returned), " modelled"),
                " (\u2265 50)\n"))
 
     p001b <- checks[checks$check_id == "P001b", ]

@@ -479,6 +479,54 @@ describe("validate()'s sample-size checks and evaluate()'s fold rule", {
 
   })
 
+  ## Spectra far from the rest, which the spectral screen removes
+  with_spectral_outliers <- function(obj, rows) {
+
+    pred <- obj$data$role_map$variable[obj$data$role_map$role == "predictor"]
+    obj$data$analysis[rows, pred] <- obj$data$analysis[rows, pred] * 50
+    obj
+
+  }
+
+  it("scores the fold rule on the rows its spectral removal leaves, which evaluate() refuses", {
+
+    ## 8 rows give a training part of 6, which passes; the 6 left give 4
+    obj <- with_spectral_outliers(make_eval_object(n = 8), rows = 1:2)
+    obj$config$tuning$cv_folds <- 5L
+
+    out <- capture.output(v <- suppressWarnings(
+      validate(obj, remove_outliers = "spectral", spectral_threshold = 0.5, verbose = TRUE)
+    ))
+    p001b <- v$validation$checks[v$validation$checks$check_id == "P001b", ]
+
+    expect_identical(verdict(obj)[["P001b"]], "pass")
+    expect_setequal(v$validation$outliers$removed_ids, c("S001", "S002"))
+    expect_identical(p001b$status, "fail")
+    expect_identical(p001b$value, "4 training rows (need > 5)")
+    expect_false(v$validation$passed)
+    expect_true(any(grepl("Samples: 6 (", out, fixed = TRUE)))
+    expect_identical(evaluate_door(v), "refused")
+
+  })
+
+  it("warns of small folds on the rows its spectral removal leaves, where evaluate() warns", {
+
+    ## 65 rows give a training part of 50, folds of 10; the 63 left give 48,
+    ## folds of 9
+    obj <- with_spectral_outliers(make_eval_object(n = 65), rows = 1:2)
+    obj$config$tuning$cv_folds <- 5L
+
+    v    <- quiet_validate(obj, remove_outliers = "spectral")
+    p002 <- v$validation$checks[v$validation$checks$check_id == "P002", ]
+
+    expect_identical(verdict(obj)[["P002"]], "pass")
+    expect_setequal(v$validation$outliers$removed_ids, c("S001", "S002"))
+    expect_identical(p002$status, "fail")
+    expect_identical(p002$value, "~9")
+    expect_lt(evaluate_door(v), SMALL_FOLD_ROWS)
+
+  })
+
 })
 
 
@@ -542,6 +590,23 @@ describe("validate() outcome checks", {
 
     p003 <- result$validation$checks[result$validation$checks$check_id == "P003", ]
     expect_equal(p003$status, "fail")
+
+  })
+
+  test_that("P003 reads the rows a spectral removal leaves, which evaluate() refuses as constant", {
+
+    ## The one row with another value is a spectral outlier
+    hd <- make_configured_hd(outcome_values = c(9, rep(5, 99)))
+    hd$data$analysis[1, 2:51] <- 100 * hd$data$analysis[1, 2:51]
+
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+    p003   <- result$validation$checks[result$validation$checks$check_id == "P003", ]
+
+    expect_true("S001" %in% result$validation$outliers$removed_ids)
+    expect_identical(p003$status, "fail")
+    expect_false(result$validation$passed)
+    expect_error(suppressWarnings(evaluate(result, seed = 42L)),
+                 class = "horizons_error_input", regexp = "zero variance")
 
   })
 

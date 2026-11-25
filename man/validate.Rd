@@ -77,8 +77,9 @@ section of the object and sets \code{validation$passed} based on whether any
 ERROR-severity checks failed.
 
 \strong{The rows counted:} the sample-size and outcome-variance checks count
-the rows the modelling verbs model, those with an observed outcome that no
-step flagged (\code{.flag}). The fold checks read the training part
+the rows of the object \code{validate()} returns, after any spectral removal it
+makes, that the modelling verbs model: those with an observed outcome that
+no step flagged (\code{.flag}). The fold checks read the training part
 \code{evaluate()}'s train/test split leaves of them, on the rule the verbs
 apply: P001b is an ERROR when it has no more rows than CV folds, which
 \code{evaluate()} and \code{fit()} refuse, and P002 a WARNING when an even split of

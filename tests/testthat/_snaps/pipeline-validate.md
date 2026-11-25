@@ -41,9 +41,9 @@
       validate(hd, remove_outliers = TRUE, verbose = TRUE)
     Output
       ├─ Validating...
-      │  ├─ ✓ Samples: 100 (≥ 50)
-      │  ├─ ✓ CV feasibility: 80 training rows for 5 folds (need > 5)
-      │  ├─ ✓ Outcome variance: 26.61
+      │  ├─ ✓ Samples: 97 (≥ 50)
+      │  ├─ ✓ CV feasibility: 77 training rows for 5 folds (need > 5)
+      │  ├─ ✓ Outcome variance: 27.09
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
       │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
