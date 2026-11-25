@@ -280,12 +280,12 @@ configuration's recipe keeps in any cross-validation fold or on the whole
 training part, and \code{num_comp} at those and the smallest fold's rows less
 one, narrowing a range given here, so no candidate asks a fold for more
 predictors than it kept; a range whose lower bound is above that cap
-fails the configuration, saying so. \code{configure()} refuses a name no configured model
-tunes, a range that is not two finite numbers with the lower below the
-upper, an \code{mtry}, \code{num_comp} or \code{hidden_units} range starting below 1 (each
-counts the predictors, components or hidden units a fit uses, so 0 is no
-model), and a fractional
-bound on a whole-number parameter (typed where the model's engine is
+fails the configuration, saying so. \code{configure()} refuses a name no
+configured model tunes, a range that is not two finite numbers with the
+lower below the upper, an \code{mtry}, \code{num_comp} or \code{hidden_units} range
+starting below 1 (each counts the predictors, components or hidden units
+a fit uses, so 0 is no model), and a fractional bound on a whole-number
+parameter (typed where the model's engine is
 installed, and again by \code{evaluate()} and \code{fit()} once they have checked
 the engines of the models they fit). An engine's own limits are not
 checked: Cubist takes 1 to 100 committees and 0 to 9 neighbors, and a
@@ -299,13 +299,17 @@ own grids.
 1 to the predictors the data cap it at, which on full spectra is about
 1,700. A random forest's fit time grows with it: on one cross-validation
 fold of full spectra, 500 trees took 148 s at an \code{mtry} of 41 and 3,051 s
-at 1,200, on one thread. On the spectral data the package has been
-benchmarked on, the values chosen on about 1,700 bands sat between 0.06
-and 0.22 of them, and the cross-validated error changed little across
-that span. So where time matters, \code{tune_ranges = list(mtry = c(1, 200))},
-or a feature selection that keeps fewer bands, searches the faster part
-of the range. That evidence is one data set, so the default searches the
-whole range (#115).
+at 1,200, on one thread. Where rf's searches landed has varied. With no
+feature selection, 19 saved searches on about 1,700 bands chose a median
+of 376: five at or below 41 (the square root of the bands), six above a
+third of the bands and four above half. On one data set's Boruta and CARS
+selections, nine of ten chose between 0.06 and 0.22 of the bands, and
+where one configuration was searched twice the cross-validated error
+differed by under half a standard error. A narrower range
+(\code{tune_ranges = list(mtry = c(1, 200))}, for instance), or a feature
+selection that keeps fewer bands, searches the faster part of the range
+at the cost of the values above it, which more than half of the searches
+without a selection chose. The default searches the whole range (#115).
 
 mlp's networks are kept within a weight budget, \code{max_weights}. A network
 of h hidden units on p predictors holds h(p + 2) + 1 weights, and nnet's
@@ -320,7 +324,7 @@ training part's), and when that narrows the range the configuration's
 row and the verb's log say so with a note; nnet is given the budget as
 its own limit (\code{MaxNWts}). At the default of 10,000 weights an mlp on
 about 1,700 bands searches up to 5 units, and one on 250 selected bands
-up to 39, so its default range of 1 to 10 is not narrowed there. Raise
+up to 39, where its default range of 1 to 10 is not narrowed. Raise
 the budget to search larger networks on wide predictors, at that cost,
 or set it to \code{Inf} for none; a feature selection and
 \code{tune_ranges = list(hidden_units = )} are the other levers. The budget is

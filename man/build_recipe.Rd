@@ -10,7 +10,8 @@ build_recipe(
   role_map,
   sg_window = DEFAULT_SG_WINDOW,
   pca_threshold = DEFAULT_PCA_THRESHOLD,
-  transformed = FALSE
+  transformed = FALSE,
+  selection_seed = NULL
 )
 }
 \arguments{
@@ -31,6 +32,13 @@ selection keeps, passed to \code{recipes::step_pca(threshold = )}. Default
 \item{transformed}{Logical. \code{TRUE} when \code{train_data}'s spectra are already
 transformed (\code{hoist_spectra()}), so the recipe has no transform step.
 Default \code{FALSE}.}
+
+\item{selection_seed}{A whole number, or \code{NULL}. The \code{seed} the Boruta and
+CARS steps draw under (\code{selection_seed()}): a fold's prep takes its own,
+and the training part's prep and the configuration's final fit take the
+training part's, so the final fit selects what the bounds were read from.
+\code{NULL} (default) leaves the steps to draw from the stream they are
+prepped in.}
 }
 \value{
 A \code{recipes::recipe} object ready for \code{workflows::add_recipe()}.

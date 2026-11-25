@@ -6,8 +6,9 @@
 #' `fixed` arguments and each of its `tuned` arguments as `tune::tune()`; the
 #' engine `model_engine()` names, with the row's `engine_args`, its
 #' thread argument (`threads$argument`) at `threads` and its weight limit
-#' (`weights$argument`) at `max_weights`; and the regression mode. Each argument is captured as parsnip captures one written
-#' in the call (`500`, `tune::tune()`, `"impurity"`). Used by
+#' (`weights$argument`) at `max_weights`; and the regression mode. Each
+#' argument is captured as parsnip captures one written in the call (`500`,
+#' `tune::tune()`, `"impurity"`). Used by
 #' `evaluate_single_config()` and `fit_single_config()` to build the workflow
 #' for each config.
 #'

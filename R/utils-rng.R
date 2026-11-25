@@ -124,12 +124,34 @@ unit_seed <- function(seed, name) {
 
 with_unit_seed <- function(seed, name, code) {
 
-  local_rng_state()
-
-  set.seed(unit_seed(seed, name), kind = "Mersenne-Twister",
-           normal.kind = "Inversion", sample.kind = "Rejection")
+  local_seed(unit_seed(seed, name))
 
   code
+
+}
+
+
+#' Seed the generator for the rest of a function, as a unit's seed does
+#'
+#' @description
+#' Seeds the generator with `seed` under the kinds [with_unit_seed()] pins,
+#' and restores the caller's stream and kinds when `frame` exits. The one
+#' place a seed is set: [with_unit_seed()] for a unit's code, and a selection
+#' step's `prep()` for the `seed` it was built with
+#' ([step_select_boruta()], [step_select_cars()]).
+#'
+#' @param seed A whole number: [unit_seed()]'s value, or a step's `seed`.
+#' @param frame The frame whose exit restores the state: the caller's.
+#' @return `NULL`, invisibly.
+#' @keywords internal
+#' @noRd
+local_seed <- function(seed, frame = parent.frame()) {
+
+  local_rng_state(frame)
+
+  set.seed(seed, kind = "Mersenne-Twister", normal.kind = "Inversion", sample.kind = "Rejection")
+
+  invisible(NULL)
 
 }
 

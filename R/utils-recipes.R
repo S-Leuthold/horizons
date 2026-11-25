@@ -54,6 +54,12 @@
 #' @param transformed Logical. `TRUE` when `train_data`'s spectra are already
 #'   transformed (`hoist_spectra()`), so the recipe has no transform step.
 #'   Default `FALSE`.
+#' @param selection_seed A whole number, or `NULL`. The `seed` the Boruta and
+#'   CARS steps draw under (`selection_seed()`): a fold's prep takes its own,
+#'   and the training part's prep and the configuration's final fit take the
+#'   training part's, so the final fit selects what the bounds were read from.
+#'   `NULL` (default) leaves the steps to draw from the stream they are
+#'   prepped in.
 #'
 #' @return A `recipes::recipe` object ready for `workflows::add_recipe()`.
 #' @keywords internal
@@ -61,8 +67,9 @@ build_recipe <- function(config_row,
                          train_data,
                          role_map,
                          sg_window     = DEFAULT_SG_WINDOW,
-                         pca_threshold = DEFAULT_PCA_THRESHOLD,
-                         transformed   = FALSE) {
+                         pca_threshold  = DEFAULT_PCA_THRESHOLD,
+                         transformed    = FALSE,
+                         selection_seed = NULL) {
 
   outcome_col <- role_map$variable[role_map$role == "outcome"]
 
@@ -133,13 +140,15 @@ build_recipe <- function(config_row,
     "boruta" = rec |>
       step_select_boruta(
         dplyr::matches("^spec[0-9]+$"),
-        outcome = outcome_col
+        outcome = outcome_col,
+        seed    = selection_seed
       ),
 
     "cars" = rec |>
       step_select_cars(
         dplyr::matches("^spec[0-9]+$"),
-        outcome = outcome_col
+        outcome = outcome_col,
+        seed    = selection_seed
       )
 
     ### No default: the door validators refuse a method outside

@@ -14,9 +14,10 @@
 #' the runners set it from `config$tuning$ranges` (`TUNE_RANGES` holds 1 to
 #' `PLS_MAX_COMP`) and cap it by the data ([cap_by_data()]: the fewest
 #' predictors any fold or the whole training part keeps, and the smallest
-#' fold's rows less one), so the table is the one place it is kept. It is a submodel, as `MODEL_SPECS$plsr` names
-#' it: tune fits the counts of a grid once, at the largest, and the engine
-#' scores every count from that fit ([multi_predict._horizons_pls()]).
+#' fold's rows less one), so the table is the one place it is kept. It is a
+#' submodel, as `MODEL_SPECS$plsr` names it: tune fits the counts of a grid
+#' once, at the largest, and the engine scores every count from that fit
+#' ([multi_predict._horizons_pls()]).
 #' Registering twice in one session is a no-op.
 #'
 #' @return `NULL`, invisibly.
@@ -97,8 +98,10 @@ register_pls_engine <- function() {
 #' most components the data can hold. A fit asked for more uses that many and
 #' warns, with class `horizons_warning_substitution`. The runners cap the
 #' tuning range at the fewest predictors any fold or the whole training part
-#' keeps and at the smallest fold's rows less one (`cap_by_data()`), so a
-#' tuned count never reaches this cap; a direct fit, or the stop below, can.
+#' keeps and at the smallest fold's rows less one (`cap_by_data()`), and the
+#' final fit keeps the training part's predictors, so a tuned count never
+#' reaches this cap in a fold or the final fit. A direct fit can, and the
+#' stop below warns the same way.
 #'
 #' The fit also stops before a component that would add nothing to it, and
 #' warns the same way. PLS with `a` components is the least-squares fit over

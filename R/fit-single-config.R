@@ -255,9 +255,14 @@ fit_single_config <- function(config_row,
     ## Step 1: Build recipe, model specification and workflow
     ## -----------------------------------------------------------------------
 
+    ## The selection steps draw under the training part's prep's seed, so the
+    ## final fit, on the same rows, selects what that prep selected and the
+    ## bounds read from it cover the final fit (selection_seed())
     recipe <- unit_step("recipe", build_recipe(config_row, train_data, role_map,
-                                               sg_window     = sg_window,
-                                               pca_threshold = pca_threshold))
+                                               sg_window      = sg_window,
+                                               pca_threshold  = pca_threshold,
+                                               selection_seed = selection_seed(seed, "fit", config_row,
+                                                                               "training")))
 
     model_spec <- unit_step("model_spec", define_model_spec(config_row$model, isolate = isolate, threads = threads,
                                                            max_weights = max_weights))

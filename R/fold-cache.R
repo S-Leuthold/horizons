@@ -190,18 +190,46 @@ fold_unit_row <- function(config_row) {
 #' @param unit_row Single-row tibble from [fold_unit_row()].
 #' @param hoisted The transformed rows ([hoist_spectra()]).
 #' @param role_map Tibble with `variable` and `role` columns.
-#' @param sg_window,pca_threshold Passed to [build_recipe()].
+#' @param sg_window,pca_threshold,selection_seed Passed to [build_recipe()].
 #' @return An untrained `recipe`.
 #' @keywords internal
 #' @noRd
-fold_unit_recipe <- function(unit_row, hoisted, role_map, sg_window, pca_threshold) {
+fold_unit_recipe <- function(unit_row, hoisted, role_map, sg_window, pca_threshold, selection_seed = NULL) {
 
   local_rng_state()
 
   build_recipe(unit_row, hoisted, role_map,
-               sg_window     = sg_window,
-               pca_threshold = pca_threshold,
-               transformed   = TRUE)
+               sg_window      = sg_window,
+               pca_threshold  = pca_threshold,
+               transformed    = TRUE,
+               selection_seed = selection_seed)
+
+}
+
+#' The seed a selection step draws under in one prep
+#'
+#' @description
+#' The seed of the prep's own unit: a hash of the run's root and the prep's
+#' name ([unit_seed()]), the scope ([fold_prep_scope()]) then the part, the
+#' fold's id or `"training"`. Nothing in a prep draws before its selection
+#' step, so the step drawing under it draws what the unit's seed gave it
+#' before steps took a seed. The configuration's own recipe takes the
+#' training part's (`part = "training"`), so its final fit, on the same rows,
+#' selects exactly what the training part's prep selected: the bounds read
+#' from that prep and every fold's cover every fit the configuration makes
+#' ([finalize_bound()]).
+#'
+#' @param seed The run's root.
+#' @param verb Character(1). `"evaluate"` or `"fit"`.
+#' @param config_row Single-row tibble: a configuration's row, or a unit's
+#'   ([fold_unit_row()]).
+#' @param part Character(1). The fold's id, or `"training"`.
+#' @return A whole number.
+#' @keywords internal
+#' @noRd
+selection_seed <- function(seed, verb, config_row, part) {
+
+  unit_seed(seed, c(fold_prep_scope(verb, config_row), part))
 
 }
 
@@ -422,7 +450,9 @@ prep_fold_entry <- function(unit, hoisted, rows, role_map, seed, sg_window, pca_
 
   out <- run_unit({
 
-    recipe <- unit_step("recipe", fold_unit_recipe(unit$row, hoisted, role_map, sg_window, pca_threshold))
+    part   <- if (is.null(rows)) "training" else unit$fold
+    recipe <- unit_step("recipe", fold_unit_recipe(unit$row, hoisted, role_map, sg_window, pca_threshold,
+                                                   selection_seed(seed, unit$verb, unit$row, part)))
 
     if (is.null(rows)) {
 
@@ -579,7 +609,10 @@ fold_entry_reader <- function(fold_entries, units, build, folds) {
 #' records the configuration then holds as its own (a failure ends it
 #' here), or, with no feature selection, the transformed rows' predictors.
 #' With each fold's ([assemble_folds()]), they bound the configuration's
-#' tuning parameters ([finalize_bound()]): the final fit is made on them.
+#' tuning parameters ([finalize_bound()]). The final fit keeps exactly these:
+#' it is made on the same rows, and its selection step draws under this
+#' prep's seed ([selection_seed()]), so a stochastic selection (Boruta,
+#' CARS) selects what this prep selected.
 #'
 #' @param entry The training part's entry, or `NULL`.
 #' @param inputs [fold_prep_inputs()]'s value.
@@ -633,9 +666,11 @@ finalize_bound <- function(param_set, n_predictors, folds, max_weights = DEFAULT
 #' preps keeps (the whole training part's or a fold's), and `num_comp`'s at
 #' those predictors and at the smallest analysis set's rows less one, so a
 #' grid or a Bayesian search proposes no value one of its fits cannot take
-#' (#216): a feature selection keeps a different number of predictors in
-#' each fold, and a value above a fold's count would be truncated by one
-#' engine, refused by another and passed over silently by a third.
+#' (#216), the final fit among them, which keeps the training part's
+#' predictors ([selection_seed()]). A feature selection keeps a different
+#' number of predictors in each fold, and a value above a fold's count would
+#' be truncated by one engine, refused by another and passed over silently
+#' by a third.
 #' `hidden_units`' upper bound is the most units whose network stays within
 #' the weight budget on the most predictors any prep keeps
 #' ([max_hidden_units()]), since a network's weights grow with its inputs;

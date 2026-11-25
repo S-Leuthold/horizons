@@ -38,8 +38,9 @@ Builds a model's tunable parsnip specification from its row of
 \code{fixed} arguments and each of its \code{tuned} arguments as \code{tune::tune()}; the
 engine \code{model_engine()} names, with the row's \code{engine_args}, its
 thread argument (\code{threads$argument}) at \code{threads} and its weight limit
-(\code{weights$argument}) at \code{max_weights}; and the regression mode. Each argument is captured as parsnip captures one written
-in the call (\code{500}, \code{tune::tune()}, \code{"impurity"}). Used by
+(\code{weights$argument}) at \code{max_weights}; and the regression mode. Each
+argument is captured as parsnip captures one written in the call (\code{500},
+\code{tune::tune()}, \code{"impurity"}). Used by
 \code{evaluate_single_config()} and \code{fit_single_config()} to build the workflow
 for each config.
 }

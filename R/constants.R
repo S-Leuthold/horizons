@@ -62,8 +62,9 @@
 #   define_model_spec() sets to configure(max_weights = )'s budget. The
 #   runners cap `hidden_units` so the search proposes no network over that
 #   budget on the most predictors any of a configuration's preps keeps
-#   (cap_by_data(), R/fold-cache.R), so the argument never refuses a
-#   candidate the search asked for.
+#   (cap_by_data(), R/fold-cache.R), the final fit's among them, since it
+#   keeps the training part's (selection_seed()); so the argument never
+#   refuses a candidate the search asked for.
 #
 # An engine's traits are read through engine_spec() (R/utils-models.R), which
 # finds the row of an isolated twin's engine too.
@@ -186,9 +187,10 @@ SELECTION_PACKAGES <- list(
 # The most components the plsr model tunes over (#216), its default range's
 # upper bound in TUNE_RANGES. The runners cap it further at the fewest
 # predictors the recipe keeps in a fold or on the whole training part and at
-# the smallest fold's rows less one (cap_by_data(), R/fold-cache.R). MIR models often want more than the handful a default
-# range allows, and 30 keeps a grid's points where models land. Not a field
-# of MODEL_SPECS: CARS caps its components with it too (R/step-select-cars.R).
+# the smallest fold's rows less one (cap_by_data(), R/fold-cache.R). MIR
+# models often want more than the handful a default range allows, and 30
+# keeps a grid's points where models land. Not a field of MODEL_SPECS: CARS
+# caps its components with it too (R/step-select-cars.R).
 PLS_MAX_COMP <- 30L
 
 # The PLS stop's tolerance, relative (pls_informative(), R/pls-engine.R). A
@@ -702,7 +704,11 @@ PARALLELIZE_OVER_VALUES <- c("auto", "configs", "resamples")
 #      longer has candidates truncated, passed over or failed there; and
 #      mlp's hidden_units is capped so no network passes the weight budget
 #      (configure(max_weights = )), where its larger candidates had failed.
-SCORING_SCHEMA <- 10L
+#  11  2026-11-24: the Boruta and CARS steps draw under a seed fixed when
+#      the recipe is built, a fold's prep its own and the final fit the
+#      training part's, so the final fit selects what the bounds were read
+#      from rather than making a draw of its own.
+SCORING_SCHEMA <- 11L
 
 # Schema of eval_manifest.rds, which evaluate() writes at the start of every
 # run with an output_dir and monitor_evaluate() reads. Schema 4 (#42) records
