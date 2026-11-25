@@ -2642,6 +2642,14 @@ log_members_below_threshold <- function(collector, members, fallback, bayesian_i
 
 #' Record that UQ and AD were turned off for a small calibration set
 #'
+#' @description
+#' The remedy follows `ensemble()`'s CV+ gate for the same shortfall: it
+#' offers lowering `min_calib_rows` only when an allowed value would let the
+#' calibration run, and names the number that does. `control_horizons()`
+#' takes no `min_calib_rows` below the split-conformal floor
+#' (`conformal_min_rows()` at `DEFAULT_UQ_LEVEL`, 9 rows), which holds for
+#' the applicability domain alone too, so below it the remedy is more rows.
+#'
 #' @param collector `fit()`'s collector.
 #' @param compute_uq,compute_ad Logical. What was asked for.
 #' @param n_calib Integer(1). The calibration rows drawn.
@@ -2659,9 +2667,17 @@ log_calibration_skip <- function(collector, compute_uq, compute_ad, n_calib,
   ## The verb follows the subject: intervals are plural, the domain is not
   verb <- if (compute_uq) "were" else "was"
 
+  floor_rows <- conformal_min_rows(DEFAULT_UQ_LEVEL)
+
+  remedy <- if (n_calib >= floor_rows) {
+    "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )} to {n_calib} or fewer; the calibration set needs at least {floor_rows} rows."
+  } else {
+    "Fit on more rows: the calibration set needs at least {floor_rows} rows whatever {.code min_calib_rows} is."
+  }
+
   log_warning(collector, "skipped", c(
     "{what} {verb} not computed for any member: the calibration set has {n_calib} row{?s}, fewer than {.code min_calib_rows} ({min_calib_rows}).",
-    "i" = "Fit on more rows, or lower {.code control_horizons(min_calib_rows = )}, to {conformal_min_rows(DEFAULT_UQ_LEVEL)} at least."
+    "i" = remedy
   ), ids = ids)
 
   invisible(collector)
