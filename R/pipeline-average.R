@@ -145,9 +145,10 @@
 #'   are modelled over, whichever order `average()` and [standardize()] run
 #'   in: on spectra `standardize()` has run on, every band they have; on
 #'   spectra it has not, the bands inside its default `trim`, 600 to 4000
-#'   cm-1. When no band lies inside the range, quality control correlates
-#'   over every band, and a note on the log says so. The call's note names
-#'   the bands it used.
+#'   cm-1. A range given that holds no band of the spectra is refused. When
+#'   the default holds none, as for an instrument outside 600 to 4000 cm-1,
+#'   quality control correlates over every band, and a note on the log says
+#'   so. The call's note names the bands it used.
 #' @param on_all_outliers Character. Behavior when all replicates fail QC:
 #'   * `"warn"` (default): Keep all replicates and average
 #'   * `"drop"`: Remove the sample entirely
@@ -323,6 +324,18 @@ average <- function(x,
   qc_bands <- quality_check_bands(predictor_cols, qc_range,
                                   standardized = !is.null(x$data$standardization))
   qc_wn    <- round(range(wn_values(qc_bands$cols)), 2)
+
+  ### A range given that holds no band cannot be the one read, so it is
+  ### refused, QC on or off; the default's own fallback is every band
+  if (!is.null(qc_range) && qc_bands$fallback) {
+
+    abort_horizons(c(
+      "{.arg qc_range} holds no band of the spectra.",
+      "x" = "It is {qc_range[1]} to {qc_range[2]} cm-1, and the spectra run from {qc_wn[1]} to {qc_wn[2]} cm-1.",
+      "i" = "Give a range that overlaps the spectra's, or {.code NULL} for the range they are modelled over."
+    ), kind = "input")
+
+  }
 
   if (quality_check && qc_bands$fallback) {
 
@@ -897,7 +910,9 @@ average <- function(x,
 #' it has, the range it was trimmed to; one it has not run on, over the bands
 #' inside `standardize()`'s default `trim`, `MIR_RANGE`. A `qc_range` given
 #' is the range read either way. The bounds are inclusive, as `trim`'s are.
-#' When no band lies inside the range, the check reads every band.
+#' When no band lies inside the range, the check reads every band: the
+#' default's fallback, since `average()` refuses a `qc_range` given that
+#' holds none.
 #'
 #' @param predictor_cols Character. The predictor columns, named by
 #'   wavenumber.

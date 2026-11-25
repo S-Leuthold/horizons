@@ -37,9 +37,10 @@ spectra keep every band. \code{NULL} (the default) is the range the spectra
 are modelled over, whichever order \code{average()} and \code{\link[=standardize]{standardize()}} run
 in: on spectra \code{standardize()} has run on, every band they have; on
 spectra it has not, the bands inside its default \code{trim}, 600 to 4000
-cm-1. When no band lies inside the range, quality control correlates
-over every band, and a note on the log says so. The call's note names
-the bands it used.}
+cm-1. A range given that holds no band of the spectra is refused. When
+the default holds none, as for an instrument outside 600 to 4000 cm-1,
+quality control correlates over every band, and a note on the log says
+so. The call's note names the bands it used.}
 
 \item{on_all_outliers}{Character. Behavior when all replicates fail QC:
 \itemize{

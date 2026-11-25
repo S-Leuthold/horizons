@@ -2054,7 +2054,18 @@ test_that("average()'s quality control reads the bands qc_range names, its defau
   expect_identical(lost(out), 6L)
   expect_match(note(out), "over 1376 bands, 2000 to 7500 cm-1,", fixed = TRUE)
 
-  ## With no band inside the range, every band, and a note that says so
+  ## A range given that holds no band is refused at the door, QC on or off,
+  ## naming both ranges
+  for (qc in c(TRUE, FALSE)) {
+    err <- expect_error(average(hd, qc_range = c(100, 500), quality_check = qc, verbose = FALSE),
+                        class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+    expect_match(msg, "`qc_range` holds no band of the spectra.", fixed = TRUE, info = qc)
+    expect_match(msg, "It is 100 to 500 cm-1, and the spectra run from 596 to 7500 cm-1.", fixed = TRUE, info = qc)
+    expect_match(msg, "or `NULL` for the range they are modelled over.", fixed = TRUE, info = qc)
+  }
+
+  ## With no band inside the default range, every band, and a note that says so
   nir <- hd
   names(nir$data$analysis)[match(wn, names(nir$data$analysis))] <- paste0("wn_", wn_values(wn) + 5000)
   nir$data$role_map$variable[match(wn, nir$data$role_map$variable)] <- paste0("wn_", wn_values(wn) + 5000)
