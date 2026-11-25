@@ -108,6 +108,54 @@ describe("the collector", {
 
   })
 
+  it("keeps a table an event carries as its row's detail, and NULL on every other row", {
+
+    removed <- tibble::tibble(sample_id = c("s1", "s1", "s2"), scan = c("a", "b", "c"))
+
+    col <- log_open("average")
+    log_note(col, "3 scans removed.", ids = c("s1", "s2"), n = 3L, detail = removed)
+    log_note(col, "Averaged 6 scans into 2 samples.")
+    log <- log_close(col)
+
+    expect_type(log$detail, "list")
+    expect_identical(log$detail[[1]], removed)
+    expect_null(log$detail[[2]])
+
+    ### An earlier call's tables are kept as they were
+    later <- log_open("standardize")
+    log_note(later, "Standardized.")
+    expect_identical(log_close(later, log)$detail[1:2], log$detail)
+
+  })
+
+  it("binds the tables of a warning added several times into its row's detail", {
+
+    col <- log_open("evaluate")
+    log_warning(col, "skipped", "Config a skipped.", ids = "a", detail = tibble::tibble(config_id = "a"))
+    log_warning(col, "skipped", "Config b skipped.", ids = "b")
+    log_warning(col, "skipped", "Config c skipped.", ids = "c", detail = tibble::tibble(config_id = "c"))
+    log_note(col, "A note.")
+
+    log <- log_close(col)
+
+    expect_identical(log$detail[[1]], tibble::tibble(config_id = c("a", "c")))
+    expect_null(log$detail[[2]])
+
+    ## And the warning raised carries its row, table and all
+    w <- expect_warning(signal_log(col), class = "horizons_warning_skipped")
+    expect_identical(w$log$detail[[1]], tibble::tibble(config_id = c("a", "c")))
+
+  })
+
+  it("refuses a detail that is not a table, as a bug in its caller", {
+
+    col <- log_open("average")
+
+    expect_error(log_note(col, "A note.", detail = c("s1", "s2")), "must be a data frame",
+                 class = "horizons_error_internal")
+
+  })
+
   it("never raises a note", {
 
     col <- log_open("average")

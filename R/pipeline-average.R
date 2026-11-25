@@ -89,6 +89,34 @@
 #' `horizons_warning_quality` it raises, under `"keep_best"` and `"drop"`
 #' as a note, since either is your explicit choice.
 #'
+#' **Which scans QC removed:** when the quality check removes any scan, one
+#' note on the log names the samples that lost one, and its `detail` is a
+#' table with one row per scan removed:
+#' * `sample_id`: the averaged sample it belonged to (with a custom `by`, the
+#'   `by` value, as the result's `sample_id` is)
+#' * `scan`: the scan's `filename` when the input has one (OPUS scans), else
+#'   its row number as text
+#' * `row`: its row in the data `average()` was given
+#' * `reason`: `"below_threshold"`, removed because its mean correlation fell
+#'   below `correlation_threshold`, as is every scan of a sample
+#'   `on_all_outliers = "drop"` dropped but an uncorrelatable one;
+#'   `"uncorrelatable"`, a scan QC could not correlate with the others, such
+#'   as a flat one, in every mode; or
+#'   `"not_best"`, a scan of a sample whose replicates all failed, left out
+#'   when `on_all_outliers = "keep_best"` kept the best
+#' * `mean_correlation`: its mean correlation with the sample's other scans
+#'   in the last round of the removal it took part in, `NA` when it had none
+#'
+#' `dplyr::bind_rows(x$log$detail[x$log$verb == "average"])` gathers it,
+#' to join to a sample table by `sample_id`. When the check removed no scan,
+#' no row carries a table and the gather is a table with no columns, so check
+#' it has rows before joining. Nothing resets the log, so the table stays on
+#' the object through every later verb. Under `on_all_outliers = "warn"` a
+#' sample whose replicates all failed keeps every scan QC could correlate, so
+#' only its uncorrelatable scans can be in the table. Flagged replicates are
+#' left out of QC rather than removed by it, and are counted in the call's
+#' note instead.
+#'
 #' @param x A `horizons_data` object from the pipeline.
 #' @param by Character. Column name to group replicates by. Default: `"sample_id"`.
 #'   With any other column, the grouping values are coerced to character and
@@ -123,10 +151,11 @@
 #'     varies within any sample dropped
 #'   * `data$role_map`: Updated to remove dropped columns and to point the
 #'     `id` role at the new `sample_id`
-#'   * `log`: The samples whose replicates all failed QC, and the metadata
-#'     columns dropped, then a note recording the call: `by`, the scans in
-#'     and samples out, the quality check and the replicates it removed, and
-#'     any flagged replicates left out
+#'   * `log`: The samples whose replicates all failed QC, the metadata
+#'     columns dropped, and the scans QC removed, as a table in the note's
+#'     `detail`, then a note recording the call: `by`, the scans in and
+#'     samples out, the quality check and the replicates it removed, and any
+#'     flagged replicates left out
 #'
 #' @examples
 #' \dontrun{
@@ -308,11 +337,9 @@ average <- function(x,
 
     if (length(dup_ids) > 0) {
 
-      shown <- utils::head(dup_ids, 5)
-
       abort_horizons(c(
         "{.arg by} column {.field {by}} has values that become the same {.field sample_id} as text.",
-        "x" = "Repeated as text: {.val {shown}}.",
+        "x" = "Repeated as text: {shown_ids(dup_ids)}.",
         "i" = "Make {.field {by}} character, or round it, before averaging."
       ), kind = "input")
 
@@ -321,6 +348,17 @@ average <- function(x,
   }
 
   n_replicates <- nrow(analysis)
+
+  ## How the record names a scan QC removes ------------------------------------
+  ## By its file, when the input is OPUS scans with a filename (the column is
+  ## dropped from the result, so this is the last place it is known), and by
+  ## its row in the table average() was given otherwise.
+
+  scan_names <- if ("filename" %in% role_map$variable[role_map$role == "meta"]) {
+    as.character(analysis$filename)
+  } else {
+    as.character(seq_len(n_replicates))
+  }
 
   ## Compute replicate counts per group for output ---------------------------
 
@@ -335,6 +373,7 @@ average <- function(x,
   ## Initialize tracking -----------------------------------------------------
 
   results_list        <- vector("list", n_groups)
+  removed_list        <- vector("list", n_groups)
   n_dropped           <- 0
   all_outlier_samples <- character()
   dropped_samples     <- character()
@@ -380,6 +419,23 @@ average <- function(x,
 
     conflicts    <- c(conflicts, group_result$conflicts)
     varying_meta <- union(varying_meta, group_result$meta_dropped)
+
+    ## The scans QC removed, by the averaged row's id: the group's value, which
+    ## becomes the sample_id under a custom `by`, and by the scan's row in the
+    ## table given
+    if (nrow(group_result$removed) > 0) {
+
+      rows <- group_idx[group_result$removed$index]
+
+      removed_list[[i]] <- tibble::tibble(
+        sample_id        = as.character(group_id),
+        scan             = scan_names[rows],
+        row              = rows,
+        reason           = group_result$removed$reason,
+        mean_correlation = group_result$removed$mean_correlation
+      )
+
+    }
 
     if (is.null(group_result$averaged)) {
 
@@ -573,14 +629,12 @@ average <- function(x,
   if (length(failed_samples) > 0) {
 
     n_failed <- length(failed_samples)
-    shown    <- utils::head(failed_samples, 5)
-    more     <- if (n_failed > 5) paste0(" and ", n_failed - 5, " more") else ""
 
     if (on_all_outliers == "warn") {
 
       log_warning(collector, "quality", c(
         "All replicates failed QC for {n_failed} sample{?s}, averaged anyway.",
-        "i" = "Samples: {.val {shown}}{more}.",
+        "i" = "Samples: {shown_ids(failed_samples)}.",
         "i" = "Use {.code on_all_outliers = \"keep_best\"} to keep one replicate of each, or {.code \"drop\"} to drop them."
       ), ids = failed_samples)
 
@@ -594,7 +648,7 @@ average <- function(x,
 
       log_note(collector, c(
         statement,
-        "i" = "Samples: {.val {shown}}{more}."
+        "i" = "Samples: {shown_ids(failed_samples)}."
       ), ids = failed_samples)
 
     }
@@ -612,6 +666,27 @@ average <- function(x,
     log_note(collector,
              "Dropped {length(dropped_cols)} metadata column{?s} whose values differ between a sample's replicates: {.field {dropped_cols}}.",
              ids = dropped_cols)
+
+  }
+
+  ## The scans the quality check removed (#255) -------------------------------
+  ## One note whose detail is a row per scan, joined to the sample table by
+  ## sample_id and to the scans by scan or row. Written just before the
+  ## call's record, which counts them.
+
+  removed_scans <- dplyr::bind_rows(removed_list)
+
+  if (nrow(removed_scans) > 0) {
+
+    lost_samples <- unique(removed_scans$sample_id)
+    n_lost       <- length(lost_samples)
+    n_removed    <- nrow(removed_scans)
+
+    log_note(collector, c(
+      "The quality check removed {n_removed} replicate{?s} from {n_lost} sample{?s}.",
+      "i" = "Samples: {shown_ids(lost_samples)}.",
+      "i" = "Each scan, why it was removed and its mean correlation are in this row's {.field detail}."
+    ), ids = lost_samples, n = n_removed, detail = removed_scans)
 
   }
 
@@ -773,6 +848,11 @@ average <- function(x,
 #'     against the others QC could correlate, from the first round, before
 #'     any removal; a tie goes to the earlier replicate. `integer(0)` when
 #'     fewer than two could be correlated
+#'   * `mean_cors`: Numeric, one per replicate (in original indexing): its
+#'     mean correlation with the other active replicates in the last round
+#'     it took part in, so for a removed one the round that removed it. `NA`
+#'     for one QC could not correlate, for one whose partners had all been
+#'     removed, and for every one when no round ran
 #'
 #' @noRd
 compute_replicate_quality <- function(predictor_matrix, threshold) {
@@ -787,7 +867,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
       uncorrelatable = integer(0),
       outliers       = integer(0),
       all_fail       = FALSE,
-      best           = integer(0)
+      best           = integer(0),
+      mean_cors      = rep(NA_real_, n)
     ))
 
   }
@@ -817,6 +898,7 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
   active_idx <- which(correlate)
   outliers   <- integer(0)
   best       <- integer(0)
+  mean_cors  <- rep(NA_real_, n)
 
   ## Fewer than two left to correlate: no QC possible ------------------------
 
@@ -826,7 +908,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
       uncorrelatable = uncorrelatable,
       outliers       = integer(0),
       all_fail       = FALSE,
-      best           = integer(0)
+      best           = integer(0),
+      mean_cors      = mean_cors
     ))
 
   }
@@ -856,6 +939,12 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 
     diag(cor_matrix) <- NA
     mean_cors_active <- rowMeans(cor_matrix, na.rm = TRUE)
+
+    ### Each active replicate's value this round, kept as its last; one with
+    ### no correlation left has none
+    mean_cors[active_idx] <- mean_cors_active
+    mean_cors[active_idx][is.nan(mean_cors_active)] <- NA_real_
+
     mean_cors_active[is.nan(mean_cors_active)] <- -Inf
 
     ## The first round compares every replicate QC could correlate with all
@@ -895,7 +984,8 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
     uncorrelatable = uncorrelatable,
     outliers       = as.integer(outliers),
     all_fail       = all_fail,
-    best           = as.integer(best)
+    best           = as.integer(best),
+    mean_cors      = mean_cors
   )
 
 }
@@ -922,7 +1012,14 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #' @return A list with:
 #'   * `averaged`: Single-row tibble (or NULL if dropped)
 #'   * `n_dropped`: Number of replicates QC removed, the flagged ones not
-#'     among them
+#'     among them: the rows of `removed`
+#'   * `removed`: One row per replicate QC removed, by its row in
+#'     `group_data`: `index`, `reason` (`"uncorrelatable"`, set aside before
+#'     the removal; `"below_threshold"`, removed by it, as is every other
+#'     replicate of a sample `"drop"` dropped; `"not_best"`, left out of a
+#'     sample `"keep_best"` kept to its best) and `mean_correlation` (from
+#'     the last round of QC it took part in, `NA` when it had none), in row
+#'     order
 #'   * `all_outliers`: Logical, TRUE if all replicates were outliers
 #'   * `qc_info`: QC details
 #'   * `conflicts`: One entry per non-numeric response whose replicates
@@ -951,10 +1048,22 @@ average_group <- function(group_data,
 
   ## Initialize return values ------------------------------------------------
 
-  n_dropped <- 0
   all_outliers <- FALSE
   qc_info <- NULL
   conflicts <- list()
+
+  ## The replicates QC removes, with why and each one's mean correlation, as
+  ## average()'s record names them (#255); the count it reports is theirs
+  removed <- integer(0)
+  reason  <- character(0)
+  cors    <- rep(NA_real_, n_reps)
+
+  removed_record <- function() {
+    ord <- order(removed)
+    tibble::tibble(index            = removed[ord],
+                   reason           = reason[ord],
+                   mean_correlation = cors[removed[ord]])
+  }
 
   ## Flagged replicates ------------------------------------------------------
   ## A replicate a step flagged is one it could not use, so it is left out of
@@ -987,6 +1096,8 @@ average_group <- function(group_data,
     qc$uncorrelatable <- usable[qc$uncorrelatable]
     qc$outliers       <- usable[qc$outliers]
     qc$best           <- usable[qc$best]
+    cors[usable]      <- qc$mean_cors
+    qc$mean_cors      <- cors
     qc_info <- qc
 
     ## Replicates QC cannot correlate ----------------------------------------
@@ -1004,7 +1115,8 @@ average_group <- function(group_data,
 
       usable          <- setdiff(usable, qc$uncorrelatable)
       rows_to_average <- usable
-      n_dropped       <- n_uncorrelatable
+      removed         <- qc$uncorrelatable
+      reason          <- rep("uncorrelatable", n_uncorrelatable)
 
     }
 
@@ -1022,11 +1134,16 @@ average_group <- function(group_data,
 
           ## Drop entire sample ----------------------------------------------
           ## Its flagged replicates are counted as left out, in n_flag_out,
-          ## so QC removed the rest
+          ## so QC removed the rest: each one it could correlate fell below
+          ## the threshold in the last round it took part in
+
+          removed <- c(removed, usable)
+          reason  <- c(reason, rep("below_threshold", length(usable)))
 
           return(list(
             averaged     = NULL,
-            n_dropped    = n_reps - sum(flagged),
+            n_dropped    = length(removed),
+            removed      = removed_record(),
             all_outliers = TRUE,
             qc_info      = qc_info,
             flag         = NA_character_,
@@ -1043,7 +1160,9 @@ average_group <- function(group_data,
           ## correlation, so the first is kept (#109).
 
           rows_to_average <- qc$best
-          n_dropped <- n_dropped + length(usable) - length(rows_to_average)
+          not_best        <- setdiff(usable, qc$best)
+          removed         <- c(removed, not_best)
+          reason          <- c(reason, rep("not_best", length(not_best)))
 
         } else {
 
@@ -1058,7 +1177,8 @@ average_group <- function(group_data,
         ## Some pass, some fail: drop outliers -------------------------------
 
         rows_to_average <- setdiff(usable, qc$outliers)
-        n_dropped <- n_dropped + length(qc$outliers)
+        removed         <- c(removed, qc$outliers)
+        reason          <- c(reason, rep("below_threshold", length(qc$outliers)))
 
       }
 
@@ -1170,7 +1290,8 @@ average_group <- function(group_data,
 
   list(
     averaged     = result,
-    n_dropped    = n_dropped,
+    n_dropped    = length(removed),
+    removed      = removed_record(),
     all_outliers = all_outliers,
     qc_info      = qc_info,
     conflicts    = conflicts,

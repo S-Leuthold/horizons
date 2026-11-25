@@ -175,7 +175,10 @@ source and settings, so a pipeline's history is in one place. The one
 call that writes none is \code{standardize()}'s early return on spectra
 already standardized, whose \code{skipped} warning is its row. Notes are never
 raised. Every row carries the \code{time} its call ended, so the first row's
-is when the spectra were read (on a training set, the library's).
+is when the spectra were read (on a training set, the library's). A row
+can carry a table of what it is about, one row per thing, in its
+\code{detail}: \code{\link[=average]{average()}}'s note on the scans its quality check removed is
+one; every other row's is \code{NULL}.
 \code{predict()}, which changes no object,
 carries each warning's record as the field \code{log}.
 
