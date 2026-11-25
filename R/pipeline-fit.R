@@ -2244,7 +2244,8 @@ retune_kept_line <- function(moved) {
 #'   `strata_error` (why) and `strata_warnings` (what rsample warned of), as
 #'   [draw_eval_split()] returns them. It runs no sample-size check: `fit()`
 #'   checks the rows its folds are drawn from, which refuses every case a
-#'   check here would. Aborts with class
+#'   check here would, and the split refuses one modelled row by the same
+#'   rule, since it would leave no training row. Aborts with class
 #'   `horizons_error_input` when the object has no configuration or more than
 #'   one, the window is at least as
 #'   wide as the spectrum, or `validate()`'s response-trim request is for
@@ -2295,7 +2296,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
   ## is refused before anything is drawn.
   trim_request <- response_trim_request(x)
 
-  drawn <- draw_eval_split(modelled$data, outcome_col, seed, call = call)
+  drawn <- draw_eval_split(modelled$data, outcome_col, seed, x$config$tuning$cv_folds,
+                           call = call)
 
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
                                      id_col = id_column(role_map), collector = collector)
@@ -2304,6 +2306,8 @@ cold_start_evaluation <- function(x, metric, seed, collector, call = rlang::call
   ## The sample-size rule is fit()'s own check on the rows its folds are
   ## drawn from, which are this training part less any calibration rows, so
   ## it refuses every case a check here would, as evaluate() refuses them.
+  ## One modelled row, which leaves the split no training row, the draw
+  ## above refuses by the same rule.
 
   ## The shape of an evaluate() results row (create_failed_result()'s
   ## columns less scoring_schema, since nothing was scored), all unmeasured

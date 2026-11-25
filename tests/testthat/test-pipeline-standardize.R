@@ -186,6 +186,52 @@ test_that("standardize() refuses water-band removal that would leave nothing, an
 })
 
 
+test_that("standardize() refuses a non-predictor column named like a predictor it would write, naming it, before any work", {
+
+  ## An axis off the 2 cm-1 grid, which standardize() resamples onto 602
+  set.seed(1)
+  wn <- seq(4000, 600, by = -1.93)
+  df <- tibble::as_tibble(matrix(stats::runif(5 * length(wn)), 5,
+                                 dimnames = list(NULL, paste0("wn_", wn))))
+  df <- tibble::add_column(df, sample_id = paste0("s", 1:5), .before = 1)
+  hd <- spectra(df, verbose = FALSE)
+
+  ## A meta column under a name the object can carry until the rebuild
+  with_meta <- function(obj, name) {
+    obj$data$analysis[[name]] <- 1:5
+    obj$data$role_map <- tibble::add_row(obj$data$role_map, variable = name, role = "meta", .after = 1)
+    obj
+  }
+
+  ## The work after the check never starts
+  local_mocked_bindings(resample_onto_grid = function(...) stop("resampled"))
+
+  err <- expect_error(standardize(with_meta(hd, "wn_602"), verbose = FALSE),
+                      class = "horizons_error_input")
+  msg <- conditionMessage(err)
+
+  expect_match(msg, "would name 1 predictor column the same as a column that is not a predictor", fixed = TRUE)
+  expect_match(msg, "Taken: wn_602.", fixed = TRUE)
+  expect_identical(rlang::call_name(err$call), "standardize")
+
+  ## A name inside the water bands is free once they are removed
+  expect_error(standardize(with_meta(hd, "wn_1650"), verbose = FALSE), "Taken: wn_1650.", fixed = TRUE)
+  expect_error(standardize(with_meta(hd, "wn_1650"), remove_water = TRUE, verbose = FALSE),
+               "resampled", fixed = TRUE)
+
+  ## Without resampling the axis keeps its own wavenumbers, written as
+  ## wn_<wavenumber> whatever the predictors were named: bare numbers here
+  bare <- hd
+  pred <- bare$data$role_map$role == "predictor"
+  bare$data$role_map$variable[pred] <- sub("^wn_", "", bare$data$role_map$variable[pred])
+  names(bare$data$analysis) <- sub("^wn_", "", names(bare$data$analysis))
+
+  expect_no_error(standardize(with_meta(bare, "wn_602"), resample = NULL, verbose = FALSE))
+  expect_error(standardize(with_meta(bare, "wn_4000"), resample = NULL, verbose = FALSE),
+               "Taken: wn_4000.", fixed = TRUE, class = "horizons_error_input")
+
+})
+
 test_that("standardize() refuses a resample of zero or below, with one refusal", {
 
   expect_error(standardize(create_test_spectra(), resample = 0),

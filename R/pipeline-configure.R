@@ -239,14 +239,14 @@
 #'   `add_response()`.
 #' @param outcome `character(1) or NULL`. Which response variable to model.
 #'   Auto-selects if exactly one response exists.
-#' @param models `character`. Model algorithms to benchmark. Default
-#'   `c("rf", "cubist", "plsr")`. See `VALID_MODELS` for options.
-#' @param transformations `character`. Response transformations to test.
-#'   Default `"none"`.
-#' @param preprocessing `character`. Per-config spectral preprocessing methods.
-#'   Default `"raw"`.
-#' @param feature_selection `character`. Feature selection methods to test.
-#'   Default `"none"`.
+#' @param models `character`. Model algorithms to benchmark, at least one.
+#'   Default `c("rf", "cubist", "plsr")`. See `VALID_MODELS` for options.
+#' @param transformations `character`. Response transformations to test,
+#'   at least one. Default `"none"`.
+#' @param preprocessing `character`. Per-config spectral preprocessing methods,
+#'   at least one. Default `"raw"`.
+#' @param feature_selection `character`. Feature selection methods to test,
+#'   at least one. Default `"none"`.
 #' @param cv_folds `integer`. Number of cross-validation folds. Default 5.
 #'   Minimum 2.
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
@@ -434,11 +434,25 @@ configure <- function(x,
 
   for (axis in names(axes)) {
 
-    bad <- setdiff(axes[[axis]]$given, axes[[axis]]$valid)
+    valid <- axes[[axis]]$valid
+
+    ## An empty axis (NULL, or a vector of none) would give a grid of no
+    ## configurations, which evaluate() refuses as never configured
+    if (length(axes[[axis]]$given) == 0) {
+
+      given <- axes[[axis]]$given
+
+      abort_horizons(c(
+        "{.arg {axis}} must name at least one value.",
+        "x" = "Got {.code {paste(deparse(given), collapse = ' ')}}.",
+        "i" = "Valid values: {.val {valid}}."
+      ), kind = "input")
+
+    }
+
+    bad <- setdiff(axes[[axis]]$given, valid)
 
     if (length(bad) > 0) {
-
-      valid <- axes[[axis]]$valid
 
       abort_horizons(c(
         "{.arg {axis}} must be among the values horizons knows.",
@@ -679,9 +693,11 @@ configure <- function(x,
   ## Every prediction is clamped to the range, so an outcome outside it would
   ## be scored against predictions that cannot reach it. Refused here, where
   ## the values are first known, rather than after evaluate() has tuned every
-  ## configuration (#76). evaluate() and fit() repeat the check.
+  ## configuration (#76). evaluate() and fit() repeat the check, on the rows
+  ## they model, and so does this one: a flagged row is no model's.
 
-  breach <- outcome_range_breach(x$data$analysis[[outcome_var]], outcome_range)
+  modelled <- modelling_mask(x$data$analysis, outcome_var)
+  breach   <- outcome_range_breach(x$data$analysis[[outcome_var]][modelled], outcome_range)
 
   if (!is.null(breach)) {
 
@@ -1345,7 +1361,9 @@ outcome_range_breach <- function(values, outcome_range) {
 #' `evaluate()`, `fit()` and `ensemble()` call this on entry, before they
 #' draw a split or fit anything, so an object whose outcome no longer fits its
 #' range fails in a second rather than after the tuning cost (#76). The rows
-#' are the ones the verbs model: missing outcomes are ignored.
+#' are the ones the verbs model ([modelling_mask()]): missing outcomes and
+#' flagged rows are ignored, since no model is fitted on them or scored
+#' against them.
 #'
 #' @param x A configured `horizons_data` object.
 #' @param verb `character(1)`. The calling verb, named in the message.
@@ -1376,7 +1394,8 @@ check_outcome_range <- function(x, verb, call = rlang::caller_env()) {
   }
 
   outcome_range <- outcome_range_setting(x)
-  breach        <- outcome_range_breach(x$data$analysis[[outcome_col]], outcome_range)
+  modelled      <- modelling_mask(x$data$analysis, outcome_col)
+  breach        <- outcome_range_breach(x$data$analysis[[outcome_col]][modelled], outcome_range)
 
   if (is.null(breach)) return(invisible(NULL))
 
@@ -1483,8 +1502,8 @@ format_outcome_value <- function(value) {
 #' `evaluate()` and `fit()` (on either path) call this beside
 #' [check_outcome_range()], before they draw a split or fit anything, so a
 #' constant outcome fails in a second rather than after the tuning cost or
-#' with an error from inside a model. The rows are the ones the verbs model:
-#' missing outcomes are ignored.
+#' with an error from inside a model. The rows are the ones the verbs model
+#' ([modelling_mask()]): missing outcomes and flagged rows are ignored.
 #'
 #' @param x A configured `horizons_data` object.
 #' @param verb `character(1)`. The calling verb, named in the message.
@@ -1504,15 +1523,19 @@ check_outcome_variance <- function(x, verb, call = rlang::caller_env()) {
 
   }
 
-  constant <- constant_outcome(x$data$analysis[[outcome_col]])
+  modelled <- modelling_mask(x$data$analysis, outcome_col)
+  constant <- constant_outcome(x$data$analysis[[outcome_col]][modelled])
 
   if (is.null(constant)) return(invisible(NULL))
 
   value_text <- format_outcome_value(constant$value)
 
+  ### A flagged row with an outcome is not one of them, so the count says so
+  rows_text <- if (any(!modelled & !is.na(x$data$analysis[[outcome_col]]))) "unflagged rows" else "rows"
+
   abort_horizons(c(
     "{.fn {verb}} cannot model {.field {outcome_col}}: it has zero variance.",
-    "x" = "All {constant$n} rows with an observed {.field {outcome_col}} have the value {value_text}.",
+    "x" = "All {constant$n} {rows_text} with an observed {.field {outcome_col}} have the value {value_text}.",
     "i" = "A model fitted to a constant learns nothing from the spectra. Check that the outcome role names the right column and that its values were joined to the right samples."
   ), kind = "input", call = call)
 

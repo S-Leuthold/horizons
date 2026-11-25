@@ -105,7 +105,7 @@ describe("fit() - response_bound (#68)", {
   obj <- make_eval_object(n = 60, n_configs = 1)
   obj$config$tuning$final_bayesian_iter <- 0L
 
-  held_out <- rsample::testing(suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 12L))$split)$sample_id
+  held_out <- rsample::testing(suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 12L, obj$config$tuning$cv_folds))$split)$sample_id
   top_test <- which(obj$data$analysis$sample_id %in% held_out)
   top_test <- top_test[which.max(obj$data$analysis$SOC[top_test])]
   obj$data$analysis$SOC[top_test] <- max(obj$data$analysis$SOC) + 1

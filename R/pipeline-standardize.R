@@ -463,6 +463,41 @@ in_water_bands <- function(wavelengths) {
 
 }
 
+#' Refuse an axis whose predictor names another column already has
+#'
+#' @description
+#' `standardize()` names the predictors of the axis it writes `wn_<wavenumber>`
+#' (Step 7, the rebuild), beside the columns that are not predictors. A
+#' column of those named like a new predictor would leave the rebuilt table
+#' two columns of one name, which the rebuild cannot hold. Checked once the
+#' axis is known and before any spectrum is changed, as an input error naming
+#' the columns.
+#'
+#' @param axis `numeric.` The wavenumbers of the axis the call writes, before
+#'   any water bands are removed.
+#' @param remove_water `logical(1).` Whether the call removes the water bands,
+#'   whose columns it then does not write.
+#' @param non_predictor_vars `character.` The analysis columns that are not
+#'   predictors.
+#' @param call The frame the refusal reports: `standardize()`'s.
+#' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
+#' @noRd
+check_axis_names <- function(axis, remove_water, non_predictor_vars, call = rlang::caller_env()) {
+
+  if (remove_water) axis <- axis[!in_water_bands(axis)]
+
+  taken <- intersect(paste0("wn_", axis), non_predictor_vars)
+
+  if (length(taken) == 0) return(invisible(NULL))
+
+  abort_horizons(c(
+    "{.fn standardize} would name {length(taken)} predictor column{?s} the same as {?a column/columns} that {?is/are} not a predictor.",
+    "x" = "Taken: {.field {taken}}.",
+    "i" = "The predictors are named {.code wn_<wavenumber>}; rename the other {cli::qty(length(taken))}column{?s} before standardizing."
+  ), kind = "input", call = call)
+
+}
+
 #' Remove water absorption bands from spectra
 #'
 #' @description
@@ -1002,7 +1037,9 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' gives `wn_4000, wn_3996, ..., wn_600` (851 columns) whether the scans came
 #' at 2 cm⁻¹ from 600 or at about 1.93 cm⁻¹ from 599.74. Grid wavenumbers are
 #' rounded to six decimal places, so a non-integer resolution such as 1.5
-#' gives clean, stable names (`wn_601.5`).
+#' gives clean, stable names (`wn_601.5`). A column that is not a predictor
+#' may not carry the name of one the call writes: it is refused before any
+#' spectrum is changed.
 #'
 #' The spectra are interpolated onto the grid by cubic spline and never
 #' extrapolated: grid points beyond the data's range are dropped with a
@@ -1396,6 +1433,17 @@ standardize <- function(x,
 
   }
 
+  ## The axis's names must be free -------------------------------------------
+  ## The predictors are rebuilt as wn_<wavenumber> beside the columns that are
+  ## not (Step 7), so none of those may carry a new predictor's name. Without
+  ## resampling the axis written is the one left here; with it, the grid is
+  ## checked once Step 4 has decided it. Either way, before any spectrum is
+  ## changed.
+
+  non_predictor_vars <- role_map$variable[role_map$role != "predictor"]
+
+  if (is.null(resample)) check_axis_names(wavelengths, remove_water, non_predictor_vars)
+
   ## ---------------------------------------------------------------------------
   ## Step 4: Resample onto the canonical grid (if requested)
   ## ---------------------------------------------------------------------------
@@ -1501,6 +1549,8 @@ standardize <- function(x,
       ), kind = "input")
 
     }
+
+    check_axis_names(grid, remove_water, non_predictor_vars)
 
     ## Already on the grid: keep the values, do not re-interpolate ------------
 
@@ -1676,7 +1726,6 @@ standardize <- function(x,
 
   ## Get non-predictor columns -------------------------------------------------
 
-  non_predictor_vars <- role_map$variable[role_map$role != "predictor"]
   non_predictor_data <- analysis[, non_predictor_vars, drop = FALSE]
 
   ## Combine -------------------------------------------------------------------

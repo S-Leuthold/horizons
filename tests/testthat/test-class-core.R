@@ -170,6 +170,114 @@ test_that("validate_horizons_data errors when role_map exists but analysis missi
 })
 
 ## ---------------------------------------------------------------------------
+## Zero rows: one input refusal, at every verb's door
+## ---------------------------------------------------------------------------
+
+## A horizons_data object with its rows gone, as a filter upstream leaves it
+without_rows <- function(obj) {
+
+  obj$data$analysis <- obj$data$analysis[0, ]
+  obj$data$n_rows   <- 0L
+  obj
+
+}
+
+## The refusal, from the verb named; `call = FALSE` leaves the call unchecked
+expect_no_rows <- function(expr, verb, call = TRUE) {
+
+  err <- expect_error(expr, class = "horizons_error_input", info = verb)
+  msg <- conditionMessage(err)
+
+  expect_match(msg, "The data has no rows.", fixed = TRUE, info = verb)
+  expect_match(msg, "Check the filter, join or source that left it empty.", fixed = TRUE, info = verb)
+  if (call) expect_identical(rlang::call_name(err$call), verb, info = verb)
+
+}
+
+test_that("validate_horizons_data refuses an analysis table with no rows at either stage, as an input error", {
+
+  obj <- new_horizons_data(
+    analysis = tibble::tibble(sample_id = character(0), `4000` = numeric(0), `3998` = numeric(0)),
+    role_map = tibble::tibble(variable = c("sample_id", "4000", "3998"),
+                              role     = c("id", "predictor", "predictor"))
+  )
+
+  check <- function(stage) validate_horizons_data(obj, stage = stage)
+
+  for (stage in c("full", "raw")) expect_no_rows(check(stage), "check")
+
+  ## An object with no data at all is still one being built, and passes
+  expect_identical(validate_horizons_data(new_horizons_data()), new_horizons_data())
+
+})
+
+test_that("every verb that validates at its door refuses zero rows the same way, before any work", {
+
+  set.seed(3)
+  df <- tibble::tibble(sample_id = paste0("S", 1:6),
+                       wn_4000 = stats::runif(6), wn_3998 = stats::runif(6), wn_3996 = stats::runif(6))
+
+  ## The data verbs, from spectra() on
+  expect_no_rows(spectra(df[0, ], verbose = FALSE), "spectra")
+
+  raw <- without_rows(spectra(df, verbose = FALSE))
+
+  expect_no_rows(parse_ids(raw, verbose = FALSE), "parse_ids")
+  expect_no_rows(average(raw, verbose = FALSE), "average")
+  expect_no_rows(add_response(raw, tibble::tibble(sample_id = "S1", SOC = 1), variable = "SOC",
+                              verbose = FALSE), "add_response")
+  expect_no_rows(standardize(raw, verbose = FALSE), "standardize")
+
+  ## The modelling verbs; none tunes a configuration
+  local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"),
+                        fit_single_config      = function(...) stop("a member was fitted"))
+
+  configured <- without_rows(make_eval_object(n = 20, n_configs = 1))
+
+  expect_no_rows(configure(configured, verbose = FALSE), "configure")
+  expect_no_rows(validate(configured, verbose = FALSE), "validate")
+  expect_no_rows(evaluate(configured), "evaluate")
+  expect_no_rows(fit(configured), "fit")
+
+  fitted <- without_rows(readRDS(test_path("fixtures", "ensemble_fit.rds")))
+  expect_no_rows(ensemble(fitted), "ensemble")
+
+  ## select_training(): no targets, refused before the library resolves, and
+  ## no library rows. Its input check validates each object without passing
+  ## the verb's call on, so the call is not checked here.
+  targets <- make_axis_object(seq(4000, 600, by = -8), n = 6L)
+
+  with_mocked_bindings(
+    expect_no_rows(select_training(without_rows(targets), "kssl", k = 5), "select_training", call = FALSE),
+    resolve_source = function(...) stop("the library was resolved")
+  )
+
+  expect_no_rows(select_training(targets, without_rows(targets), k = 5), "select_training", call = FALSE)
+
+})
+
+test_that("predict() takes zero rows of new_data, as a data frame or an object, and gives zero rows", {
+
+  fx <- readRDS(test_path("fixtures", "ensemble_fit.rds"))
+
+  role_map <- fx$data$role_map
+  keep     <- role_map$variable[role_map$role %in% c("id", "predictor")]
+  frame    <- fx$data$analysis[0, keep]
+
+  from_frame <- predict(fx, new_data = frame)
+  expect_s3_class(from_frame, "data.frame")
+  expect_identical(nrow(from_frame), 0L)
+
+  ## A horizons_data with no rows is never validated as new_data
+  as_object <- new_horizons_data(analysis = frame, role_map = role_map[role_map$variable %in% keep, ])
+  from_object <- predict(fx, new_data = as_object)
+
+  expect_identical(nrow(from_object), 0L)
+  expect_identical(names(from_object), names(from_frame))
+
+})
+
+## ---------------------------------------------------------------------------
 ## sample_id checks
 ## ---------------------------------------------------------------------------
 

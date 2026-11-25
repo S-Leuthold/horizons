@@ -299,29 +299,44 @@ describe("validate() sample count checks", {
 
   })
 
-  ## P001b — CV feasibility (n_model >= cv_folds * 2) --------------------------
+  ## P001b — CV feasibility (the training part has more rows than folds) ------
 
-  test_that("P001b passes at boundary (n_model=10, folds=5)", {
+  test_that("P001b passes at the fold rule's boundary (8 rows, a training part of 6, folds=5)", {
 
-    result <- quiet_validate(make_configured_hd(n_samples = 10, cv_folds = 5L))
+    result <- quiet_validate(make_configured_hd(n_samples = 8, cv_folds = 5L))
 
     p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
     expect_equal(p001b$status, "pass")
-    expect_identical(p001b$value, "10 (need >= 10)")
+    expect_identical(p001b$value, "6 training rows (need > 5)")
+    expect_true(result$validation$passed)
 
   })
 
-  test_that("P001b fails below boundary (n_model=9, folds=5) -> passed=FALSE, and shows it", {
+  test_that("P001b fails below the boundary (7 rows, a training part of 5, folds=5) -> passed=FALSE, and shows it", {
 
     out <- capture.output(result <- suppressWarnings(
-      validate(make_configured_hd(n_samples = 9, cv_folds = 5L), verbose = TRUE)
+      validate(make_configured_hd(n_samples = 7, cv_folds = 5L), verbose = TRUE)
     ))
 
     p001b <- result$validation$checks[result$validation$checks$check_id == "P001b", ]
     expect_equal(p001b$status, "fail")
     expect_equal(p001b$severity, "ERROR")
+    expect_identical(p001b$value, "5 training rows (need > 5)")
     expect_false(result$validation$passed)
-    expect_true(any(grepl("\u2717 CV feasibility: 9 \u2265 10", out, fixed = TRUE)))
+    expect_true(any(grepl("\u2717 CV feasibility: 5 training rows for 5 folds (need > 5)", out, fixed = TRUE)))
+
+  })
+
+  test_that("P001b and P002 count the training part without moving the session's random stream", {
+
+    hd <- make_configured_hd(n_samples = 60, cv_folds = 5L)
+
+    set.seed(11)
+    quiet_validate(hd)
+    after <- stats::runif(1)
+
+    set.seed(11)
+    expect_identical(stats::runif(1), after)
 
   })
 
@@ -354,12 +369,179 @@ describe("validate() sample count checks", {
 
   test_that("P002 fails below 10 per fold", {
 
-    ## n=49, folds=5 → 9 per fold → fail
+    ## n=49, folds=5 → a training part of 39, 7 per fold → fail
     result <- quiet_validate(make_configured_hd(n_samples = 49, cv_folds = 5L))
 
     p002 <- result$validation$checks[result$validation$checks$check_id == "P002", ]
     expect_equal(p002$status, "fail")
     expect_equal(p002$severity, "WARNING")
+
+  })
+
+  test_that("P002 divides the training part into folds, not every row", {
+
+    ## 55 rows are 11 a fold over all of them, but the split's training part
+    ## of 43 gives folds of 8
+    result <- quiet_validate(make_configured_hd(n_samples = 55, cv_folds = 5L))
+
+    p002 <- result$validation$checks[result$validation$checks$check_id == "P002", ]
+    expect_equal(p002$status, "fail")
+    expect_identical(p002$value, "~8")
+
+  })
+
+})
+
+
+## ===========================================================================
+## 2b. The sample-size verdict agrees with evaluate()'s door
+## ===========================================================================
+
+describe("validate()'s sample-size checks and evaluate()'s fold rule", {
+
+  ## What evaluate() does with the object at its door: "refused" when the fold
+  ## rule refuses it, else the rows of its smallest assessment fold, read
+  ## where it decides whether to warn (no configuration is tuned)
+  evaluate_door <- function(obj) {
+
+    real_small_folds <- log_small_folds
+    seen <- NULL
+
+    local_mocked_bindings(
+      log_small_folds = function(collector, folds) {
+        seen <<- real_small_folds(collector, folds)
+        stop("past the door")
+      },
+      evaluate_single_config = function(...) stop("a configuration ran")
+    )
+
+    ### Only the fold rule's refusal counts; any other is an error here
+    fold_rule <- "cross-validation needs more training rows than folds"
+
+    refused <- tryCatch({
+      suppressWarnings(evaluate(obj, seed = 42L))
+      FALSE
+    }, horizons_error_input = function(e) {
+      if (grepl(fold_rule, gsub("\\s+", " ", conditionMessage(e)), fixed = TRUE)) TRUE else stop(e)
+    }, error = function(e) if (identical(conditionMessage(e), "past the door")) FALSE else stop(e))
+
+    if (refused) "refused" else seen
+
+  }
+
+  verdict <- function(obj) {
+
+    checks <- quiet_validate(obj)$validation$checks
+    stats::setNames(checks$status, checks$check_id)
+
+  }
+
+  ## Flag rows as standardize() does
+  flag <- function(obj, rows) {
+
+    obj$data$analysis$.flag <- ifelse(seq_len(nrow(obj$data$analysis)) %in% rows,
+                                      "standardize", NA_character_)
+    obj$data$role_map <- tibble::add_row(obj$data$role_map, variable = ".flag", role = "meta")
+    obj
+
+  }
+
+  it("passes 8 rows at 5 folds, which evaluate() runs", {
+
+    obj <- make_eval_object(n = 8)
+    obj$config$tuning$cv_folds <- 5L
+
+    expect_identical(verdict(obj)[["P001b"]], "pass")
+    expect_type(evaluate_door(obj), "integer")
+
+  })
+
+  it("fails 20 rows of which 16 are flagged at 5 folds, which evaluate() refuses", {
+
+    obj <- flag(make_eval_object(n = 20), rows = 1:16)
+    obj$config$tuning$cv_folds <- 5L
+
+    expect_identical(verdict(obj)[["P001b"]], "fail")
+    expect_identical(evaluate_door(obj), "refused")
+
+  })
+
+  it("fails one modelled row, a training part of none, which evaluate() refuses by the same rule", {
+
+    obj <- make_eval_object(n = 10)
+    obj$config$tuning$cv_folds <- 5L
+    obj$data$analysis$SOC[-1] <- NA_real_
+
+    checks <- quiet_validate(obj)$validation$checks
+
+    expect_identical(checks$value[checks$check_id == "P001b"], "0 training rows (need > 5)")
+    expect_identical(verdict(obj)[["P001b"]], "fail")
+    expect_identical(evaluate_door(obj), "refused")
+
+  })
+
+  it("warns of small folds where evaluate() warns, on the training part's folds", {
+
+    ## 55 rows: folds of 8 or fewer, so both warn; 80: folds of 12, neither
+    for (n in c(55L, 80L)) {
+
+      obj <- make_eval_object(n = n)
+      obj$config$tuning$cv_folds <- 5L
+
+      smallest <- evaluate_door(obj)
+
+      expect_identical(smallest < SMALL_FOLD_ROWS, n == 55L, info = n)
+      expect_identical(verdict(obj)[["P002"]] == "pass", smallest >= SMALL_FOLD_ROWS, info = n)
+
+    }
+
+  })
+
+  ## Spectra far from the rest, which the spectral screen removes
+  with_spectral_outliers <- function(obj, rows) {
+
+    pred <- obj$data$role_map$variable[obj$data$role_map$role == "predictor"]
+    obj$data$analysis[rows, pred] <- obj$data$analysis[rows, pred] * 50
+    obj
+
+  }
+
+  it("scores the fold rule on the rows its spectral removal leaves, which evaluate() refuses", {
+
+    ## 8 rows give a training part of 6, which passes; the 6 left give 4
+    obj <- with_spectral_outliers(make_eval_object(n = 8), rows = 1:2)
+    obj$config$tuning$cv_folds <- 5L
+
+    out <- capture.output(v <- suppressWarnings(
+      validate(obj, remove_outliers = "spectral", spectral_threshold = 0.5, verbose = TRUE)
+    ))
+    p001b <- v$validation$checks[v$validation$checks$check_id == "P001b", ]
+
+    expect_identical(verdict(obj)[["P001b"]], "pass")
+    expect_setequal(v$validation$outliers$removed_ids, c("S001", "S002"))
+    expect_identical(p001b$status, "fail")
+    expect_identical(p001b$value, "4 training rows (need > 5)")
+    expect_false(v$validation$passed)
+    expect_true(any(grepl("Samples: 6 (", out, fixed = TRUE)))
+    expect_identical(evaluate_door(v), "refused")
+
+  })
+
+  it("warns of small folds on the rows its spectral removal leaves, where evaluate() warns", {
+
+    ## 65 rows give a training part of 50, folds of 10; the 63 left give 48,
+    ## folds of 9
+    obj <- with_spectral_outliers(make_eval_object(n = 65), rows = 1:2)
+    obj$config$tuning$cv_folds <- 5L
+
+    v    <- quiet_validate(obj, remove_outliers = "spectral")
+    p002 <- v$validation$checks[v$validation$checks$check_id == "P002", ]
+
+    expect_identical(verdict(obj)[["P002"]], "pass")
+    expect_setequal(v$validation$outliers$removed_ids, c("S001", "S002"))
+    expect_identical(p002$status, "fail")
+    expect_identical(p002$value, "~9")
+    expect_lt(evaluate_door(v), SMALL_FOLD_ROWS)
 
   })
 
@@ -426,6 +608,23 @@ describe("validate() outcome checks", {
 
     p003 <- result$validation$checks[result$validation$checks$check_id == "P003", ]
     expect_equal(p003$status, "fail")
+
+  })
+
+  test_that("P003 reads the rows a spectral removal leaves, which evaluate() refuses as constant", {
+
+    ## The one row with another value is a spectral outlier
+    hd <- make_configured_hd(outcome_values = c(9, rep(5, 99)))
+    hd$data$analysis[1, 2:51] <- 100 * hd$data$analysis[1, 2:51]
+
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+    p003   <- result$validation$checks[result$validation$checks$check_id == "P003", ]
+
+    expect_true("S001" %in% result$validation$outliers$removed_ids)
+    expect_identical(p003$status, "fail")
+    expect_false(result$validation$passed)
+    expect_error(suppressWarnings(evaluate(result, seed = 42L)),
+                 class = "horizons_error_input", regexp = "zero variance")
 
   })
 
@@ -1006,6 +1205,51 @@ describe("validate() outlier removal", {
 
     expect_identical(out$response_trim,
                      list(outcome = "SOC", method = "iqr", threshold = 1.5))
+
+  })
+
+  test_that("says on the log and the tree how many rows the screen removed, and that it was before any split", {
+
+    hd  <- make_outlier_hd()
+    out <- capture.output(result <- suppressWarnings(
+      validate(hd, remove_outliers = "spectral", verbose = TRUE)
+    ))
+    removed <- result$validation$outliers$removed_ids
+
+    ## A note on the log, which later verbs carry, naming the rows, with the
+    ## removal record as its detail
+    note <- result$log[result$log$type == "note" &
+                         grepl("spectral outlier", result$log$message, fixed = TRUE), ]
+
+    expect_identical(nrow(note), 1L)
+    expect_match(note$message, paste0("Removed ", length(removed), " spectral outliers before any split"),
+                 fixed = TRUE)
+    expect_match(note$message, "the rows a later test set is drawn from are the ones left", fixed = TRUE)
+    expect_setequal(note$ids[[1]], removed)
+    expect_identical(note$detail[[1]], result$validation$outliers$removal_detail)
+
+    ## And the tree
+    expect_true(any(grepl(paste0("Removed ", length(removed), " spectral outliers before any split"),
+                          out, fixed = TRUE)))
+    expect_true(any(grepl(paste0(result$data$n_rows, " samples remaining, which a later test set is drawn from"),
+                          out, fixed = TRUE)))
+
+    ## Detection alone removes nothing and notes nothing
+    kept <- quiet_validate(hd, remove_outliers = FALSE)
+    expect_false(any(grepl("spectral outlier", kept$log$message, fixed = TRUE)))
+
+  })
+
+  test_that("the NA share and the Cubist check count the rows a spectral removal leaves", {
+
+    hd     <- make_outlier_hd()
+    result <- quiet_validate(hd, remove_outliers = "spectral")
+    checks <- result$validation$checks
+    n_left <- result$data$n_rows
+
+    expect_lt(n_left, 100)
+    expect_identical(checks$value[checks$check_id == "P004"], paste0("0/", n_left, " (0%)"))
+    expect_match(checks$value[checks$check_id == "P010"], paste0("; ", n_left, " x 20 = "), fixed = TRUE)
 
   })
 

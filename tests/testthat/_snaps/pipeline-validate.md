@@ -5,7 +5,7 @@
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)
-      │  ├─ ✓ CV feasibility: 100 ≥ 10
+      │  ├─ ✓ CV feasibility: 80 training rows for 5 folds (need > 5)
       │  ├─ ✓ Outcome variance: 26.61
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
@@ -22,7 +22,7 @@
     Output
       ├─ Validating...
       │  ├─ ✓ Samples: 100 (≥ 50)
-      │  ├─ ✓ CV feasibility: 100 ≥ 10
+      │  ├─ ✓ CV feasibility: 80 training rows for 5 folds (need > 5)
       │  ├─ ✗ Outcome variance: 0
       │  ├─ ✓ Missing: 0/100 (0%)
       │  ├─ ✓ Near-zero variance: 0
@@ -41,17 +41,17 @@
       validate(hd, remove_outliers = TRUE, verbose = TRUE)
     Output
       ├─ Validating...
-      │  ├─ ✓ Samples: 100 (≥ 50)
-      │  ├─ ✓ CV feasibility: 100 ≥ 10
-      │  ├─ ✓ Outcome variance: 26.61
-      │  ├─ ✓ Missing: 0/100 (0%)
+      │  ├─ ✓ Samples: 97 (≥ 50)
+      │  ├─ ✓ CV feasibility: 77 training rows for 5 folds (need > 5)
+      │  ├─ ✓ Outcome variance: 27.09
+      │  ├─ ✓ Missing: 0/97 (0%)
       │  ├─ ✓ Near-zero variance: 0
-      │  ├─ ✓ Cubist feasibility: 100 x 50 cells, 0 config(s) flagged
+      │  ├─ ✓ Cubist feasibility: 97 x 50 cells, 0 config(s) flagged
       │  ├─ ℹ Spectral outliers: 3
       │  ├─ ℹ Response outliers: 1 on the whole table, not removed
       │  │  └─ Trim requested: evaluate() fences its training partition (1.5 x IQR) and trims training rows only; test rows untouched
-      │  ├─ Removed 3 spectral outliers
-      │  ├─ 97 samples remaining
+      │  ├─ Removed 3 spectral outliers before any split
+      │  ├─ 97 samples remaining, which a later test set is drawn from
       │  └─ Status: PASSED
       │
 

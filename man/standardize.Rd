@@ -99,7 +99,9 @@ extent, so two sources share columns only where their ranges overlap; pass
 gives \verb{wn_4000, wn_3996, ..., wn_600} (851 columns) whether the scans came
 at 2 cm⁻¹ from 600 or at about 1.93 cm⁻¹ from 599.74. Grid wavenumbers are
 rounded to six decimal places, so a non-integer resolution such as 1.5
-gives clean, stable names (\code{wn_601.5}).
+gives clean, stable names (\code{wn_601.5}). A column that is not a predictor
+may not carry the name of one the call writes: it is refused before any
+spectrum is changed.
 
 The spectra are interpolated onto the grid by cubic spline and never
 extrapolated: grid points beyond the data's range are dropped with a

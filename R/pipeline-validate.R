@@ -9,11 +9,25 @@
 #' `validate()` is an advisory pre-flight report, run between `configure()`
 #' and `evaluate()`. Running it is optional and nothing gates on its verdict:
 #' `evaluate()` and `fit()` refuse invalid input themselves, including the
-#' problems its ERROR checks report (too few rows for the CV folds, and an
-#' outcome with zero variance). Detection is mandatory; outlier removal is
-#' opt-in. The function populates the `validation` section of the object
-#' and sets `validation$passed` based on whether any ERROR-severity checks
-#' failed.
+#' problems its ERROR checks report (a training part without more rows than
+#' CV folds, and an outcome with zero variance). Detection is mandatory;
+#' outlier removal is opt-in. The function populates the `validation`
+#' section of the object and sets `validation$passed` based on whether any
+#' ERROR-severity checks failed.
+#'
+#' **The rows counted:** the checks read the object `validate()` returns,
+#' after any spectral removal it makes, except the two outlier detections
+#' and the near-zero-variance check, which read the rows the screen ran on.
+#' The sample-size and outcome-variance checks count its rows that the
+#' modelling verbs model: those with an observed outcome that no step flagged
+#' (`.flag`). The fold checks read the training part
+#' `evaluate()`'s train/test split leaves of them, on the rule the verbs
+#' apply: P001b is an ERROR when it has no more rows than CV folds, which
+#' `evaluate()` and `fit()` refuse, and P002 a WARNING when an even split of
+#' it into folds leaves fewer than 10 rows in a fold, as the verbs warn. A
+#' training part P001b passes can still be refused once rows leave it after
+#' the split: a response trim requested here, and `fit()`'s calibration set
+#' when UQ or AD is on.
 #'
 #' **Severity levels:**
 #'
@@ -39,23 +53,25 @@
 #' **Response outliers are trimmed from the training partition, not here:**
 #'
 #' Spectral outliers are removed here, since the detector reads no labels.
-#' Response outliers are not. Fences computed over the whole table would
-#' include the rows `evaluate()` later holds out as its test set, and
-#' removing the rows outside them before any split exists takes exactly the
-#' hardest cases out of the test set, chosen by their own labels, so the test
-#' metrics come out optimistic (#77). So `validate()` flags the rows outside
-#' the whole-table fences for information (`response_ids`, check P006) and,
-#' when `remove_outliers` asks for response removal, records the request in
-#' `validation$outliers$response_trim`. `evaluate()` then draws its
-#' train/test split on the untrimmed rows, computes the fences from the
-#' training partition's labels alone, and trims the training rows outside
-#' them before any CV fold is drawn; test rows are never removed on their
-#' labels. `fit()` reuses that split and those trimmed rows, and its cold
-#' start applies the same rule. On an object already evaluated, a request
-#' that differs from the trim `evaluate()` applied makes `fit()` refuse until
-#' `evaluate()` runs again. A later `configure()` clears the request
-#' with the rest of the verdict, since it was made for the outcome being
-#' replaced.
+#' They leave before any split, so the test set `evaluate()` later draws comes
+#' from the screened rows; the tree and a note on the object's log say how
+#' many were removed. Response outliers are not removed here. Fences computed
+#' over the whole table would include the rows `evaluate()` later holds out as
+#' its test set, and removing the rows outside them before any split exists
+#' takes exactly the hardest cases out of the test set, chosen by their own
+#' labels, so the test metrics come out optimistic (#77). So `validate()`
+#' flags the rows outside the whole-table fences for information
+#' (`response_ids`, check P006) and, when `remove_outliers` asks for response
+#' removal, records the request in `validation$outliers$response_trim`.
+#' `evaluate()` then draws its train/test split on the untrimmed rows,
+#' computes the fences from the training partition's labels alone, and trims
+#' the training rows outside them before any CV fold is drawn; test rows are
+#' never removed on their labels. `fit()` reuses that split and those trimmed
+#' rows, and its cold start applies the same rule. On an object already
+#' evaluated, a request that differs from the trim `evaluate()` applied makes
+#' `fit()` refuse until `evaluate()` runs again. A later `configure()` clears
+#' the request with the rest of the verdict, since it was made for the outcome
+#' being replaced.
 #'
 #' **Checks that cannot run:**
 #'
@@ -257,31 +273,16 @@ validate <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 2: Compute sample counts + extract outcome
+  ## Step 2: The table as it arrives, its outcome and the folds
   ## ---------------------------------------------------------------------------
 
   analysis <- x$data$analysis
-  n_total  <- nrow(analysis)
 
   ## Outcome extraction ---------------------------------------------------------
 
-  ### The door validator has refused more than one outcome, or one whose
-  ### column is not in the analysis table.
+  ### The door validator has refused a configured object without exactly one
+  ### outcome, or one whose column is not in the analysis table.
   outcome_col <- x$data$role_map$variable[x$data$role_map$role == "outcome"]
-
-  has_outcome <- length(outcome_col) == 1
-
-  if (has_outcome) {
-
-    outcome_vals <- analysis[[outcome_col]]
-    n_model      <- sum(!is.na(outcome_vals))
-
-  } else {
-
-    outcome_vals <- NULL
-    n_model      <- n_total
-
-  }
 
   ## CV folds from tuning config ------------------------------------------------
 
@@ -339,79 +340,12 @@ validate <- function(x,
   ))
 
   ## ---------------------------------------------------------------------------
-  ## Step 5: P001 — Recommended sample count (n_total)
+  ## Step 4b: Spectral outliers, detected and, when asked, removed
   ## ---------------------------------------------------------------------------
-
-  checks <- rbind(checks, run_check(
-    "P001", "Recommended sample count",
-    condition = n_total >= 50,
-    severity  = "WARNING",
-    value     = as.character(n_total)
-  ))
-
-  ## ---------------------------------------------------------------------------
-  ## Step 6: P001b — CV feasibility (n_model)
-  ## ---------------------------------------------------------------------------
-
-  checks <- rbind(checks, run_check(
-    "P001b", "Feasible CV split",
-    condition = n_model >= cv_folds * 2,
-    severity  = "ERROR",
-    value     = paste0(n_model, " (need >= ", cv_folds * 2, ")")
-  ))
-
-  ## ---------------------------------------------------------------------------
-  ## Step 7: P002 — Samples per CV fold (n_model)
-  ## ---------------------------------------------------------------------------
-
-  samples_per_fold <- floor(n_model / cv_folds)
-
-  checks <- rbind(checks, run_check(
-    "P002", "Samples per CV fold",
-    condition = samples_per_fold >= 10,
-    severity  = "WARNING",
-    value     = paste0("~", samples_per_fold)
-  ))
-
-  ## ---------------------------------------------------------------------------
-  ## Step 8: P003 — Outcome variance (gated)
-  ## ---------------------------------------------------------------------------
-
-  if (has_outcome) {
-
-    outcome_complete <- outcome_vals[!is.na(outcome_vals)]
-    outcome_var      <- if (length(outcome_complete) >= 2) stats::var(outcome_complete) else 0
-
-    checks <- rbind(checks, run_check(
-      "P003", "Outcome variance",
-      condition = outcome_var > 0,
-      severity  = "ERROR",
-      value     = format(outcome_var, digits = 4)
-    ))
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Step 9: P004 — Outcome NA proportion (gated)
-  ## ---------------------------------------------------------------------------
-
-  if (has_outcome) {
-
-    n_na     <- sum(is.na(outcome_vals))
-    pct_na   <- round(100 * n_na / n_total, 1)
-
-    checks <- rbind(checks, run_check(
-      "P004", "Outcome NA proportion",
-      condition = pct_na <= 20,
-      severity  = "WARNING",
-      value     = paste0(n_na, "/", n_total, " (", pct_na, "%)")
-    ))
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Step 10: P005 — Spectral outlier detection
-  ## ---------------------------------------------------------------------------
+  ## Before anything is counted, so the sample-size and outcome-variance
+  ## checks below score the rows validate() returns, the ones evaluate() gets.
+  ## Only spectral outliers leave the object here, since that detector reads
+  ## no labels; response outliers are never removed here (Step 12, #77).
 
   spectral <- detect_spectral_outliers(
     analysis       = clean_analysis,
@@ -430,89 +364,6 @@ validate <- function(x,
                 "Spectral outlier detection did not run: {spectral$skipped}.")
 
   }
-
-  checks <- rbind(checks, run_check(
-    "P005", "Spectral outliers",
-    condition = TRUE,
-    severity  = "INFO",
-    value     = if (is.null(spectral$skipped)) {
-      paste0(length(spectral_outlier_ids), " flagged")
-    } else {
-      paste0("not run: ", spectral$skipped)
-    }
-  ))
-
-  ## ---------------------------------------------------------------------------
-  ## Step 11: P006 — Response outlier detection (gated)
-  ## ---------------------------------------------------------------------------
-
-  response_outlier_ids <- character(0)
-  response_skipped     <- NULL
-
-  if (has_outcome) {
-
-    ### Flagged rows are left out, as P005, P007 and evaluate()'s trim
-    ### leave them out.
-    response <- detect_response_outliers(
-      analysis    = clean_analysis,
-      outcome_col = outcome_col,
-      threshold   = response_threshold
-    )
-
-    response_outlier_ids <- response$ids
-    response_skipped     <- response$skipped
-
-    if (!is.null(response_skipped)) {
-
-      log_warning(collector, "skipped",
-                  "Response outlier detection did not run: {response_skipped}.")
-
-    }
-
-    checks <- rbind(checks, run_check(
-      "P006", "Response outliers",
-      condition = TRUE,
-      severity  = "INFO",
-      value     = if (is.null(response_skipped)) {
-        paste0(length(response_outlier_ids), " flagged")
-      } else {
-        paste0("not run: ", response_skipped)
-      }
-    ))
-
-  }
-
-  ## ---------------------------------------------------------------------------
-  ## Step 11b: P010 — Cubist feasibility at full resolution
-  ## ---------------------------------------------------------------------------
-
-  n_pred_cols        <- length(predictor_cols)
-  n_cells            <- n_total * n_pred_cols
-  cubist_flagged_ids <- check_cubist_feasibility(
-    configs      = x$config$configs,
-    n_total      = n_total,
-    n_predictors = n_pred_cols,
-    max_cells    = CUBIST_MAX_CELLS
-  )
-
-  checks <- rbind(checks, run_check(
-    "P010", "Cubist feasibility at full resolution",
-    condition = length(cubist_flagged_ids) == 0,
-    severity  = "WARNING",
-    value     = paste0(length(cubist_flagged_ids), " config(s); ", n_total, " x ",
-                       n_pred_cols, " = ", format(n_cells, big.mark = ",", scientific = FALSE),
-                       " cells")
-  ))
-
-  ## ---------------------------------------------------------------------------
-  ## Step 12: Outlier removal (if requested)
-  ## ---------------------------------------------------------------------------
-  ## Only spectral outliers leave the object here, since that detector reads
-  ## no labels. Response outliers are never removed here (#77): the fences
-  ## above span every row, including the rows evaluate() will hold out, so
-  ## removing on them would take the test set's hardest cases out by their
-  ## own labels. A response request is recorded instead, and evaluate()
-  ## trims the training partition on fences from its labels alone.
 
   remove_spectral <- isTRUE(remove_outliers) || identical(remove_outliers, "spectral")
   trim_response   <- isTRUE(remove_outliers) || identical(remove_outliers, "response")
@@ -553,12 +404,187 @@ validate <- function(x,
     removed_ids <- spectral_outlier_ids
     did_remove  <- TRUE
 
+    ## The screen runs before any split, so a later test set is drawn from
+    ## the rows it leaves. Said on the log, which every later verb carries,
+    ## and in the tree; a note, since removing them was the user's call.
+    log_note(collector, c(
+      "Removed {length(removed_ids)} spectral outlier{?s} before any split: the rows a later test set is drawn from are the ones left.",
+      "i" = "Samples: {shown_ids(removed_ids)}.",
+      "i" = "Each sample and the threshold it was removed at are in this row's {.field detail}."
+    ), ids = removed_ids, detail = removal_detail)
+
   }
 
+  ## ---------------------------------------------------------------------------
+  ## Step 4c: The table returned, and the rows the verbs model
+  ## ---------------------------------------------------------------------------
+  ## Every check below reads the table validate() returns, but P006's
+  ## detection, which reads the rows the screen ran on, as P007 and P005 do.
+  ## The sample-size checks count what evaluate() and fit() count: the rows
+  ## with an observed outcome and no flag (modelling_mask(), the rule
+  ## modelling_rows() applies), and the training part evaluate()'s split
+  ## leaves of them, drawn at the root evaluate() takes by default.
+
+  returned     <- x$data$analysis
+  n_total      <- nrow(returned)
+  outcome_vals <- returned[[outcome_col]]
+
+  modelled <- modelling_mask(returned, outcome_col)
+  n_model  <- sum(modelled)
+  n_train  <- training_part_rows(returned, outcome_col, seed = recorded_seed(x) %||% 0L,
+                                 cv_folds = cv_folds)
+
+  ## ---------------------------------------------------------------------------
+  ## Step 5: P001 — Recommended sample count (n_model)
+  ## ---------------------------------------------------------------------------
+
+  checks <- rbind(checks, run_check(
+    "P001", "Recommended sample count",
+    condition = n_model >= 50,
+    severity  = "WARNING",
+    value     = as.character(n_model)
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 6: P001b — CV feasibility (n_train)
+  ## ---------------------------------------------------------------------------
+  ## The fold rule evaluate() and fit() refuse on (check_fold_rows()).
+
+  checks <- rbind(checks, run_check(
+    "P001b", "Feasible CV split",
+    condition = is_foldable(n_train, cv_folds),
+    severity  = "ERROR",
+    value     = paste0(n_train, " training rows (need > ", cv_folds, ")")
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 7: P002 — Samples per CV fold (n_train)
+  ## ---------------------------------------------------------------------------
+  ## The verbs warn when the smallest assessment fold has fewer than
+  ## SMALL_FOLD_ROWS rows (log_small_folds()). An even split of the training
+  ## part has floor(n_train / cv_folds) in its smallest fold; a stratified one
+  ## can have a row or so fewer.
+
+  samples_per_fold <- floor(n_train / cv_folds)
+
+  checks <- rbind(checks, run_check(
+    "P002", "Samples per CV fold",
+    condition = samples_per_fold >= SMALL_FOLD_ROWS,
+    severity  = "WARNING",
+    value     = paste0("~", samples_per_fold)
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 8: P003 — Outcome variance
+  ## ---------------------------------------------------------------------------
+
+  outcome_complete <- outcome_vals[modelled]
+  outcome_var      <- if (length(outcome_complete) >= 2) stats::var(outcome_complete) else 0
+
+  checks <- rbind(checks, run_check(
+    "P003", "Outcome variance",
+    condition = outcome_var > 0,
+    severity  = "ERROR",
+    value     = format(outcome_var, digits = 4)
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 9: P004 — Outcome NA proportion
+  ## ---------------------------------------------------------------------------
+
+  n_na     <- sum(is.na(outcome_vals))
+  pct_na   <- round(100 * n_na / n_total, 1)
+
+  checks <- rbind(checks, run_check(
+    "P004", "Outcome NA proportion",
+    condition = pct_na <= 20,
+    severity  = "WARNING",
+    value     = paste0(n_na, "/", n_total, " (", pct_na, "%)")
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 10: P005 — Spectral outliers (detected in Step 4b)
+  ## ---------------------------------------------------------------------------
+
+  checks <- rbind(checks, run_check(
+    "P005", "Spectral outliers",
+    condition = TRUE,
+    severity  = "INFO",
+    value     = if (is.null(spectral$skipped)) {
+      paste0(length(spectral_outlier_ids), " flagged")
+    } else {
+      paste0("not run: ", spectral$skipped)
+    }
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 11: P006 — Response outlier detection
+  ## ---------------------------------------------------------------------------
+
+  ### Flagged rows are left out, as P005, P007 and evaluate()'s trim leave
+  ### them out.
+  response <- detect_response_outliers(
+    analysis    = clean_analysis,
+    outcome_col = outcome_col,
+    threshold   = response_threshold
+  )
+
+  response_outlier_ids <- response$ids
+  response_skipped     <- response$skipped
+
+  if (!is.null(response_skipped)) {
+
+    log_warning(collector, "skipped",
+                "Response outlier detection did not run: {response_skipped}.")
+
+  }
+
+  checks <- rbind(checks, run_check(
+    "P006", "Response outliers",
+    condition = TRUE,
+    severity  = "INFO",
+    value     = if (is.null(response_skipped)) {
+      paste0(length(response_outlier_ids), " flagged")
+    } else {
+      paste0("not run: ", response_skipped)
+    }
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 11b: P010 — Cubist feasibility at full resolution
+  ## ---------------------------------------------------------------------------
+
+  n_pred_cols        <- length(predictor_cols)
+  n_cells            <- n_total * n_pred_cols
+  cubist_flagged_ids <- check_cubist_feasibility(
+    configs      = x$config$configs,
+    n_total      = n_total,
+    n_predictors = n_pred_cols,
+    max_cells    = CUBIST_MAX_CELLS
+  )
+
+  checks <- rbind(checks, run_check(
+    "P010", "Cubist feasibility at full resolution",
+    condition = length(cubist_flagged_ids) == 0,
+    severity  = "WARNING",
+    value     = paste0(length(cubist_flagged_ids), " config(s); ", n_total, " x ",
+                       n_pred_cols, " = ", format(n_cells, big.mark = ",", scientific = FALSE),
+                       " cells")
+  ))
+
+  ## ---------------------------------------------------------------------------
+  ## Step 12: The response-trim request
+  ## ---------------------------------------------------------------------------
+  ## Response outliers are never removed here (#77): the fences above span
+  ## every row, including the rows evaluate() will hold out, so removing on
+  ## them would take the test set's hardest cases out by their own labels. A
+  ## response request is recorded instead, and evaluate() trims the training
+  ## partition on fences from its labels alone.
+  ##
   ## The request evaluate() and fit()'s cold start read. The outcome is
   ## recorded so a request can never be applied to another outcome's labels;
   ## configure() clears it with the verdict anyway.
-  response_trim <- if (trim_response && has_outcome) {
+  response_trim <- if (trim_response) {
     list(outcome   = outcome_col,
          method    = response_method,
          threshold = as.numeric(response_threshold))
@@ -632,30 +658,29 @@ validate <- function(x,
 
     ## Sample checks --------------------------------------------------------------
 
+    ### The rows the verbs model, of the rows returned when some are left out
     p001 <- checks[checks$check_id == "P001", ]
     sym  <- if (p001$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-    cat(paste0("\u2502  \u251C\u2500 ", sym, " Samples: ", n_total, " (\u2265 50)\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " Samples: ", n_model,
+               if (n_model < n_total) paste0(" of ", n_total, " modelled"),
+               " (\u2265 50)\n"))
 
     p001b <- checks[checks$check_id == "P001b", ]
     sym   <- if (p001b$status == "pass") cli::col_green("\u2713") else cli::col_red("\u2717")
-    cat(paste0("\u2502  \u251C\u2500 ", sym, " CV feasibility: ", n_model,
-               " \u2265 ", cv_folds * 2, "\n"))
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " CV feasibility: ", n_train,
+               " training rows for ", cv_folds, " folds (need > ", cv_folds, ")\n"))
 
-    ## Outcome checks (gated) ----------------------------------------------------
+    ## Outcome checks -------------------------------------------------------------
 
-    if (has_outcome) {
+    p003 <- checks[checks$check_id == "P003", ]
+    sym  <- if (p003$status == "pass") cli::col_green("\u2713") else cli::col_red("\u2717")
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " Outcome variance: ",
+               format(outcome_var, digits = 4), "\n"))
 
-      p003 <- checks[checks$check_id == "P003", ]
-      sym  <- if (p003$status == "pass") cli::col_green("\u2713") else cli::col_red("\u2717")
-      cat(paste0("\u2502  \u251C\u2500 ", sym, " Outcome variance: ",
-                 format(outcome_var, digits = 4), "\n"))
-
-      p004 <- checks[checks$check_id == "P004", ]
-      sym  <- if (p004$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
-      cat(paste0("\u2502  \u251C\u2500 ", sym, " Missing: ", n_na, "/", n_total,
-                 " (", pct_na, "%)\n"))
-
-    }
+    p004 <- checks[checks$check_id == "P004", ]
+    sym  <- if (p004$status == "pass") cli::col_green("\u2713") else cli::col_yellow("\u26A0")
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " Missing: ", n_na, "/", n_total,
+               " (", pct_na, "%)\n"))
 
     ## Predictor checks -----------------------------------------------------------
 
@@ -676,22 +701,18 @@ validate <- function(x,
                cli::col_cyan("\u2139"), " Spectral outliers: ",
                if (is.null(spectral$skipped)) length(spectral_outlier_ids) else "not run", "\n"))
 
-    if (has_outcome) {
+    cat(paste0("\u2502  \u251C\u2500 ",
+               cli::col_cyan("\u2139"), " Response outliers: ",
+               if (is.null(response_skipped)) length(response_outlier_ids) else "not run",
+               if (!is.null(response_trim)) " on the whole table, not removed" else "",
+               "\n"))
 
-      cat(paste0("\u2502  \u251C\u2500 ",
-                 cli::col_cyan("\u2139"), " Response outliers: ",
-                 if (is.null(response_skipped)) length(response_outlier_ids) else "not run",
-                 if (!is.null(response_trim)) " on the whole table, not removed" else "",
-                 "\n"))
+    ## Where the request goes, so nobody reads the count above as rows gone
+    if (!is.null(response_trim)) {
 
-      ## Where the request goes, so nobody reads the count above as rows gone
-      if (!is.null(response_trim)) {
-
-        cat(paste0("\u2502  \u2502  \u2514\u2500 Trim requested: evaluate() fences its training ",
-                   "partition (", format(response_trim$threshold), " x IQR) and trims ",
-                   "training rows only; test rows untouched\n"))
-
-      }
+      cat(paste0("\u2502  \u2502  \u2514\u2500 Trim requested: evaluate() fences its training ",
+                 "partition (", format(response_trim$threshold), " x IQR) and trims ",
+                 "training rows only; test rows untouched\n"))
 
     }
 
@@ -699,8 +720,9 @@ validate <- function(x,
 
     if (did_remove) {
 
-      cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " spectral outliers\n"))
-      cat(paste0("\u2502  \u251C\u2500 ", x$data$n_rows, " samples remaining\n"))
+      cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " spectral outlier",
+                 if (length(removed_ids) != 1) "s", " before any split\n"))
+      cat(paste0("\u2502  \u251C\u2500 ", x$data$n_rows, " samples remaining, which a later test set is drawn from\n"))
 
     }
 
