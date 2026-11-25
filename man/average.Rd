@@ -37,10 +37,14 @@ spectra keep every band. \code{NULL} (the default) is the range the spectra
 are modelled over, whichever order \code{average()} and \code{\link[=standardize]{standardize()}} run
 in: on spectra \code{standardize()} has run on, every band they have; on
 spectra it has not, the bands inside its default \code{trim}, 600 to 4000
-cm-1. A range given that holds no band of the spectra is refused. When
-the default holds none, as for an instrument outside 600 to 4000 cm-1,
-quality control correlates over every band, and a note on the log says
-so. The call's note names the bands it used.}
+cm-1. A correlation needs at least three bands, so a range given that
+holds fewer of the spectra's bands is refused. When the default holds
+fewer, as for an instrument outside 600 to 4000 cm-1, quality control
+correlates over every band, and a note on the log says so. The call's
+note names the bands quality control used. An instrument whose axis
+only partly overlaps 600 to 4000 cm-1 is checked over the overlap,
+which that note names, and can set \code{qc_range} to the range it is
+modelled over.}
 
 \item{on_all_outliers}{Character. Behavior when all replicates fail QC:
 \itemize{

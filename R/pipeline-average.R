@@ -145,10 +145,14 @@
 #'   are modelled over, whichever order `average()` and [standardize()] run
 #'   in: on spectra `standardize()` has run on, every band they have; on
 #'   spectra it has not, the bands inside its default `trim`, 600 to 4000
-#'   cm-1. A range given that holds no band of the spectra is refused. When
-#'   the default holds none, as for an instrument outside 600 to 4000 cm-1,
-#'   quality control correlates over every band, and a note on the log says
-#'   so. The call's note names the bands it used.
+#'   cm-1. A correlation needs at least three bands, so a range given that
+#'   holds fewer of the spectra's bands is refused. When the default holds
+#'   fewer, as for an instrument outside 600 to 4000 cm-1, quality control
+#'   correlates over every band, and a note on the log says so. The call's
+#'   note names the bands quality control used. An instrument whose axis
+#'   only partly overlaps 600 to 4000 cm-1 is checked over the overlap,
+#'   which that note names, and can set `qc_range` to the range it is
+#'   modelled over.
 #' @param on_all_outliers Character. Behavior when all replicates fail QC:
 #'   * `"warn"` (default): Keep all replicates and average
 #'   * `"drop"`: Remove the sample entirely
@@ -325,14 +329,15 @@ average <- function(x,
                                   standardized = !is.null(x$data$standardization))
   qc_wn    <- round(range(wn_values(qc_bands$cols)), 2)
 
-  ### A range given that holds no band cannot be the one read, so it is
-  ### refused, QC on or off; the default's own fallback is every band
+  ### A range given that holds too few bands to correlate over cannot be the
+  ### one read, so it is refused, QC on or off; the default's own fallback is
+  ### every band
   if (!is.null(qc_range) && qc_bands$fallback) {
 
     abort_horizons(c(
-      "{.arg qc_range} holds no band of the spectra.",
+      "{.arg qc_range} holds {qc_bands$n_inside} band{?s} of the spectra, and the quality check needs at least {QC_MIN_BANDS} to correlate over.",
       "x" = "It is {qc_range[1]} to {qc_range[2]} cm-1, and the spectra run from {qc_wn[1]} to {qc_wn[2]} cm-1.",
-      "i" = "Give a range that overlaps the spectra's, or {.code NULL} for the range they are modelled over."
+      "i" = "Give a range holding at least {QC_MIN_BANDS} bands of the spectra, or {.code NULL} for the range they are modelled over."
     ), kind = "input")
 
   }
@@ -340,7 +345,7 @@ average <- function(x,
   if (quality_check && qc_bands$fallback) {
 
     log_note(collector, c(
-      "No band lies inside the quality check's range, {qc_bands$asked[1]} to {qc_bands$asked[2]} cm-1, so it correlated over every band, {qc_wn[1]} to {qc_wn[2]} cm-1.",
+      "The quality check's range, {qc_bands$asked[1]} to {qc_bands$asked[2]} cm-1, holds {qc_bands$n_inside} band{?s}, fewer than the {QC_MIN_BANDS} it needs to correlate over, so it correlated over every band, {qc_wn[1]} to {qc_wn[2]} cm-1.",
       "i" = "Set {.arg qc_range} to the range the spectra are modelled over."
     ))
 
@@ -910,9 +915,9 @@ average <- function(x,
 #' it has, the range it was trimmed to; one it has not run on, over the bands
 #' inside `standardize()`'s default `trim`, `MIR_RANGE`. A `qc_range` given
 #' is the range read either way. The bounds are inclusive, as `trim`'s are.
-#' When no band lies inside the range, the check reads every band: the
-#' default's fallback, since `average()` refuses a `qc_range` given that
-#' holds none.
+#' When fewer than `QC_MIN_BANDS` bands lie inside the range, too few to
+#' correlate over, the check reads every band: the default's fallback, since
+#' `average()` refuses a `qc_range` given that holds fewer.
 #'
 #' @param predictor_cols Character. The predictor columns, named by
 #'   wavenumber.
@@ -923,8 +928,9 @@ average <- function(x,
 #'
 #' @return List: `cols`, the predictor columns QC correlates over; `asked`,
 #'   the range they were chosen from, `NULL` for every band of a
-#'   standardized object; and `fallback`, `TRUE` when no band lay inside
-#'   `asked`, so `cols` is every band.
+#'   standardized object; `n_inside`, the bands inside `asked` (every band
+#'   when `asked` is `NULL`); and `fallback`, `TRUE` when `n_inside` is
+#'   fewer than `QC_MIN_BANDS`, so `cols` is every band.
 #' @keywords internal
 #' @noRd
 quality_check_bands <- function(predictor_cols, qc_range, standardized) {
@@ -933,20 +939,23 @@ quality_check_bands <- function(predictor_cols, qc_range, standardized) {
 
   if (is.null(asked)) {
 
-    return(list(cols = predictor_cols, asked = NULL, fallback = FALSE))
+    return(list(cols = predictor_cols, asked = NULL,
+                n_inside = length(predictor_cols), fallback = FALSE))
 
   }
 
   wn     <- wn_values(predictor_cols)
   inside <- wn >= asked[1] & wn <= asked[2]
 
-  if (!any(inside)) {
+  if (sum(inside) < QC_MIN_BANDS) {
 
-    return(list(cols = predictor_cols, asked = asked, fallback = TRUE))
+    return(list(cols = predictor_cols, asked = asked,
+                n_inside = sum(inside), fallback = TRUE))
 
   }
 
-  list(cols = predictor_cols[inside], asked = asked, fallback = FALSE)
+  list(cols = predictor_cols[inside], asked = asked,
+       n_inside = sum(inside), fallback = FALSE)
 
 }
 

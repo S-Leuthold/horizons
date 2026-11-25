@@ -2060,7 +2060,7 @@ test_that("average()'s quality control reads the bands qc_range names, its defau
     err <- expect_error(average(hd, qc_range = c(100, 500), quality_check = qc, verbose = FALSE),
                         class = "horizons_error_input")
     msg <- gsub("\\s+", " ", conditionMessage(err))
-    expect_match(msg, "`qc_range` holds no band of the spectra.", fixed = TRUE, info = qc)
+    expect_match(msg, "`qc_range` holds 0 bands of the spectra, and the quality check needs at least 3 to correlate over.", fixed = TRUE, info = qc)
     expect_match(msg, "It is 100 to 500 cm-1, and the spectra run from 596 to 7500 cm-1.", fixed = TRUE, info = qc)
     expect_match(msg, "or `NULL` for the range they are modelled over.", fixed = TRUE, info = qc)
   }
@@ -2074,7 +2074,7 @@ test_that("average()'s quality control reads the bands qc_range names, its defau
   rows <- log_rows_added(nir, out)
 
   expect_identical(lost(out), c(6L, 9L))
-  expect_match(rows$message[1], "No band lies inside the quality check's range, 600 to 4000 cm-1, so it correlated over every band, 5596 to 12500 cm-1.", fixed = TRUE)
+  expect_match(rows$message[1], "The quality check's range, 600 to 4000 cm-1, holds 0 bands, fewer than the 3 it needs to correlate over, so it correlated over every band, 5596 to 12500 cm-1.", fixed = TRUE)
   expect_match(note(out), "over 1727 bands, 5596 to 12500 cm-1,", fixed = TRUE)
 
   ### Without the check there is nothing to say
@@ -2086,6 +2086,77 @@ test_that("average()'s quality control reads the bands qc_range names, its defau
     expect_error(average(hd, qc_range = bad, verbose = FALSE), "qc_range",
                  class = "horizons_error_input", info = paste(bad, collapse = " "))
   }
+
+})
+
+test_that("average()'s quality check needs three bands in its range: the default falls back to every band, a range given with fewer is refused", {
+
+  ## Raw scans from 10000 cm-1 down to `low`, as an FT-NIR instrument writes
+  ## them: two samples of three scans, S1's third differing strongly at
+  ## 7000 cm-1, outside the default range. The bands at and below 4000 cm-1
+  ## rise steeply, so a check over three of them can correlate.
+  make_nir_hd <- function(low) {
+    wn    <- seq(10000, low, by = -4)
+    base  <- 0.3 + 0.1 * sin(wn / 700) + pmax(4000 - wn, 0) * 0.01
+    set.seed(5)
+    scans <- t(vapply(1:6, function(i) base + stats::rnorm(length(wn), 0, 5e-4), numeric(length(wn))))
+    scans[3, ] <- scans[3, ] + 0.5 * exp(-((wn - 7000) / 300)^2)
+    colnames(scans) <- wn
+    df <- tibble::as_tibble(scans)
+    df$sample_id <- rep(c("S1", "S2"), each = 3)
+    spectra(df, verbose = FALSE)
+  }
+
+  note <- function(out) out$log$message[nrow(out$log)]
+  lost <- function(out) dplyr::bind_rows(out$log$detail[out$log$verb == "average"])$row
+
+  ## The default holding one band (the axis ends at 4000) or two: QC over
+  ## every band, which removes S1's third, and a note that says why
+  for (case in list(list(low = 4000, n = "1 band", bands = 1501),
+                    list(low = 3996, n = "2 bands", bands = 1502))) {
+    hd   <- make_nir_hd(case$low)
+    out  <- average(hd, verbose = FALSE)
+    rows <- log_rows_added(hd, out)
+
+    expect_identical(lost(out), 3L, info = case$n)
+    expect_match(rows$message[1],
+                 paste0("The quality check's range, 600 to 4000 cm-1, holds ", case$n,
+                        ", fewer than the 3 it needs to correlate over, so it correlated over every band, ",
+                        case$low, " to 10000 cm-1."),
+                 fixed = TRUE, info = case$n)
+    expect_match(note(out), paste0("over ", case$bands, " bands, ", case$low, " to 10000 cm-1,"),
+                 fixed = TRUE, info = case$n)
+  }
+
+  ## Three bands inside it are checked over, the overlap the call's note names
+  hd  <- make_nir_hd(3992)
+  out <- average(hd, verbose = FALSE)
+
+  expect_identical(nrow(log_rows_added(hd, out)), 1L)
+  expect_match(note(out), "over 3 bands, 3992 to 4000 cm-1, with `on_all_outliers = \"warn\"`; 0 replicates removed",
+               fixed = TRUE)
+
+  ## A range given holding one band or two is refused at the door, QC on or
+  ## off, naming how many it holds; three are read
+  hd <- make_nir_hd(3980)
+
+  for (case in list(list(range = c(3999, 4001), n = "1 band"),
+                    list(range = c(3996, 4000), n = "2 bands"))) {
+    for (qc in c(TRUE, FALSE)) {
+      err <- expect_error(average(hd, qc_range = case$range, quality_check = qc, verbose = FALSE),
+                          class = "horizons_error_input")
+      msg <- gsub("\\s+", " ", conditionMessage(err))
+      expect_match(msg, paste0("`qc_range` holds ", case$n, " of the spectra, and the quality check needs at least 3 to correlate over."),
+                   fixed = TRUE, info = paste(case$n, qc))
+      expect_match(msg, paste0("It is ", case$range[1], " to ", case$range[2], " cm-1, and the spectra run from 3980 to 10000 cm-1."),
+                   fixed = TRUE, info = paste(case$n, qc))
+      expect_match(msg, "Give a range holding at least 3 bands of the spectra", fixed = TRUE,
+                   info = paste(case$n, qc))
+    }
+  }
+
+  out <- average(hd, qc_range = c(3992, 4000), verbose = FALSE)
+  expect_match(note(out), "over 3 bands, 3992 to 4000 cm-1,", fixed = TRUE)
 
 })
 

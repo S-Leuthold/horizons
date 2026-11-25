@@ -853,6 +853,12 @@ WN_SNAP_FRACTION <- 0.01
 # the scans and QC over 600 to 4,000 cm-1 removed 10.0%.
 MIR_RANGE <- c(600, 4000)
 
+# The fewest bands average()'s quality check correlates over. A correlation
+# over one band is undefined and over two is always 1 or -1, so a range
+# holding fewer says nothing about a replicate: the default falls back to
+# every band, and a `qc_range` given that holds fewer is refused.
+QC_MIN_BANDS <- 3L
+
 ## validate() Heuristics --------------------------------------------------------
 
 # validate()'s P010 check: cubist without dimension reduction on a large
