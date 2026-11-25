@@ -679,9 +679,11 @@ configure <- function(x,
   ## Every prediction is clamped to the range, so an outcome outside it would
   ## be scored against predictions that cannot reach it. Refused here, where
   ## the values are first known, rather than after evaluate() has tuned every
-  ## configuration (#76). evaluate() and fit() repeat the check.
+  ## configuration (#76). evaluate() and fit() repeat the check, on the rows
+  ## they model, and so does this one: a flagged row is no model's.
 
-  breach <- outcome_range_breach(x$data$analysis[[outcome_var]], outcome_range)
+  modelled <- modelling_mask(x$data$analysis, outcome_var)
+  breach   <- outcome_range_breach(x$data$analysis[[outcome_var]][modelled], outcome_range)
 
   if (!is.null(breach)) {
 

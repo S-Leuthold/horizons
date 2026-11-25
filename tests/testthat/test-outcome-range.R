@@ -464,6 +464,20 @@ describe("configure() - outcome_range", {
 
   })
 
+  it("ignores a flagged row's outcome, as the verbs that model do", {
+
+    hd <- make_range_hd(value = function(v) { v[1] <- -5; v })
+    hd$data$analysis$.flag <- c("standardize", rep(NA_character_, 59))
+    hd$data$role_map <- tibble::add_row(hd$data$role_map, variable = ".flag", role = "meta")
+
+    expect_no_error(configure_small(hd))
+
+    hd$data$analysis$.flag[1] <- NA_character_
+
+    expect_error(configure_small(hd), "outcome_range", class = "horizons_error_input")
+
+  })
+
   it("applies the range to the outcome it configures, not to other responses", {
 
     ## Two responses: SOC (positive) and d13C (negative). One object models
