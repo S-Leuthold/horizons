@@ -1071,7 +1071,6 @@ evaluate <- function(x,
     manifest <- list(
       schema_version               = EVAL_MANIFEST_SCHEMA,
       n_total                      = n_total,
-      n_pending                    = n_pending,
       pending_ids                  = pending_ids,
       config_ids                   = configs$config_id,
       config_cost                  = config_costs(configs, n_train),
