@@ -1125,6 +1125,38 @@ describe("validate() outlier removal", {
 
   })
 
+  test_that("says on the log and the tree how many rows the screen removed, and that it was before any split", {
+
+    hd  <- make_outlier_hd()
+    out <- capture.output(result <- suppressWarnings(
+      validate(hd, remove_outliers = "spectral", verbose = TRUE)
+    ))
+    removed <- result$validation$outliers$removed_ids
+
+    ## A note on the log, which later verbs carry, naming the rows, with the
+    ## removal record as its detail
+    note <- result$log[result$log$type == "note" &
+                         grepl("spectral outlier", result$log$message, fixed = TRUE), ]
+
+    expect_identical(nrow(note), 1L)
+    expect_match(note$message, paste0("Removed ", length(removed), " spectral outliers before any split"),
+                 fixed = TRUE)
+    expect_match(note$message, "the rows a later test set is drawn from are the ones left", fixed = TRUE)
+    expect_setequal(note$ids[[1]], removed)
+    expect_identical(note$detail[[1]], result$validation$outliers$removal_detail)
+
+    ## And the tree
+    expect_true(any(grepl(paste0("Removed ", length(removed), " spectral outliers before any split"),
+                          out, fixed = TRUE)))
+    expect_true(any(grepl(paste0(result$data$n_rows, " samples remaining, which a later test set is drawn from"),
+                          out, fixed = TRUE)))
+
+    ## Detection alone removes nothing and notes nothing
+    kept <- quiet_validate(hd, remove_outliers = FALSE)
+    expect_false(any(grepl("spectral outlier", kept$log$message, fixed = TRUE)))
+
+  })
+
   test_that("remove_outliers='spectral': removes only spectral outliers", {
 
     hd     <- make_outlier_hd()

@@ -111,7 +111,9 @@ fences on the outcome variable, over the unflagged rows too.
 \strong{Response outliers are trimmed from the training partition, not here:}
 
 Spectral outliers are removed here, since the detector reads no labels.
-Response outliers are not. Fences computed over the whole table would
+They leave before any split, so the test set \code{evaluate()} later draws
+comes from the screened rows; the tree and a note on the object's log say
+how many were removed. Response outliers are not removed here. Fences computed over the whole table would
 include the rows \code{evaluate()} later holds out as its test set, and
 removing the rows outside them before any split exists takes exactly the
 hardest cases out of the test set, chosen by their own labels, so the test

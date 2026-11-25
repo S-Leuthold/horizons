@@ -50,8 +50,8 @@
       │  ├─ ℹ Spectral outliers: 3
       │  ├─ ℹ Response outliers: 1 on the whole table, not removed
       │  │  └─ Trim requested: evaluate() fences its training partition (1.5 x IQR) and trims training rows only; test rows untouched
-      │  ├─ Removed 3 spectral outliers
-      │  ├─ 97 samples remaining
+      │  ├─ Removed 3 spectral outliers before any split
+      │  ├─ 97 samples remaining, which a later test set is drawn from
       │  └─ Status: PASSED
       │
 

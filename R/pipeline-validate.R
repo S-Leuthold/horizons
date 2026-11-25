@@ -49,7 +49,9 @@
 #' **Response outliers are trimmed from the training partition, not here:**
 #'
 #' Spectral outliers are removed here, since the detector reads no labels.
-#' Response outliers are not. Fences computed over the whole table would
+#' They leave before any split, so the test set `evaluate()` later draws
+#' comes from the screened rows; the tree and a note on the object's log say
+#' how many were removed. Response outliers are not removed here. Fences computed over the whole table would
 #' include the rows `evaluate()` later holds out as its test set, and
 #' removing the rows outside them before any split exists takes exactly the
 #' hardest cases out of the test set, chosen by their own labels, so the test
@@ -569,6 +571,15 @@ validate <- function(x,
     removed_ids <- spectral_outlier_ids
     did_remove  <- TRUE
 
+    ## The screen runs before any split, so a later test set is drawn from
+    ## the rows it leaves. Said on the log, which every later verb carries,
+    ## and in the tree; a note, since removing them was the user's call.
+    log_note(collector, c(
+      "Removed {length(removed_ids)} spectral outlier{?s} before any split: the rows a later test set is drawn from are the ones left.",
+      "i" = "Samples: {shown_ids(removed_ids)}.",
+      "i" = "Each sample and the threshold it was removed at are in this row's {.field detail}."
+    ), ids = removed_ids, detail = removal_detail)
+
   }
 
   ## The request evaluate() and fit()'s cold start read. The outcome is
@@ -718,8 +729,9 @@ validate <- function(x,
 
     if (did_remove) {
 
-      cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " spectral outliers\n"))
-      cat(paste0("\u2502  \u251C\u2500 ", x$data$n_rows, " samples remaining\n"))
+      cat(paste0("\u2502  \u251C\u2500 Removed ", length(removed_ids), " spectral outlier",
+                 if (length(removed_ids) != 1) "s", " before any split\n"))
+      cat(paste0("\u2502  \u251C\u2500 ", x$data$n_rows, " samples remaining, which a later test set is drawn from\n"))
 
     }
 
