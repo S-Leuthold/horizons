@@ -668,9 +668,10 @@ fit <- function(x,
     n_daemons <- connected_daemons()
     reports   <- check_parallel_workers("fit", needed_packages(member_configs$model, member_configs$feature_selection),
                                         collector, results = member_results(list()))
+    ### The table a daemon holds: the whole axis, masked columns included
     short_memory <- check_daemon_memory(reports, member_configs$model, control$isolate,
                                         n_rows       = nrow(x$data$analysis),
-                                        n_predictors = sum(role_map$role == "predictor"),
+                                        n_predictors = length(axis_columns(role_map)),
                                         collector    = collector, verb = "fit")
   }
 
@@ -1190,7 +1191,7 @@ fit <- function(x,
 
     member_costs <- config_costs(member_rows, nrow(train_Fit))
     plan         <- inner_daemon_plan(member_costs, member_rows$model, cv_folds, control, reports,
-                                      n_rows = nrow(x$data$analysis), n_predictors = sum(role_map$role == "predictor"),
+                                      n_rows = nrow(x$data$analysis), n_predictors = length(axis_columns(role_map)),
                                       n_train = nrow(train_Fit), kept = config_kept(member_rows, role_map, fold_stage),
                                       collector = collector, verb = "fit", unit = "member")
     planned      <- plan$planned

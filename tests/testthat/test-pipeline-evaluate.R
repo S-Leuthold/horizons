@@ -2403,6 +2403,40 @@ describe("eval_data_fingerprint()", {
 
   })
 
+  it("is unchanged for an object with nothing masked: the hashes are the ones from before the masked role", {
+
+    ## Pinned at the commit before the masked role, so checkpoints written
+    ## then still resume
+    fp <- eval_data_fingerprint(df_xy, roles_xy)
+
+    expect_identical(fp$data_hash, "fff9c38278348879f5cec36963a9ac37")
+    expect_identical(fp$data_fields, list(outcome        = "y",
+                                          ids            = "44d916ee3f07c5bb",
+                                          roles          = "8cc0a7cea12a3bce",
+                                          outcome_values = "b6f20ea623194e83",
+                                          predictors     = "753447db92c5cbbb"))
+
+  })
+
+  it("reads a masked column's values and role, which reach the model through the windows beside it", {
+
+    masked_xy <- roles_xy
+    masked_xy$role[masked_xy$variable == "wn_2"] <- "masked"
+
+    base <- eval_data_fingerprint(df_xy, masked_xy)$data_fields
+
+    ## A column whose role flips from predictor to masked
+    flipped <- compare_record(base, eval_data_fingerprint(df_xy, roles_xy)$data_fields)
+    expect_identical(flipped$differ, "roles")
+
+    ## A masked column's values
+    moved      <- df_xy
+    moved$wn_2 <- moved$wn_2 + 1
+    changed    <- compare_record(eval_data_fingerprint(moved, masked_xy)$data_fields, base)
+    expect_identical(changed$differ, "predictors")
+
+  })
+
 })
 
 ## A condition's message on one line: cli wraps at the console width, so a

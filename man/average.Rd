@@ -108,8 +108,10 @@ whose baseline differs in slope or curvature correlates lower. The check
 reads the range the spectra are modelled over, whichever order the two
 verbs run in (\code{qc_range}): on spectra \code{standardize()} has not run on, the
 bands inside its default \code{trim}, 600 to 4000 cm-1; on spectra it has run
-on, every band it kept. At the defaults the check reads the same range in
-either order, and the averaged spectra keep every band.
+on, every band it kept and does not mask (\code{remove_water = TRUE} masks the
+water bands, which are not modelled). At the defaults the check reads the
+same range in either order, and the averaged spectra keep every band,
+masked ones included.
 
 \strong{Missing and non-finite values:} an \code{Inf}, \code{-Inf} or \code{NaN} in a
 replicate is treated as a missing value, as \code{NA} is. Quality control

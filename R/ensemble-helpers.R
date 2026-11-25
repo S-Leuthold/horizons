@@ -967,7 +967,7 @@ predict.horizons_ensemble <- function(object,
 
   new_spectra <- resolve_new_data(new_data)
 
-  check_predictor_schema(object, new_spectra)
+  check_predictor_schema(object, new_spectra, new_data)
 
   ## sample_id keys every combine below (the weighted average groups on it,
   ## the wide pivot keys rows on it, the intervals join on it), so a repeated

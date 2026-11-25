@@ -40,8 +40,10 @@
 #' reads the range the spectra are modelled over, whichever order the two
 #' verbs run in (`qc_range`): on spectra `standardize()` has not run on, the
 #' bands inside its default `trim`, 600 to 4000 cm-1; on spectra it has run
-#' on, every band it kept. At the defaults the check reads the same range in
-#' either order, and the averaged spectra keep every band.
+#' on, every band it kept and does not mask (`remove_water = TRUE` masks the
+#' water bands, which are not modelled). At the defaults the check reads the
+#' same range in either order, and the averaged spectra keep every band,
+#' masked ones included.
 #'
 #' **Missing and non-finite values:** an `Inf`, `-Inf` or `NaN` in a
 #' replicate is treated as a missing value, as `NA` is. Quality control
@@ -308,11 +310,15 @@ average <- function(x,
 
   role_map <- x$data$role_map
 
-  ## Predictor columns (wavelengths) -----------------------------------------
+  ## Spectral columns (wavelengths) ------------------------------------------
+  ## The axis is averaged whole, masked bands included (axis_columns()), so
+  ## they survive averaging; the quality check correlates over the
+  ## predictors, the bands that are modelled.
 
   predictor_cols <- role_map$variable[role_map$role == "predictor"]
+  axis_cols      <- axis_columns(role_map)
 
-  if (length(predictor_cols) == 0) {
+  if (length(axis_cols) == 0) {
 
     abort_horizons(c(
       "{.arg x} has no spectra to average.",
@@ -376,7 +382,7 @@ average <- function(x,
   ## band uses the replicates with a value there. A band no replicate has
   ## stays NA, for standardize() to decide on. is.na() is TRUE for NaN.
 
-  analysis[predictor_cols] <- lapply(analysis[predictor_cols], function(v) {
+  analysis[axis_cols] <- lapply(analysis[axis_cols], function(v) {
     v[is.na(v) | is.infinite(v)] <- NA
     v
   })
@@ -481,7 +487,7 @@ average <- function(x,
     average_group(group_data          = group_data,
                   group_id            = group_id,
                   by                  = by,
-                  predictor_cols      = predictor_cols,
+                  predictor_cols      = axis_cols,
                   qc_cols             = qc_bands$cols,
                   meta_cols           = meta_cols,
                   response_cols       = response_cols,
@@ -640,9 +646,9 @@ average <- function(x,
   ## Step 7: Reorder columns
   ## -------------------------------------------------------------------------
 
-  ## Order: by column, retained meta, responses, predictors ------------------
+  ## Order: by column, retained meta, responses, the axis -------------------
 
-  col_order <- c(by, retained_meta, response_cols, predictor_cols)
+  col_order <- c(by, retained_meta, response_cols, axis_cols)
   col_order <- col_order[col_order %in% names(averaged)]
   averaged <- averaged[, col_order, drop = FALSE]
 
@@ -1142,10 +1148,11 @@ compute_replicate_quality <- function(predictor_matrix, threshold) {
 #' @param group_data Tibble of replicates for one group.
 #' @param group_id The group identifier value.
 #' @param by Name of grouping column.
-#' @param predictor_cols Character vector of predictor column names.
+#' @param predictor_cols Character vector of the spectral columns averaged:
+#'   the axis, masked columns included ([axis_columns()]).
 #' @param qc_cols Character vector. The predictor columns quality control
 #'   correlates over ([quality_check_bands()]); the mean is over every
-#'   predictor column.
+#'   column of the axis.
 #' @param meta_cols Character vector of metadata column names.
 #' @param response_cols Character vector of response and outcome column names.
 #'   Numeric columns are averaged over the same rows as the predictors;

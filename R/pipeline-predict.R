@@ -88,9 +88,14 @@ NULL
 #' **Axis alignment (v1 limitation).** The fitted workflow's recipe applies the
 #' per-config preprocessing (SNV, derivatives, feature selection) but not the
 #' object-level operations performed by `standardize()` (resampling to a common
-#' wavenumber grid, range trimming, water-band removal). `new_data` must
+#' wavenumber grid, range trimming, water-band masking). `new_data` must
 #' therefore arrive on the same wavenumber axis the model was trained on.
 #' `predict()` validates the predictor schema and errors if it does not match.
+#' A model trained on data standardized with `remove_water = TRUE` also reads
+#' the masked water bands, through its transform's windows beside them, so
+#' `new_data` must carry those columns too; and new data that masks a band
+#' the model was trained on is refused, since the model would read a band the
+#' data says is not to be modelled.
 #'
 #' Applicability-domain columns (`.ad_distance`, `.ad_flag`) are emitted per
 #' config when the object carries an AD bundle (`fit(compute_ad = TRUE)`). The
@@ -228,8 +233,9 @@ predict.horizons_fit <- function(object,
 
   new_spectra <- resolve_new_data(new_data)
 
-  ## Validate new_data carries the training-axis predictor columns fit() stored.
-  check_predictor_schema(object, new_spectra)
+  ## Validate new_data carries the training-axis predictor columns fit() stored,
+  ## and the masked ones the transform reads beside them.
+  check_predictor_schema(object, new_spectra, new_data)
 
   ## Intervals asked for where there is no UQ bundle to build them from (#145)
   if (isTRUE(interval)) {
@@ -610,13 +616,13 @@ ensure_predict_namespaces <- function(object, config_ids, verb = "predict",
 #' Resolve new_data to a predictor tibble with a sample_id
 #'
 #' Accepts a `horizons_data` object or a bare tibble/data.frame. Returns a
-#' tibble carrying `sample_id` plus the predictor (wavelength) columns. Pulls
-#' predictor columns by role (the accessor API does not exist yet, so this is
-#' done inline via the role map).
+#' tibble carrying `sample_id` plus the spectral (wavelength) columns: the
+#' whole axis ([axis_columns()]), since a model trained with masked columns
+#' reads them through its transform's windows.
 #'
 #' @param new_data A `horizons_data` or tibble/data.frame.
 #' @param call The frame a refusal reports: the verb's.
-#' @return A tibble with `sample_id`, the predictor columns and `.flag` when
+#' @return A tibble with `sample_id`, the axis's columns and `.flag` when
 #'   the object has one; a bare data frame is returned whole, with a
 #'   `sample_id` added when it has none.
 #'   Aborts with class `horizons_error_input` when `new_data` is neither, or
@@ -630,7 +636,7 @@ resolve_new_data <- function(new_data, call = rlang::caller_env()) {
     analysis <- new_data$data$analysis
     role_map <- new_data$data$role_map
 
-    pred_cols <- role_map$variable[role_map$role == "predictor"]
+    pred_cols <- axis_columns(role_map)
     id_col    <- role_map$variable[role_map$role == "id"][1]
 
     ## A row a step flagged is carried with its flag, so predict() returns it
@@ -725,35 +731,62 @@ log_interval_quality <- function(collector, object, returned) {
 #' Validate that new_data carries the model's training predictor axis
 #'
 #' The fitted workflow's recipe replays per-config steps but NOT object-level
-#' `standardize()` (resampling, trimming, water-band removal). So `new_data`
+#' `standardize()` (resampling, trimming, water-band masking). So `new_data`
 #' must already be on the training wavenumber axis. This compares the predictor
-#' columns `fit()` recorded (`models$predictor_schema`) against what `new_data`
-#' supplies and aborts with an actionable message on mismatch.
+#' columns `fit()` recorded (`models$predictor_schema`), and the training
+#' data's masked columns ([masked_columns()] of the fit's own role map), which
+#' the transform reads beside them, against what `new_data` supplies, and
+#' aborts with an actionable message on mismatch. A `horizons_data` that
+#' masks a column the model was trained on is refused too: the model would
+#' read a column the data says is not to be modelled. The extra columns of
+#' new data the model did not mask are read as they are, so a masked model
+#' predicts unmasked data.
 #'
 #' @param object A `horizons_fit` carrying `models$predictor_schema`.
 #' @param new_spectra Tibble from [resolve_new_data()].
+#' @param new_data `new_data` as `predict()` was given it, whose own mask is
+#'   read when it is a `horizons_data`.
 #' @param call The frame the error reports: `predict()`'s.
 #' @return Invisibly TRUE; aborts with class `horizons_error_input` on a
 #'   mismatch.
 #' @keywords internal
 #' @noRd
-check_predictor_schema <- function(object, new_spectra, call = rlang::caller_env()) {
+check_predictor_schema <- function(object, new_spectra, new_data = NULL, call = rlang::caller_env()) {
 
   ## fit() stored the training-axis predictor columns, which the fit validator
   ## at predict()'s door requires; check against them directly (no recipe
-  ## re-introspection, which a butchered workflow can break).
+  ## re-introspection, which a butchered workflow can break). The masked
+  ## columns of the training data are read beside them by the transform.
   expected <- object$models$predictor_schema
+  masked   <- masked_columns(object$data$role_map)
 
   supplied <- setdiff(names(new_spectra), "sample_id")
-  missing  <- setdiff(expected, supplied)
+  missing  <- setdiff(c(expected, masked), supplied)
 
   if (length(missing) > 0) {
+
+    n_masked_missing <- sum(missing %in% masked)
 
     abort_horizons(c(
       "{.arg new_data} is missing {length(missing)} predictor column{?s} the model expects.",
       "x" = "Missing (first few): {.val {utils::head(missing, 5)}}",
       "i" = "new_data must be on the training wavenumber axis. Run {.fn standardize} \\
-             to the same grid the model was trained on (e.g. 600-4000 at 2 cm^-1) before predicting."
+             to the same grid the model was trained on (e.g. 600-4000 at 2 cm^-1) before predicting.",
+      "i" = if (n_masked_missing > 0) "{n_masked_missing} of them {?is/are} masked in the training data, which the model's spectral transform reads beside the bands it models: keep them in {.arg new_data}, as {.code standardize(remove_water = TRUE)} does."
+    ), kind = "input", call = call)
+
+  }
+
+  ## New data that masks a column the model was trained on
+  new_masked <- if (inherits(new_data, "horizons_data")) masked_columns(new_data$data$role_map) else character(0)
+  overlap    <- intersect(expected, new_masked)
+
+  if (length(overlap) > 0) {
+
+    abort_horizons(c(
+      "{.arg new_data} masks {length(overlap)} column{?s} the model was trained on.",
+      "x" = "Masked in {.arg new_data} (first few): {.val {utils::head(overlap, 5)}}",
+      "i" = "The model would read columns {.arg new_data} says are not to be modelled. Standardize {.arg new_data} as the training data was, which modelled these bands: from {.fn spectra}, with {.code remove_water = FALSE}."
     ), kind = "input", call = call)
 
   }

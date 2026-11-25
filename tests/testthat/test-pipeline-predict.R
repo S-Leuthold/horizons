@@ -401,6 +401,93 @@ describe("predict.horizons_fit() - schema gate", {
 
 
 ## ---------------------------------------------------------------------------
+## A model trained with masked columns
+## ---------------------------------------------------------------------------
+## Its transform reads the masked columns beside the modelled ones, so new
+## data must carry them; new data that masks a column the model was trained
+## on is refused.
+
+describe("predict.horizons_fit() - a model trained with masked columns", {
+
+  ## Twenty bands, two inside the window's reach masked, and a first
+  ## derivative, whose windows read them
+  masked_cols <- c("wn_3972", "wn_3970")
+  train       <- mask_axis_columns(make_predict_eval(n = 150, n_wn = 20), masked_cols)
+  train$config$configs$preprocessing <- "deriv1"
+
+  masked_fit <- suppressWarnings(fit(train, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE))
+
+  new_df <- make_new_spectra(n_wn = 20)
+  new_hd <- function(masked = character(0)) {
+    roles <- tibble::tibble(variable = c(grep("^wn_", names(new_df), value = TRUE), "sample_id"),
+                            role     = c(rep("predictor", 20), "id"))
+    hd <- new_horizons_data(analysis = new_df, role_map = roles)
+    if (length(masked)) mask_axis_columns(hd, masked) else hd
+  }
+
+  it("records the modelled columns as its schema, and needs the masked ones in new data too", {
+
+    expect_identical(masked_fit$models$predictor_schema,
+                     setdiff(grep("^wn_", names(new_df), value = TRUE), masked_cols))
+
+    err <- expect_error(predict(masked_fit, new_df[, setdiff(names(new_df), "wn_3970")]),
+                        "missing 1 predictor column the model expects", fixed = TRUE,
+                        class = "horizons_error_input")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "1 of them is masked in the training data", fixed = TRUE)
+
+    ## The same as an object whose axis lacks them
+    short <- delete_axis_columns(new_hd(), masked_cols)
+
+    expect_error(predict(masked_fit, short), "missing 2 predictor columns the model expects",
+                 fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("predicts the same from new data with the same mask, without it, or as a data frame", {
+
+    as_frame  <- predict(masked_fit, new_df, interval = FALSE)
+    unmasked  <- predict(masked_fit, new_hd(), interval = FALSE)
+    same_mask <- predict(masked_fit, new_hd(masked_cols), interval = FALSE)
+
+    expect_true(all(is.finite(as_frame$.pred)))
+    expect_identical(unmasked, as_frame)
+    expect_identical(same_mask, as_frame)
+
+  })
+
+  it("refuses new data that masks a column the model was trained on", {
+
+    err <- expect_error(predict(masked_fit, new_hd(c(masked_cols, "wn_3974"))),
+                        "masks 1 column the model was trained on", fixed = TRUE,
+                        class = "horizons_error_input")
+    expect_match(gsub("\\s+", " ", conditionMessage(err)), "remove_water = FALSE", fixed = TRUE)
+
+    ## And a model trained with nothing masked, on new data that masks
+    expect_error(predict(fitted_fixture, mask_axis_columns(
+                   new_horizons_data(analysis = make_new_spectra(),
+                                     role_map  = tibble::tibble(variable = c(paste0("wn_", seq(4000, by = -2, length.out = 10)), "sample_id"),
+                                                                role     = c(rep("predictor", 10), "id"))),
+                   "wn_3992")),
+                 "masks 1 column the model was trained on", fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("returns NA for a row missing a value in a masked column, which its windows read", {
+
+    holed <- new_df
+    holed$wn_3970[3] <- NA_real_
+
+    out <- suppressWarnings(predict(masked_fit, holed, interval = FALSE))
+
+    expect_true(is.na(out$.pred[3]))
+    expect_true(all(is.finite(out$.pred[-3])))
+
+  })
+
+})
+
+
+## ---------------------------------------------------------------------------
 ## Non-negativity floor
 ## ---------------------------------------------------------------------------
 
