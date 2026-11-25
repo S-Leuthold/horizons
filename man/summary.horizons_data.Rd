@@ -32,6 +32,10 @@ rows removed since the draw (present only for objects from
 \item \strong{Configuration section}: Tuning parameter defaults, config count, and
 the outcome range when it is not the default \code{c(0, Inf)}
 \item \strong{Validation section}: Whether validation has run, pass/fail status
+\item \strong{Evaluation section}: The configurations' outcomes and the rank
+metric, then the best configuration with its model, its cross-validated
+value of the rank metric (which ranked it) beside its held-out test
+value, as \code{print()} shows them, and its other test metrics
 \item \strong{Log section}: Every row of the log, in order: when its call ran, the
 verb, for a warning its topic, and the message. The data verbs' notes
 record how the object was made, from the source onward

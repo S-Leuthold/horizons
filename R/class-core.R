@@ -3327,6 +3327,26 @@ summary_log <- function(log) {
 
 }
 
+#' The best configuration's score, as print() and summary() show it
+#'
+#' @description
+#' The CV value of the rank metric, which ranked it (#50), then its held-out
+#' test value, each labelled: one line both methods print, so the two cannot
+#' give one "Best" two unlabelled values.
+#'
+#' @param best_row One-row data frame: the best configuration's row of
+#'   `evaluation$results`, holding `metric` and `cv_<metric>`.
+#' @param metric Character(1). The rank metric.
+#' @return Character(1), e.g. `"CV RMSE = 1.84 (test RMSE = 2.1)"`.
+#' @keywords internal
+#' @noRd
+best_config_score <- function(best_row, metric) {
+
+  paste0("CV ", toupper(metric), " = ", round(best_row[[paste0("cv_", metric)]], 3),
+         " (test ", toupper(metric), " = ", round(best_row[[metric]], 3), ")")
+
+}
+
 #' Print method for horizons_data objects
 #'
 #' @description
@@ -3505,17 +3525,10 @@ print.horizons_data <- function(x, ...) {
     ## Best config
     if (show_best) {
 
-      cv_col <- paste0("cv_", metric)
-
       ## Ranking is on the CV metric (#50), which the eval validator
       ## requires; the held-out test value goes beside it.
-      cat(paste0(
-        "   \u2514\u2500 Best: ", best_id,
-        " \u2014 CV ", toupper(metric), " = ",
-        round(best_row[[cv_col]], 3),
-        " (test ", toupper(metric), " = ",
-        round(best_row[[metric]], 3), ")\n"
-      ))
+      cat(paste0("   \u2514\u2500 Best: ", best_id, " \u2014 ",
+                 best_config_score(best_row, metric), "\n"))
 
     }
 
@@ -3614,6 +3627,10 @@ print.horizons_data <- function(x, ...) {
 #' - **Configuration section**: Tuning parameter defaults, config count, and
 #'   the outcome range when it is not the default `c(0, Inf)`
 #' - **Validation section**: Whether validation has run, pass/fail status
+#' - **Evaluation section**: The configurations' outcomes and the rank
+#'   metric, then the best configuration with its model, its cross-validated
+#'   value of the rank metric (which ranked it) beside its held-out test
+#'   value, as `print()` shows them, and its other test metrics
 #' - **Log section**: Every row of the log, in order: when its call ran, the
 #'   verb, for a warning its topic, and the message. The data verbs' notes
 #'   record how the object was made, from the source onward
@@ -3894,15 +3911,31 @@ summary.horizons_data <- function(object, ...) {
 
         cat(paste0("   \u251C\u2500 Best: ", best_id, " (", model_name, ")\n"))
 
-        ## Show key metrics for the best config
-        metric_cols <- intersect(c("rmse", "rpd", "rsq", "ccc"), names(best_row))
+        ## The rank metric's CV value, which ranked it, and its test value,
+        ## as print() shows them, whatever the metric; then the other key
+        ## test metrics, labelled as test metrics
+        lines <- character(0)
+
+        if (metric %in% names(best_row)) {
+          lines <- best_config_score(best_row, metric)
+        }
+
+        metric_cols <- intersect(setdiff(c("rmse", "rpd", "rsq", "ccc"), metric), names(best_row))
+
         if (length(metric_cols) > 0) {
 
           metric_strs <- vapply(metric_cols, function(m) {
             paste0(toupper(m), " = ", round(best_row[[m]], 3))
           }, character(1))
 
-          cat(paste0("   \u2502     \u2514\u2500 ", paste(metric_strs, collapse = ", "), "\n"))
+          lines <- c(lines, paste0("Test ", paste(metric_strs, collapse = ", ")))
+
+        }
+
+        if (length(lines) > 0) {
+
+          branch <- c(rep("\u251C\u2500", length(lines) - 1), "\u2514\u2500")
+          cat(paste0("   \u2502     ", branch, " ", lines, "\n"), sep = "")
 
         }
 
