@@ -598,8 +598,9 @@ test_that("a library built but not moved into the cache is returned, with one sk
   expect_length(skipped, 1L)
 
   msg <- gsub("\\s+", " ", conditionMessage(skipped[[1]]))
-  expect_match(msg, "library was built but could not be moved into the cache, so every later draw downloads and builds it again", fixed = TRUE)
-  expect_match(msg, "check that", fixed = TRUE)
+  expect_match(msg, "library was built but could not be cached, so every later draw downloads and builds it again", fixed = TRUE)
+  expect_match(msg, "the file could not be renamed into place", fixed = TRUE)
+  expect_match(msg, "Check that", fixed = TRUE)
 
   ## The record says it is not cached, and no space was written either
   expect_s3_class(out, "horizons_data")
@@ -611,6 +612,42 @@ test_that("a library built but not moved into the cache is returned, with one sk
   ## them in the cache
   expect_true(written[1])
   expect_true(dir.exists(cache))
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+
+})
+
+
+test_that("a library whose save fails is returned, with one skipped warning naming the file and why", {
+
+  ## A full disk fails the save itself, part way, before any rename. The
+  ## draw goes on with the library built in memory, as when the rename fails.
+  entry <- make_mini_ossl(withr::local_tempdir(), seed = 3, extras = FALSE, n_kssl = 60L)
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  local_mocked_bindings(qs_save = function(object, file, ...) {
+    writeLines("half a library", file)
+    stop("No space left on device")
+  }, .package = "qs2")
+
+  collector <- log_open("select_training")
+
+  expect_no_error(res <- resolve_source("mini", verbose = FALSE, collector = collector))
+
+  expect_s3_class(res$pool, "horizons_data")
+  expect_true("path" %in% names(res$record))
+  expect_null(res$record$path)
+
+  rows <- log_rows(collector)
+  expect_identical(rows$topic, "skipped")
+
+  msg <- gsub("\\s+", " ", rows$message)
+  expect_match(msg, "library was built but could not be cached, so every later draw downloads and builds it again", fixed = TRUE)
+  expect_match(msg, file.path(cache, "mini_v0.qs2"), fixed = TRUE)
+  expect_match(msg, "No space left on device", fixed = TRUE)
+  expect_match(msg, "options(horizons.cache_dir = )", fixed = TRUE)
+
+  ## The half-written file and the raw downloads are gone
   expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
 
 })

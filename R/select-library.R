@@ -330,8 +330,9 @@ library_cache_path <- function(entry) {
 #' library and removes the raw downloads; a rebuild is a note on the verb's
 #' log. A cached file that holds another library is refused.
 #'
-#' A library built but not moved into the cache (a rename that fails on a
-#' locked or network filesystem) is still returned, with its record's
+#' A library built but not cached ([write_cache_file()] failing to save or
+#' rename it: a full disk, a locked or network filesystem) is still
+#' returned, with its record's
 #' `path` `NULL` and one `skipped` warning, since every later draw downloads
 #' and builds it again until the cache directory is fixed; its first-use
 #' space is not built.
@@ -434,19 +435,20 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
                         sources = entry$sources[, c("file", "url", "bytes", "md5")]),
                    class = "horizons_library")
 
-  ## Write to a temporary name and rename, so an interrupted write never
-  ## leaves a file the next draw would mistake for a finished library, and a
-  ## failed one never leaves half a gigabyte behind.
+  ## Written whole or not at all, so an interrupted write never leaves a
+  ## file the next draw would mistake for a finished library, and a failed
+  ## one never leaves half a gigabyte behind. A library that cannot be
+  ## cached (a full disk, a locked or network filesystem) is still this
+  ## draw's.
 
-  tmp <- tempfile(paste0(".", entry$name, "-"), tmpdir = dirname(path), fileext = ".qs2.tmp")
-  on.exit(unlink(tmp), add = TRUE)
-  qs2::qs_save(lib, tmp)
+  not_written <- write_cache_file(lib, path, tmp_prefix = paste0(".", entry$name, "-"))
 
-  if (!file.rename(tmp, path)) {
+  if (!is.null(not_written)) {
 
     log_warning(collector, "skipped", c(
-      "The {.val {entry$name}} library was built but could not be moved into the cache, so every later draw downloads and builds it again.",
-      "i" = "Rename to {.path {path}} failed; check that {.path {dirname(path)}} is writable, or set {.code options(horizons.cache_dir = )}."
+      "The {.val {entry$name}} library was built but could not be cached, so every later draw downloads and builds it again.",
+      "x" = "Writing {.path {path}} failed: {not_written}",
+      "i" = "Check that {.path {dirname(path)}} is writable and has room for the library, or set {.code options(horizons.cache_dir = )} to a directory that is."
     ))
 
     if (verbose) cat(paste0("\u251C\u2500 Library ", cli::style_bold(entry$name), " ", entry$version,
