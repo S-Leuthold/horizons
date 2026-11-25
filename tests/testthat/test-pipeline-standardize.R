@@ -1409,6 +1409,20 @@ test_that("unusable_spectra() gives one rule over a matrix or a data frame, and 
 
 })
 
+test_that("unusable_spectra() on an axis with a mask reads every column for a missing value and the unmasked ones for spread", {
+
+  ## Column 2 masked. Row 2 varies only there, row 3 is missing only there
+  M      <- rbind(c(1, 2, 3, 4), c(5, 9, 5, 5), c(1, NA, 3, 4), c(1, 2, 2, 2))
+  masked <- c(FALSE, TRUE, FALSE, FALSE)
+
+  expect_identical(unusable_spectra(M, masked), c(NA, "no spread", "non-finite", NA))
+  expect_identical(unusable_spectra(as.data.frame(M), masked), unusable_spectra(M, masked))
+
+  ## Nothing masked is the rule without a mask
+  expect_identical(unusable_spectra(M, rep(FALSE, 4)), unusable_spectra(M))
+
+})
+
 test_that("a point standing alone between two holes in a spectrum carries the grid point it sits on", {
 
   ## On a 2 cm-1 axis resampled to 4, row 2 has holes either side of 2000

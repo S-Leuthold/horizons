@@ -664,13 +664,20 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths, call = rlang:
 #' so the validator applies it to a library's table at its door without
 #' copying it into a matrix.
 #'
+#' On an axis with masked columns ([axis_columns()]) the first test reads
+#' every column, since the transform's windows read a masked value beside a
+#' modelled one, and the second reads the unmasked columns alone, the ones
+#' SNV normalizes by.
+#'
 #' @param M Numeric matrix or data frame, one spectrum per row.
+#' @param masked Logical, one per column of `M`: the masked columns, or
+#'   `NULL` (the default) for none.
 #' @return Character, one per row: `NA` for a usable spectrum,
 #'   `"non-finite"` or `"no spread"`; `NA` for every row when there are no
 #'   columns.
 #' @keywords internal
 #' @noRd
-unusable_spectra <- function(M) {
+unusable_spectra <- function(M, masked = NULL) {
 
   n      <- NROW(M)
   p      <- NCOL(M)
@@ -678,8 +685,11 @@ unusable_spectra <- function(M) {
 
   if (p == 0) return(reason)
 
+  ### The columns the spread is judged over
+  judged <- if (is.null(masked)) rep(TRUE, p) else !masked
+
   column <- if (is.data.frame(M)) function(j) M[[j]] else function(j) M[, j]
-  first  <- column(1)
+  first  <- if (any(judged)) column(which(judged)[1])
 
   non_finite <- rep(FALSE, n)
   flat       <- rep(TRUE, n)
@@ -688,13 +698,13 @@ unusable_spectra <- function(M) {
 
     v          <- column(j)
     non_finite <- non_finite | !is.finite(v)
-    flat       <- flat & v == first
+    if (judged[j]) flat <- flat & v == first
 
   }
 
   ### A missing value leaves flat NA, which the non-finite reason covers
-  reason[non_finite]                             <- "non-finite"
-  reason[!non_finite & flat %in% TRUE & p >= 2]  <- "no spread"
+  reason[non_finite]                                     <- "non-finite"
+  reason[!non_finite & flat %in% TRUE & sum(judged) >= 2] <- "no spread"
 
   reason
 

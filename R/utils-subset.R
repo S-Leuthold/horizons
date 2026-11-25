@@ -712,18 +712,115 @@ subset_selection <- function(selection, keep_ids, n_removed, analysis) {
 
 
 ## ---------------------------------------------------------------------------
-## sort_axis_decreasing() — Put the predictor axis in decreasing order
+## axis_columns(), masked_columns(), mask_ranges() — the axis and its mask
 ## ---------------------------------------------------------------------------
 
-#' Put an object's predictor columns in decreasing wavenumber order
+#' The spectral axis of a role map, and the columns on it that are masked
 #'
 #' @description
-#' Reorders the predictor columns among themselves, in `data$analysis` and
-#' `data$role_map` alike. Names and values are untouched and every other
-#' column keeps its place. Shared by [spectra()] and [standardize()]: both
-#' sort their predictor axis on this helper, since a source can arrive in
-#' either order (a KSSL-shaped library is stored increasing) and every check
-#' and downstream step assumes decreasing.
+#' A spectral column holds one of two roles. A `predictor` is modelled. A
+#' `masked` column is measured and kept on the axis but never modelled:
+#' `standardize(remove_water = TRUE)` gives the water bands that role, where
+#' it used to delete them, so the spectral transform's windows read real
+#' neighbours on either side of a band and the band is dropped after it.
+#' Together the two roles are the axis, in role-map order, which the
+#' validator holds to strictly decreasing wavenumber.
+#'
+#' A reader that models, scales, selects or counts the spectra reads the
+#' `predictor` role, as it always has. A reader that needs the axis whole
+#' reads it here: the transform, `standardize()`, `average()`'s mean, the
+#' data fingerprint, `predict()`'s door and `select_training()`'s axis. These
+#' helpers and the role vocabulary are the only code that spells the masked
+#' role, so no reader restates the rule.
+#'
+#' @param role_map Tibble with `variable` and `role` columns.
+#'
+#' @return Character. `axis_columns()`: the predictor and masked columns;
+#'   `masked_columns()`: the masked ones. Both in role-map order, empty when
+#'   there are none.
+#'
+#' @noRd
+axis_columns <- function(role_map) {
+
+  as.character(role_map$variable[role_map$role %in% c("predictor", "masked")])
+
+}
+
+#' @rdname axis_columns
+#' @noRd
+masked_columns <- function(role_map) {
+
+  as.character(role_map$variable[role_map$role %in% "masked"])
+
+}
+
+#' Each run of masked columns as a wavenumber range
+#'
+#' @description
+#' How a mask crosses to another grid: `select_training()` takes its mask as
+#' ranges (`mask = `), and a run of masked columns on one axis is the range
+#' from its lowest wavenumber to its highest. On a grid that shares the axis
+#' the ranges select the same columns; on a finer one they select the
+#' columns between the run's own ends.
+#'
+#' @param wn Numeric. The axis's wavenumbers, in column order.
+#' @param masked Logical, one per column of the axis.
+#'
+#' @return A two-column numeric matrix, low then high, one row per run, in
+#'   increasing order; `NULL` when nothing is masked.
+#'
+#' @noRd
+mask_ranges <- function(wn, masked) {
+
+  if (!any(masked)) return(NULL)
+
+  runs   <- rle(as.logical(masked))
+  ends   <- cumsum(runs$lengths)
+  starts <- ends - runs$lengths + 1L
+  inside <- which(runs$values)
+
+  ranges <- t(vapply(inside, function(r) range(wn[starts[r]:ends[r]]), numeric(2)))
+
+  unname(ranges[order(ranges[, 1]), , drop = FALSE])
+
+}
+
+#' Which wavenumbers lie in any of a set of ranges
+#'
+#' @param wn Numeric. Wavenumbers.
+#' @param ranges A two-column matrix, low then high, one range per row, or
+#'   `NULL`.
+#'
+#' @return Logical, one per wavenumber, bounds included; all `FALSE` for
+#'   `NULL` ranges.
+#'
+#' @noRd
+in_ranges <- function(wn, ranges) {
+
+  inside <- rep(FALSE, length(wn))
+
+  for (i in seq_len(NROW(ranges))) inside <- inside | (wn >= ranges[i, 1] & wn <= ranges[i, 2])
+
+  inside
+
+}
+
+
+## ---------------------------------------------------------------------------
+## sort_axis_decreasing() — Put the axis in decreasing order
+## ---------------------------------------------------------------------------
+
+#' Put an object's spectral axis in decreasing wavenumber order
+#'
+#' @description
+#' Reorders the axis's columns ([axis_columns()]: the predictors and any
+#' masked columns) among themselves, in `data$analysis` and `data$role_map`
+#' alike, so a masked column keeps its place between its neighbours. Names,
+#' values and roles are untouched and every other column keeps its place.
+#' Shared by [spectra()] and [standardize()]: both sort their axis on this
+#' helper, since a source can arrive in either order (a KSSL-shaped library
+#' is stored increasing) and every check and downstream step assumes
+#' decreasing.
 #'
 #' @param x `horizons_data.` The object.
 #'
@@ -737,8 +834,8 @@ sort_axis_decreasing <- function(x) {
   analysis <- x$data$analysis
   role_map <- x$data$role_map
 
-  pred_rows <- which(role_map$role == "predictor")
-  pred_vars <- role_map$variable[pred_rows]
+  pred_vars <- axis_columns(role_map)
+  pred_rows <- match(pred_vars, role_map$variable)
 
   ### A predictor name that is not a wavenumber leaves the order to the
   ### validator rather than being pushed to the end.
