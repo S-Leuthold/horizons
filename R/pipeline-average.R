@@ -30,9 +30,18 @@
 #' others below threshold, which can happen with the simpler "flag all at once"
 #' method when group sizes are small (n=2-3).
 #'
-#' **Important:** Run `standardize()` with baseline correction before `average()`
-#' to ensure baseline shifts don't confound quality control. Spectra with baseline
-#' offsets can correlate ~1.0 but shouldn't be averaged without correction.
+#' **The order with [standardize()]:** the pipeline averages before it
+#' standardizes, `spectra() |> parse_ids() |> average() |> standardize()`,
+#' so quality control correlates the scans as they were read. Pearson
+#' correlation does not change with an offset or a gain between two scans,
+#' so a replicate that differs from the others only by a baseline offset or
+#' a scale factor passes whether or not a baseline has been corrected; one
+#' whose baseline differs in slope or curvature correlates lower. The check
+#' reads the range the spectra are modelled over, whichever order the two
+#' verbs run in (`qc_range`): on spectra `standardize()` has not run on, the
+#' bands inside its default `trim`, 600 to 4000 cm-1; on spectra it has run
+#' on, every band it kept. At the defaults the check reads the same range in
+#' either order, and the averaged spectra keep every band.
 #'
 #' **Missing and non-finite values:** an `Inf`, `-Inf` or `NaN` in a
 #' replicate is treated as a missing value, as `NA` is. Quality control
@@ -168,11 +177,11 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Basic averaging after parsing IDs
+#' # Average the replicate scans, then standardize, as the pipeline runs
 #' hd |>
-#'   standardize() |>
-#'   parse_ids(format = "{sample}_{rep}") |>
-#'   average()
+#'   parse_ids(format = "{sampleid}_{replicate}") |>
+#'   average() |>
+#'   standardize()
 #'
 #' # Without quality control
 #' hd |> average(quality_check = FALSE)
