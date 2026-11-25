@@ -73,7 +73,13 @@ and the \code{pca_threshold} every config's recipe ran with) and
 predictions are clamped to \code{configure()}'s \code{outcome_range} before they
 are scored, as are the tuning predictions of a transformed response,
 which are back-transformed first. Aborts, before any config runs, when
-\code{configure()}'s \code{sg_window} is not narrower than the spectrum, and, with class
+\code{configure()}'s \code{sg_window} is not narrower than the spectrum, when the
+grid holds a Savitzky-Golay method (\code{"sg"}, \code{"deriv1"}, \code{"deriv2"},
+\code{"snv_deriv1"}, \code{"snv_deriv2"}) and the wavenumber axis has a gap in it
+(a spacing over three times the median and over 30 cm-1, such as a band
+deleted upstream or by \code{standardize(remove_water = TRUE)}), since the
+window would run across the gap as if its two sides were neighbours
+(\code{"raw"} and \code{"snv"} run), and, with class
 \code{horizons_error_input}, when an observed outcome lies outside
 \code{outcome_range} or is infinite, or when \code{metric = "rrmse"} under a range
 whose lower bound is negative (the mean outcome it divides by can then be

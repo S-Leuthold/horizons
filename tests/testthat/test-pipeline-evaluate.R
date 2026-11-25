@@ -1886,6 +1886,77 @@ describe("evaluate() - recipe settings", {
 })
 
 ## =========================================================================
+## No Savitzky-Golay window across a gap in the axis
+## =========================================================================
+## The window methods convolve adjacent columns whatever their spacing, so
+## on an axis with a gap the columns beside it would hold a window that
+## treats the gap's two sides as neighbours. evaluate() refuses the call
+## before a configuration runs; raw and snv read each column on its own.
+
+describe("evaluate() - no window method across a gap in the axis", {
+
+  ## 40 bands 2 cm-1 apart less the 15 from 3954 to 3926: one gap of 32
+  ## cm-1, over three times the spacing and over 30 cm-1
+  gapped <- delete_axis_columns(make_eval_object(n_wn = 40, n_configs = 3),
+                                paste0("wn_", seq(3954, 3926, by = -2)))
+
+  ## How many configurations evaluate() ran, and the condition it ended on
+  runs <- function(obj, preprocessing) {
+
+    obj$config$configs$preprocessing <- preprocessing
+    ran <- 0L
+
+    err <- testthat::with_mocked_bindings(
+      evaluate_single_config = function(...) {
+        ran <<- ran + 1L
+        tibble::tibble(config_id = list(...)$config_row$config_id,
+                       status = "failed", error_message = "mocked")
+      },
+      tryCatch(suppressWarnings(evaluate(obj, seed = 42L)), error = function(e) e),
+      .package = "horizons"
+    )
+
+    list(error = err, ran = ran)
+
+  }
+
+  it("refuses a grid with a window method before any configuration runs, naming the gap and the methods", {
+
+    out <- runs(gapped, c("raw", "deriv1", "snv_deriv2"))
+    msg <- gsub("\\s+", " ", conditionMessage(out$error))
+
+    expect_s3_class(out$error, "horizons_error_input")
+    expect_match(msg, "The wavenumber axis has 1 gap, and \"deriv1\" and \"snv_deriv2\" run a window along it.", fixed = TRUE)
+    expect_match(msg, "3924 to 3956 cm", fixed = TRUE)
+    expect_match(msg, "the 8 columns beside it", fixed = TRUE)
+    expect_match(msg, "remove_water = FALSE", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
+  it("runs raw and snv on the same axis", {
+
+    out <- runs(gapped, c("raw", "snv", "raw"))
+
+    ## Every mocked configuration fails, so the run ends on that
+    expect_s3_class(out$error, "horizons_error_all_configs_failed")
+    expect_identical(out$ran, 3L)
+
+  })
+
+  it("runs every window method on an axis with no gap", {
+
+    whole <- make_eval_object(n_wn = 40, n_configs = 3)
+    out   <- runs(whole, c("sg", "deriv2", "snv_deriv1"))
+
+    expect_s3_class(out$error, "horizons_error_all_configs_failed")
+    expect_identical(out$ran, 3L)
+
+  })
+
+})
+
+## =========================================================================
 ## Ranking tie-break and checkpoint scoring schema (review, 2026-09-15)
 ## =========================================================================
 

@@ -71,7 +71,9 @@ predictor quality, and detects spectral and response outliers.
 and \code{evaluate()}. Running it is optional and nothing gates on its verdict:
 \code{evaluate()} and \code{fit()} refuse invalid input themselves, including the
 problems its ERROR checks report (a training part without more rows than
-CV folds, and an outcome with zero variance). Detection is mandatory;
+CV folds, an outcome with zero variance, and a Savitzky-Golay method in
+the grid on a wavenumber axis with a gap in it, P011, which would run its
+window across the gap). Detection is mandatory;
 outlier removal is opt-in. The function populates the \code{validation}
 section of the object and sets \code{validation$passed} based on whether any
 ERROR-severity checks failed.

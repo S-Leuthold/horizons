@@ -10,7 +10,9 @@
 #' and `evaluate()`. Running it is optional and nothing gates on its verdict:
 #' `evaluate()` and `fit()` refuse invalid input themselves, including the
 #' problems its ERROR checks report (a training part without more rows than
-#' CV folds, and an outcome with zero variance). Detection is mandatory;
+#' CV folds, an outcome with zero variance, and a Savitzky-Golay method in
+#' the grid on a wavenumber axis with a gap in it, P011, which would run its
+#' window across the gap). Detection is mandatory;
 #' outlier removal is opt-in. The function populates the `validation`
 #' section of the object and sets `validation$passed` based on whether any
 #' ERROR-severity checks failed.
@@ -573,6 +575,23 @@ validate <- function(x,
   ))
 
   ## ---------------------------------------------------------------------------
+  ## Step 11c: P011 — No Savitzky-Golay window across a gap in the axis
+  ## ---------------------------------------------------------------------------
+  ## The rule evaluate() and fit() refuse on (check_window_gaps()), for every
+  ## configuration of the grid.
+
+  window   <- window_gaps(x)
+  n_gaps   <- NROW(window$gaps)
+  window_n <- if (length(window$methods)) paste(window$methods, collapse = ", ") else "none"
+
+  checks <- rbind(checks, run_check(
+    "P011", "No window method across a gap",
+    condition = n_gaps == 0L || length(window$methods) == 0L,
+    severity  = "ERROR",
+    value     = paste0(n_gaps, " gap(s) in the axis; window methods: ", window_n)
+  ))
+
+  ## ---------------------------------------------------------------------------
   ## Step 12: The response-trim request
   ## ---------------------------------------------------------------------------
   ## Response outliers are never removed here (#77): the fences above span
@@ -694,6 +713,13 @@ validate <- function(x,
     cat(paste0("\u2502  \u251C\u2500 ", sym, " Cubist feasibility: ",
                n_total, " x ", n_pred_cols, " cells, ",
                length(cubist_flagged_ids), " config(s) flagged\n"))
+
+    p011 <- checks[checks$check_id == "P011", ]
+    sym  <- if (p011$status == "pass") cli::col_green("\u2713") else cli::col_red("\u2717")
+    cat(paste0("\u2502  \u251C\u2500 ", sym, " Window across a gap: ",
+               if (p011$status == "pass") "none" else {
+                 paste0(window_n, " on an axis with ", n_gaps, " gap", if (n_gaps != 1) "s")
+               }, "\n"))
 
     ## Outlier detection ----------------------------------------------------------
 

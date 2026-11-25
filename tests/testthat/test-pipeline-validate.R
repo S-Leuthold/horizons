@@ -813,6 +813,67 @@ describe("validate() cubist feasibility check (P010)", {
 
 
 ## ===========================================================================
+## 4c. No Savitzky-Golay window across a gap in the axis (P011)
+## ===========================================================================
+
+describe("validate() window method across a gap (P011)", {
+
+  ## 50 bands 1 cm-1 apart less the 31 from 640 to 610: one gap of 32 cm-1,
+  ## over three times the spacing and over 30 cm-1
+  gapped <- delete_axis_columns(make_configured_hd(), as.character(640:610))
+
+  p011 <- function(result) result$validation$checks[result$validation$checks$check_id == "P011", ]
+
+  test_that("P011 fails as an ERROR when the grid runs a window method on an axis with a gap, as evaluate() and fit() refuse", {
+
+    hd <- gapped
+    hd$config$configs$preprocessing <- "deriv1"
+
+    expect_output(result <- suppressWarnings(validate(hd, verbose = TRUE)),
+                  "Window across a gap: deriv1 on an axis with 1 gap", fixed = TRUE)
+
+    check <- p011(result)
+    expect_equal(check$status, "fail")
+    expect_equal(check$severity, "ERROR")
+    expect_equal(check$value, "1 gap(s) in the axis; window methods: deriv1")
+    expect_false(result$validation$passed)
+
+    ## The door both verbs share refuses the same object
+    expect_error(check_window_gaps(hd), class = "horizons_error_input")
+
+  })
+
+  test_that("P011 passes on the same axis when the grid runs raw and snv only", {
+
+    hd <- gapped
+    hd$config$configs <- rbind(hd$config$configs, hd$config$configs)
+    hd$config$configs$config_id     <- c("rf_raw_none_none_abc123", "rf_snv_none_none_def456")
+    hd$config$configs$preprocessing <- c("raw", "snv")
+    hd$config$n_configs             <- 2L
+
+    check <- p011(quiet_validate(hd))
+
+    expect_equal(check$status, "pass")
+    expect_equal(check$value, "1 gap(s) in the axis; window methods: none")
+
+  })
+
+  test_that("P011 passes with a window method on an axis with no gap", {
+
+    hd <- make_configured_hd()
+    hd$config$configs$preprocessing <- "snv_deriv2"
+
+    check <- p011(quiet_validate(hd))
+
+    expect_equal(check$status, "pass")
+    expect_equal(check$value, "0 gap(s) in the axis; window methods: snv_deriv2")
+
+  })
+
+})
+
+
+## ===========================================================================
 ## 5. Spectral outlier detection (P005)
 ## ===========================================================================
 

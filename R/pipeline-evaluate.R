@@ -486,7 +486,13 @@
 #'   predictions are clamped to `configure()`'s `outcome_range` before they
 #'   are scored, as are the tuning predictions of a transformed response,
 #'   which are back-transformed first. Aborts, before any config runs, when
-#'   `configure()`'s `sg_window` is not narrower than the spectrum, and, with class
+#'   `configure()`'s `sg_window` is not narrower than the spectrum, when the
+#'   grid holds a Savitzky-Golay method (`"sg"`, `"deriv1"`, `"deriv2"`,
+#'   `"snv_deriv1"`, `"snv_deriv2"`) and the wavenumber axis has a gap in it
+#'   (a spacing over three times the median and over 30 cm-1, such as a band
+#'   deleted upstream or by `standardize(remove_water = TRUE)`), since the
+#'   window would run across the gap as if its two sides were neighbours
+#'   (`"raw"` and `"snv"` run), and, with class
 #'   `horizons_error_input`, when an observed outcome lies outside
 #'   `outcome_range` or is infinite, or when `metric = "rrmse"` under a range
 #'   whose lower bound is negative (the mean outcome it divides by can then be
@@ -3860,18 +3866,21 @@ render_response_trim <- function(trim) {
 #' the Savitzky-Golay window is at least as wide as the spectrum, which
 #' `configure()` cannot check because `standardize()` may still change the
 #' axis after it (#62). Past that point such a window fails every config
-#' inside tune with a message that never names it. Returns the record
+#' inside tune with a message that never names it. It then refuses a grid
+#' that runs a window method on an axis with a gap ([check_window_gaps()]).
+#' Returns the record
 #' `evaluate()` stores as `evaluation$recipe`, the window's width in cm-1 on
 #' the axis the recipe runs on included. `fit()`'s cold start (#45) calls it
 #' too, so a configured object that skips `evaluate()` is held to the same
-#' check and records the same settings.
+#' checks and records the same settings.
 #'
 #' @param x A configured `horizons_data`.
 #' @param call The call the condition is attributed to. Default: the caller,
 #'   `evaluate()` or `fit()`.
 #' @return List with `sg_window`, `sg_window_cm` (`NA` when the axis spacing
 #'   cannot be read) and `pca_threshold`. Aborts with class
-#'   `horizons_error_input` when the window does not fit the spectrum.
+#'   `horizons_error_input` when the window does not fit the spectrum, or a
+#'   window method would run across a gap in the axis.
 #' @keywords internal
 #' @noRd
 evaluation_recipe <- function(x, call = rlang::caller_env()) {
@@ -3894,9 +3903,89 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 
   }
 
+  ## Every configuration of the grid, since the call runs them all
+  check_window_gaps(x, call = call)
+
   list(sg_window     = recipe_cfg$sg_window,
        sg_window_cm  = window_cm,
        pca_threshold = recipe_cfg$pca_threshold)
+
+}
+
+## ---------------------------------------------------------------------------
+## window_gaps, check_window_gaps — no window across a gap in the axis
+## ---------------------------------------------------------------------------
+
+#' The gaps in the axis, and the window methods that would run across them
+#'
+#' @description
+#' The Savitzky-Golay methods ([WINDOW_PREPROCESSING]) convolve adjacent
+#' columns whatever their spacing, so on an axis with a gap in it the columns
+#' beside the gap hold a window that treats its two sides as neighbours.
+#' A gap is `grid_summary()`'s, the rule `select_training()` refuses one by
+#' (`check_select_axis()`): a spacing over three times the median and over
+#' 30 cm-1. An axis whose names do not parse as wavenumbers has no gap here;
+#' the validator refuses it.
+#'
+#' @param x A configured `horizons_data`.
+#' @param preprocessing Character. The methods the call runs. Default: every
+#'   configuration's.
+#' @return List with `gaps` (a two-column matrix, `low` and `high`, one row a
+#'   gap in increasing order; `NULL` when the axis has none) and `methods`
+#'   (the window methods among `preprocessing`, in [WINDOW_PREPROCESSING]'s
+#'   order). Both non-empty is a call [check_window_gaps()] refuses.
+#' @keywords internal
+#' @noRd
+window_gaps <- function(x, preprocessing = x$config$configs$preprocessing) {
+
+  role_map <- x$data$role_map
+  wn       <- wn_values(role_map$variable[role_map$role == "predictor"])
+
+  gaps <- if (length(wn) > 1L && !anyNA(wn)) grid_summary(wn)$gaps
+
+  list(gaps = gaps, methods = intersect(WINDOW_PREPROCESSING, preprocessing))
+
+}
+
+#' Refuse a window method on an axis with a gap in it
+#'
+#' @description
+#' The door `evaluate()` and `fit()` share ([evaluation_recipe()] on the
+#' grid, and `fit()` on its members when it reuses an evaluation, which may
+#' predate this check). It refuses the call, before anything is drawn, when
+#' a method the call runs would put a Savitzky-Golay window across a gap
+#' ([window_gaps()]), since the columns beside the gap would hold features
+#' that are not in the spectra. `"raw"` and `"snv"` read each column on its
+#' own, so they run. The gap rule is a definition, not a sufficiency
+#' threshold, so it has no override: the remedy is the method.
+#'
+#' @param x A configured `horizons_data`.
+#' @param preprocessing Character. The methods the call runs. Default: every
+#'   configuration's.
+#' @param call The frame the refusal reports: the verb's.
+#' @return `NULL`, invisibly. Aborts with class `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_window_gaps <- function(x, preprocessing = x$config$configs$preprocessing,
+                              call = rlang::caller_env()) {
+
+  found <- window_gaps(x, preprocessing)
+
+  if (is.null(found$gaps) || length(found$methods) == 0L) return(invisible(NULL))
+
+  gaps     <- found$gaps
+  methods  <- found$methods
+  n_gaps   <- nrow(gaps)
+  shown    <- paste(sprintf("%g to %g", gaps[, "low"], gaps[, "high"]), collapse = ", ")
+  n_beside <- recipe_settings(x)$sg_window - 1L
+
+  abort_horizons(c(
+    "The wavenumber axis has {n_gaps} gap{?s}, and {.val {methods}} {cli::qty(length(methods))}run{?s/} a window along it.",
+    "x" = "{shown} cm\u207B\u00B9.",
+    "i" = "A Savitzky-Golay window would run across each gap as if its two sides were neighbours, so the {n_beside} columns beside it would hold features that are not in the spectra.",
+    "i" = "If an earlier {.code standardize(remove_water = TRUE)} deleted these bands, re-run the pipeline from {.fn spectra} with {.code remove_water = FALSE}.",
+    "i" = "Otherwise configure {.val raw} or {.val snv}, or trim the spectra to one side of each gap ({.fn standardize}'s {.arg trim})."
+  ), kind = "input", call = call)
 
 }
 

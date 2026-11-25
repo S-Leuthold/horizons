@@ -155,7 +155,10 @@
 #' A member's own warnings, from the engines and from tune, are in
 #' `models$results$warnings`. A bug, a refusal or a missing package is not
 #' the member's and stops the call: before any member is fitted, `fit()`
-#' refuses members whose model's engine or feature-selection step needs a
+#' refuses members that run a Savitzky-Golay method (`"sg"`, `"deriv1"`,
+#' `"deriv2"`, `"snv_deriv1"`, `"snv_deriv2"`) on a wavenumber axis with a
+#' gap in it, as [evaluate()] refuses such a grid (`horizons_error_input`),
+#' and members whose model's engine or feature-selection step needs a
 #' package that is not installed, naming each (`horizons_error_missing_package`). When the first members fail the same
 #' way (3 of them by default, `control_horizons(breaker = )`, `FALSE` to
 #' fit every member), and between them span two of the members' models,
@@ -214,7 +217,8 @@
 #' are `NA`, and `runtime_secs` is 0. `evaluation$recipe` records the recipe
 #' settings as `evaluate()` does, and `fit()` applies `evaluate()`'s checks
 #' first: an outcome that is not constant, a Savitzky-Golay window narrower
-#' than the spectrum, and more rows than `cv_folds` to draw the folds from,
+#' than the spectrum, no window method on an axis with a gap in it, and more
+#' rows than `cv_folds` to draw the folds from,
 #' which `fit()` checks on either path. Re-fitting a cold-started fit starts
 #' cold again. With more than one configuration `fit()` aborts with class
 #' `horizons_error_input`:
@@ -622,6 +626,12 @@ fit <- function(x,
   ## fitted. Only the members: an evaluation that also holds a mars
   ## configuration does not need earth to fit the others.
   member_configs <- all_configs[all_configs$config_id %in% top_configs$config_id, ]
+
+  ## No member runs a Savitzky-Golay window across a gap in the axis. A cold
+  ## start checked its one configuration in cold_start_evaluation(); an
+  ## evaluation can predate the check evaluate() makes, so its members are
+  ## checked here, before any is fitted.
+  if (!cold_start) check_window_gaps(x, member_configs$preprocessing)
 
   check_config_packages(member_configs, "fit")
 
@@ -2250,7 +2260,8 @@ retune_kept_line <- function(moved) {
 #'   rule, since it would leave no training row. Aborts with class
 #'   `horizons_error_input` when the object has no configuration or more than
 #'   one, the window is at least as
-#'   wide as the spectrum, or `validate()`'s response-trim request is for
+#'   wide as the spectrum or would run across a gap in the axis, or
+#'   `validate()`'s response-trim request is for
 #'   another outcome ([response_trim_request()]).
 #' @keywords internal
 #' @noRd

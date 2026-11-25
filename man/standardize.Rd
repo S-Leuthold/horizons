@@ -30,7 +30,9 @@ baseline correction. Without resampling, columns outside the range are
 dropped. Use \code{NULL} to skip trimming.}
 
 \item{remove_water}{\code{logical.} Remove water absorption bands
-(1580-1720, 3100-3700 cm⁻¹)? Default \code{FALSE}.}
+(1580-1720, 3100-3700 cm⁻¹)? Default \code{FALSE}. The gaps they leave rule
+out the Savitzky-Golay methods in \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} (see
+Details).}
 
 \item{baseline}{\code{logical.} Apply convex hull baseline correction?
 Default \code{FALSE}.}
@@ -138,9 +140,10 @@ the canonical grid, so every source's convex hull is pinned at the same
 ends, the grid's; the points kept beyond the trim bounds for interpolation
 are gone by then and never reach it. Without resampling, it is fitted on
 the trimmed native axis. Water bands are deleted last so that
-\code{standardize()}'s own interpolation never spans them; a Savitzky-Golay
-derivative taken later still runs across the hole they leave, which is a
-separate matter (see \code{select_training()}'s \code{mask}).
+\code{standardize()}'s own interpolation never spans them. The axis they leave
+has a gap at each band, and a Savitzky-Golay window would run across it,
+so \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} refuse the window methods (\code{"sg"} and the
+derivatives) on it; \code{"raw"} and \code{"snv"} run.
 
 \strong{Unusable spectra:} a spectrum \code{standardize()} cannot use, one with a
 value that is not finite among those it returns, or one with no spread
