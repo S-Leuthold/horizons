@@ -273,7 +273,7 @@ make_axis_object <- function(wn, n = 6L, prefix = "A", seed = 7L, clay = FALSE) 
 #' @noRd
 pool_on_targets <- function(fx) {
 
-  pm   <- predictor_matrix(fx$pool)
+  pm   <- axis_matrix(fx$pool)
   vars <- function(x) x$data$role_map$variable[x$data$role_map$role == "predictor"]
   keep <- match(shared_columns(vars(fx$targets), vars(fx$pool))$shared, vars(fx$pool))
 

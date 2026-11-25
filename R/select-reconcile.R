@@ -8,15 +8,18 @@
 
 
 ## ---------------------------------------------------------------------------
-## predictor_matrix() — Spectra as a matrix with wavenumbers
+## axis_matrix() — Spectra as a matrix with wavenumbers
 ## ---------------------------------------------------------------------------
 
 #' Extract the spectral matrix of a horizons_data object
 #'
 #' @description
-#' Pulls the predictor columns into a numeric matrix, rows named by
-#' `sample_id`, and returns the wavenumbers alongside in the order the
-#' columns carry them (decreasing, by the object contract).
+#' Pulls the axis's columns ([axis_columns()]: the predictors and any masked
+#' columns between them) into a numeric matrix, rows named by `sample_id`,
+#' and returns the wavenumbers alongside in the order the columns carry them
+#' (decreasing, by the object contract). The similarity space's derivative
+#' runs along the whole axis and its mask drops the masked columns after it
+#' ([space_mask()]), as the model's transform does.
 #'
 #' @param x [horizons_data.] The object.
 #'
@@ -25,17 +28,16 @@
 #'
 #' @seealso [search_axis()]
 #' @noRd
-predictor_matrix <- function(x) {
+axis_matrix <- function(x) {
 
-  role_map <- x$data$role_map
-  vars     <- role_map$variable[role_map$role == "predictor"]
+  vars <- axis_columns(x$data$role_map)
 
   m <- as.matrix(x$data$analysis[, vars, drop = FALSE])
   dimnames(m) <- list(x$data$analysis$sample_id, NULL)
 
   list(
     matrix      = m,
-    wavenumbers = predictor_wavenumbers(x)
+    wavenumbers = axis_wavenumbers(x)
   )
 
 }
@@ -48,7 +50,7 @@ predictor_matrix <- function(x) {
 #' The pool's spectral matrix as a similarity space is built on
 #'
 #' @description
-#' `predictor_matrix()`'s matrix without the flagged rows, and on `cols`
+#' `axis_matrix()`'s matrix without the flagged rows, and on `cols`
 #' alone when given. It is made only to be passed straight to
 #' `transform_similarity()` as a space is built, so it dies with that call: a
 #' library's is a gigabyte, so no caller holds it.
@@ -62,7 +64,7 @@ predictor_matrix <- function(x) {
 #' @noRd
 library_matrix <- function(pool, flagged, cols = NULL) {
 
-  m <- predictor_matrix(pool)$matrix
+  m <- axis_matrix(pool)$matrix
   if (any(flagged)) m <- m[!flagged, , drop = FALSE]
 
   if (is.null(cols)) m else m[, cols, drop = FALSE]
@@ -71,24 +73,59 @@ library_matrix <- function(pool, flagged, cols = NULL) {
 
 
 ## ---------------------------------------------------------------------------
-## predictor_wavenumbers() — The axis, without the spectra
+## axis_wavenumbers() — The axis, without the spectra
 ## ---------------------------------------------------------------------------
 
-#' The wavenumbers of a horizons_data object's predictor columns
+#' The wavenumbers of a horizons_data object's axis
 #'
 #' @description
-#' The axis as `predictor_matrix()` reads it, without building the matrix,
-#' which for a registered library is the whole library.
+#' The axis as `axis_matrix()` reads it, masked columns included, without
+#' building the matrix, which for a registered library is the whole library.
 #'
 #' @param x [horizons_data.] The object.
 #'
-#' @return [Numeric.] One wavenumber per predictor column, in column order.
+#' @return [Numeric.] One wavenumber per column of the axis, in column order.
 #' @noRd
-predictor_wavenumbers <- function(x) {
+axis_wavenumbers <- function(x) {
 
-  role_map <- x$data$role_map
+  as.numeric(sub("^wn_", "", axis_columns(x$data$role_map)))
 
-  as.numeric(sub("^wn_", "", role_map$variable[role_map$role == "predictor"]))
+}
+
+
+## ---------------------------------------------------------------------------
+## space_mask() — The ranges the similarity space leaves out
+## ---------------------------------------------------------------------------
+
+#' The wavenumber ranges the similarity space masks
+#'
+#' @description
+#' One concept with two sources: the ranges `mask` names, a lever for the
+#' search alone, and the masked columns of each object the draw reads (the
+#' targets' and the library's, [mask_ranges()]), which no reader models. So a
+#' band either side masked is out of the space, as it is out of the model.
+#' The ranges are kept in that order, the argument's first and as given.
+#'
+#' @param mask [Matrix or NULL.] `select_training()`'s argument.
+#' @param ... [horizons_data.] The objects whose masks the space honours.
+#'
+#' @return [Matrix or NULL.] Two columns, low then high, one range per row;
+#'   `NULL` when nothing is masked.
+#' @noRd
+space_mask <- function(mask, ...) {
+
+  own <- lapply(list(...), function(obj) {
+    axis <- axis_columns(obj$data$role_map)
+    mask_ranges(axis_wavenumbers(obj), axis %in% masked_columns(obj$data$role_map))
+  })
+
+  ranges <- c(list(mask), own)
+  ranges <- ranges[!vapply(ranges, is.null, logical(1))]
+
+  if (length(ranges) == 0) return(NULL)
+  if (length(ranges) == 1) return(ranges[[1]])
+
+  do.call(rbind, lapply(ranges, unname))
 
 }
 
@@ -177,7 +214,9 @@ shown_gaps <- function(gaps, n_show = 5L) {
 #' `transform_similarity()`. Both inventions are silent: the output is smooth,
 #' finite and correctly named. So the gap is a refusal, and it is checked on
 #' the axis rather than on the mask, because masking happens after the
-#' derivative and cannot undo a hole that was already in the input.
+#' derivative and cannot undo a hole that was already in the input. A band
+#' `standardize(remove_water = TRUE)` masked is on the axis, so it is no
+#' gap.
 #'
 #' @param wn [Numeric.] The axis's wavenumbers.
 #' @param arg [Character.] The argument the axis belongs to, `"x"` or
@@ -194,7 +233,7 @@ check_select_axis <- function(wn, arg, what, call = rlang::caller_env()) {
 
     abort_horizons(c(
       "{.arg {arg}}, {what}, must have at least two wavenumbers.",
-      "x" = "It has {length(wn)} predictor column{?s}.",
+      "x" = "It has {length(wn)} spectral column{?s}.",
       "i" = "The similarity space takes a derivative along the axis, so it needs a spectrum, not a single band."
     ), kind = "input", call = call)
 
@@ -211,7 +250,7 @@ check_select_axis <- function(wn, arg, what, call = rlang::caller_env()) {
     "The wavenumber axis of {.arg {arg}}, {what}, has {nrow(gaps)} gap{?s} in it.",
     "x" = "{shown}, each more than three times and more than 30 cm-1 above the median spacing of {grid$resolution} cm-1.",
     "i" = "Resampling would spline-fill the gap and the derivative would run straight across it, inventing absorbance at every edge.",
-    "i" = "Handle water bands with {.arg mask}, which masks after the derivative; never by deleting columns upstream."
+    "i" = "Keep water bands in the spectra and mask them, which masks after the derivative: {.code standardize(remove_water = TRUE)} on data from {.fn spectra}, or {.arg mask}; never delete columns upstream."
   ), kind = "input", call = call)
 
 }
@@ -221,19 +260,20 @@ check_select_axis <- function(wn, arg, what, call = rlang::caller_env()) {
 ## shared_columns() — the targets' wavenumbers the library has
 ## ---------------------------------------------------------------------------
 
-#' Split the targets' predictor columns into those the library shares
+#' Split the targets' spectral columns into those the library shares
 #'
 #' @description
 #' The training set is the library's own columns at the wavenumbers the
 #' targets share with it (#236). A column is shared when the library has a
-#' predictor of the same name, the rule `predict()` applies to the same
+#' column of the same name on its axis ([axis_columns()]), the rule
+#' `predict()` applies to the same
 #' columns later (`check_predictor_schema()`), so the targets can always
 #' predict from a model trained on the result. `standardize()` names every
 #' column `wn_<wavenumber>` on a grid rounded to six decimals, so on anything
 #' it made, name and value agree.
 #'
-#' @param target_vars [Character.] The targets' predictor columns.
-#' @param library_vars [Character.] The library's predictor columns.
+#' @param target_vars [Character.] The targets' axis columns.
+#' @param library_vars [Character.] The library's axis columns.
 #'
 #' @return [List.] `shared` (the library's columns the targets also have, in
 #'   the library's order) and `target_only` (the targets' columns the library
@@ -328,8 +368,8 @@ on_own_grid <- function(wn, of = wn) {
 #' not put on the library's grid, and the refusal names the `standardize()`
 #' call that does it, built from the library's own range and step.
 #'
-#' @param target_vars [Character.] The targets' predictor columns.
-#' @param library_vars [Character.] The library's predictor columns: the
+#' @param target_vars [Character.] The targets' axis columns.
+#' @param library_vars [Character.] The library's axis columns: the
 #'   resolved pool's, or a registered library's grid before it is downloaded.
 #' @param restandardize [Logical.] Whether the targets were standardized
 #'   already, so the call needs `force = TRUE`.
@@ -438,7 +478,7 @@ check_shared_columns <- function(target_vars, library_vars, restandardize = FALS
 #' @param pool_record [List or NULL.] The library's
 #'   `data$standardization`.
 #' @param wn [Numeric.] The returned columns' wavenumbers.
-#' @param n_library [Integer.] How many predictor columns the library has.
+#' @param n_library [Integer.] How many columns the library's axis has.
 #'
 #' @return [List or NULL.] The record for the training set.
 #' @noRd

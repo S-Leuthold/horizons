@@ -281,11 +281,15 @@ prime_library_space <- function(pool, record, verbose = TRUE,
   if (is.null(identity)) return(invisible(NULL))
 
   ## The space a draw builds: without the rows an earlier step flagged, the
-  ## matrix made only inside the build's transform, as a draw makes it
-  wn       <- predictor_wavenumbers(pool)
+  ## matrix made only inside the build's transform, as a draw makes it, and
+  ## the library's own mask with the default's (space_mask()), as a default
+  ## draw on unmasked targets masks it
+  wn       <- axis_wavenumbers(pool)
   flagged  <- flagged_rows(pool$data$analysis)
   settings <- default_space_settings(grid_summary(wn)$resolution)
   n_cols   <- length(wn)
+
+  settings$mask <- space_mask(settings$mask, pool)
 
   if (settings$derivative > 0L && !sg_window_fits(settings$window, n_cols)) {
 

@@ -92,7 +92,7 @@ test_that("a draw that builds the space builds the first-use space, bit for bit"
   expect_false(out$selection$search$cache$hit)
   drawn <- qs2::qs_read(file.path(m$cache, space_files(m$cache)))$space
 
-  pm <- predictor_matrix(m$pool)
+  pm <- axis_matrix(m$pool)
   s  <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
   direct <- space_on(pm$matrix, pm$wavenumbers, snv = s$snv, derivative = s$derivative,
                      window = s$window, poly = s$poly, mask = s$mask, ncomp = s$ncomp,

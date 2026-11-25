@@ -1,5 +1,5 @@
 # tests/testthat/test-select-reconcile.R
-# Tests for select_training()'s two axes: predictor_matrix(), grid_summary()
+# Tests for select_training()'s two axes: axis_matrix(), grid_summary()
 # and the axis door (check_select_axis()); shared_columns(), the door for
 # targets that share no column, and returned_standardization(), the training
 # set's record (#236, #90); and search_axis(), which puts the targets on the
@@ -7,13 +7,38 @@
 
 
 ## =============================================================================
-## predictor_matrix()
+## axis_matrix()
 ## =============================================================================
 
-test_that("predictor_matrix() returns the spectra with decreasing wavenumbers", {
+test_that("axis_matrix() and axis_wavenumbers() read the whole axis, masked columns included", {
+
+  fx     <- select_fixture(n_pool = 20)
+  masked <- mask_axis_columns(fx$pool, c("wn_1700", "wn_1696"))
+
+  expect_identical(axis_matrix(masked), axis_matrix(fx$pool))
+  expect_identical(axis_wavenumbers(masked), fx$pool_wn)
+
+})
+
+
+test_that("space_mask() is the argument's ranges, then each object's masked bands, NULL when nothing is masked", {
+
+  fx      <- select_fixture(n_pool = 20)
+  targets <- mask_axis_columns(fx$targets, c("wn_1720", "wn_1712"))
+  pool    <- mask_axis_columns(fx$pool, c("wn_3700", "wn_3696", "wn_3692"))
+
+  expect_null(space_mask(NULL, fx$targets, fx$pool))
+  expect_identical(space_mask(rbind(c(1, 2)), fx$targets, fx$pool), rbind(c(1, 2)))
+  expect_identical(space_mask(NULL, targets, pool), rbind(c(1712, 1720), c(3692, 3700)))
+  expect_identical(space_mask(rbind(c(1, 2)), targets, fx$pool), rbind(c(1, 2), c(1712, 1720)))
+
+})
+
+
+test_that("axis_matrix() returns the spectra with decreasing wavenumbers", {
 
   fx  <- select_fixture(n_pool = 20)
-  out <- predictor_matrix(fx$pool)
+  out <- axis_matrix(fx$pool)
 
   expect_type(out, "list")
   expect_identical(dim(out$matrix), c(20L, length(fx$pool_wn)))
@@ -50,7 +75,7 @@ test_that("check_select_axis() refuses an axis of one wavenumber, and passes a u
   expect_error(check_select_axis(4000, "x", "the targets"),
                regexp = "at least two wavenumbers", class = "horizons_error_input")
   expect_error(check_select_axis(numeric(0), "library", "the pool"),
-               regexp = "has 0 predictor columns", class = "horizons_error_input")
+               regexp = "has 0 spectral columns", class = "horizons_error_input")
 
   ## Two columns are an axis; a usable one returns its summary
   expect_identical(check_select_axis(c(4000, 3996), "x", "the targets")$n, 2L)

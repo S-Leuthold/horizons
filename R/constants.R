@@ -843,7 +843,7 @@ SELECT_COLLECT_BYTES <- 64 * 1024^2
 # (transform_similarity(), the PCA, the component cap, the sdev floor's rule)
 # must bump this, or old spaces are read as if the new code had built them.
 # 2: the space is fit without the library's flagged rows (0.12.0).
-SELECT_SPACE_CACHE_VERSION <- 2L
+SELECT_SPACE_CACHE_VERSION <- 3L
 
 ## spectra() -------------------------------------------------------------------
 

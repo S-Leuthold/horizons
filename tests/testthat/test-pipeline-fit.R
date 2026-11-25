@@ -784,6 +784,62 @@ describe("fit() - no window method across a gap in the axis", {
 })
 
 
+## =========================================================================
+## No modelling verb reads a masked column
+## =========================================================================
+
+describe("evaluate(), fit() and predict() - masked columns are never read", {
+
+  it("score, fit, bound and predict the same for raw and snv with every other row's masked values poisoned", {
+
+    skip_unless_slow_tier()
+
+    ## Thirty bands, five masked; raw and snv read no neighbour, so a masked
+    ## value reaches nothing they compute
+    masked_cols <- paste0("wn_", seq(3962, 3954, by = -2))
+    base        <- mask_axis_columns(make_eval_object(n = 200, n_wn = 30, n_configs = 2), masked_cols)
+    base$config$configs$model         <- "rf"
+    base$config$configs$preprocessing <- c("raw", "snv")
+    base$config$tuning$final_bayesian_iter <- 0L
+
+    poison <- function(obj) {
+      rows <- seq(1, nrow(obj$data$analysis), by = 2)
+      obj$data$analysis[rows, masked_cols] <- 1e6
+      obj
+    }
+
+    run <- function(obj) {
+      ev <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 11L))
+      ft <- suppressWarnings(fit(ev, n_best = 2L, seed = 11L))
+      list(ev = ev, ft = ft)
+    }
+
+    clean <- run(base)
+    wild  <- run(poison(base))
+
+    scores <- c("config_id", "rmse", "rsq", "rpd", "cv_rmse", "cv_rpd")
+    expect_identical(wild$ev$evaluation$results[, scores], clean$ev$evaluation$results[, scores])
+    expect_identical(wild$ft$models$cv_predictions, clean$ft$models$cv_predictions)
+    expect_identical(wild$ft$models$results[, c("config_id", "rmse", "rpd", "cv_rmse_mean")],
+                     clean$ft$models$results[, c("config_id", "rmse", "rpd", "cv_rmse_mean")])
+
+    ## New data, with and without its masked values poisoned, through the
+    ## intervals and the applicability domain
+    new_data <- base$data$analysis[1:20, c("sample_id", axis_columns(base$data$role_map))]
+    wild_new <- new_data
+    wild_new[seq(1, 20, by = 2), masked_cols] <- 1e6
+
+    out_clean <- predict(clean$ft, new_data, config = "all")
+    out_wild  <- predict(wild$ft, wild_new, config = "all")
+
+    expect_true(all(c(".pred_lower", ".ad_distance") %in% names(out_clean)))
+    expect_identical(out_wild, out_clean)
+
+  })
+
+})
+
+
 describe("fit() - seed reproducibility", {
 
   ## The train/test split is evaluate()'s, so what fit()'s seed controls is

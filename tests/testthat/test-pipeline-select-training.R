@@ -50,7 +50,7 @@ learnable_clay_pool <- function(pool, r2 = 0.8, seed = 1) {
   ## One peak centre from each of make_select_fixture()'s two families
   centres <- c(1630, 1420)
 
-  pm   <- predictor_matrix(pool)
+  pm   <- axis_matrix(pool)
   band <- vapply(centres, function(cc) {
     rowMeans(pm$matrix[, abs(pm$wavenumbers - cc) <= 20, drop = FALSE])
   }, numeric(nrow(pm$matrix)))
@@ -636,6 +636,7 @@ test_that("select_training() refuses a target axis it cannot search, before the 
                       regexp = "gap", class = "horizons_error_input")
   expect_match(conditionMessage(err), "`x`, the targets", fixed = TRUE)
   expect_match(conditionMessage(err), "mask", fixed = TRUE)
+  expect_match(conditionMessage(err), "standardize(remove_water = TRUE)", fixed = TRUE)
 
 })
 
@@ -733,7 +734,7 @@ test_that("the unit check catches a log-base difference and lets an instrument g
   ## One matrix against a scaled copy of itself, so the fold difference is
   ## the scale factor and nothing else.
   fx <- select_fixture(n_pool = 30)
-  M  <- predictor_matrix(fx$pool)$matrix
+  M  <- axis_matrix(fx$pool)$matrix
 
   expect_true(check_photometric_units(M,  M * 100)$mismatch)
   expect_true(check_photometric_units(M,  M * 2.303)$mismatch)
@@ -835,7 +836,7 @@ test_that("the resemblance check is seeded and leaves the caller's RNG alone", {
   ## so exercise the helper directly on a pool that is over it.
   fx <- select_fixture(n_pool = 60)
   rc <- pool_on_targets(fx)
-  tm <- predictor_matrix(fx$targets)
+  tm <- axis_matrix(fx$targets)
   sp <- space_on(rc$matrix, rc$wavenumbers, ncomp = 4L)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
 
@@ -1114,7 +1115,7 @@ test_that("scope = 'global' returns every pool row on the targets' grid", {
   expect_setequal(out$data$analysis$sample_id, fx$pool$data$analysis$sample_id)
 
   ## On the targets' grid, not the pool's
-  pm <- predictor_matrix(out)
+  pm <- axis_matrix(out)
   expect_identical(pm$wavenumbers, fx$target_wn)
 
   ## Record and groups
@@ -1209,7 +1210,7 @@ test_that("the return keeps every pool response and carries no similarity column
   expect_identical(out$data$n_responses, 2L)
 
   ## Only the targets' wavenumbers, nothing from the derivative space
-  pm <- predictor_matrix(out)
+  pm <- axis_matrix(out)
   expect_identical(pm$wavenumbers, fx$target_wn)
   expect_identical(out$data$n_predictors, length(fx$target_wn))
 
@@ -1479,7 +1480,7 @@ test_that("at k = 1 batch and global record every twin in the measured pool, wit
 
   fx <- select_fixture(n_pool = 60, seed = 3, n_replicates = 3)
   rc <- pool_on_targets(fx)
-  tm <- predictor_matrix(fx$targets)
+  tm <- axis_matrix(fx$targets)
   sp <- space_on(rc$matrix, rc$wavenumbers, sdev_floor = SELECT_SDEV_FLOOR)
   St <- project_similarity(sp, tm$matrix, tm$wavenumbers)
   a  <- fx$pool$data$analysis
@@ -2056,7 +2057,7 @@ test_that("targets on a coarser grid get the library's own values there, and the
 
   out <- select_training(targets, pool, k = 10)
   rec <- out$data$standardization
-  wn  <- predictor_matrix(out)$wavenumbers
+  wn  <- axis_matrix(out)$wavenumbers
 
   ## Every target column is shared, so nothing is warned and none is missing
   expect_identical(out$selection$reconciliation$operation, "subset")
@@ -2066,8 +2067,8 @@ test_that("targets on a coarser grid get the library's own values there, and the
   ## The library's own values at the targets' wavenumbers, not a spline's
   pred <- function(x) x$data$role_map$variable[x$data$role_map$role == "predictor"]
   expect_identical(pred(out), pred(targets))
-  expect_identical(predictor_matrix(out)$matrix,
-                   predictor_matrix(subset_rows(pool, out$data$analysis$sample_id))$matrix[, match(pred(out), pred(pool))])
+  expect_identical(axis_matrix(out)$matrix,
+                   axis_matrix(subset_rows(pool, out$data$analysis$sample_id))$matrix[, match(pred(out), pred(pool))])
 
   ## The recorded step is the axis's spacing, the targets' 8, not the pool's 4
   expect_equal(rec$grid$step, stats::median(abs(diff(wn))))
@@ -2261,8 +2262,8 @@ test_that("targets finer than the library get its own columns, with one coverage
   ## The pool's whole axis comes back, as it was: nothing interpolated up
   expect_identical(pred(out), pred(fx$pool))
   expect_identical(out$selection$reconciliation$operation, "none")
-  expect_identical(predictor_matrix(out)$matrix,
-                   predictor_matrix(subset_rows(fx$pool, out$data$analysis$sample_id))$matrix)
+  expect_identical(axis_matrix(out)$matrix,
+                   axis_matrix(subset_rows(fx$pool, out$data$analysis$sample_id))$matrix)
 
   ## The 850 target columns between the pool's are named, in the record and
   ## on the log row the warning carries
@@ -2289,7 +2290,7 @@ test_that("targets wider than the library get the columns they share, with the r
   w <- expect_warning(out <- select_training(fx$targets, fx$pool, k = 5, properties = "clay"),
                       class = "horizons_warning_coverage")
 
-  wn <- predictor_matrix(out)$wavenumbers
+  wn <- axis_matrix(out)$wavenumbers
   expect_identical(range(wn), c(600, 4000))
   expect_identical(wn, seq(4000, 600, by = -8))
   expect_identical(sort(out$selection$reconciliation$target_only),
@@ -2313,7 +2314,7 @@ test_that("targets on an offset step get the columns both grids share, at their 
   w <- expect_warning(out <- select_training(targets, pool, k = 5, properties = "clay"),
                       class = "horizons_warning_coverage")
 
-  wn <- predictor_matrix(out)$wavenumbers
+  wn <- axis_matrix(out)$wavenumbers
   expect_identical(wn, seq(3996, 600, by = -12))
 
   rec <- out$data$standardization
@@ -2445,7 +2446,7 @@ test_that("hulls over different ranges name the range both reach, which a librar
   ## the library's hull over the range both reach can.
   fx <- select_fixture(n_pool = 120)
 
-  tm     <- predictor_matrix(fx$targets)
+  tm     <- axis_matrix(fx$targets)
   raw_wn <- round(rev(599.74 + 1.93 * (0:1761)), 2)
   raw_wn <- raw_wn[raw_wn >= 600 & raw_wn <= 4000]
   rs     <- resample_spectra(tm$matrix, tm$wavenumbers, new_wav = raw_wn)
@@ -3208,5 +3209,92 @@ test_that("select_training() stops with horizons_error_process_died when the dra
   expect_identical(rlang::call_name(err$call), "select_training")
   expect_match(gsub("\\s+", " ", conditionMessage(err)),
                paste(PROCESS_DIED, "the library draw ended without returning its result"), fixed = TRUE)
+
+})
+
+
+
+## =============================================================================
+## Masked bands: one concept with select_training()'s mask
+## =============================================================================
+
+## The fixture's draw at k = 5 before the masked role existed, pinned at that
+## build: with nothing masked and mask = NULL the draw is the one it was
+pinned_membership <- c(
+  "T01 P127", "T01 P122", "T01 P032", "T01 P013", "T01 P035", "T02 P123", "T02 P073", "T02 P066",
+  "T02 P048", "T02 P025", "T03 P028", "T03 P101", "T03 P031", "T03 P129", "T03 P033", "T04 P068",
+  "T04 P033", "T04 P104", "T04 P130", "T04 P080", "T05 P199", "T05 P198", "T05 P226", "T05 P186",
+  "T05 P211", "T06 P291", "T06 P249", "T06 P163", "T06 P179", "T06 P214", "T07 P221", "T07 P205",
+  "T07 P274", "T07 P223", "T07 P237", "T08 P240", "T08 P283", "T08 P230", "T08 P246", "T08 P296",
+  "T01 P122", "T01 P013", "T01 P039", "T01 P100", "T01 P128", "T02 P123", "T02 P066", "T02 P138",
+  "T02 P067", "T02 P031", "T03 P028", "T03 P101", "T03 P031", "T03 P065", "T03 P123", "T04 P130",
+  "T04 P065", "T04 P101", "T04 P049", "T04 P134", "T05 P198", "T05 P186", "T05 P165", "T05 P152",
+  "T05 P172", "T06 P291", "T06 P163", "T06 P179", "T06 P214", "T06 P293", "T07 P205", "T07 P237",
+  "T07 P258", "T07 P286", "T07 P183", "T08 P240", "T08 P246", "T08 P296", "T08 P239", "T08 P156"
+)
+
+describe("select_training() on targets and libraries with masked bands", {
+
+  fx <- select_fixture()
+
+  ## The water bands, kept and masked: the low one on the targets (8 cm-1),
+  ## the high one on the library (4 cm-1)
+  band_of <- function(obj, lo, hi) {
+    wn <- axis_wavenumbers(obj)
+    axis_columns(obj$data$role_map)[wn >= lo & wn <= hi]
+  }
+
+  targets <- mask_axis_columns(fx$targets, band_of(fx$targets, 1580, 1720))
+  pool    <- mask_axis_columns(fx$pool,    band_of(fx$pool,    3100, 3700))
+
+  out <- suppressWarnings(select_training(targets, pool, k = 5))
+
+  it("draws for masked targets, which are no gap, and masks in the training set every shared column either side masks", {
+
+    expected <- intersect(axis_columns(out$data$role_map),
+                          c(band_of(fx$targets, 1580, 1720), band_of(fx$pool, 3100, 3700)))
+
+    expect_identical(masked_columns(out$data$role_map), expected)
+    expect_identical(out$data$n_predictors,
+                     length(axis_columns(out$data$role_map)) - length(expected))
+    expect_identical(validate_horizons_data(out), out)
+
+  })
+
+  it("records the ranges the space ran with: the argument's, then the targets' and the library's", {
+
+    expect_identical(out$selection$settings$mask, rbind(c(1584, 1720), c(3100, 3700)))
+
+    given <- suppressWarnings(select_training(targets, pool, k = 5, mask = rbind(c(2200, 2400))))
+    expect_identical(given$selection$settings$mask, rbind(c(2200, 2400), c(1584, 1720), c(3100, 3700)))
+
+  })
+
+  it("never reads the library's masked values: the draw and its distances are the same with them poisoned", {
+
+    ## Columns more than the derivative's half window (20 cm-1 at the default
+    ## 40) inside the band, on every other row
+    poisoned <- pool
+    inner    <- band_of(pool, 3140, 3660)
+    rows     <- seq(1, nrow(poisoned$data$analysis), by = 2)
+    poisoned$data$analysis[rows, inner] <- 1e6
+
+    again <- suppressWarnings(select_training(targets, poisoned, k = 5))
+
+    expect_identical(again$selection$membership, out$selection$membership)
+    expect_identical(again$selection$target_distances, out$selection$target_distances)
+
+  })
+
+  it("is the draw it was with nothing masked and mask = NULL", {
+
+    plain <- suppressWarnings(quiet_select(fx, k = 5))
+    m     <- plain$selection$membership
+
+    expect_identical(paste(m$target_id, m$pool_id), pinned_membership)
+    expect_null(plain$selection$settings$mask)
+    expect_identical(masked_columns(plain$data$role_map), character(0))
+
+  })
 
 })
