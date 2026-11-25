@@ -152,10 +152,13 @@ predict_fold_model <- function(fold_model, method, member_mat,
 #' \eqn{\ge 1 - 2\alpha} theorem is proven for the two-set construction with
 #' unsigned nonconformity scores, not for this signed single-set variant. No
 #' finite-sample distribution-free guarantee is claimed here. Coverage is
-#' validated empirically instead: the leave-self-out diagnostic
-#' (`oof_coverage`, computed at build time) and the coverage regression tests
-#' in `test-ensemble-uq.R` are the operative evidence, and both sit near
-#' \eqn{1 - \alpha} on the reference data. The signed variant is a deliberate
+#' validated empirically instead: the coverage regression tests in
+#' `test-ensemble-uq.R` are the evidence, and sit near \eqn{1 - \alpha} on
+#' the reference data; an ensemble's held-out figure is `test_coverage`. The
+#' leave-self-out diagnostic (`oof_coverage`, computed at build time) is
+#' partly in-sample, since for each calibration row the fold models of the
+#' other folds trained on that row: it is a guardrail against gross failure,
+#' not a coverage estimate. The signed variant is a deliberate
 #' choice — the symmetric two-set construction cannot produce asymmetric
 #' intervals under skewed soil-property residuals.
 #'
@@ -553,6 +556,9 @@ compute_ensemble_uq <- function(oof,
 
   ## Leave-self-out diagnostics: for each calibration row i, form the CV+
   ## bound over the other n-1 rows and check whether i's truth is covered.
+  ## Partly in-sample: the bound at row i reads the fold models of the other
+  ## folds, which trained on row i, so it is a guardrail against gross
+  ## failure, not a coverage estimate; the held-out figure is test_coverage.
   ## Every fold model predicts every calibration row's members once (shared
   ## fold-prediction primitive); row lookups then index into that matrix by
   ## calib_pos.
