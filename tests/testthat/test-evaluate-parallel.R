@@ -157,7 +157,7 @@ describe("evaluate() parallel worker footprint", {
 
   })
 
-  it("runs its configuration with data.table and each engine thread option on one thread", {
+  it("runs its configuration with data.table and each engine thread option on one thread, and puts them back as its task ends", {
 
     skip_if_not_installed("RhpcBLASctl")
     skip_if_not_installed("data.table")
@@ -195,6 +195,67 @@ describe("evaluate() parallel worker footprint", {
     horizons:::evaluate_config_worker(1L, worker_payload_file())
 
     expect_identical(seen, c(dt = 1L, ranger = 1L, other = 1L))
+
+    ## The process stands in for the user's daemon, so each is back as the
+    ## task found it
+    expect_identical(c(dt = data.table::getDTthreads(), ranger = getOption("ranger.num.threads"),
+                       other = getOption("horizons.test.threads")),
+                     c(dt = 2L, ranger = 7L, other = 7L))
+
+  })
+
+  it("leaves a user's daemon with the data.table threads and engine thread options it had, once a task has set it up (installed build)", {
+
+    skip_on_cran()
+    skip_if_dev_package()
+    skip_if_not_installed("data.table")
+
+    ## A real daemon, which loads the build R_LIBS names
+    local_test_daemons(1)
+
+    ## What a task reads on the daemon. A quoted call, so a task carries no
+    ## frame of this test's
+    threads <- quote(list(
+      dt     = data.table::getDTthreads(),
+      ranger = getOption("ranger.num.threads"),
+      blas   = if (requireNamespace("RhpcBLASctl", quietly = TRUE)) RhpcBLASctl::blas_get_num_procs() else NA
+    ))
+
+    ## The daemon as its user left it, in a task of their own: data.table and
+    ## BLAS on two threads, and ranger's option unset, so ranger uses every
+    ## core. mirai's cleanup after each task puts back only the options a
+    ## daemon started with, so a thread option a task sets stays. data.table
+    ## caps at OMP_NUM_THREADS, which an R installation's Renviron.site may
+    ## set in every process, and at OpenMP's count, so both go first.
+    with_deadline(mirai::mirai({
+      Sys.unsetenv("OMP_NUM_THREADS")
+      if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+        RhpcBLASctl::omp_set_num_threads(2L)
+        RhpcBLASctl::blas_set_num_threads(2L)
+      }
+      data.table::setDTthreads(2L)
+      TRUE
+    })[], 30)
+
+    before <- with_deadline(mirai::mirai(eval(threads), threads = threads)[], 30)
+    skip_if_not(identical(before$dt, 2L), "data.table's threads cannot be raised on a daemon here")
+    expect_null(before$ranger)
+
+    ## A horizons task sets the daemon up as every worker does, runs, and
+    ## calls the put-back as its task ends
+    inside <- with_deadline(mirai::mirai({
+      unpin  <- prepare(models, selections)
+      inside <- eval(threads)
+      unpin()
+      inside
+    }, prepare = prepare_worker, threads = threads, models = "rf", selections = "pca")[], 60)
+
+    after <- with_deadline(mirai::mirai(eval(threads), threads = threads)[], 30)
+
+    expect_identical(inside$dt, 1L)
+    expect_identical(inside$ranger, 1L)
+    expect_identical(after, before)
+    if (!is.na(before$blas) && before$blas == 2) expect_equal(inside$blas, 1)
 
   })
 

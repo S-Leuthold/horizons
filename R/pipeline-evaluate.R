@@ -4034,17 +4034,18 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' Set a daemon up to run a unit: its threads, and the packages it needs
 #'
 #' @description
-#' Every process that fits runs one thread. OpenBLAS reads its thread count
-#' when it loads, so setting OPENBLAS_NUM_THREADS on a daemon, after the
-#' library is loaded, changed nothing when measured (2026-09-15): BLAS and
-#' OpenMP are pinned here at run time through RhpcBLASctl instead
-#' ([pin_blas_threads()]), and the function that puts them back is
-#' returned, for the worker to call as its task ends, since the daemon is
-#' the user's. Without RhpcBLASctl the daemon keeps the threads it started
-#' with. Also set here: data.table's threads, and the thread options the
-#' model table declares for its engines (ranger's, which Boruta's forests
-#' read too). A daemon starts with the session's environment variables from
-#' when daemons() was called, not its in-process settings.
+#' Every process that fits runs one thread. The daemon's threads are pinned
+#' by the one pin the session's are ([pin_parent_threads()]): BLAS and
+#' OpenMP at run time through RhpcBLASctl, since OpenBLAS reads its thread
+#' count when it loads and setting OPENBLAS_NUM_THREADS on a daemon, after
+#' the library is loaded, changed nothing when measured (2026-09-15);
+#' data.table's threads; and the thread options the model table declares
+#' for its engines (ranger's, which Boruta's forests read too). The function
+#' that puts all of them back is returned, for the worker to call as its
+#' task ends, since the daemon is the user's. Without RhpcBLASctl the daemon
+#' keeps the BLAS and OpenMP threads it started with. A daemon starts with
+#' the session's environment variables from when daemons() was called, not
+#' its in-process settings.
 #'
 #' Then the packages the unit needs are loaded, as the verb's door check
 #' loaded them in the session. A daemon is a fresh process, and some of them
@@ -4058,21 +4059,18 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #'
 #' @param models,selections The unit's models and feature selections
 #'   ([needed_packages()]).
-#' @return A function of no arguments that puts BLAS's and OpenMP's threads
-#'   back as they were ([pin_blas_threads()]), invisibly.
+#' @return A function of no arguments that puts BLAS's, OpenMP's and
+#'   data.table's threads and the engines' thread options back as they were
+#'   ([pin_parent_threads()]), invisibly.
 #' @keywords internal
 #' @noRd
 prepare_worker <- function(models, selections) {
 
-  unpin_blas <- pin_blas_threads()
-
-  if (requireNamespace("data.table", quietly = TRUE)) data.table::setDTthreads(1L)
-
-  options(engine_thread_options())
+  unpin <- pin_parent_threads()
 
   for (pkg in names(needed_packages(models, selections))) requireNamespace(pkg, quietly = TRUE)
 
-  invisible(unpin_blas)
+  invisible(unpin)
 
 }
 

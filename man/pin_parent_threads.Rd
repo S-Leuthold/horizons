@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils-parallel.R
 \name{pin_parent_threads}
 \alias{pin_parent_threads}
-\title{Pin BLAS, OpenMP, data.table and the engines' threads in the parent}
+\title{Pin BLAS, OpenMP, data.table and the engines' threads in this process}
 \usage{
 pin_parent_threads()
 }
@@ -11,12 +11,15 @@ A function that restores the previous settings; call it from
 \code{on.exit()}.
 }
 \description{
-Pinning has to happen in the parent before workers are forked or spawned.
+The one set-and-restore of every thread count horizons pins, for the
+session before dispatch (in the parent, before workers are forked or
+spawned) and for each daemon a unit's task sets up (\code{prepare_worker()}),
+so a daemon, which is the user's, is left as the task found it.
 OpenBLAS reads its thread count when it loads, so setting
 \code{OPENBLAS_NUM_THREADS} inside a worker after the library is loaded is dead
 code (proven 2026-09-15: the environment variable changed nothing, the
 runtime call did). \code{RhpcBLASctl} provides the runtime call and is a
-Suggests; without it the parent relies on the environment variables being
+Suggests; without it a process relies on the environment variables being
 set before R starts. The engines' thread options are the ones
 \code{MODEL_SPECS} declares (\code{engine_thread_options()}), set to one.
 }
