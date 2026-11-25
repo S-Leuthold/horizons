@@ -357,7 +357,8 @@
 #'   `target_only`, the targets' wavenumbers the library lacks. `x$log` is the
 #'   pool's, with this call's rows after it: one per warning topic, each
 #'   raised once at the end of the call (`horizons_warning_input` for pool
-#'   and targets in different photometric units; `flagged` for targets an
+#'   and targets in different photometric units, and for a PLS space, which
+#'   chose the rows by their own measured values; `flagged` for targets an
 #'   earlier step flagged, which get no training set; `coverage` for target
 #'   columns the library lacks, a search on the overlap and draws short of
 #'   `k`; `skipped` for a property left out under `properties = NULL` (no
@@ -365,9 +366,11 @@
 #'   similarity space or library that could not be cached; `partial_failure`
 #'   for a property every drawn row of which was some target's twin, left
 #'   out, so the call did not complete in full; `applicability` for targets
-#'   beyond the library's spread), and a note for each cost paid once (a
-#'   cached library or similarity space rebuilt, a first-use space not
-#'   built).
+#'   beyond the library's spread), a note that a model evaluated on the
+#'   training set is scored on library rows drawn near the targets, not on
+#'   the targets, which the tree says too, and a note for each cost paid
+#'   once (a cached library or similarity space rebuilt, a first-use space
+#'   not built).
 #'
 #' @examples
 #' \dontrun{
@@ -769,6 +772,10 @@ select_training <- function(x, library,
   if (verbose) report_selection(out$selection, n_targets = drawn$n_targets,
                                 seed_line = seed_tree_line(root),
                                 draw_line = draw_tree_line(in_session))
+
+  ## What a model evaluated on the training set is scored on, said once: in
+  ## the tree above and as a note on the log, whatever verbose is
+  log_note(collector, paste0(selection_scored_on(scope), "."))
 
   ## Draws short of k: too few measured rows left after the twin
   ## subtraction, or, under cosine, no defined distance at all. One coverage
@@ -1336,7 +1343,8 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   ## A PLS space is fit against the pool's own responses, so which rows land
   ## in the training set was decided by their y. No target leakage, but the
-  ## pool-internal CV downstream is optimistic. Stated, not fixed here.
+  ## pool-internal CV downstream is optimistic: a legal request risky enough
+  ## to say so, whatever verbose is, as well as on the record.
 
   space_note <- if (space == "pls") {
     paste0("The similarity space is PLS against ", properties,
@@ -1344,6 +1352,15 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
            "pool-internal CV is optimistic and the honest score is against the targets")
   } else {
     NULL
+  }
+
+  if (space == "pls") {
+
+    log_warning(collector, "input", c(
+      "The similarity space is PLS against {.field {properties}}, so the draw chose the training set's rows by their own measured {properties}.",
+      "i" = "A model evaluated on them is scored optimistically. Score it against measured targets, or draw with {.code space = \"pca\"}, which reads no outcome."
+    ), ids = properties)
+
   }
 
   if (verbose) {
@@ -1888,6 +1905,29 @@ draw_tree_line <- function(in_session) {
   }
 
   paste0("Draw: in this session, ", draw_in_session_reason(in_session, markup = FALSE))
+
+}
+
+
+#' What a model evaluated on a drawn set is scored on
+#'
+#' @description
+#' The one sentence the selection tree and its note on the log say: a model
+#' evaluated on the training set, by [evaluate()] and [fit()], is scored on
+#' its library rows held out of it, chosen for their nearness to the targets
+#' (under `scope = "global"`, every library row the draw could reach), not on
+#' the targets, so only measured targets show how it predicts them.
+#'
+#' @param scope The draw's scope.
+#' @return Character(1), without a closing full stop.
+#' @keywords internal
+#' @noRd
+selection_scored_on <- function(scope) {
+
+  rows <- if (identical(scope, "global")) "the library's rows" else "library rows drawn near the targets"
+
+  paste0("A model evaluated on this training set is scored on ", rows,
+         ", not on the targets; only measured targets show how well it predicts them")
 
 }
 
@@ -2883,6 +2923,8 @@ report_selection <- function(sel, n_targets, seed_line = NULL, draw_line = NULL)
     nrow(sel$resemblance$beyond)
   }
   cat(paste0("\u2502  \u251C\u2500 Targets beyond the pool's spread: ", far, "\n"))
+
+  cat(paste0("\u2502  \u251C\u2500 ", selection_scored_on(scope), "\n"))
 
   n_groups <- nrow(sel$groups)
   n_rows   <- length(unique(unlist(sel$groups$pool_ids)))

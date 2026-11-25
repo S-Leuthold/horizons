@@ -36,6 +36,7 @@
       │  ├─ Twins flagged: 1 (T01)
       │  ├─ Twin rows: 1 removed from the union
       │  ├─ Targets beyond the pool's spread: 0
+      │  ├─ A model evaluated on this training set is scored on library rows drawn near the targets, not on the targets; only measured targets show how well it predicts them
       │  └─ 39 rows in 1 group (scope = batch)
       │
 

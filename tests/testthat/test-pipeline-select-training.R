@@ -2602,23 +2602,65 @@ test_that("the record carries the SG window in cm-1 and the space's floor", {
 })
 
 
-test_that("a PLS space records and prints that it selected on the pool's own responses", {
+test_that("a PLS space records, prints and warns, whatever verbose is, that it selected on the pool's own responses", {
 
-  fx  <- select_fixture(n_pool = 100)
-  out <- quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L)
+  fx <- select_fixture(n_pool = 100)
+
+  ## Raised quiet or not, an input warning carrying its row, which names the
+  ## property
+  for (verbose in c(FALSE, TRUE)) {
+
+    txt <- utils::capture.output(
+      w <- expect_warning(
+        out <- select_training(fx$targets, fx$pool, k = 10, properties = "clay", space = "pls", ncomp = 3L,
+                               control = control_horizons(verbose = verbose)),
+        class = "horizons_warning_input"
+      )
+    )
+
+    expect_match(conditionMessage(w), "so the draw chose the training set's rows by their own measured clay", fixed = TRUE)
+    expect_match(conditionMessage(w), "Score it against measured targets", fixed = TRUE)
+    expect_identical(w$log$topic, "input")
+    expect_identical(w$log$ids[[1]], "clay")
+    expect_identical(any(grepl("optimistic", txt)), verbose)
+
+  }
 
   note <- out$selection$settings$space_note
   expect_true(is.character(note))
   expect_match(note, "optimistic")
   expect_match(note, "clay")
 
-  ## A PCA run carries no such note
-  expect_null(quiet_select(fx, k = 10, properties = "clay")$selection$settings$space_note)
+  ## A PCA run carries no such note, and raises no such warning
+  expect_no_warning(pca <- quiet_select(fx, k = 10, properties = "clay"), class = "horizons_warning_input")
+  expect_null(pca$selection$settings$space_note)
 
-  txt <- utils::capture.output(select_training(fx$targets, fx$pool, k = 10, properties = "clay",
-                                               space = "pls", ncomp = 3L,
-                                               control = control_horizons(verbose = TRUE)))
-  expect_true(any(grepl("optimistic", txt)))
+})
+
+
+test_that("a drawn set says once, in its tree and on its log, that a model evaluated on it is scored on library rows, not the targets", {
+
+  fx   <- select_fixture(n_pool = 60)
+  said <- "A model evaluated on this training set is scored on library rows drawn near the targets, not on the targets"
+
+  txt <- utils::capture.output(
+    out <- select_training(fx$targets, fx$pool, k = 5, properties = "clay",
+                           control = control_horizons(verbose = TRUE))
+  )
+
+  notes <- out$log[out$log$verb == "select_training" & out$log$type == "note", ]
+
+  expect_length(grep(said, txt, fixed = TRUE), 1L)
+  expect_identical(sum(grepl(said, notes$message, fixed = TRUE)), 1L)
+  expect_match(notes$message[grepl(said, notes$message, fixed = TRUE)],
+               "only measured targets show how well it predicts them.", fixed = TRUE)
+
+  ## Quiet, the log still says it; under global the rows are the library's
+  quiet  <- quiet_select(fx, k = 5, properties = "clay")
+  global <- suppressWarnings(quiet_select(fx, k = 5, properties = "clay", scope = "global"))
+
+  expect_identical(sum(grepl(said, quiet$log$message, fixed = TRUE)), 1L)
+  expect_identical(sum(grepl("is scored on the library's rows, not on the targets", global$log$message, fixed = TRUE)), 1L)
 
 })
 
@@ -2774,7 +2816,8 @@ test_that("metric and space levers change which rows are drawn", {
   base <- quiet_select(fx, k = 10, properties = "clay")
   maha <- quiet_select(fx, k = 10, properties = "clay", metric = "mahalanobis")
   cosn <- quiet_select(fx, k = 10, properties = "clay", metric = "cosine")
-  pls  <- quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L)
+  pls  <- suppressWarnings(quiet_select(fx, k = 10, properties = "clay", space = "pls", ncomp = 3L),
+                           classes = "horizons_warning_input")
 
   ids <- function(o) o$selection$membership$pool_id
 
