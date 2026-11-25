@@ -223,9 +223,10 @@ check_reserved_columns <- function(columns,
 #'     combination), `step`, `class` and `error_message`.}
 #'   \item{`horizons_error_read_failed`}{(run) [spectra()] could read none
 #'     of the files it was given. One row per file travels as `results`: its
-#'     `file`, the `step` that failed (`"file_read"`, or `"file_block"` for
-#'     a file with no absorbance block), the `class` of the root cause, and
-#'     the `cause`.}
+#'     `file`, the `step` that failed (`"file_read"`; `"file_block"` for a
+#'     file with no absorbance block; `"file_columns"` for a CSV file whose
+#'     columns cannot be read as spectra; `NA` for a failure outside every
+#'     step), the `class` of the root cause, and the `cause`.}
 #'   \item{`horizons_error_selection_failed`}{(run) [select_training()] had
 #'     nothing to return: the twin subtraction left no training rows for any
 #'     property it drew for. One row per property travels as `results`: its
@@ -321,8 +322,11 @@ check_reserved_columns <- function(columns,
 #'   \item{`horizons_warning_coverage`}{The data only partly covers what is
 #'     asked of it, such as a wavenumber range, or [add_response()]'s source
 #'     matching fewer than half the samples.}
-#'   \item{`horizons_warning_applicability`}{Predictions outside the
-#'     applicability domain.}
+#'   \item{`horizons_warning_applicability`}{Predictions or targets beyond
+#'     what the model or the library covers: `predict()`'s predictions
+#'     winsorized to the response bound, and [select_training()]'s targets
+#'     beyond the library's own nearest-neighbour spread. An out-of-domain
+#'     prediction is not warned: it is the `.ad_flag` column.}
 #'   \item{`horizons_warning_input`}{A request that is legal but risky enough
 #'     to say so, such as [configure()] discarding an evaluation or a fit, or
 #'     configuring an outcome a [select_training()] draw was not made for.}
