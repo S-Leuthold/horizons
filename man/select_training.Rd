@@ -363,11 +363,11 @@ on its native 600 to 4000 cm-1 grid at 2 cm-1. horizons does not host it.
 The first draw downloads OSSL's public files (about 436 MB), verifies their
 published MD5s, builds the library and caches it; it asks first in an
 interactive session, and a non-interactive one needs
-\code{options(horizons.library_download = TRUE)}. Nothing is downloaded for a
-call the library would refuse: \code{properties}, a named \code{k} and a PLS
-space's one property are checked against the library's properties first,
-\code{window} against its grid, and the targets against its columns and
-standardization. The option
+\code{options(horizons.library_download = TRUE)}. Before anything is
+downloaded, the call is checked against what horizons records of the
+library: \code{properties}, a named \code{k} and a PLS space's one property against
+its properties, \code{window} against \code{poly} at its grid's spacing, and the
+targets against its columns and standardization. The option
 \code{horizons.cache_dir} moves the cache. Every later draw reads the cache,
 until a version of horizons that builds the library differently: a
 library cached by an earlier build is built again, after asking as on

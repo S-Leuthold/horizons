@@ -189,11 +189,11 @@
 #' The first draw downloads OSSL's public files (about 436 MB), verifies their
 #' published MD5s, builds the library and caches it; it asks first in an
 #' interactive session, and a non-interactive one needs
-#' `options(horizons.library_download = TRUE)`. Nothing is downloaded for a
-#' call the library would refuse: `properties`, a named `k` and a PLS
-#' space's one property are checked against the library's properties first,
-#' `window` against its grid, and the targets against its columns and
-#' standardization. The option
+#' `options(horizons.library_download = TRUE)`. Before anything is
+#' downloaded, the call is checked against what horizons records of the
+#' library: `properties`, a named `k` and a PLS space's one property against
+#' its properties, `window` against `poly` at its grid's spacing, and the
+#' targets against its columns and standardization. The option
 #' `horizons.cache_dir` moves the cache. Every later draw reads the cache,
 #' until a version of horizons that builds the library differently: a
 #' library cached by an earlier build is built again, after asking as on
@@ -580,10 +580,12 @@ select_training <- function(x, library,
   }
 
   ## properties, a named k, and a PLS space's one property. A registered
-  ## library's property map names every response it can hold, since its
-  ## build names them from the map, so all three are checked here, before
-  ## the download. Any other library's responses are known only once it is
-  ## read, and the draw checks them then, by the same rules.
+  ## library's property map is what its pinned release builds: the build
+  ## keeps the mapped properties the release holds, and the release's files
+  ## are fixed by their MD5s, so the map is the built library's responses.
+  ## All three are checked here against the map, before the download. Any
+  ## other library's responses are known only once it is read, and the draw
+  ## checks them then, by the same rules.
 
   props_ok <- is.null(properties) ||
               (is.character(properties) && length(properties) >= 1L && !anyNA(properties))
