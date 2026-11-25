@@ -1929,7 +1929,7 @@ describe("evaluate() - no window method across a gap in the axis", {
     expect_match(msg, "The wavenumber axis has 1 gap, and \"deriv1\" and \"snv_deriv2\" run a window along it.", fixed = TRUE)
     expect_match(msg, "3924 to 3956 cm", fixed = TRUE)
     expect_match(msg, "the 8 columns beside it", fixed = TRUE)
-    expect_match(msg, "remove_water = FALSE", fixed = TRUE)
+    expect_match(msg, "it now keeps the bands and masks them", fixed = TRUE)
     expect_identical(out$ran, 0L)
 
   })
@@ -1982,6 +1982,25 @@ describe("evaluate() - no window method across a gap in the axis", {
 
     expect_s3_class(out$error, "horizons_error_all_configs_failed")
     expect_identical(out$ran, 3L)
+
+  })
+
+  it("scores raw and snv on a masked band as on the band deleted, and runs the window methods only on the masked one", {
+
+    ## Sixty bands, the 15 from 3922 to 3894 a band more than the window's
+    ## half from either end of the axis, which the edge trim treats alike
+    band    <- paste0("wn_", seq(3922, 3894, by = -2))
+    obj     <- make_eval_object(n = 60, n_wn = 60, n_configs = 2)
+    obj$config$configs$preprocessing <- c("raw", "snv")
+
+    masked  <- suppressWarnings(evaluate(mask_axis_columns(obj, band), prune = FALSE, seed = 5L))
+    deleted <- suppressWarnings(evaluate(delete_axis_columns(obj, band), prune = FALSE, seed = 5L))
+
+    scores <- c("config_id", "status", "rmse", "rsq", "rpd", "cv_rmse", "cv_rpd")
+    expect_identical(masked$evaluation$results[, scores], deleted$evaluation$results[, scores])
+
+    expect_identical(runs(mask_axis_columns(obj, band), c("deriv1", "snv_deriv2"))$ran, 2L)
+    expect_s3_class(runs(delete_axis_columns(obj, band), c("deriv1", "snv_deriv2"))$error, "horizons_error_input")
 
   })
 

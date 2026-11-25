@@ -490,7 +490,8 @@
 #'   grid holds a Savitzky-Golay method (`"sg"`, `"deriv1"`, `"deriv2"`,
 #'   `"snv_deriv1"`, `"snv_deriv2"`) and the wavenumber axis has a gap in it
 #'   (a spacing over three times the median and over 30 cm-1, such as a band
-#'   deleted upstream or by `standardize(remove_water = TRUE)`), since the
+#'   deleted upstream; `standardize(remove_water = TRUE)` masks its bands
+#'   and leaves no gap), since the
 #'   window would run across the gap as if its two sides were neighbours
 #'   (`"raw"` and `"snv"` run), and, with class
 #'   `horizons_error_input`, when an observed outcome lies outside
@@ -4008,7 +4009,7 @@ check_window_gaps <- function(x, preprocessing = x$config$configs$preprocessing,
     "The wavenumber axis has {n_gaps} gap{?s}, and {.val {methods}} {cli::qty(length(methods))}run{?s/} a window along it.",
     "x" = "{shown}.",
     "i" = "A Savitzky-Golay window would run across each gap as if its two sides were neighbours, so the {n_beside} columns beside it would hold features that are not in the spectra.",
-    "i" = "If an earlier {.code standardize(remove_water = TRUE)} deleted these bands, re-run the pipeline from {.fn spectra} with {.code remove_water = FALSE}.",
+    "i" = "If an earlier {.code standardize(remove_water = TRUE)} deleted these bands, re-run the pipeline from {.fn spectra}: it now keeps the bands and masks them.",
     "i" = "Otherwise configure {.val raw} or {.val snv}, or trim the spectra to one side of each gap ({.fn standardize}'s {.arg trim})."
   ), kind = "input", call = call)
 
