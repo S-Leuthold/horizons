@@ -30,17 +30,17 @@ configure(
 \item{outcome}{\verb{character(1) or NULL}. Which response variable to model.
 Auto-selects if exactly one response exists.}
 
-\item{models}{\code{character}. Model algorithms to benchmark. Default
+\item{models}{\code{character}. Model algorithms to benchmark, at least one. Default
 \code{c("rf", "cubist", "plsr")}. See \code{VALID_MODELS} for options.}
 
-\item{transformations}{\code{character}. Response transformations to test.
-Default \code{"none"}.}
+\item{transformations}{\code{character}. Response transformations to test,
+at least one. Default \code{"none"}.}
 
-\item{preprocessing}{\code{character}. Per-config spectral preprocessing methods.
-Default \code{"raw"}.}
+\item{preprocessing}{\code{character}. Per-config spectral preprocessing methods,
+at least one. Default \code{"raw"}.}
 
-\item{feature_selection}{\code{character}. Feature selection methods to test.
-Default \code{"none"}.}
+\item{feature_selection}{\code{character}. Feature selection methods to test,
+at least one. Default \code{"none"}.}
 
 \item{cv_folds}{\code{integer}. Number of cross-validation folds. Default 5.
 Minimum 2.}

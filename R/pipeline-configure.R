@@ -239,14 +239,14 @@
 #'   `add_response()`.
 #' @param outcome `character(1) or NULL`. Which response variable to model.
 #'   Auto-selects if exactly one response exists.
-#' @param models `character`. Model algorithms to benchmark. Default
+#' @param models `character`. Model algorithms to benchmark, at least one. Default
 #'   `c("rf", "cubist", "plsr")`. See `VALID_MODELS` for options.
-#' @param transformations `character`. Response transformations to test.
-#'   Default `"none"`.
-#' @param preprocessing `character`. Per-config spectral preprocessing methods.
-#'   Default `"raw"`.
-#' @param feature_selection `character`. Feature selection methods to test.
-#'   Default `"none"`.
+#' @param transformations `character`. Response transformations to test,
+#'   at least one. Default `"none"`.
+#' @param preprocessing `character`. Per-config spectral preprocessing methods,
+#'   at least one. Default `"raw"`.
+#' @param feature_selection `character`. Feature selection methods to test,
+#'   at least one. Default `"none"`.
 #' @param cv_folds `integer`. Number of cross-validation folds. Default 5.
 #'   Minimum 2.
 #' @param grid_size `integer`. Hyperparameter grid size (Latin hypercube).
@@ -434,11 +434,25 @@ configure <- function(x,
 
   for (axis in names(axes)) {
 
-    bad <- setdiff(axes[[axis]]$given, axes[[axis]]$valid)
+    valid <- axes[[axis]]$valid
+
+    ## An empty axis (NULL, or a vector of none) would give a grid of no
+    ## configurations, which evaluate() refuses as never configured
+    if (length(axes[[axis]]$given) == 0) {
+
+      given <- axes[[axis]]$given
+
+      abort_horizons(c(
+        "{.arg {axis}} must name at least one value.",
+        "x" = "Got {.code {paste(deparse(given), collapse = ' ')}}.",
+        "i" = "Valid values: {.val {valid}}."
+      ), kind = "input")
+
+    }
+
+    bad <- setdiff(axes[[axis]]$given, valid)
 
     if (length(bad) > 0) {
-
-      valid <- axes[[axis]]$valid
 
       abort_horizons(c(
         "{.arg {axis}} must be among the values horizons knows.",

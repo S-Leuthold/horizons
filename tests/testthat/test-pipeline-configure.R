@@ -209,6 +209,30 @@ describe("configure() validation", {
 
   })
 
+  test_that("refuses an empty axis, or a NULL one, at its door, naming it", {
+
+    hd <- make_single_response_hd()
+
+    for (axis in c("models", "transformations", "preprocessing", "feature_selection")) {
+
+      for (empty in list(character(0), NULL)) {
+
+        args <- stats::setNames(list(empty), axis)
+        err  <- expect_error(do.call(configure, c(list(hd), args)),
+                             class = "horizons_error_input", info = axis)
+
+        msg <- conditionMessage(err)
+        expect_match(msg, paste0("`", axis, "` must name at least one value."), fixed = TRUE, info = axis)
+        expect_match(msg, if (is.null(empty)) "Got `NULL`." else "Got `character(0)`.", fixed = TRUE,
+                     info = axis)
+        expect_match(msg, "Valid values:", fixed = TRUE, info = axis)
+
+      }
+
+    }
+
+  })
+
   test_that("errors for cv_folds < 2", {
 
     hd <- make_single_response_hd()
