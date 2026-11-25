@@ -873,6 +873,47 @@ test_that("a bad argument is reported before a registered library is fetched", {
 
 })
 
+test_that("properties, a named k and a PLS space's one property are checked against a registered library before it is fetched", {
+
+  fx    <- select_fixture()
+  entry <- make_mini_ossl(withr::local_tempdir())
+  cache <- local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  ## The registry's property map names every response the library can hold,
+  ## so each mistake is refused at the door, the library never resolved
+  local_mocked_bindings(resolve_registered = function(...) stop("the library was resolved"))
+
+  cases <- list(
+    list(args    = list(properties = "caly"),
+         finding = "`properties` not in the mini library's properties: \"caly\" (available: \"clay\", \"sand\""),
+    list(args    = list(properties = 1),
+         finding = "`properties` must be NULL or a character vector of property names"),
+    list(args    = list(properties = character(0)),
+         finding = "`properties` must be NULL or a character vector of property names"),
+    list(args    = list(k = c(clay = 5, snad = 5), properties = c("clay", "sand")),
+         finding = "A named `k` needs an entry for every property; missing \"sand\""),
+    ## properties = NULL draws for every property the map names
+    list(args    = list(k = c(clay = 5, oc = 5)),
+         finding = "A named `k` needs an entry for every property; missing \"sand\", \"silt\""),
+    list(args    = list(space = "pls", ncomp = 3L),
+         finding = "`space = \"pls\"` selects against one property; name exactly one in `properties`")
+  )
+
+  for (case in cases) {
+
+    err <- expect_error(do.call(select_training, c(list(fx$targets, "mini"), case$args)),
+                        class = "horizons_error_input", inherit = FALSE)
+
+    expect_length(err$findings, 1L)
+    expect_match(err$findings, case$finding, fixed = TRUE, info = case$finding)
+
+  }
+
+  expect_length(list.files(cache, all.files = TRUE, no.. = TRUE), 0L)
+
+})
+
 test_that("a build clears what a killed build left, and only when it is old", {
 
   entry <- make_mini_ossl(withr::local_tempdir())

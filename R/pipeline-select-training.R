@@ -189,7 +189,11 @@
 #' The first draw downloads OSSL's public files (about 436 MB), verifies their
 #' published MD5s, builds the library and caches it; it asks first in an
 #' interactive session, and a non-interactive one needs
-#' `options(horizons.library_download = TRUE)`. The option
+#' `options(horizons.library_download = TRUE)`. Nothing is downloaded for a
+#' call the library would refuse: `properties`, a named `k` and a PLS
+#' space's one property are checked against the library's properties first,
+#' `window` against its grid, and the targets against its columns and
+#' standardization. The option
 #' `horizons.cache_dir` moves the cache. Every later draw reads the cache,
 #' until a version of horizons that builds the library differently: a
 #' library cached by an earlier build is built again, after asking as on
@@ -566,15 +570,39 @@ select_training <- function(x, library,
 
   if (registered && window_ok && deriv_ok && poly_ok && derivative > 0) {
 
-    lib_res <- library_registry()[[library]]$filters$wn_step
-    pts     <- window_to_points(window, lib_res)
+    errors <- c(errors, window_poly_finding(window, library_registry()[[library]]$filters$wn_step, poly,
+                                            grid = paste0("the ", library, " library's")))
 
-    if (pts <= poly) {
+  }
 
-      errors <- c(errors, cli::format_inline(
-        "A {.arg window} of {window} cm\u207B\u00B9 is {pts} point{?s} on the {library} library's {lib_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}; widen {.arg window} or lower {.arg poly}"))
+  ## properties, a named k, and a PLS space's one property. A registered
+  ## library's property map names every response it can hold, since its
+  ## build names them from the map, so all three are checked here, before
+  ## the download. Any other library's responses are known only once it is
+  ## read, and the draw checks them then, by the same rules.
+
+  props_ok <- is.null(properties) ||
+              (is.character(properties) && length(properties) >= 1L && !anyNA(properties))
+
+  if (!props_ok) {
+
+    errors <- c(errors, cli::format_inline("{.arg properties} must be NULL or a character vector of property names"))
+
+  } else {
+
+    known     <- if (registered) library_registry()[[library]]$properties$property
+    drawn_for <- properties %||% known
+
+    if (registered) {
+
+      errors <- c(errors, unknown_properties_finding(properties, known,
+                                                     where = paste0("the ", library, " library's properties")))
 
     }
+
+    if (k_ok) errors <- c(errors, missing_k(k, drawn_for))
+
+    if (!is.null(drawn_for)) errors <- c(errors, pls_property_finding(space, drawn_for))
 
   }
 
@@ -603,12 +631,6 @@ select_training <- function(x, library,
   if (identical(space, "pls") && ncomp_ok && ncomp < 1) {
 
     errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} needs a whole-number {.arg ncomp}; a variance proportion has no meaning for PLS"))
-
-  }
-
-  if (identical(space, "pls") && !is.null(properties) && length(properties) != 1L) {
-
-    errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
 
   }
 
@@ -897,24 +919,13 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   } else {
 
-    unknown <- setdiff(properties, responses)
-
-    if (length(unknown)) {
-
-      errors <- c(errors, cli::format_inline("{.arg properties} not in the pool's responses: {.val {unknown}} (available: {.val {responses}})"))
-
-    }
+    errors <- c(errors, unknown_properties_finding(properties, responses, where = "the pool's responses"))
 
   }
 
-  ## One rule for a named k, which resolve_k() relies on below
-  errors <- c(errors, missing_k(k, properties))
-
-  if (identical(space, "pls") && length(properties) != 1L) {
-
-    errors <- c(errors, cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}"))
-
-  }
+  ## The door's rules, on the pool's responses: a named k, which resolve_k()
+  ## relies on below, and a PLS space's one property
+  errors <- c(errors, missing_k(k, properties), pls_property_finding(space, properties))
 
   ## A prior selection's provenance columns would collide on bind_cols ------
 
@@ -1228,12 +1239,12 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   window_points <- if (derivative > 0) window_to_points(window, search_res) else NA_integer_
 
-  if (derivative > 0 && window_points <= poly) {
+  ## The door's rule for a registered library's grid, on this library's
+  if (derivative > 0) {
 
-    abort_horizons(c(
-      "A {.arg window} of {window} cm\u207B\u00B9 is {window_points} point{?s} on the library's {search_res} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}.",
-      "i" = "Widen {.arg window} or lower {.arg poly}."
-    ), kind = "input")
+    too_few <- window_poly_finding(window, search_res, poly, grid = "the library's")
+
+    if (length(too_few)) abort_select_inputs(too_few)
 
   }
 
@@ -2021,6 +2032,31 @@ sg_window_fits <- function(points, n_columns) {
 }
 
 
+#' A window too few points on a grid for the polynomial, as a finding
+#'
+#' @description
+#' The one rule for the verb's door, on a registered library's grid before
+#' the download, and for the draw, on the library's own grid once it is
+#' read: the window's points ([window_to_points()]) must exceed `poly`.
+#'
+#' @param window [Numeric.] The window's width in cm-1.
+#' @param resolution [Numeric.] The grid's spacing in cm-1.
+#' @param poly [Integer.] The polynomial's order.
+#' @param grid [Character.] Whose grid, for the message: `"the library's"`.
+#' @return [Character.] Zero or one finding.
+#' @noRd
+window_poly_finding <- function(window, resolution, poly, grid) {
+
+  points <- window_to_points(window, resolution)
+
+  if (points > poly) return(character())
+
+  cli::format_inline(
+    "A {.arg window} of {window} cm\u207B\u00B9 is {points} point{?s} on {grid} {resolution} cm\u207B\u00B9 grid, too few for a polynomial of order {poly}; widen {.arg window} or lower {.arg poly}")
+
+}
+
+
 ## ---------------------------------------------------------------------------
 ## abort_select_inputs() — every collected argument problem, in one error
 ## ---------------------------------------------------------------------------
@@ -2042,6 +2078,48 @@ abort_select_inputs <- function(findings, call = rlang::caller_env()) {
 
   abort_findings(findings, "The inputs failed {length(findings)} check{?s}.",
                  kind = "input", call = call)
+
+}
+
+
+#' Properties a library does not hold, as a finding
+#'
+#' @description
+#' The one rule for the verb's door, against a registered library's property
+#' map, and for the draw, against the pool's responses.
+#'
+#' @param properties [Character.] The properties named.
+#' @param available [Character.] Those the library holds.
+#' @param where [Character.] What `available` is, for the message: `"the
+#'   pool's responses"`.
+#' @return [Character.] Zero or one finding.
+#' @noRd
+unknown_properties_finding <- function(properties, available, where) {
+
+  unknown <- setdiff(properties, available)
+
+  if (!length(unknown)) return(character())
+
+  cli::format_inline("{.arg properties} not in {where}: {.val {unknown}} (available: {.val {available}})")
+
+}
+
+
+#' A PLS space without exactly one property, as a finding
+#'
+#' @description
+#' The one rule for the verb's door, on the properties named or a registered
+#' library's property map, and for the draw, on the properties it resolved.
+#'
+#' @param space [Character.] The similarity space.
+#' @param properties [Character.] The properties drawn for.
+#' @return [Character.] Zero or one finding.
+#' @noRd
+pls_property_finding <- function(space, properties) {
+
+  if (!identical(space, "pls") || length(properties) == 1L) return(character())
+
+  cli::format_inline("{.arg space = \"pls\"} selects against one property; name exactly one in {.arg properties}")
 
 }
 
