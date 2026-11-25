@@ -759,7 +759,7 @@ evaluate <- function(x,
 
   trim_request <- response_trim_request(x)
 
-  drawn <- draw_eval_split(analysis, outcome_col, seed)
+  drawn <- draw_eval_split(analysis, outcome_col, seed, cv_folds)
 
   trimmed <- trim_training_responses(drawn$split, outcome_col, trim_request,
                                      id_col = id_column(role_map), collector = collector)
@@ -3489,18 +3489,21 @@ is_foldable <- function(n_train, cv_folds) {
 #' @param analysis Data frame. The object's analysis table.
 #' @param outcome_col Character. Name of the outcome column.
 #' @param seed Integer. The root the split is drawn at.
+#' @param cv_folds Integer. `config$tuning$cv_folds`.
 #' @return Integer. The training part's rows: 0 when fewer than two rows can
-#'   be modelled, since a split needs a row on each side.
+#'   be modelled, since a split needs a row on each side, which is where the
+#'   verbs refuse ([draw_eval_split()]).
 #' @keywords internal
 #' @noRd
-training_part_rows <- function(analysis, outcome_col, seed) {
+training_part_rows <- function(analysis, outcome_col, seed, cv_folds) {
 
   modelled <- modelling_mask(analysis, outcome_col)
 
   if (sum(modelled) < 2) return(0L)
 
   ### The split reads the outcome alone, so only its column is passed
-  drawn <- draw_eval_split(analysis[modelled, outcome_col, drop = FALSE], outcome_col, seed)
+  drawn <- draw_eval_split(analysis[modelled, outcome_col, drop = FALSE], outcome_col, seed,
+                           cv_folds)
 
   nrow(rsample::training(drawn$split))
 
@@ -3613,6 +3616,8 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #' @param outcome_col Character. Name of the outcome column.
 #' @param seed Integer. The run's seed, `evaluate()`'s (or `fit()`'s on a
 #'   cold start).
+#' @param cv_folds Integer. `config$tuning$cv_folds`, for the fold rule's
+#'   refusal.
 #' @param call The frame a refusal reports: the verb's.
 #' @return List with `split` (the `rsplit`), `n_dropped` (integer, the rows
 #'   whose outcome is `NA`), `stratified` (`FALSE` when the split is
@@ -3621,12 +3626,25 @@ check_rank_metric_arg <- function(metric, call = rlang::caller_env()) {
 #'   stratified draw failed and was retried without strata),
 #'   `strata_error` (why it failed, or `NA`) and `strata_warnings` (what
 #'   rsample warned of during the stratified draw). Aborts as
-#'   [modelling_rows()] does.
+#'   [modelling_rows()] does, and with the fold rule's refusal
+#'   ([check_fold_rows()]) when one row is modelled, since a split leaves it
+#'   no training row.
 #' @keywords internal
 #' @noRd
-draw_eval_split <- function(analysis, outcome_col, seed, call = rlang::caller_env()) {
+draw_eval_split <- function(analysis, outcome_col, seed, cv_folds, call = rlang::caller_env()) {
 
   modelled <- modelling_rows(analysis, outcome_col, call = call)
+
+  ## A split holds at least one row out for the test set, so one modelled
+  ## row leaves none to train on, which rsample refuses unclassed. That is
+  ## the fold rule's case, refused in its words before the draw.
+  n_modelled <- nrow(modelled$data)
+
+  if (n_modelled < 2) {
+
+    check_fold_rows(0L, cv_folds, n_modelled = n_modelled, n_test = n_modelled, call = call)
+
+  }
 
   drawn <- with_unit_seed(seed, "evaluate/split", draw_stratified(
     outcome      = modelled$data[[outcome_col]],

@@ -179,6 +179,24 @@ describe("evaluate() - gate checks", {
 
   })
 
+  it("refuses one row with an observed outcome by the same rule, before the split is drawn", {
+
+    local_mocked_bindings(evaluate_single_config = function(...) stop("a configuration ran"))
+
+    ## A split holds one row out, so one row leaves none to train on
+    one <- make_eval_object(n = 10)
+    one$data$analysis$SOC[-1] <- NA_real_
+
+    err <- expect_error(evaluate(one, seed = 42L), class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+
+    expect_match(msg, "The training part has 0 rows, but 3-fold cross-validation needs more training rows than folds.",
+                 fixed = TRUE)
+    expect_match(msg, "1 row has an observed outcome; the test set holds 1.", fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "evaluate")
+
+  })
+
   it("runs a small sample, warning once that its folds are small", {
 
     ## Read the fixture before the runner is mocked (helper-memo.R)
@@ -873,7 +891,7 @@ describe("draw_eval_split()", {
 
     for (seed in c(1L, 42L, 307L)) {
 
-      drawn  <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", seed))
+      drawn  <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", seed, obj$config$tuning$cv_folds))
       before <- suppressWarnings(draw_before(obj$data$analysis, seed))
 
       expect_identical(drawn$split$in_id, before$in_id, info = paste("seed", seed))
@@ -899,7 +917,7 @@ describe("draw_eval_split()", {
       .package = "rsample"
     )
 
-    drawn  <- draw_eval_split(obj$data$analysis, "SOC", 42L)
+    drawn  <- draw_eval_split(obj$data$analysis, "SOC", 42L, obj$config$tuning$cv_folds)
     before <- draw_before(obj$data$analysis, 42L)
 
     expect_false(drawn$stratified)
@@ -914,7 +932,7 @@ describe("draw_eval_split()", {
     ## unstratified, and the draw used to be reported stratified
     small <- make_eval_object(n = 30, n_configs = 1)
 
-    drawn <- suppressWarnings(draw_eval_split(small$data$analysis, "SOC", 42L))
+    drawn <- suppressWarnings(draw_eval_split(small$data$analysis, "SOC", 42L, small$config$tuning$cv_folds))
 
     expect_false(drawn$stratified)
     expect_false(drawn$strata_failed)
@@ -924,7 +942,7 @@ describe("draw_eval_split()", {
   it("is the split evaluate() stores", {
 
     ev    <- suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L))
-    drawn <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 42L))
+    drawn <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", 42L, obj$config$tuning$cv_folds))
 
     expect_identical(ev$evaluation$split$in_id, drawn$split$in_id)
 
@@ -1005,7 +1023,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
   request <- response_trim_request(v)
 
   ## The split as drawn, before any trim
-  plain       <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L))$split
+  plain       <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L, v$config$tuning$cv_folds))$split
   train_plain <- rsample::training(plain)
   test_plain  <- rsample::testing(plain)
 
@@ -1097,7 +1115,7 @@ describe("evaluate() - response outliers are trimmed from the training partition
     ## design, as it always was, so what must not read a test label is the
     ## trim. Every test row's outcome is moved a long way inside the drawn
     ## split, and the trim must come out the same.
-    drawn   <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L))
+    drawn   <- suppressWarnings(draw_eval_split(v$data$analysis, "SOC", 307L, v$config$tuning$cv_folds))
     is_test <- !seq_len(nrow(drawn$split$data)) %in% drawn$split$in_id
 
     relabelled <- drawn$split

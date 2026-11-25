@@ -431,7 +431,8 @@ validate <- function(x,
 
   modelled <- modelling_mask(returned, outcome_col)
   n_model  <- sum(modelled)
-  n_train  <- training_part_rows(returned, outcome_col, seed = recorded_seed(x) %||% 0L)
+  n_train  <- training_part_rows(returned, outcome_col, seed = recorded_seed(x) %||% 0L,
+                                 cv_folds = cv_folds)
 
   ## ---------------------------------------------------------------------------
   ## Step 5: P001 — Recommended sample count (n_model)

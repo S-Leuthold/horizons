@@ -1452,7 +1452,7 @@ describe("evaluate() - a fold prep that fails in the run's stage", {
 
   local_failing_prep <- function(obj, step = function(target) rlang::expr(fail_lacking(sample_id, !!target)),
                                  .env = parent.frame()) {
-    drawn  <- draw_eval_split(obj$data$analysis, "SOC", 42L)
+    drawn  <- draw_eval_split(obj$data$analysis, "SOC", 42L, obj$config$tuning$cv_folds)
     target <- rsample::training(drawn$split)$sample_id[1]
     real   <- build_recipe
     testthat::local_mocked_bindings(build_recipe = function(config_row, train_data, role_map, ..., transformed = FALSE) {

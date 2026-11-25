@@ -69,7 +69,7 @@ seed_placing_odd_row <- function(obj, in_test) {
 
   for (seed in 1:200) {
 
-    split <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", seed)$split)
+    split <- suppressWarnings(draw_eval_split(obj$data$analysis, "SOC", seed, obj$config$tuning$cv_folds)$split)
 
     if (identical("S001" %in% rsample::testing(split)$sample_id, in_test)) return(seed)
 

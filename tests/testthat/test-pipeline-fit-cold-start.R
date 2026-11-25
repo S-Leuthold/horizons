@@ -489,6 +489,23 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
+  it("refuses one row with an observed outcome by the same rule, before the split is drawn", {
+
+    ## A split holds one row out, so one row leaves none to train on
+    one <- make_eval_object(n = 10, n_configs = 1)
+    one$data$analysis$SOC[-1] <- NA_real_
+
+    local_mocked_bindings(fit_single_config = function(...) stop("a member was fitted"))
+
+    err <- expect_error(suppressWarnings(fit(one, seed = 42L)), class = "horizons_error_input")
+    msg <- gsub("\\s+", " ", conditionMessage(err))
+
+    expect_match(msg, "The training part has 0 rows, but 3-fold cross-validation needs more training rows than folds.",
+                 fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "fit")
+
+  })
+
   it("runs below the old floor of twice cv_folds, once the training part outnumbers the folds", {
 
     ## 5 rows: 4 in the training part, which the old floor of 6 refused

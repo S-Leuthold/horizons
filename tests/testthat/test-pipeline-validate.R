@@ -466,6 +466,20 @@ describe("validate()'s sample-size checks and evaluate()'s fold rule", {
 
   })
 
+  it("fails one modelled row, a training part of none, which evaluate() refuses by the same rule", {
+
+    obj <- make_eval_object(n = 10)
+    obj$config$tuning$cv_folds <- 5L
+    obj$data$analysis$SOC[-1] <- NA_real_
+
+    checks <- quiet_validate(obj)$validation$checks
+
+    expect_identical(checks$value[checks$check_id == "P001b"], "0 training rows (need > 5)")
+    expect_identical(verdict(obj)[["P001b"]], "fail")
+    expect_identical(evaluate_door(obj), "refused")
+
+  })
+
   it("warns of small folds where evaluate() warns, on the training part's folds", {
 
     ## 55 rows: folds of 8 or fewer, so both warn; 80: folds of 12, neither
