@@ -17,8 +17,11 @@ NULL
 ## non-standard-evaluation names used inside dplyr/tidyr pipelines. These are
 ## pipeline references (.metric/.estimate = yardstick output columns), not real
 ## globals. The magrittr dot is gone along with magrittr itself — the package
-## uses the base pipe throughout.
-utils::globalVariables(c(".metric", ".estimate"))
+## uses the base pipe throughout. object and new_data are the names
+## register_pls_engine() quotes with rlang::expr() for parsnip's prediction
+## call, which R CMD check's code analysis reads as free variables, since it
+## does not know expr() quotes its argument.
+utils::globalVariables(c(".metric", ".estimate", "object", "new_data"))
 
 
 #' The build of horizons this session loaded
