@@ -9,6 +9,7 @@ average(
   by = "sample_id",
   quality_check = TRUE,
   correlation_threshold = 0.996,
+  qc_range = NULL,
   on_all_outliers = c("warn", "drop", "keep_best"),
   verbose = getOption("horizons.verbose", TRUE)
 )
@@ -29,6 +30,21 @@ Default: \code{TRUE}.}
 
 \item{correlation_threshold}{Numeric. Minimum mean pairwise correlation for
 a replicate to pass QC. Default: \code{0.996}. Changing this is rarely needed.}
+
+\item{qc_range}{\code{numeric(2)} or \code{NULL}. The wavenumber range, in cm-1 and
+inclusive, whose bands quality control correlates over; the averaged
+spectra keep every band. \code{NULL} (the default) is the range the spectra
+are modelled over, whichever order \code{average()} and \code{\link[=standardize]{standardize()}} run
+in: on spectra \code{standardize()} has run on, every band they have; on
+spectra it has not, the bands inside its default \code{trim}, 600 to 4000
+cm-1. A correlation needs at least three bands, so a range given that
+holds fewer of the spectra's bands is refused. When the default holds
+fewer, as for an instrument outside 600 to 4000 cm-1, quality control
+correlates over every band, and a note on the log says so. The call's
+note names the bands quality control used. An instrument whose axis
+only partly overlaps 600 to 4000 cm-1 is checked over the overlap,
+which that note names, and can set \code{qc_range} to the range it is
+modelled over.}
 
 \item{on_all_outliers}{Character. Behavior when all replicates fail QC:
 \itemize{
@@ -60,8 +76,8 @@ varies within any sample dropped
 \item \code{log}: The samples whose replicates all failed QC, the metadata
 columns dropped, and the scans QC removed, as a table in the note's
 \code{detail}, then a note recording the call: \code{by}, the scans in and
-samples out, the quality check and the replicates it removed, and any
-flagged replicates left out
+samples out, the quality check, the bands it correlated over and the
+replicates it removed, and any flagged replicates left out
 }
 }
 \description{
@@ -82,9 +98,18 @@ This iterative approach prevents a single bad replicate from dragging all
 others below threshold, which can happen with the simpler "flag all at once"
 method when group sizes are small (n=2-3).
 
-\strong{Important:} Run \code{standardize()} with baseline correction before \code{average()}
-to ensure baseline shifts don't confound quality control. Spectra with baseline
-offsets can correlate ~1.0 but shouldn't be averaged without correction.
+\strong{The order with \code{\link[=standardize]{standardize()}}:} the pipeline averages before it
+standardizes, \code{spectra() |> parse_ids() |> average() |> standardize()},
+so quality control correlates the scans as they were read. Pearson
+correlation does not change with an offset or a gain between two scans,
+so a replicate that differs from the others only by a baseline offset or
+a scale factor passes whether or not a baseline has been corrected; one
+whose baseline differs in slope or curvature correlates lower. The check
+reads the range the spectra are modelled over, whichever order the two
+verbs run in (\code{qc_range}): on spectra \code{standardize()} has not run on, the
+bands inside its default \code{trim}, 600 to 4000 cm-1; on spectra it has run
+on, every band it kept. At the defaults the check reads the same range in
+either order, and the averaged spectra keep every band.
 
 \strong{Missing and non-finite values:} an \code{Inf}, \code{-Inf} or \code{NaN} in a
 replicate is treated as a missing value, as \code{NA} is. Quality control
@@ -136,7 +161,8 @@ Metadata columns are checked for uniformity within groups:
 \item Non-uniform within any sample: column dropped from every row, and named
 in a note on the object's log
 \item \code{filename}, the OPUS input's meta column: always dropped (not meaningful
-after averaging). A response of that name is averaged like any other
+after averaging), unless it is \code{by}, when it becomes \code{sample_id} as any
+\code{by} column does. A response of that name is averaged like any other
 }
 
 \strong{The log:}
@@ -177,11 +203,11 @@ note instead.
 }
 \examples{
 \dontrun{
-# Basic averaging after parsing IDs
+# Average the replicate scans, then standardize, as the pipeline runs
 hd |>
-  standardize() |>
-  parse_ids(format = "{sample}_{rep}") |>
-  average()
+  parse_ids(format = "{sampleid}_{replicate}") |>
+  average() |>
+  standardize()
 
 # Without quality control
 hd |> average(quality_check = FALSE)

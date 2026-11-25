@@ -188,6 +188,41 @@ test_that("spectra() allows explicit id_col override", {
 
 })
 
+test_that("spectra() refuses a source column named sample_id beside another id column, never overwriting the ids", {
+
+  d <- tibble::tibble(SampleName = c("A", "B", "C"), sample_id = c(11, 12, 13),
+                      `4000` = c(0.1, 0.2, 0.3), `3998` = c(0.2, 0.3, 0.4))
+
+  ## A data frame's columns are the caller's: refused at the door, with the
+  ## remedy
+  err <- expect_error(spectra(d, id_col = "SampleName", verbose = FALSE),
+                      class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "spectra")
+  expect_match(msg, "a column named sample_id that is not its id column, SampleName.", fixed = TRUE)
+  expect_match(msg, "Rename or drop the sample_id column, or pass it as `id_col`.", fixed = TRUE)
+
+  ## Taken as the id, or detected as one, the column is the id
+  expect_identical(spectra(d, id_col = "sample_id", verbose = FALSE)$data$analysis$sample_id,
+                   c("11", "12", "13"))
+  expect_identical(spectra(d, verbose = FALSE)$data$analysis$sample_id, c("11", "12", "13"))
+
+  ## A CSV file holding one fails as that file, and the rest are returned
+  dir <- withr::local_tempdir()
+  readr::write_csv(d, file.path(dir, "clash.csv"))
+  readr::write_csv(d[, c("SampleName", "4000", "3998")], file.path(dir, "ok.csv"))
+
+  w <- expect_warning(out <- spectra(dir, id_col = "SampleName", verbose = FALSE),
+                      "1 of 2 CSV files could not be read", fixed = TRUE,
+                      class = "horizons_warning_partial_failure")
+
+  expect_match(gsub("\\s+", " ", conditionMessage(w)), "pass it as `id_col`", fixed = TRUE)
+  expect_identical(out$data$analysis$sample_id, c("A", "B", "C"))
+  expect_identical(out$log$ids[out$log$topic %in% "partial_failure"][[1]], file.path(dir, "clash.csv"))
+
+})
+
 test_that("spectra() detects wavelength columns with numeric names", {
 
   ## Arrange ---------------------------------------------------------------
@@ -341,6 +376,32 @@ test_that("spectra() refuses a source column named .flag, which the steps reserv
 
   err <- expect_error(utils::capture.output(spectra(df)), class = "horizons_error_input")
   expect_match(conditionMessage(err), "column named .flag", fixed = TRUE)
+
+})
+
+test_that("a CSV file holding a .flag column fails as that file, and the rest are returned", {
+
+  dir <- withr::local_tempdir()
+  readr::write_csv(tibble::tibble(sample_id = "A", `4000` = 0.1, `3998` = 0.2), file.path(dir, "ok.csv"))
+  readr::write_csv(tibble::tibble(sample_id = "B", .flag = "mine", `4000` = 0.3, `3998` = 0.4),
+                   file.path(dir, "flag.csv"))
+
+  ## Of several, it is dropped by name, with the cause and the remedy
+  w <- expect_warning(out <- spectra(dir, verbose = FALSE), "1 of 2 CSV files could not be read",
+                      fixed = TRUE, class = "horizons_warning_partial_failure")
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_identical(out$data$analysis$sample_id, "A")
+  expect_match(msg, "Column check failed: The source has a column named .flag", fixed = TRUE)
+  expect_match(msg, "Rename the column before reading it with `spectra()`.", fixed = TRUE)
+  expect_identical(out$log$ids[out$log$topic %in% "partial_failure"][[1]], file.path(dir, "flag.csv"))
+
+  ## Alone, it is the read's failure, a run error naming the file's step
+  err <- expect_error(spectra(file.path(dir, "flag.csv"), verbose = FALSE),
+                      class = "horizons_error_read_failed")
+  expect_true(inherits(err, "horizons_error_run"))
+  expect_identical(err$results$step, "file_columns")
+  expect_identical(err$results$class, "horizons_error_run")
 
 })
 

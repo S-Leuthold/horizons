@@ -141,16 +141,20 @@ check_arg <- function(check,
 #' @param subject [Character(1).] How the message opens, saying what holds
 #'   the column: `"The source has"` by default, the wording of the verbs
 #'   that read a source.
+#' @param kind [Character(1).] The refusal's kind: `"input"` by default, at
+#'   a verb's door; `"run"` for a CSV file's columns, which fail that file's
+#'   unit rather than the call ([source_kind()]).
 #' @param call The frame the error reports, the caller's by default, so the
 #'   message names the verb.
 #'
 #' @return `NULL` invisibly when no name is reserved; otherwise an error of
-#'   class `horizons_error_input`.
+#'   class `horizons_error_<kind>`.
 #' @keywords internal
 #' @noRd
 check_reserved_columns <- function(columns,
                                    remedy,
                                    subject = "The source has",
+                                   kind    = "input",
                                    call    = rlang::caller_env()) {
 
   reserved <- intersect(".flag", columns)
@@ -164,7 +168,7 @@ check_reserved_columns <- function(columns,
   abort_horizons(c(
     paste0(subject, " a column named {.field {reserved}}, which horizons reserves for the rows its steps flag."),
     "i" = remedy
-  ), kind = "input", call = call)
+  ), kind = kind, call = call)
 
 }
 

@@ -86,8 +86,8 @@ test_that("parse_ids() handles complex filenames", {
   ## Arrange ---------------------------------------------------------------
 
   hd <- make_test_hd(c(
-    "SITE-F_S100-1_GroundBulk_S1_A2.0",
-    "SITE-G_S200-2_IntactBulk_S2_B3.0"
+    "SITE-F_S100-1_GroundBulk_S1_A2",
+    "SITE-G_S200-2_IntactBulk_S2_B3"
   ))
 
   ## Act -------------------------------------------------------------------
@@ -159,6 +159,51 @@ test_that("parse_ids() too_few='keep_original' keeps filename as sample_id", {
   row   <- quiet$log[quiet$log$verb == "parse_ids" & quiet$log$type == "warning", ]
   expect_identical(row$topic, "substitution")
   expect_identical(row$ids[[1]], "weird_format")
+
+})
+
+test_that("parse_ids() names the unmatched files as the other verbs do, and says what each kept", {
+
+  ## Seven unmatched: five named, and the rest counted, with one "and" ------
+
+  bad <- paste0("odd", 1:7)
+  hd  <- make_test_hd(c("PROJ_S001", bad))
+
+  w   <- expect_warning(parse_ids(hd, format = "{project}_{sampleid}", verbose = FALSE),
+                        class = "horizons_warning_substitution")
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_match(msg, 'Non-matching: "odd1", "odd2", "odd3", "odd4", "odd5" and 2 more.', fixed = TRUE)
+
+  ## With a sampleid token, an unmatched row's sample_id is its filename -----
+
+  expect_match(msg, "Their sample_ids are their filenames.", fixed = TRUE)
+
+  ## Without one, its sample_id is as it was, which for a data frame is not
+  ## the filename
+
+  df <- make_test_hd(c("PROJ_S001", "odd1"))
+  df$data$analysis$sample_id <- c("lab-1", "lab-2")
+
+  w   <- expect_warning(out <- parse_ids(df, format = "{project}_{plate}", verbose = FALSE),
+                        class = "horizons_warning_substitution")
+  msg <- gsub("\\s+", " ", conditionMessage(w))
+
+  expect_identical(out$data$analysis$sample_id, c("lab-1", "lab-2"))
+  expect_identical(out$data$analysis$plate, c("S001", NA))
+  expect_match(msg, "Its sample_id is unchanged, and the parsed columns are `NA` for it.", fixed = TRUE)
+  expect_no_match(msg, "filename as", fixed = TRUE)
+
+  ## The note under too_few = "na", and the refusal, which names ten ---------
+
+  out  <- parse_ids(hd, format = "{project}_{sampleid}", too_few = "na", verbose = FALSE)
+  note <- log_rows_added(hd, out)$message[1]
+  expect_match(note, '"odd5" and 2 more.', fixed = TRUE)
+
+  hd  <- make_test_hd(c("PROJ_S001", paste0("odd", 1:12)))
+  err <- expect_error(parse_ids(hd, format = "{project}_{sampleid}", too_few = "error", verbose = FALSE),
+                      class = "horizons_error_input")
+  expect_match(gsub("\\s+", " ", conditionMessage(err)), '"odd9", "odd10" and 2 more.', fixed = TRUE)
 
 })
 
@@ -280,6 +325,56 @@ test_that("parse_ids() patterns mode ignores unnamed patterns", {
 
   expect_identical(names(unnamed$data$analysis), names(hd$data$analysis))
   expect_identical(unnamed$data$analysis$sample_id, "prefix_VALUE_suffix")
+
+})
+
+
+test_that("a named pattern may hold groups of its own: its column is the whole text it matched", {
+
+  hd <- make_test_hd(c("S1-2_x", "S3_x", "T4-1_y"))
+
+  ## An optional replicate suffix, an ordinary capturing group ----------------
+
+  expect_warning(
+    result <- parse_ids(hd, patterns = c(sampleid = "S\\d+(-\\d+)?", "_", tag = "x"), verbose = FALSE),
+    class = "horizons_warning_substitution"
+  )
+
+  expect_identical(result$data$analysis$sample_id, c("S1-2", "S3", "T4-1_y"))
+  expect_identical(result$data$analysis$tag, c("x", "x", NA))
+
+  ### The count is the rows that parsed, which the columns show
+  expect_match(result$log$message[nrow(result$log)], "2 of 3 filenames matched", fixed = TRUE)
+
+  ## A pattern that starts with a group, holds two, or opens non-capturing ----
+
+  cases <- list(
+    c(sampleid = "(S|T)(\\d+)-\\d+", "_", tag = "[a-z]"),
+    c(sampleid = "(S|T)\\d+(-\\d+)?", "_", tag = "[a-z]"),
+    c(sampleid = "(?:S|T)\\d+(?:-\\d+)?", "_", tag = "[a-z]"),
+    c(sampleid = "[ST]\\d+(-\\d+)?", "(_)", tag = "([a-z])")
+  )
+
+  for (patterns in cases) {
+
+    ### One of them needs the suffix, which S3_x lacks
+    result <- parse_ids(hd, patterns = patterns, too_few = "na", verbose = FALSE)
+
+    expect_identical(result$data$analysis$sample_id[c(1, 3)], c("S1-2", "T4-1"), info = patterns[[1]])
+    expect_identical(result$data$analysis$tag[c(1, 3)], c("x", "y"), info = patterns[[1]])
+
+  }
+
+  ## A name outside ASCII is cut where it matched ------------------------------
+
+  hd <- make_test_hd(c("B\u00f6den_S1_x", "B\u00f6den_S2_y"))
+
+  result <- parse_ids(hd, patterns = c(site = "[^_]+", "_", sampleid = "S(\\d)", "_", tag = "."),
+                      verbose = FALSE)
+
+  expect_identical(result$data$analysis$site, rep("B\u00f6den", 2))
+  expect_identical(result$data$analysis$sample_id, c("S1", "S2"))
+  expect_identical(result$data$analysis$tag, c("x", "y"))
 
 })
 
@@ -409,25 +504,40 @@ test_that("parse_ids() preserves original filename column", {
 
 
 ## ---------------------------------------------------------------------------
-## parse_ids() — Extension stripping
+## parse_ids() — The filename as stored
 ## ---------------------------------------------------------------------------
+## spectra() stores each OPUS file's name without its extension, so the parse
+## reads the filename as it is, and a stem's own dots are part of it.
 
-test_that("parse_ids() strips file extensions before parsing", {
+test_that("parse_ids() parses the filename as stored, so stems differing after a dot stay apart", {
 
-  ## Arrange ---------------------------------------------------------------
+  ## From OPUS files Soil.A.0 and Soil.B.0 -----------------------------------
 
-  ## Filenames with extensions (as if from OPUS files) ----------------------
+  hd <- make_test_hd(c("Soil.A", "Soil.B"))
+
+  result <- parse_ids(hd, format = "{sampleid}", verbose = FALSE)
+
+  expect_identical(result$data$analysis$sample_id, c("Soil.A", "Soil.B"))
+
+  ## The documented dot-separated format, on stems such as PROJ-S1.Bulk.0's ---
+
+  hd <- make_test_hd(c("PROJ-S1.Bulk", "PROJ-S2.Fine"))
+
+  result <- parse_ids(hd, format = "{project}-{sampleid}.{fraction}", verbose = FALSE)
+
+  expect_identical(result$data$analysis$sample_id, c("S1", "S2"))
+  expect_identical(result$data$analysis$project, c("PROJ", "PROJ"))
+  expect_identical(result$data$analysis$fraction, c("Bulk", "Fine"))
+  expect_match(result$log$message[nrow(result$log)], "2 of 2 filenames matched", fixed = TRUE)
+
+  ## A data frame's own filename column is parsed as it was given ---------------
 
   hd <- make_test_hd(c("PROJ_S001_bulk.0", "PROJ_S002_bulk.0"))
 
-  ## Act -------------------------------------------------------------------
+  result <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}", verbose = FALSE)
 
-  result <- parse_ids(hd, format = "{project}_{sampleid}_{fraction}")
-
-  ## Assert ----------------------------------------------------------------
-
-  expect_equal(result$data$analysis$sample_id, c("S001", "S002"))
-  expect_equal(result$data$analysis$fraction, c("bulk", "bulk"))
+  expect_identical(result$data$analysis$sample_id, c("S001", "S002"))
+  expect_identical(result$data$analysis$fraction, c("bulk.0", "bulk.0"))
 
 })
 

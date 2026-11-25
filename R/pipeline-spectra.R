@@ -52,8 +52,10 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'
 #' * **Tibble/data.frame**: Same detection logic as CSV.
 #'
-#' The `filename` column (role: meta) preserves original filenames for traceability
-#' and later ID parsing via `parse_ids()`.
+#' For OPUS input, a `filename` column (role: meta) holds each file's name
+#' without its extension, for traceability and for [parse_ids()]. A data
+#' frame or a CSV file has one only when its source carries a `filename`
+#' column that is not the id, which is kept as meta like any other column.
 #'
 #' **Several files:** `source` may be a character vector of files and
 #' directories, all OPUS or all CSV; a directory is read as the files of
@@ -93,15 +95,17 @@ SPECTRA_TYPES <- c("opus", "csv")
 #' cell in the detected id column leaves a `sample_id` of `NA`. Both are
 #' legitimate before replicate scans are collapsed, so `spectra()` passes a
 #' duplicate or `NA` `sample_id` silently; use [average()] to collapse
-#' replicates before anything that requires unique ids (`average()` itself,
-#' `add_response()`, `configure()`, and onward, which refuse the object).
+#' replicates before anything that requires unique ids. `average()` refuses
+#' an `NA` id; `add_response()`, `configure()` and onward refuse either.
 #'
 #' @param source A data frame, or a character vector of paths, each a file
 #'   or a directory (see Details).
 #' @param type Character. One of `"opus"`, `"csv"`, or `NULL` for auto-detect.
 #'   Default: `NULL`.
 #' @param id_col Character. Column name to use as sample ID. If `NULL`,
-#'   auto-detects from common aliases. Default: `NULL`.
+#'   auto-detects from common aliases. Default: `NULL`. The id column becomes
+#'   `sample_id`, so a source that also has a `sample_id` column, which is
+#'   not the id, is refused rather than having it overwrite the ids.
 #' @param wavelength_cols Character vector. Column names containing spectral data.
 #'   If `NULL`, auto-detects numeric column names or `wn_*` prefix. Default: `NULL`.
 #' @param recursive Logical. For directory paths, search subdirectories.
@@ -110,8 +114,9 @@ SPECTRA_TYPES <- c("opus", "csv")
 #'   `getOption("horizons.verbose", TRUE)`, as every verb's.
 #'
 #' @return A `horizons_data` S3 object with:
-#'   * `data$analysis`: tibble with `sample_id`, `filename`, `wn_*` columns, and
-#'     any additional columns
+#'   * `data$analysis`: tibble with `sample_id`, the meta columns (`filename`
+#'     for OPUS input, or a source column of that name that is not the id,
+#'     and any other columns a source carries), then the `wn_*` columns
 #'   * `data$role_map`: tibble mapping columns to roles
 #'   * `log`: after any warnings, a note recording the call: the source type,
 #'     the files read from the paths given, the scans and predictors, and the
@@ -244,10 +249,6 @@ spectra <- function(source,
   ## Raw stage: replicate scans haven't been collapsed by average() yet, so a
   ## duplicate sample_id here (Bruker's own naming does this: "S100-1.0" and
   ## "S100-1.1" both become "S100-1" once the extension is stripped) passes.
-
-  ## No source column takes a name horizons reserves, such as `.flag`.
-  check_reserved_columns(names(result$data$analysis),
-                         remedy = "Rename the column before reading it with {.fn spectra}.")
 
   sorted_result <- sort_axis_decreasing(result)
   result        <- validate_horizons_data(sorted_result$x, stage = "raw")
@@ -993,8 +994,10 @@ source_kind <- function(file) if (is.null(file)) "input" else "run"
 #'
 #' @description
 #' The one check both table loaders (a data frame, a CSV file) use for the
-#' user's `id_col` and `wavelength_cols`: the columns named must exist, the
-#' wavelength columns must be named by wavenumber (#121), and they must
+#' user's `id_col` and `wavelength_cols`: the columns named must exist, no
+#' column but the id may be named `sample_id` (the name the id column takes),
+#' none may take a name horizons reserves ([check_reserved_columns()]),
+#' the wavelength columns must be named by wavenumber (#121), and they must
 #' hold numbers. Either is detected when not
 #' given ([detect_id_column()], [detect_wavelength_columns()]). Each
 #' problem keeps its remedy in its bullets and reports as `spectra()`. For
@@ -1033,6 +1036,28 @@ check_source_columns <- function(data, id_col, wavelength_cols, file = NULL, cal
     id_column <- detect_id_column(names(data), file = file, call = call)
 
   }
+
+  ## No other column takes the id's name ---------------------------------------
+  ## The id column is written as `sample_id`, so a source column of that name
+  ## that is not the id would overwrite the ids. Refused, as parse_ids()
+  ## refuses a token named like a column, rather than overwriting.
+
+  if (id_column != "sample_id" && "sample_id" %in% names(data)) {
+
+    abort_horizons(c(
+      "The source has a column named {.field sample_id} that is not its id column, {.field {id_column}}.",
+      "i" = "The id column becomes {.field sample_id}, so the two would collide.",
+      "i" = "Rename or drop the {.field sample_id} column, or pass it as {.arg id_col}."
+    ), kind = source_kind(file), call = call)
+
+  }
+
+  ## No column takes a name horizons reserves, such as `.flag` ----------------
+
+  check_reserved_columns(names(data),
+                         remedy = "Rename the column before reading it with {.fn spectra}.",
+                         kind   = source_kind(file),
+                         call   = call)
 
   ## The wavelength columns ---------------------------------------------------
 

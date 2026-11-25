@@ -19,12 +19,20 @@ parse_ids(
 \code{"{project}_{sampleid}_{fraction}"}. Mutually exclusive with \code{patterns}.}
 
 \item{patterns}{Named character vector. Regex patterns where names become
-columns and unnamed elements are separators. Mutually exclusive with \code{format}.}
+columns and unnamed elements are separators. Mutually exclusive with \code{format}.
+A pattern may hold groups of its own, capturing or not
+(\code{sampleid = "S\\\\d+(-\\\\d+)?"}): a named pattern's column is the whole
+text it matched. A backreference must name its group
+(\code{"(?<r>\\\\w)\\\\k<r>"}), since each named pattern is wrapped in a group of
+its own and a numbered one such as \verb{\\\\1} points at the wrong group.}
 
 \item{too_few}{Character. How to handle non-matching filenames:
 \itemize{
-\item \code{"keep_original"} (default): Keep original filename as \code{sample_id},
-with one \code{horizons_warning_substitution} naming the files.
+\item \code{"keep_original"} (default): A filename the pattern does not match
+is not parsed, and one \code{horizons_warning_substitution} names the
+files. With a \code{sampleid} token its \code{sample_id} is the filename;
+without one its \code{sample_id} is unchanged. Its other tokens' columns
+are \code{NA}.
 \item \code{"error"}: Abort with list of non-matching files.
 \item \code{"na"}: Set \code{sample_id} to NA. As you asked for it, it is not warned:
 the files are counted in verbose output and named in a note on the
@@ -54,6 +62,11 @@ encode project, sample ID, fraction, replicate, or position information.
 For CSV or tibble data, sample IDs and metadata are usually already in
 columns of their own; \code{parse_ids()} reads any data with a \code{filename}
 column.
+
+The filename is parsed as it is stored. \code{\link[=spectra]{spectra()}} stores each OPUS
+file's name without its extension (\code{PROJ-S1.Bulk} for \code{PROJ-S1.Bulk.0}),
+so a dot left in the name is part of it, and a data frame's own
+\code{filename} column is parsed as given.
 
 The function supports two modes:
 

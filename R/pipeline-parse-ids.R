@@ -32,6 +32,11 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #' columns of their own; `parse_ids()` reads any data with a `filename`
 #' column.
 #'
+#' The filename is parsed as it is stored. [spectra()] stores each OPUS
+#' file's name without its extension (`PROJ-S1.Bulk` for `PROJ-S1.Bulk.0`),
+#' so a dot left in the name is part of it, and a data frame's own
+#' `filename` column is parsed as given.
+#'
 #' The function supports two modes:
 #'
 #' **Format string mode** (`format` parameter):
@@ -57,9 +62,17 @@ SAMPLEID_VARIANTS <- c("sampleid", "sample_id", "SampleID", "Sample_ID", "sample
 #'   `"{project}_{sampleid}_{fraction}"`. Mutually exclusive with `patterns`.
 #' @param patterns Named character vector. Regex patterns where names become
 #'   columns and unnamed elements are separators. Mutually exclusive with `format`.
+#'   A pattern may hold groups of its own, capturing or not
+#'   (`sampleid = "S\\d+(-\\d+)?"`): a named pattern's column is the whole
+#'   text it matched. A backreference must name its group
+#'   (`"(?<r>\\w)\\k<r>"`), since each named pattern is wrapped in a group of
+#'   its own and a numbered one such as `\\1` points at the wrong group.
 #' @param too_few Character. How to handle non-matching filenames:
-#'   * `"keep_original"` (default): Keep original filename as `sample_id`,
-#'     with one `horizons_warning_substitution` naming the files.
+#'   * `"keep_original"` (default): A filename the pattern does not match
+#'     is not parsed, and one `horizons_warning_substitution` names the
+#'     files. With a `sampleid` token its `sample_id` is the filename;
+#'     without one its `sample_id` is unchanged. Its other tokens' columns
+#'     are `NA`.
 #'   * `"error"`: Abort with list of non-matching files.
 #'   * `"na"`: Set `sample_id` to NA. As you asked for it, it is not warned:
 #'     the files are counted in verbose output and named in a note on the
@@ -227,11 +240,9 @@ parse_ids <- function(x,
 
   collector <- log_open("parse_ids")
 
+  ### Parsed as stored: spectra() stores each OPUS file's name without its
+  ### extension, so a dot left in the stem is part of the name
   filenames <- x$data$analysis$filename
-
-  ## Strip file extensions ---------------------------------------------------
-
-  filenames_clean <- tools::file_path_sans_ext(filenames)
 
   ## -------------------------------------------------------------------------
   ## Step 3: Convert format to patterns (if needed)
@@ -247,8 +258,9 @@ parse_ids <- function(x,
   ## The sampleid token writes sample_id, as it is meant to; every other token
   ## adds a column of its name.
 
-  tokens <- names(patterns)[nzchar(names(patterns) %||% character(0))]
-  tokens <- tokens[!tolower(tokens) %in% tolower(SAMPLEID_VARIANTS)]
+  tokens       <- names(patterns)[nzchar(names(patterns) %||% character(0))]
+  has_sampleid <- any(tolower(tokens) %in% tolower(SAMPLEID_VARIANTS))
+  tokens       <- tokens[!tolower(tokens) %in% tolower(SAMPLEID_VARIANTS)]
 
   ## Refuse a token named like a column horizons reserves, such as `.flag` ---
 
@@ -275,7 +287,7 @@ parse_ids <- function(x,
   ## Step 4: Apply patterns to extract values
   ## -------------------------------------------------------------------------
 
-  extracted <- apply_patterns(filenames_clean, patterns)
+  extracted <- apply_patterns(filenames, patterns)
 
   ## -------------------------------------------------------------------------
   ## Step 5: Handle non-matches
@@ -288,25 +300,31 @@ parse_ids <- function(x,
   if (n_unmatched > 0) {
 
     non_match_names <- filenames[non_matches]
-    more_10 <- if (n_unmatched > 10) paste0(" and ", n_unmatched - 10, " more") else ""
-    more_5  <- if (n_unmatched > 5) paste0(" and ", n_unmatched - 5, " more") else ""
 
     if (too_few == "error") {
 
       abort_horizons(c(
         "Pattern did not match {n_unmatched} filename{?s}.",
-        "i" = "Non-matching files: {.val {head(non_match_names, 10)}}{more_10}.",
+        "i" = "Non-matching files: {shown_ids(non_match_names, n_show = 10L)}.",
         "i" = "Change {.arg format} or {.arg patterns} so they match, or set {.arg too_few} to {.val keep_original} or {.val na}."
       ), kind = "input")
 
     } else if (too_few == "keep_original") {
 
-      ### Other than what was asked ran: these ids are filenames, which
-      ### average() will not collapse with their replicates
+      ### Other than what was asked ran. With a sampleid token these ids are
+      ### filenames, which average() will not collapse with their
+      ### replicates; without one the rows keep their ids and lack the
+      ### parsed values
+      kept <- if (has_sampleid) {
+        "{cli::qty(n_unmatched)}{?Its/Their} {.field sample_id}{?/s} {?is its filename/are their filenames}."
+      } else {
+        "{cli::qty(n_unmatched)}{?Its/Their} {.field sample_id} {?is/are} unchanged, and the parsed columns are {.code NA} for {?it/them}."
+      }
+
       log_warning(collector, "substitution", c(
         "Pattern did not match {n_unmatched} filename{?s}.",
-        "i" = "Keeping original filename as sample_id.",
-        "i" = "Non-matching: {.val {head(non_match_names, 5)}}{more_5}."
+        "i" = kept,
+        "i" = "Non-matching: {shown_ids(non_match_names)}."
       ), ids = non_match_names)
 
     } else {
@@ -314,7 +332,7 @@ parse_ids <- function(x,
       ### too_few = "na" is the user's explicit choice: reported, not warned
       log_note(collector, c(
         "Pattern did not match {n_unmatched} filename{?s}, so {?its/their} {.field sample_id} {?is/are} {.code NA}.",
-        "i" = "Non-matching: {.val {head(non_match_names, 5)}}{more_5}."
+        "i" = "Non-matching: {shown_ids(non_match_names)}."
       ), ids = non_match_names)
 
     }
@@ -617,12 +635,19 @@ format_to_patterns <- function(format) {
 #' Apply patterns to extract values from filenames
 #'
 #' @description
-#' Builds a full regex from patterns vector and extracts named groups.
+#' Builds one anchored regex from the patterns and reads each named
+#' pattern's text by its group's name. Each named pattern is wrapped as a
+#' PCRE named group of a name of its own (`horizons_tok_<i>`, which no token
+#' name limits), and each unnamed one as a non-capturing group, so a group a
+#' pattern holds, capturing or not, is never read: a named pattern's column
+#' is the whole text it matched.
 #'
 #' @param filenames Character vector of filenames to parse.
 #' @param patterns Named character vector of patterns.
 #'
-#' @return A tibble with one column per named pattern plus `.matched` indicator.
+#' @return A tibble with one column per named pattern plus `.matched`, the
+#'   filename where the regex matched it and `NA` where it did not; a named
+#'   column is `NA` exactly where `.matched` is.
 #'
 #' @noRd
 apply_patterns <- function(filenames, patterns) {
@@ -631,102 +656,42 @@ apply_patterns <- function(filenames, patterns) {
   ## Step 1: Build full regex
   ## -------------------------------------------------------------------------
 
-  ## Get named patterns (capturing groups) -----------------------------------
+  pattern_names <- names(patterns) %||% rep("", length(patterns))
+  named_idx     <- which(pattern_names != "")
+  group_names   <- paste0("horizons_tok_", seq_along(patterns))
 
-  pattern_names <- names(patterns)
-
-  if (is.null(pattern_names)) {
-
-    pattern_names <- rep("", length(patterns))
-
-  }
-
-  named_idx <- which(pattern_names != "")
-
-  ## Build regex with named groups -------------------------------------------
-
-  regex_parts <- character(length(patterns))
-
-  for (i in seq_along(patterns)) {
-
-    if (pattern_names[i] != "") {
-
-      ## Named pattern: ensure capturing group ------------------------------
-
-      ## If pattern doesn't start with (, wrap it in parentheses
-
-      pat <- patterns[i]
-
-      if (!grepl("^\\(", pat)) {
-
-        pat <- paste0("(", pat, ")")
-
-      }
-
-      regex_parts[i] <- pat
-
-    } else {
-
-      ## Unnamed pattern: use non-capturing group ---------------------------
-
-      regex_parts[i] <- paste0("(?:", patterns[i], ")")
-
-    }
-
-  }
+  regex_parts <- ifelse(pattern_names != "",
+                        paste0("(?<", group_names, ">", patterns, ")"),
+                        paste0("(?:", patterns, ")"))
 
   full_regex <- paste0("^", paste(regex_parts, collapse = ""), "$")
 
   ## -------------------------------------------------------------------------
   ## Step 2: Apply regex to filenames
   ## -------------------------------------------------------------------------
+  ## An empty filename, which only an empty match could match, is not one.
 
-  matches <- regmatches(filenames, regexec(full_regex, filenames, perl = TRUE))
+  match   <- regexpr(full_regex, filenames, perl = TRUE)
+  matched <- !is.na(match) & attr(match, "match.length") > 0
 
   ## -------------------------------------------------------------------------
-  ## Step 3: Extract values into tibble
+  ## Step 3: Each named pattern's text, by its group's name
   ## -------------------------------------------------------------------------
 
-  ## Initialize result tibble ------------------------------------------------
+  result <- tibble::tibble(.matched = ifelse(matched, filenames, NA_character_))
 
-  result <- tibble::tibble(.matched = rep(NA_character_, length(filenames)))
+  starts  <- attr(match, "capture.start")
+  lengths <- attr(match, "capture.length")
 
-  ## Add column for each named pattern ---------------------------------------
+  for (i in named_idx) {
 
-  for (name in pattern_names[named_idx]) {
+    group <- group_names[i]
+    first <- starts[matched, group]
 
-    result[[name]] <- NA_character_
+    value          <- rep(NA_character_, length(filenames))
+    value[matched] <- substring(filenames[matched], first, first + lengths[matched, group] - 1L)
 
-  }
-
-  ## Fill in values from matches ---------------------------------------------
-
-  for (i in seq_along(matches)) {
-
-    match_result <- matches[[i]]
-
-    if (length(match_result) > 0 && match_result[1] != "") {
-
-      ## Match succeeded -----------------------------------------------------
-
-      result$.matched[i] <- match_result[1]
-
-      ## Extract captured groups (skip full match at position 1) -------------
-
-      captured <- match_result[-1]
-
-      if (length(captured) == length(named_idx)) {
-
-        for (j in seq_along(named_idx)) {
-
-          col_name <- pattern_names[named_idx[j]]
-          result[[col_name]][i] <- captured[j]
-
-        }
-
-      }
-
-    }
+    result[[pattern_names[i]]] <- value
 
   }
 

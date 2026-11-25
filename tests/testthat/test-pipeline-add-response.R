@@ -409,6 +409,46 @@ test_that("add_response() refuses a meta join key that repeats in the horizons d
 
 })
 
+test_that("add_response() refuses a source key of another type at its door, naming both, rather than converting it", {
+
+  ## Numeric lab ids against horizons' character ids: dplyr cannot join them,
+  ## and converting them would not be exact (as.character(1e5) is "1e+05")
+  hd  <- make_test_hd(c("101", "102", "103"))
+  lab <- data.frame(sample_id = c(101, 102, 103), SOC = c(1.2, 3.4, 5.6))
+
+  err <- expect_error(add_response(hd, lab, variable = "SOC", verbose = FALSE),
+                      class = "horizons_error_input")
+  msg <- gsub("\\s+", " ", conditionMessage(err))
+
+  expect_identical(rlang::call_name(err$call), "add_response")
+  expect_match(msg, "sample_id is a character vector in the horizons data and sample_id is a double vector in the source", fixed = TRUE)
+  expect_match(msg, 'readr::cols(sample_id = "c")', fixed = TRUE)
+
+  ## The CSV path reads such ids as numbers, and is refused the same way
+  csv <- withr::local_tempfile(fileext = ".csv")
+  readr::write_csv(lab, csv)
+
+  expect_error(add_response(hd, csv, variable = "SOC", verbose = FALSE),
+               "a double vector in the source", fixed = TRUE, class = "horizons_error_input")
+
+  ## Read as text, the same ids join
+  joined <- add_response(hd, readr::read_csv(csv, col_types = readr::cols(sample_id = "c")),
+                         variable = "SOC", verbose = FALSE)
+  expect_identical(joined$data$analysis$SOC, c(1.2, 3.4, 5.6))
+
+  ## Keys dplyr joins without converting a value pass: an integer key against
+  ## a double one, a factor against text
+  hd_int <- with_site(make_test_hd(), c(1L, 2L, 3L))
+  joined <- add_response(hd_int, tibble::tibble(site = c(3, 1, 2), SOC = c(5.6, 1.2, 3.4)),
+                         variable = "SOC", by = "site", verbose = FALSE)
+  expect_identical(joined$data$analysis$SOC, c(1.2, 3.4, 5.6))
+
+  joined <- add_response(make_test_hd(), tibble::tibble(sample_id = factor(c("S001", "S002", "S003")), SOC = c(1.2, 3.4, 5.6)),
+                         variable = "SOC", verbose = FALSE)
+  expect_identical(joined$data$analysis$SOC, c(1.2, 3.4, 5.6))
+
+})
+
 test_that("add_response() attaches values by key when the source is in another order", {
 
   hd  <- make_test_hd(c("S001", "S002", "S003"))
