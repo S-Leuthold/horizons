@@ -285,6 +285,8 @@ prep.step_transform_spectra <- function(x, training, info = NULL, ...) {
 #' @export
 bake.step_transform_spectra <- function(object, new_data, ...) {
 
+  check_step_new_data(object, new_data, columns = object$columns)
+
   spectral_matrix <- as.matrix(new_data[, object$columns])
 
   ## The masked columns prep() kept, by position among those it transforms;

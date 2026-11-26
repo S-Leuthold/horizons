@@ -79,6 +79,30 @@ describe("step_transform_spectra() refuses input it cannot use", {
 
   })
 
+  it("refuses new data at bake that lacks a column it transforms, as the selection steps do", {
+
+    ## Arrange: recipes checks the recipe's own columns before any step
+    ## bakes, so the column the step misses is one a step before it made in
+    ## training and skips at bake
+    withr::local_seed(1)
+    d <- transform_data()
+
+    prepped <- recipes::prep(recipes::recipe(SOC ~ ., data = d) |>
+                               recipes::step_mutate(wn_3940 = wn_3942, skip = TRUE) |>
+                               step_transform_spectra(dplyr::starts_with("wn_"), preprocessing = "raw"))
+
+    expect_true("wn_3940" %in% prepped$steps[[2]]$columns)
+
+    ## Act & Assert: horizons' class, and recipes' check, which names the
+    ## missing column, as the parent
+    err <- expect_error(recipes::bake(prepped, new_data = d),
+                        "`new_data` lacks columns `step_transform_spectra()` needs.",
+                        fixed = TRUE, class = "horizons_error_input")
+    expect_match(rlang::cnd_message(err), "wn_3940", fixed = TRUE)
+    expect_match(rlang::cnd_message(err), "missing from `new_data`", fixed = TRUE)
+
+  })
+
 })
 
 describe("step_transform_spectra() bakes doubles", {
