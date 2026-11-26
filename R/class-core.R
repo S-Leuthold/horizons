@@ -3620,8 +3620,9 @@ print.horizons_data <- function(x, ...) {
   if (has_eval && isFALSE(x$evaluation$screened)) {
 
     cat(cli::style_bold("Evaluation\n"))
+    n_cold <- nrow(x$evaluation$results)
     cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
-               nrow(x$evaluation$results), ")\n"))
+               n_cold, " configuration", if (n_cold != 1) "s", ")\n"))
     cat("\n")
 
   } else if (has_eval) {
@@ -3836,12 +3837,15 @@ summary.horizons_data <- function(object, ...) {
 
       if (length(wn_values) > 1) {
 
-        wn_values <- sort(wn_values, decreasing = TRUE)
-        wn_range  <- range(wn_values)
-        wn_step   <- abs(diff(wn_values[1:2]))
+        wn_range <- range(wn_values)
 
-        cat(paste0("   \u2502     \u251C\u2500 Range: ", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9\n"))
-        cat(paste0("   \u2502     \u2514\u2500 Step: ", wn_step, " cm\u207B\u00B9\n"))
+        ### The axis's spacing as every other reader takes it, the median
+        ### step, so a drifted first step does not stand for the axis
+        wn_step <- axis_spacing_cm(x)
+
+        cat(paste0("   \u2502     ", if (is.na(wn_step)) "\u2514" else "\u251C",
+                   "\u2500 Range: ", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9\n"))
+        if (!is.na(wn_step)) cat(paste0("   \u2502     \u2514\u2500 Step: ", wn_step, " cm\u207B\u00B9\n"))
 
       }
     }
@@ -3999,8 +4003,9 @@ summary.horizons_data <- function(object, ...) {
   if (has_eval && isFALSE(x$evaluation$screened)) {
 
     cat(cli::style_bold("Evaluation\n"))
+    n_cold <- nrow(x$evaluation$results)
     cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
-               nrow(x$evaluation$results), ")\n"))
+               n_cold, " configuration", if (n_cold != 1) "s", ")\n"))
     cat("\n")
 
   } else if (has_eval) {

@@ -1445,6 +1445,17 @@ test_that("print() and summary() count the masked columns beside the predictors,
 
 })
 
+test_that("summary() gives the axis's spacing, the median step, not the step between its first two columns", {
+
+  ## A 4 cm-1 step at the top of the axis, then 2 cm-1 down to 3900
+  obj <- make_axis_object(c(4000, seq(3996, 3900, by = -2)), n = 6L)
+  out <- capture.output(summary(obj))
+
+  expect_true(any(grepl("Step: 2 cm⁻¹", out, fixed = TRUE)))
+  expect_false(any(grepl("Step: 4 cm⁻¹", out, fixed = TRUE)))
+
+})
+
 test_that("summary.horizons_data shows no time for a log row without one, as on a log saved before the column", {
 
   obj <- console_object()

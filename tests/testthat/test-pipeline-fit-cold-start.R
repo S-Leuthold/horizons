@@ -152,7 +152,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("prints and summarises the record as unevaluated, and nothing else", {
 
-    only_line <- "   └─ Configs evaluated: none (fit() started cold from 1)"
+    only_line <- "   └─ Configs evaluated: none (fit() started cold from 1 configuration)"
 
     ## No success count, results, rank metric or runtime to contradict it
     expect_identical(evaluation_section(utils::capture.output(print(cold))), only_line)
