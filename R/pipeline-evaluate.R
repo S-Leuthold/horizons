@@ -2854,9 +2854,11 @@ abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
 #' spectra (#64 moved the grid for the same samples) or a rescaled outcome
 #' under the same name resumed stale results silently (#42). `data_fields`
 #' records them by name: the outcome, the sample ids, the role-map rows whose
-#' roles shape a row (`id`, `outcome`, `predictor`, and `masked`, whose values
-#' reach the model through the windows beside them), and the outcome and the
-#' axis's values ([axis_columns()]) in id order. On an object with nothing
+#' roles shape a row (`id`, `outcome`, `predictor`), and the outcome and the
+#' axis's values ([axis_columns()]: the predictors and any masked columns,
+#' whose values reach the model through the windows beside them) in id
+#' order. The masked set is the axis less the predictors, so a column whose
+#' role flips between the two moves `roles`. On an object with nothing
 #' masked both fields are what they were before the role existed, so its
 #' checkpoints resume. They are compared field by field, like the
 #' tuning settings, so a refusal can say what changed, and a row with no
@@ -2930,14 +2932,15 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
   }
 
   ## Only the roles that shape a row's contents. build_recipe() models the
-  ## outcome on the predictors, whose windows read the masked columns beside
-  ## them, and the id names the rows; a sibling `response` becomes
-  ## `response_hold` and `meta` stays `meta`, neither reaching the model. So
-  ## add_response() of another property, or a new meta column, between two
-  ## runs does not refuse a resume.
+  ## outcome on the predictors, and the id names the rows; a sibling
+  ## `response` becomes `response_hold` and `meta` stays `meta`, neither
+  ## reaching the model. So add_response() of another property, or a new meta
+  ## column, between two runs does not refuse a resume. The masked columns,
+  ## whose values the windows beside them read, are the axis less the
+  ## predictors: `predictors` hashes the axis by name, so a change of mask
+  ## moves this field through the predictor rows.
   roles <- if (has_roles) {
-    shaping <- role_map$role %in% c("id", "outcome", "predictor") |
-               role_map$variable %in% masked_columns(role_map)
+    shaping <- role_map$role %in% c("id", "outcome", "predictor")
     data.frame(variable = as.character(role_map$variable[shaping]),
                role     = as.character(role_map$role[shaping]))
   } else {
