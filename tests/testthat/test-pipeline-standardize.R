@@ -2027,6 +2027,22 @@ describe("standardize(remove_water = TRUE) masks the water bands", {
 
   })
 
+  it("does the same on a forced re-run with resample and trim off", {
+
+    again <- no_output(suppressWarnings(standardize(masked_out, resample = NULL, trim = NULL,
+                                                    remove_water = TRUE, force = TRUE)))
+    back  <- no_output(suppressWarnings(standardize(masked_out, resample = NULL, trim = NULL,
+                                                    remove_water = FALSE, force = TRUE)))
+
+    expect_identical(masked_columns(again$data$role_map), masked_columns(masked_out$data$role_map))
+    expect_identical(masked_columns(back$data$role_map), character(0))
+    expect_identical(back$data$role_map, plain_out$data$role_map)
+    expect_identical(back$data$n_predictors, 1701L)
+    expect_identical(back$data$analysis, plain_out$data$analysis)
+    expect_match(record_message(back), "nothing applied, 1701 wavenumbers kept.", fixed = TRUE)
+
+  })
+
   it("leaves no gap for the window methods, and gives them the full-axis transform beside each band", {
 
     obj <- masked_out

@@ -1289,8 +1289,8 @@ standardize <- function(x,
   ## ---------------------------------------------------------------------------
   ## Step 1c: Early exit if no operations requested
   ## ---------------------------------------------------------------------------
-  ## Nothing but the column order changes here: no values, no names. The
-  ## object is validated (stage = "raw") before it is marked, so a
+  ## Nothing but the column order and the roles change here: no values, no
+  ## names. The object is validated (stage = "raw") before it is marked, so a
   ## structurally invalid one stops here rather than travelling on as
   ## standardized — though at this stage a duplicate or NA sample_id passes,
   ## and predictor NA is not checked at all (#24).
@@ -1299,12 +1299,23 @@ standardize <- function(x,
 
     x <- validate_horizons_data(x, stage = "raw")
 
+    ## This call masks nothing, so the bands an earlier call masked are ----
+    ## predictors again, as the full path's Step 8 makes them
+
+    unmasked <- x$data$role_map
+    back     <- unmasked$variable %in% masked_columns(unmasked)
+
+    if (any(back)) {
+
+      unmasked$role[back] <- "predictor"
+      x <- set_analysis(x, x$data$analysis, unmasked)
+
+    }
+
     ## A spectrum it cannot use is flagged here too, on the axis as it is ----
 
-    ### The whole axis, any masked columns an earlier call left included
     axis_vars <- axis_columns(x$data$role_map)
-    reason    <- unusable_spectra(x$data$analysis[, axis_vars, drop = FALSE],
-                                  masked = axis_vars %in% masked_columns(x$data$role_map))
+    reason    <- unusable_spectra(x$data$analysis[, axis_vars, drop = FALSE])
     reason[flagged_rows(x$data$analysis)] <- NA_character_
 
     flagged <- flag_unusable(x$data$analysis, x$data$role_map, reason, collector)
@@ -1333,8 +1344,7 @@ standardize <- function(x,
     standardize_note(collector, resample, trim, remove_water, baseline,
                      axis          = "off",
                      n_wavelengths = length(axis_vars),
-                     kept_hull     = isTRUE(prior$baseline),
-                     n_masked      = length(masked_columns(x$data$role_map)))
+                     kept_hull     = isTRUE(prior$baseline))
 
     x$log <- log_close(collector, x$log)
 
@@ -1343,8 +1353,7 @@ standardize <- function(x,
       report_standardize_summary(
         operations          = operations,
         n_samples           = nrow(x$data$analysis),
-        final_n_wavelengths = length(axis_vars),
-        n_masked            = length(masked_columns(x$data$role_map))
+        final_n_wavelengths = length(axis_vars)
       )
 
     } else if (verbose) {
