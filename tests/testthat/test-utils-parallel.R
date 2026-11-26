@@ -1432,7 +1432,7 @@ without_rhpcblasctl <- function(env = parent.frame()) {
 
 }
 
-describe("pin_parent_threads()", {
+describe("pin_threads()", {
 
   it("pins each engine thread option the model table declares, and restores them", {
 
@@ -1440,7 +1440,7 @@ describe("pin_parent_threads()", {
     local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
     withr::local_options(ranger.num.threads = 7L, horizons.test.threads = NULL)
 
-    unpin <- pin_parent_threads()
+    unpin <- pin_threads()
 
     expect_identical(getOption("ranger.num.threads"), 1L)
     expect_identical(getOption("horizons.test.threads"), 1L)
@@ -1484,7 +1484,7 @@ describe("pin_parent_threads()", {
     raised <- counts() == 2
     skip_if_not(any(raised), "no thread count here can be raised")
 
-    unpin <- pin_parent_threads()
+    unpin <- pin_threads()
     expect_equal(counts()[raised], c(blas = 1, omp = 1, dt = 1)[raised])
 
     unpin()
@@ -1497,7 +1497,7 @@ describe("pin_parent_threads()", {
     withr::local_envvar(OPENBLAS_NUM_THREADS = NA, OMP_NUM_THREADS = NA)
     without_rhpcblasctl()
 
-    expect_no_message(unpin <- pin_parent_threads())
+    expect_no_message(unpin <- pin_threads())
     unpin()
 
   })
@@ -1523,7 +1523,7 @@ describe("pin_parent_threads()", {
 
     without_rhpcblasctl()
 
-    suppressMessages(unpin <- pin_parent_threads())
+    suppressMessages(unpin <- pin_threads())
     expect_identical(data.table::getDTthreads(), 1L)
 
     unpin()

@@ -104,7 +104,7 @@ engine_spec <- function(engine) {
 #' @description
 #' Each `option` the rows of `MODEL_SPECS` declare under `threads`, as a
 #' named list for [options()]. The one reader of them, for every place that
-#' sets threads: [pin_parent_threads()], the configs-axis worker,
+#' sets threads: [pin_threads()], the configs-axis worker,
 #' `.onLoad()` and [isolated_fit()] at the package's count, and a sequential
 #' `evaluate()` or `fit()` at `control_horizons(threads = )`.
 #'

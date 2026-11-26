@@ -737,7 +737,7 @@ evaluate <- function(x,
 
   if (axis$axis != "sequential") {
 
-    unpin_threads <- pin_parent_threads()
+    unpin_threads <- pin_threads()
     on.exit(unpin_threads(), add = TRUE)
 
   } else {
@@ -4226,7 +4226,7 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #'
 #' @description
 #' Every process that fits runs one thread. The daemon's threads are pinned
-#' by the one pin the session's are ([pin_parent_threads()]): BLAS and
+#' by the one pin the session's are ([pin_threads()]): BLAS and
 #' OpenMP at run time through RhpcBLASctl, since OpenBLAS reads its thread
 #' count when it loads and setting OPENBLAS_NUM_THREADS on a daemon, after
 #' the library is loaded, changed nothing when measured (2026-09-15);
@@ -4252,12 +4252,12 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #'   ([needed_packages()]).
 #' @return A function of no arguments that puts BLAS's, OpenMP's and
 #'   data.table's threads and the engines' thread options back as they were
-#'   ([pin_parent_threads()]), invisibly.
+#'   ([pin_threads()]), invisibly.
 #' @keywords internal
 #' @noRd
 prepare_worker <- function(models, selections) {
 
-  unpin <- pin_parent_threads()
+  unpin <- pin_threads()
 
   for (pkg in names(needed_packages(models, selections))) requireNamespace(pkg, quietly = TRUE)
 

@@ -4096,7 +4096,7 @@ describe("evaluate() - threads on a run in this session (#114)", {
 
     ## Raised first, so a run that pinned either to one would show it:
     ## threads is the engines' own count, and BLAS and OpenMP are pinned
-    ## only where a parallel run fits (pin_parent_threads(), prepare_worker())
+    ## only where a parallel run fits (pin_threads(), prepare_worker())
     old_omp  <- RhpcBLASctl::omp_get_max_threads()
     old_blas <- RhpcBLASctl::blas_get_num_procs()
     withr::defer({

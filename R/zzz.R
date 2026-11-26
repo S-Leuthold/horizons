@@ -97,7 +97,7 @@ read_built <- function(path) {
   # Optional: Check if user explicitly wants thread control help.
   # The environment variables are effective here because .onLoad runs
   # before any engine loads OpenBLAS. During a parallel run the mechanism
-  # that matters is pin_parent_threads() (R/utils-parallel.R), which
+  # that matters is pin_threads() (R/utils-parallel.R), which
   # evaluate() and fit() call before dispatch and which works at runtime
   # via RhpcBLASctl.
   if (Sys.getenv("HORIZONS_THREAD_CONTROL", "FALSE") == "TRUE") {

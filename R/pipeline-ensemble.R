@@ -240,7 +240,7 @@ ensemble <- function(x,
 
     if (allow_par) {
 
-      unpin_threads <- pin_parent_threads()
+      unpin_threads <- pin_threads()
       on.exit(unpin_threads(), add = TRUE)
 
     }

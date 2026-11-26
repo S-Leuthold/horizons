@@ -1958,7 +1958,7 @@ in_config_order <- function(rows, config_ids) {
 }
 
 ## ---------------------------------------------------------------------------
-## Thread pinning (parent side)
+## Thread pinning
 ## ---------------------------------------------------------------------------
 
 #' Pin BLAS, OpenMP, data.table and the engines' threads in this process
@@ -1979,7 +1979,7 @@ in_config_order <- function(rows, config_ids) {
 #' @return A function that restores the previous settings; call it from
 #'   `on.exit()`.
 #' @keywords internal
-pin_parent_threads <- function() {
+pin_threads <- function() {
 
   restore <- list(blas = pin_blas_threads())
 
@@ -2010,7 +2010,7 @@ pin_parent_threads <- function() {
 #'
 #' @description
 #' The one runtime pin of BLAS and OpenMP, for every process that fits: the
-#' session before dispatch ([pin_parent_threads()]), and each daemon set up
+#' session before dispatch ([pin_threads()]), and each daemon set up
 #' for a unit ([prepare_worker()]): a configs-axis configuration's daemon and
 #' a fold preparation's while its task runs, and a split configuration's
 #' inner daemons ([start_inner_daemons()]), so a configuration computes alike

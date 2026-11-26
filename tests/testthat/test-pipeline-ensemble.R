@@ -1825,7 +1825,7 @@ describe("ensemble() - allow_par", {
     local_mocked_bindings(
       check_parallel_backend = function(...) TRUE,
       connected_daemons      = function() 2L,
-      pin_parent_threads     = function() {
+      pin_threads     = function() {
         calls <<- c(calls, "pin")
         function() calls <<- c(calls, "restore")
       },
