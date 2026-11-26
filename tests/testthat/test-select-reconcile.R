@@ -59,6 +59,31 @@ test_that("check_select_axis() refuses an axis of one wavenumber, and passes a u
 })
 
 
+test_that("check_select_axis() names the gaps as evaluate() does: five in cm-1, and a count of the rest", {
+
+  ## The two water bands, named in full
+  wn  <- seq(4000, 600, by = -2)
+  two <- wn[!(wn >= 1580 & wn <= 1720) & !(wn >= 3100 & wn <= 3700)]
+  msg <- gsub("\\s+", " ", conditionMessage(
+    expect_error(check_select_axis(two, "x", "the targets"), class = "horizons_error_input")))
+
+  expect_match(msg, "has 2 gaps in it", fixed = TRUE)
+  expect_match(msg, "1578 to 1722, 3098 to 3702 cm-1, each", fixed = TRUE)
+
+  ## Seven 32 cm-1 holes: the first five, then how many more
+  starts <- seq(3980, by = -50, length.out = 7)
+  seven  <- wn[!wn %in% unlist(lapply(starts, function(s) seq(s, s - 28, by = -2)))]
+  msg    <- gsub("\\s+", " ", conditionMessage(
+    expect_error(check_select_axis(seven, "x", "the targets"), class = "horizons_error_input")))
+
+  expect_match(msg, "has 7 gaps in it", fixed = TRUE)
+  expect_match(msg, paste0("3650 to 3682, 3700 to 3732, 3750 to 3782, 3800 to 3832, ",
+                           "3850 to 3882 cm-1 and 2 more, each"), fixed = TRUE)
+  expect_no_match(msg, "3900 to 3932", fixed = TRUE)
+
+})
+
+
 test_that("grid_summary() passes a gap-free axis that is merely non-uniform", {
 
   ## Two axes that a ratio-only rule calls gapped and that have no hole in

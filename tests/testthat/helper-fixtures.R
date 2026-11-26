@@ -116,6 +116,29 @@ make_breaker_grid_object <- function(n = 60) {
 
 
 ## ---------------------------------------------------------------------------
+## An axis with a gap in it, made by hand
+## ---------------------------------------------------------------------------
+
+#' `obj` with the predictor columns `cols` deleted from its table and its
+#' role map, its predictor count kept true, so its axis has a gap where they
+#' were: what an earlier standardize(remove_water = TRUE), a band cut
+#' upstream or an instrument's missing region leaves. Every name in `cols`
+#' must be a predictor.
+delete_axis_columns <- function(obj, cols) {
+
+  role_map <- obj$data$role_map
+  stopifnot(all(cols %in% role_map$variable[role_map$role == "predictor"]))
+
+  obj$data$analysis     <- obj$data$analysis[, setdiff(names(obj$data$analysis), cols)]
+  obj$data$role_map     <- role_map[!role_map$variable %in% cols, ]
+  obj$data$n_predictors <- sum(obj$data$role_map$role == "predictor")
+
+  obj
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## Fit Test Object: a minimal horizons_eval object ready for fit()
 ## ---------------------------------------------------------------------------
 

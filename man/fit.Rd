@@ -250,7 +250,10 @@ member alone, and \code{models$results} records the step and the cause in
 A member's own warnings, from the engines and from tune, are in
 \code{models$results$warnings}. A bug, a refusal or a missing package is not
 the member's and stops the call: before any member is fitted, \code{fit()}
-refuses members whose model's engine or feature-selection step needs a
+refuses members that run a Savitzky-Golay method (\code{"sg"}, \code{"deriv1"},
+\code{"deriv2"}, \code{"snv_deriv1"}, \code{"snv_deriv2"}) on a wavenumber axis with a
+gap in it, as \code{\link[=evaluate]{evaluate()}} refuses such a grid (\code{horizons_error_input}),
+and members whose model's engine or feature-selection step needs a
 package that is not installed, naming each (\code{horizons_error_missing_package}). When the first members fail the same
 way (3 of them by default, \code{control_horizons(breaker = )}, \code{FALSE} to
 fit every member), and between them span two of the members' models,
@@ -311,7 +314,8 @@ The fit carries an unscreened evaluation record in place of
 are \code{NA}, and \code{runtime_secs} is 0. \code{evaluation$recipe} records the recipe
 settings as \code{evaluate()} does, and \code{fit()} applies \code{evaluate()}'s checks
 first: an outcome that is not constant, a Savitzky-Golay window narrower
-than the spectrum, and more rows than \code{cv_folds} to draw the folds from,
+than the spectrum, no window method on an axis with a gap in it, and more
+rows than \code{cv_folds} to draw the folds from,
 which \code{fit()} checks on either path. Re-fitting a cold-started fit starts
 cold again. With more than one configuration \code{fit()} aborts with class
 \code{horizons_error_input}:

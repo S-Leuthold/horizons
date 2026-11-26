@@ -251,6 +251,17 @@ VALID_PREPROCESSING <- c(
   "snv_deriv1",
   "snv_deriv2")
 
+### The methods that run a Savitzky-Golay window along the axis. The filter
+### convolves adjacent columns whatever their spacing, so these are refused
+### on an axis with a gap in it (check_window_gaps()); "raw" and "snv" read
+### each column on its own.
+WINDOW_PREPROCESSING <- c(
+  "sg",
+  "deriv1",
+  "deriv2",
+  "snv_deriv1",
+  "snv_deriv2")
+
 ## Feature Selection Methods --------------------------------------------------
 
 # Valid feature selection methods

@@ -723,6 +723,67 @@ describe("fit() - recipe settings", {
 })
 
 
+## =========================================================================
+## No member runs a Savitzky-Golay window across a gap in the axis
+## =========================================================================
+
+describe("fit() - no window method across a gap in the axis", {
+
+  ## An evaluation made before evaluate() refused a window method on a gapped
+  ## axis: 40 bands 2 cm-1 apart less the 15 from 3954 to 3926 (one gap of 32
+  ## cm-1), a raw and a deriv1 configuration, evaluated with the check off
+  obj <- delete_axis_columns(make_eval_object(n = 60, n_wn = 40, n_configs = 2),
+                             paste0("wn_", seq(3954, 3926, by = -2)))
+  obj$config$configs$model         <- "rf"
+  obj$config$configs$preprocessing <- c("raw", "deriv1")
+
+  ev <- testthat::with_mocked_bindings(
+    suppressWarnings(evaluate(obj, prune = FALSE, seed = 42L)),
+    check_window_gaps = function(...) invisible(NULL),
+    .package = "horizons"
+  )
+
+  ## How many members fit() fitted, and the condition it ended on
+  members_fitted <- function(ev) {
+
+    ran <- 0L
+
+    err <- testthat::with_mocked_bindings(
+      tryCatch(
+        suppressWarnings(fit(ev, n_best = 1L, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+        error = function(e) e
+      ),
+      fit_single_config = function(...) { ran <<- ran + 1L; NULL },
+      .package = "horizons"
+    )
+
+    list(error = err, ran = ran)
+
+  }
+
+  it("refuses a member that runs a window method on it, before any member is fitted", {
+
+    out <- members_fitted(rank_configs_as(ev, c("cfg_002", "cfg_001")))
+
+    expect_s3_class(out$error, "horizons_error_input")
+    expect_match(conditionMessage(out$error), "\"deriv1\" runs a window along it", fixed = TRUE)
+    expect_match(conditionMessage(out$error), "3924 to 3956 cm", fixed = TRUE)
+    expect_identical(out$ran, 0L)
+
+  })
+
+  it("fits the members that do not, from the same evaluation", {
+
+    out <- members_fitted(rank_configs_as(ev, c("cfg_001", "cfg_002")))
+
+    expect_false(inherits(out$error, "horizons_error_input"))
+    expect_identical(out$ran, 1L)
+
+  })
+
+})
+
+
 describe("fit() - seed reproducibility", {
 
   ## The train/test split is evaluate()'s, so what fit()'s seed controls is

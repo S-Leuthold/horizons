@@ -1076,9 +1076,10 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' ends, the grid's; the points kept beyond the trim bounds for interpolation
 #' are gone by then and never reach it. Without resampling, it is fitted on
 #' the trimmed native axis. Water bands are deleted last so that
-#' `standardize()`'s own interpolation never spans them; a Savitzky-Golay
-#' derivative taken later still runs across the hole they leave, which is a
-#' separate matter (see `select_training()`'s `mask`).
+#' `standardize()`'s own interpolation never spans them. The axis they leave
+#' has a gap at each band, and a Savitzky-Golay window would run across it,
+#' so [evaluate()] and [fit()] refuse the window methods (`"sg"` and the
+#' derivatives) on it; `"raw"` and `"snv"` run.
 #'
 #' **Unusable spectra:** a spectrum `standardize()` cannot use, one with a
 #' value that is not finite among those it returns, or one with no spread
@@ -1126,7 +1127,9 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   baseline correction. Without resampling, columns outside the range are
 #'   dropped. Use `NULL` to skip trimming.
 #' @param remove_water `logical.` Remove water absorption bands
-#'   (1580-1720, 3100-3700 cm⁻¹)? Default `FALSE`.
+#'   (1580-1720, 3100-3700 cm⁻¹)? Default `FALSE`. The gaps they leave rule
+#'   out the Savitzky-Golay methods in [evaluate()] and [fit()] (see
+#'   Details).
 #' @param baseline `logical.` Apply convex hull baseline correction?
 #'   Default `FALSE`.
 #' @param force `logical.` Re-standardize even if already standardized?

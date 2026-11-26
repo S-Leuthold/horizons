@@ -473,6 +473,40 @@ describe("fit() - cold start from one configuration (#45)", {
 
   })
 
+  it("refuses a window method on an axis with a gap in it, as evaluate() does", {
+
+    ## 40 bands 2 cm-1 apart less the 15 from 3954 to 3926: one gap of 32 cm-1
+    gapped <- delete_axis_columns(make_eval_object(n = 60, n_wn = 40, n_configs = 1),
+                                  paste0("wn_", seq(3954, 3926, by = -2)))
+    gapped$config$configs$preprocessing <- "deriv1"
+
+    ran <- 0L
+
+    err <- testthat::with_mocked_bindings(
+      tryCatch(fit(gapped, seed = 42L), error = function(e) e),
+      fit_single_config = function(...) { ran <<- ran + 1L; NULL },
+      .package = "horizons"
+    )
+
+    expect_s3_class(err, "horizons_error_input")
+    expect_match(conditionMessage(err), "3924 to 3956 cm", fixed = TRUE)
+    expect_match(conditionMessage(err), "\"deriv1\" runs a window along it", fixed = TRUE)
+    expect_identical(ran, 0L)
+
+    ## raw reads each column on its own, so the same axis starts cold
+    gapped$config$configs$preprocessing <- "raw"
+
+    testthat::with_mocked_bindings(
+      tryCatch(suppressWarnings(fit(gapped, compute_uq = FALSE, compute_ad = FALSE, seed = 42L)),
+               error = function(e) e),
+      fit_single_config = function(...) { ran <<- ran + 1L; NULL },
+      .package = "horizons"
+    )
+
+    expect_identical(ran, 1L)
+
+  })
+
   it("refuses a training part with no more rows than folds, as evaluate() does", {
 
     ## 4 rows: 3 in the training part, for 3 folds. fit()'s own check on the
