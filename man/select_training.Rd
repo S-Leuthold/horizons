@@ -78,8 +78,8 @@ library's (ties round up), and the record carries both. Default: \code{40}.}
 similarity space after the derivative, one row per range, low then
 high. The bands the targets or the library mask (\code{standardize(remove_water = TRUE)}) are dropped too, whatever is given here, so \code{NULL} (the default)
 is the objects' masks and nothing more. SNV takes its mean and spread
-from the columns left. \code{settings$mask} records every range the space ran
-with. A run of masked target columns is read as the range between its
+from the columns left. \code{settings$mask} records the ranges the space ran
+with, sorted, a range that overlaps the next merged with it. A run of masked target columns is read as the range between its
 own ends, so on a finer library grid the library columns between a
 masked target column and its unmasked neighbour stay in the space.}
 

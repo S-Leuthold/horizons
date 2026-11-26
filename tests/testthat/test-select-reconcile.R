@@ -21,7 +21,7 @@ test_that("axis_matrix() and axis_wavenumbers() read the whole axis, masked colu
 })
 
 
-test_that("space_mask() is the argument's ranges, then each object's masked bands, NULL when nothing is masked", {
+test_that("space_mask() is the argument's ranges and each object's masked bands, sorted and merged, NULL when nothing is masked", {
 
   fx      <- select_fixture(n_pool = 20)
   targets <- mask_axis_columns(fx$targets, c("wn_1720", "wn_1712"))
@@ -31,6 +31,17 @@ test_that("space_mask() is the argument's ranges, then each object's masked band
   expect_identical(space_mask(rbind(c(1, 2)), fx$targets, fx$pool), rbind(c(1, 2)))
   expect_identical(space_mask(NULL, targets, pool), rbind(c(1712, 1720), c(3692, 3700)))
   expect_identical(space_mask(rbind(c(1, 2)), targets, fx$pool), rbind(c(1, 2), c(1712, 1720)))
+
+  ## By the low end, whichever source a range came from
+  expect_identical(space_mask(rbind(c(2200, 2400)), targets, pool),
+                   rbind(c(1712, 1720), c(2200, 2400), c(3692, 3700)))
+
+  ## The same band from two sources is one range, and a range that reaches
+  ## into the next joins it
+  expect_identical(space_mask(rbind(c(3600, 3700), c(1712, 1720)), targets, pool),
+                   rbind(c(1712, 1720), c(3600, 3700)))
+  expect_identical(space_mask(rbind(c(1700, 1715), c(1716, 1730)), targets, fx$pool),
+                   rbind(c(1700, 1730)))
 
 })
 

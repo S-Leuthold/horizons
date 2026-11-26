@@ -3261,12 +3261,12 @@ describe("select_training() on targets and libraries with masked bands", {
 
   })
 
-  it("records the ranges the space ran with: the argument's, then the targets' and the library's", {
+  it("records the ranges the space ran with, the argument's with the targets' and the library's, sorted", {
 
     expect_identical(out$selection$settings$mask, rbind(c(1584, 1720), c(3100, 3700)))
 
     given <- suppressWarnings(select_training(targets, pool, k = 5, mask = rbind(c(2200, 2400))))
-    expect_identical(given$selection$settings$mask, rbind(c(2200, 2400), c(1584, 1720), c(3100, 3700)))
+    expect_identical(given$selection$settings$mask, rbind(c(1584, 1720), c(2200, 2400), c(3100, 3700)))
 
   })
 

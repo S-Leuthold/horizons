@@ -104,13 +104,15 @@ axis_wavenumbers <- function(x) {
 #' search alone, and the masked columns of each object the draw reads (the
 #' targets' and the library's, [mask_ranges()]), which no reader models. So a
 #' band either side masked is out of the space, as it is out of the model.
-#' The ranges are kept in that order, the argument's first and as given.
+#' The ranges come back sorted by their low ends, and a range that reaches
+#' into the next is merged with it, so the same band from two sources is one
+#' range, and one mask is one cache key however it arrives.
 #'
 #' @param mask [Matrix or NULL.] `select_training()`'s argument.
 #' @param ... [horizons_data.] The objects whose masks the space honours.
 #'
-#' @return [Matrix or NULL.] Two columns, low then high, one range per row;
-#'   `NULL` when nothing is masked.
+#' @return [Matrix or NULL.] Two columns, low then high, one range per row,
+#'   in increasing order and none overlapping; `NULL` when nothing is masked.
 #' @noRd
 space_mask <- function(mask, ...) {
 
@@ -119,13 +121,18 @@ space_mask <- function(mask, ...) {
     mask_ranges(axis_wavenumbers(obj), axis %in% masked_columns(obj$data$role_map))
   })
 
-  ranges <- c(list(mask), own)
-  ranges <- ranges[!vapply(ranges, is.null, logical(1))]
+  ranges <- do.call(rbind, c(list(mask), own))
 
-  if (length(ranges) == 0) return(NULL)
-  if (length(ranges) == 1) return(ranges[[1]])
+  if (is.null(ranges)) return(NULL)
 
-  do.call(rbind, lapply(ranges, unname))
+  ### A range that starts within the reach of those before it joins them
+  ranges <- ranges[order(ranges[, 1], ranges[, 2]), , drop = FALSE]
+  joins  <- c(FALSE, ranges[-1, 1] <= cummax(ranges[, 2])[-nrow(ranges)])
+
+  merged      <- ranges[!joins, , drop = FALSE]
+  merged[, 2] <- tapply(ranges[, 2], cumsum(!joins), max)
+
+  merged
 
 }
 
