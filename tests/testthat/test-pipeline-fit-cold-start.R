@@ -414,7 +414,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     err <- expect_error(fit(gone), class = "horizons_error_validation")
 
-    expect_true(any(grepl(paste0("missing from analysis: ", outcome), err$findings, fixed = TRUE)))
+    expect_true(any(grepl(paste0("missing from analysis: \"", outcome, "\""), err$findings, fixed = TRUE)))
 
   })
 

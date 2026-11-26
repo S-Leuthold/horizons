@@ -1022,6 +1022,6 @@ test_that("add_response() refuses to return an object its own join broke (#24)",
     class = "horizons_error_validation"
   )
 
-  expect_match(conditionMessage(err), "Columns missing from role_map: SOC", fixed = TRUE)
+  expect_match(conditionMessage(err), "Columns missing from role_map: \"SOC\"", fixed = TRUE)
 
 })

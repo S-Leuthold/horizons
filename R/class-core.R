@@ -627,7 +627,7 @@ validate_horizons_data <- function(x,
   ## (axis_columns()). A masked column is measured and never modelled, but the
   ## transform's windows read it beside its modelled neighbours.
 
-  predictor_vars <- role_map$variable[role_map$role == "predictor"]
+  predictor_vars <- role_map$variable[role_map$role %in% "predictor"]
   axis_vars      <- axis_columns(role_map)
   masked_vars    <- masked_columns(role_map)
 
@@ -754,8 +754,7 @@ validate_horizons_data <- function(x,
 
       if (length(dup_wn) > 0) {
 
-        dup_list <- paste(dup_wn, collapse = ", ")
-        errors   <- c(errors, cli::format_inline("Duplicate wavenumber columns: {dup_list}"))
+        errors <- c(errors, cli::format_inline("Duplicate wavenumber columns: {shown_ids(dup_wn)}"))
 
       } else if (!all(diff(wn_num) < 0)) {
 
@@ -774,19 +773,17 @@ validate_horizons_data <- function(x,
 
   if (length(missing_from_role_map) > 0) {
 
-    col_list <- paste(missing_from_role_map, collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Columns missing from {.field role_map}: {col_list}"))
+    errors <- c(errors, cli::format_inline("Columns missing from {.field role_map}: {shown_ids(missing_from_role_map)}"))
 
   }
 
   # Columns in role_map but not in analysis (non-predictors already handled above)
-  non_predictor_vars     <- role_map$variable[role_map$role != "predictor"]
+  non_predictor_vars     <- role_map$variable[!role_map$role %in% "predictor"]
   missing_from_analysis  <- setdiff(non_predictor_vars, names(analysis))
 
   if (length(missing_from_analysis) > 0) {
 
-    col_list <- paste(missing_from_analysis, collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Non-predictor columns in {.field role_map} missing from {.field analysis}: {col_list}"))
+    errors <- c(errors, cli::format_inline("Non-predictor columns in {.field role_map} missing from {.field analysis}: {shown_ids(missing_from_analysis)}"))
 
   }
 
@@ -800,14 +797,29 @@ validate_horizons_data <- function(x,
 
   if (length(dup_role_map_vars) > 0) {
 
-    col_list <- paste(dup_role_map_vars, collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Column{?s} with more than one {.field role_map} row: {col_list}"))
+    errors <- c(errors, cli::format_inline(
+      "{cli::qty(length(dup_role_map_vars))}Column{?s} with more than one {.field role_map} row: {shown_ids(dup_role_map_vars)}"
+    ))
+
+  }
+
+  ## Rows with no role ---------------------------------------------------------
+  ## A role map edited by hand can hold an NA role; the checks below read the
+  ## roles with %in%, as axis_columns() does, so it is this one finding.
+
+  na_role_vars <- role_map$variable[is.na(role_map$role)]
+
+  if (length(na_role_vars) > 0) {
+
+    errors <- c(errors, cli::format_inline(
+      "{cli::qty(length(na_role_vars))}Column{?s} with an {.code NA} role in {.field role_map}: {shown_ids(na_role_vars)}"
+    ))
 
   }
 
   ## id role checks ------------------------------------------------------------
 
-  n_id_roles <- sum(role_map$role == "id")
+  n_id_roles <- sum(role_map$role %in% "id")
 
   if (n_id_roles == 0) {
 
@@ -823,7 +835,7 @@ validate_horizons_data <- function(x,
     ## validator, the row writers and the joins read it by name. Requiring
     ## the role to sit on sample_id is what makes the two the same column.
 
-    id_var <- role_map$variable[role_map$role == "id"]
+    id_var <- role_map$variable[role_map$role %in% "id"]
 
     if (!isTRUE(id_var == "sample_id")) {
 
@@ -854,7 +866,7 @@ validate_horizons_data <- function(x,
 
   }
 
-  unknown_roles <- setdiff(unique(role_map$role), c(valid_roles, "covariate"))
+  unknown_roles <- setdiff(unique(role_map$role[!is.na(role_map$role)]), c(valid_roles, "covariate"))
 
   if (length(unknown_roles) > 0) {
 
@@ -866,11 +878,11 @@ validate_horizons_data <- function(x,
 
   ## Outcome cardinality checks ------------------------------------------------
 
-  n_outcome_roles <- sum(role_map$role == "outcome")
+  n_outcome_roles <- sum(role_map$role %in% "outcome")
 
   if (n_outcome_roles > 1) {
 
-    outcome_list <- paste(role_map$variable[role_map$role == "outcome"], collapse = ", ")
+    outcome_list <- paste(role_map$variable[role_map$role %in% "outcome"], collapse = ", ")
     errors       <- c(errors, cli::format_inline("Multiple {.field outcome} roles in {.field role_map} (at most one allowed): {outcome_list}"))
 
   }
@@ -1061,40 +1073,52 @@ config_findings <- function(x) {
 
   ## The grid ------------------------------------------------------------------
 
-  ### Every later verb looks a configuration up by its id
-  dup_ids <- unique(configs$config_id[duplicated(configs$config_id)])
+  if (!is.data.frame(configs)) {
 
-  if (length(dup_ids) > 0) {
-
+    ### Its columns are read below; worded as the eval validator words a
+    ### missing grid
     findings <- c(findings, cli::format_inline(
-      "{.field config$configs} has {cli::qty(length(dup_ids))}{?a /}duplicate {.field config_id}{cli::qty(length(dup_ids))}{?s} {.val {dup_ids}}"
+      "{.field config$configs} must be the configuration grid {.fn configure} wrote (a data frame)"
     ))
 
-  }
+  } else {
 
-  vocabularies <- list(model             = VALID_MODELS,
-                       transformation    = VALID_TRANSFORMATIONS,
-                       preprocessing     = VALID_PREPROCESSING,
-                       feature_selection = VALID_FEATURE_SELECTION)
+    ### Every later verb looks a configuration up by its id
+    dup_ids <- unique(configs$config_id[duplicated(configs$config_id)])
 
-  for (column in names(vocabularies)) {
-
-    if (!column %in% names(configs)) {
+    if (length(dup_ids) > 0) {
 
       findings <- c(findings, cli::format_inline(
-        "{.field config$configs} has no {.field {column}} column"
+        "{.field config$configs} has {cli::qty(length(dup_ids))}{?a /}duplicate {.field config_id}{cli::qty(length(dup_ids))}{?s} {.val {dup_ids}}"
       ))
-      next
 
     }
 
-    unknown <- setdiff(unique(as.character(configs[[column]])), vocabularies[[column]])
+    vocabularies <- list(model             = VALID_MODELS,
+                         transformation    = VALID_TRANSFORMATIONS,
+                         preprocessing     = VALID_PREPROCESSING,
+                         feature_selection = VALID_FEATURE_SELECTION)
 
-    if (length(unknown) > 0) {
+    for (column in names(vocabularies)) {
 
-      findings <- c(findings, cli::format_inline(
-        "{.field config$configs} has {cli::qty(length(unknown))}{?an /}unknown {.field {column}} {cli::qty(length(unknown))}value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
-      ))
+      if (!column %in% names(configs)) {
+
+        findings <- c(findings, cli::format_inline(
+          "{.field config$configs} has no {.field {column}} column"
+        ))
+        next
+
+      }
+
+      unknown <- setdiff(unique(as.character(configs[[column]])), vocabularies[[column]])
+
+      if (length(unknown) > 0) {
+
+        findings <- c(findings, cli::format_inline(
+          "{.field config$configs} has {cli::qty(length(unknown))}{?an /}unknown {.field {column}} {cli::qty(length(unknown))}value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
+        ))
+
+      }
 
     }
 
@@ -1115,63 +1139,75 @@ config_findings <- function(x) {
 
   }
 
-  ### configure()'s minimums: folds to split, a grid to start from, and
-  ### either search may be off
-  tuning_minimums <- c(cv_folds = 2, grid_size = 1, bayesian_iter = 0,
-                       final_bayesian_iter = 0)
-  tuning          <- x$config$tuning
-  tuning_ok       <- TRUE
+  tuning <- x$config$tuning
 
-  for (field in names(tuning_minimums)) {
+  if (!is.list(tuning)) {
 
-    value   <- tuning[[field]]
-    minimum <- tuning_minimums[[field]]
+    ### Its settings are read by name below
+    findings <- c(findings, cli::format_inline(
+      "{.field config$tuning} must be the list of tuning settings {.fn configure} wrote, not {.obj_type_friendly {tuning}}"
+    ))
 
-    if (!(is.numeric(value) && length(value) == 1 && is.finite(value) &&
-          value >= minimum && value == round(value))) {
+  } else {
 
-      tuning_ok <- FALSE
-      findings  <- c(findings, cli::format_inline(
-        "{.field config$tuning${field}} must be a whole number of at least {minimum}, not {.code {deparse1(value)}}"
+    ### configure()'s minimums: folds to split, a grid to start from, and
+    ### either search may be off
+    tuning_minimums <- c(cv_folds = 2, grid_size = 1, bayesian_iter = 0,
+                         final_bayesian_iter = 0)
+    tuning_ok       <- TRUE
+
+    for (field in names(tuning_minimums)) {
+
+      value   <- tuning[[field]]
+      minimum <- tuning_minimums[[field]]
+
+      if (!(is.numeric(value) && length(value) == 1 && is.finite(value) &&
+            value >= minimum && value == round(value))) {
+
+        tuning_ok <- FALSE
+        findings  <- c(findings, cli::format_inline(
+          "{.field config$tuning${field}} must be a whole number of at least {minimum}, not {.code {deparse1(value)}}"
+        ))
+
+      }
+
+    }
+
+    ### And configure()'s rule on the three together: evaluate()'s Bayesian
+    ### search and fit()'s on a cold start (bayesian_iter), and fit()'s re-tune
+    ### of a member whose parameters from evaluate() are unusable
+    ### (final_bayesian_iter), start from the grid, and tune_bayes() needs two
+    ### of its points (#209)
+    if (tuning_ok && tuning$grid_size < 2 &&
+        (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
       ))
 
     }
 
-  }
+    ### The weight budget (configure(max_weights = )): a whole number of at
+    ### least 1, or Inf for none (is_valid_max_weights(), configure()'s rule)
+    max_weights <- tuning$max_weights
 
-  ### And configure()'s rule on the three together: evaluate()'s Bayesian
-  ### search and fit()'s on a cold start (bayesian_iter), and fit()'s re-tune
-  ### of a member whose parameters from evaluate() are unusable
-  ### (final_bayesian_iter), start from the grid, and tune_bayes() needs two
-  ### of its points (#209)
-  if (tuning_ok && tuning$grid_size < 2 &&
-      (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
+    if (!is_valid_max_weights(max_weights)) {
 
-    findings <- c(findings, cli::format_inline(
-      "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
-    ))
+      findings <- c(findings, cli::format_inline(
+        "{.field config$tuning$max_weights} must be a whole number of at least 1, or {.code Inf}, not {.code {deparse1(max_weights)}}"
+      ))
 
-  }
+    }
 
-  ### The weight budget (configure(max_weights = )): a whole number of at
-  ### least 1, or Inf for none (is_valid_max_weights(), configure()'s rule)
-  max_weights <- tuning$max_weights
-
-  if (!is_valid_max_weights(max_weights)) {
-
-    findings <- c(findings, cli::format_inline(
-      "{.field config$tuning$max_weights} must be a whole number of at least 1, or {.code Inf}, not {.code {deparse1(max_weights)}}"
-    ))
+    ### The ranges the models are searched over, which configure() writes:
+    ### their shape (tune_range_findings()). Their types need the models'
+    ### engines, which evaluate() and fit() check at their doors before typing
+    ### them (check_range_types()), so validating an object loads no engine
+    range_findings <- tune_range_findings(tuning$ranges, arg = "config$tuning$ranges",
+                                          check_names = FALSE)
+    findings       <- c(findings, sub("\\.$", "", range_findings))
 
   }
-
-  ### The ranges the models are searched over, which configure() writes:
-  ### their shape (tune_range_findings()). Their types need the models'
-  ### engines, which evaluate() and fit() check at their doors before typing
-  ### them (check_range_types()), so validating an object loads no engine
-  range_findings <- tune_range_findings(tuning$ranges, arg = "config$tuning$ranges",
-                                        check_names = FALSE)
-  findings       <- c(findings, sub("\\.$", "", range_findings))
 
   recipe        <- x$config$recipe
   sg_window     <- if (is.list(recipe)) recipe$sg_window
@@ -3051,7 +3087,7 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
       ### Named by the covariance's form, since each form needs other fields
       bad_form <- vapply(ad[bad_shape], function(b) {
-        if (rlang::is_string(b$form) && b$form %in% c("full", "low_rank")) b$form else "none"
+        if (is.list(b) && rlang::is_string(b$form) && b$form %in% c("full", "low_rank")) b$form else "none"
       }, character(1))
 
       needs <- c(
