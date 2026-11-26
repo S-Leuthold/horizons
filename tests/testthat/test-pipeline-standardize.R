@@ -123,6 +123,25 @@ test_that("standardize() validates trim parameter", {
 })
 
 
+test_that("standardize()'s trim and average()'s qc_range are refused by one rule, in one wording", {
+
+  hd <- create_test_spectra()
+
+  for (bad in list(600, c("600", "4000"), c(600, Inf), c(4000, 600), c(600, 600))) {
+
+    trim_err <- expect_error(standardize(hd, trim = bad), class = "horizons_error_input")
+    qc_err   <- expect_error(average(hd, qc_range = bad, verbose = FALSE), class = "horizons_error_input")
+
+    expect_identical(sub("`qc_range`", "`trim`", conditionMessage(qc_err), fixed = TRUE),
+                     conditionMessage(trim_err), label = deparse(bad))
+    expect_identical(rlang::call_name(trim_err$call), "standardize")
+    expect_identical(rlang::call_name(qc_err$call), "average")
+
+  }
+
+})
+
+
 test_that("standardize() validates logical parameters", {
 
   hd <- create_test_spectra()

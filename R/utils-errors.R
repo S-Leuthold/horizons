@@ -122,6 +122,49 @@ check_arg <- function(check,
 
 }
 
+#' Check a user's wavenumber range
+#'
+#' @description
+#' The one rule for an argument that names a range of the axis,
+#' `standardize(trim = )` and `average(qc_range = )`: `NULL`, or two finite
+#' wavenumbers with the lower first.
+#'
+#' @param range The value to check.
+#' @param arg The argument's name, as the user wrote it.
+#' @param call The frame the error reports, the caller's by default.
+#'
+#' @return `NULL` invisibly when `range` passes; otherwise an error of class
+#'   `horizons_error_input`.
+#' @keywords internal
+#' @noRd
+check_wn_range <- function(range,
+                           arg  = rlang::caller_arg(range),
+                           call = rlang::caller_env()) {
+
+  if (is.null(range)) return(invisible(NULL))
+
+  if (!is.numeric(range) || length(range) != 2) {
+
+    abort_horizons(
+      "{.arg {arg}} must be numeric(2) or {.code NULL}, not {.obj_type_friendly {range}}.",
+      kind = "input", call = call
+    )
+
+  }
+
+  if (!all(is.finite(range)) || range[1] >= range[2]) {
+
+    abort_horizons(c(
+      "{.arg {arg}} must be two finite wavenumbers, the lower first.",
+      "x" = "Got {range[1]} and {range[2]}."
+    ), kind = "input", call = call)
+
+  }
+
+  invisible(NULL)
+
+}
+
 #' Refuse a column name horizons reserves
 #'
 #' @description

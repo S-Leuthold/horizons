@@ -268,23 +268,7 @@ average <- function(x,
   check_arg(rlang::check_bool, quality_check)
   check_arg(rlang::check_number_decimal, correlation_threshold, min = 0, max = 1)
 
-  if (!is.null(qc_range) && (!is.numeric(qc_range) || length(qc_range) != 2)) {
-
-    abort_horizons(
-      "{.arg qc_range} must be numeric(2) or {.code NULL}, not {.obj_type_friendly {qc_range}}.",
-      kind = "input"
-    )
-
-  }
-
-  if (!is.null(qc_range) && (!all(is.finite(qc_range)) || qc_range[1] >= qc_range[2])) {
-
-    abort_horizons(c(
-      "{.arg qc_range} must be two finite wavenumbers, the lower first.",
-      "x" = "Got {qc_range[1]} and {qc_range[2]}."
-    ), kind = "input")
-
-  }
+  check_wn_range(qc_range)
 
   outlier_modes <- c("warn", "drop", "keep_best")
 

@@ -1185,32 +1185,7 @@ standardize <- function(x,
 
   }
 
-  if (!is.null(trim) && (!is.numeric(trim) || length(trim) != 2)) {
-
-    abort_horizons(
-      "{.arg trim} must be numeric(2) or {.code NULL}, not {.obj_type_friendly {trim}}.",
-      kind = "input"
-    )
-
-  }
-
-  if (!is.null(trim) && !all(is.finite(trim))) {
-
-    abort_horizons(c(
-      "{.arg trim} must be two finite wavenumbers.",
-      "x" = "Got {trim[1]} and {trim[2]}."
-    ), kind = "input")
-
-  }
-
-  if (!is.null(trim) && trim[1] >= trim[2]) {
-
-    abort_horizons(c(
-      "{.arg trim} range must be (min, max) with min < max.",
-      "x" = "Got {trim[1]} and {trim[2]}."
-    ), kind = "input")
-
-  }
+  check_wn_range(trim)
 
   check_arg(rlang::check_bool, remove_water)
   check_arg(rlang::check_bool, baseline)
