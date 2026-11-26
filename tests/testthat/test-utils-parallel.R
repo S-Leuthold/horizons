@@ -1391,6 +1391,29 @@ describe("resume_hint()", {
 
 })
 
+describe("abort_no_daemons()", {
+
+  it("says what evaluate() and fit() spend a daemon's tasks on: the door's check and each isolated search", {
+
+    for (verb in c("evaluate", "fit")) {
+
+      err <- expect_error(abort_no_daemons(NULL, verb = verb), class = "horizons_error_no_daemons")
+      msg <- gsub("\\s+", " ", conditionMessage(err))
+      expect_match(msg, paste0("`", verb, "()` spends one task on each daemon checking it before the run, ",
+                               "and, on the resamples axis, one more after each Bayesian search of a model ",
+                               "whose fits are isolated."),
+                   fixed = TRUE, info = verb)
+
+    }
+
+    ## ensemble() checks no daemon at its door
+    err <- expect_error(abort_no_daemons(NULL, verb = "ensemble"), class = "horizons_error_no_daemons")
+    expect_no_match(conditionMessage(err), "spends one task", fixed = TRUE)
+
+  })
+
+})
+
 ## =========================================================================
 ## Thread pinning
 ## =========================================================================
