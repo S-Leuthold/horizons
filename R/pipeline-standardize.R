@@ -1065,7 +1065,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' values rather than jumping the band, SNV takes its mean and spread from
 #' the unmasked bands, and the masked columns are dropped after it. Nothing
 #' else reads them: no model, feature selection, `validate()` check,
-#' applicability domain or similarity space of [select_training()]. They
+#' applicability domain, or [select_training()]'s similarity space or units
+#' check. They
 #' count in no `n_predictors`, and [predict()] needs them in `new_data`. A
 #' re-run with `force = TRUE` masks them or not as its own `remove_water`
 #' says. Data from an earlier version, whose bands were deleted, has a gap at

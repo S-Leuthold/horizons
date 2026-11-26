@@ -3283,6 +3283,24 @@ describe("select_training() on targets and libraries with masked bands", {
 
     expect_identical(again$selection$membership, out$selection$membership)
     expect_identical(again$selection$target_distances, out$selection$target_distances)
+    expect_identical(again$selection$units, out$selection$units)
+
+  })
+
+  it("checks the photometric units on the columns neither side masks, the same columns on both", {
+
+    ## Targets on the library's own grid, searched as they are, the low band
+    ## masked on them and the high band on the library
+    on_grid <- make_axis_object(axis_wavenumbers(fx$pool), prefix = "T")
+    on_grid <- mask_axis_columns(on_grid, band_of(on_grid, 1580, 1720))
+
+    drawn   <- suppressWarnings(select_training(on_grid, pool, k = 5))
+    neither <- setdiff(axis_columns(pool$data$role_map),
+                       c(masked_columns(pool$data$role_map), masked_columns(on_grid$data$role_map)))
+
+    expect_identical(drawn$selection$units,
+                     check_photometric_units(pool$data$analysis[neither],
+                                             as.matrix(on_grid$data$analysis[neither])))
 
   })
 

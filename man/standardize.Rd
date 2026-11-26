@@ -149,7 +149,8 @@ runs reads them, so a Savitzky-Golay window beside a band reads its real
 values rather than jumping the band, SNV takes its mean and spread from
 the unmasked bands, and the masked columns are dropped after it. Nothing
 else reads them: no model, feature selection, \code{validate()} check,
-applicability domain or similarity space of \code{\link[=select_training]{select_training()}}. They
+applicability domain, or \code{\link[=select_training]{select_training()}}'s similarity space or units
+check. They
 count in no \code{n_predictors}, and \code{\link[=predict]{predict()}} needs them in \code{new_data}. A
 re-run with \code{force = TRUE} masks them or not as its own \code{remove_water}
 says. Data from an earlier version, whose bands were deleted, has a gap at

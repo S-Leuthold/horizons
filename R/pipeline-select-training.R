@@ -1237,10 +1237,14 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## Units, before SNV erases the evidence ----------------------------------
 
   ## Read from the pool's own columns, a column at a time: the library's
-  ## values are never copied whole for two numbers.
+  ## values are never copied whole for two numbers. The median and spread are
+  ## statistics, so they read the same search columns on both sides: those
+  ## neither side masks (space_mask() of the two objects alone).
 
-  units <- check_photometric_units(pool$data$analysis[pool_vars[sa$pool_cols]], sa$matrix,
-                                   pool_rows = if (any(pool_flagged)) !pool_flagged)
+  unmasked <- !in_ranges(sa$wavenumbers, space_mask(NULL, x, pool))
+  units    <- check_photometric_units(pool$data$analysis[pool_vars[sa$pool_cols][unmasked]],
+                                      sa$matrix[, unmasked, drop = FALSE],
+                                      pool_rows = if (any(pool_flagged)) !pool_flagged)
 
   if (units$mismatch) {
 
@@ -2464,9 +2468,10 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
 #' `median_iqr()`, so a library's spectra are never copied whole.
 #'
 #' @param pool_m [Matrix or data frame.] Pool spectra on the search grid,
-#'   raw: a matrix, or the pool's spectral columns as a data frame.
-#' @param target_m [Matrix or data frame.] Target spectra on the same grid,
-#'   raw.
+#'   raw: a matrix, or the pool's spectral columns as a data frame. The
+#'   columns neither side masks, as `select_training()` passes them.
+#' @param target_m [Matrix or data frame.] Target spectra on the same grid
+#'   and columns, raw.
 #' @param ratio [Numeric.] Fold difference that counts as a mismatch.
 #'   Default: `2`.
 #' @param pool_rows [Logical or NULL.] The pool rows to count; `NULL` counts
