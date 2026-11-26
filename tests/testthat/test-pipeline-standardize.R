@@ -946,6 +946,25 @@ test_that("an axis with the water bands cut upstream is not spline-filled, and s
 })
 
 
+test_that("the coverage warning names the first five gaps and counts the rest, as the refusals name gaps", {
+
+  ## Seven 32 cm-1 holes, as select_training()'s axis check is tested on
+  wn     <- seq(4000, 600, by = -2)
+  starts <- seq(3980, by = -50, length.out = 7)
+  seven  <- wn[!wn %in% unlist(lapply(starts, function(s) seq(s, s - 28, by = -2)))]
+
+  res <- with_warnings(no_output(standardize(make_axis_spectra(seven), resample = 2)))
+
+  gap_warnings <- Filter(function(w) inherits(w, "horizons_warning_coverage"), res$warnings)
+  expect_length(gap_warnings, 1L)
+  msg <- gsub("\\s+", " ", conditionMessage(gap_warnings[[1]]))
+  expect_match(msg, paste0("7 gaps in it: 3650 to 3682, 3700 to 3732, 3750 to 3782, 3800 to 3832, ",
+                           "3850 to 3882 cm-1 and 2 more."), fixed = TRUE)
+  expect_no_match(msg, "3900 to 3932", fixed = TRUE)
+
+})
+
+
 test_that("force = TRUE on an axis with the water bands deleted leaves the bands empty", {
 
   cut <- water_removed_library()

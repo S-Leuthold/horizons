@@ -1532,10 +1532,8 @@ standardize <- function(x,
 
       if (any(in_gap)) {
 
-        gap_text <- sprintf("%g to %g", gaps[, "low"], gaps[, "high"])
-
         log_warning(collector, "coverage", c(
-          "The data's axis has {nrow(gaps)} gap{?s} in it: {paste(gap_text, collapse = ', ')} cm-1.",
+          "The data's axis has {nrow(gaps)} gap{?s} in it: {shown_gaps(gaps)}.",
           "i" = "Dropped {sum(in_gap)} grid point{?s} that fall in a gap rather than interpolate across it; each side of a gap is resampled on its own."
         ))
 
