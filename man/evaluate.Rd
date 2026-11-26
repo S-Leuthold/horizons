@@ -25,12 +25,15 @@ are reported but never used for selection, so they remain honest
 held-out estimates. Default \code{"rpd"}.}
 
 \item{prune}{Logical. If TRUE, skip Bayesian optimization for configs
-whose grid-search RPD falls below \code{prune_threshold}. When \code{configure()}
-set \code{bayesian_iter = 0} there is nothing to skip, so no config is
-pruned. Either way, whether each config fell below the threshold is
-recorded in \code{evaluation$results$below_prune_threshold} (with the
-threshold in \code{prune_threshold}), and \code{fit()} warns when every member it
-fits did. Default TRUE.}
+whose grid-search RPD falls below \code{prune_threshold}. When there is no
+Bayesian stage there is nothing to skip, so the config is not pruned:
+when \code{configure()} set \code{bayesian_iter = 0}, and when the grid holds the
+model's whole search space (always for plsr, whose components share one
+fit, and for any small space of whole numbers). Either way, whether each
+config fell below the threshold is recorded in
+\code{evaluation$results$below_prune_threshold} (with the threshold in
+\code{prune_threshold}), and \code{fit()} warns when every member it fits did.
+Default TRUE.}
 
 \item{prune_threshold}{Numeric. RPD threshold for pruning. Configs with
 grid-search RPD below this value skip Bayesian optimization but still
@@ -127,8 +130,9 @@ data from it (see "Parallelism"). A resumed row must have been scored on
 this run's training data (the outcome, the sample ids, which columns hold
 the \code{id}, \code{outcome} and \code{predictor} roles, and the outcome and predictor
 values) and tuned with this run's settings
-(\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, the tuning ranges
-\code{configure()} recorded, \code{prune}, \code{prune_threshold} when pruning, \code{seed},
+(\code{cv_folds}, \code{grid_size}, \code{bayesian_iter}, the tuning ranges and the
+weight budget \code{max_weights} \code{configure()} recorded, \code{prune},
+\code{prune_threshold} when pruning, \code{seed},
 \code{control_horizons(no_improve = )}, and \code{configure()}'s \code{sg_window},
 \code{pca_threshold} and \code{outcome_range}), this run's response trim
 (\code{response_threshold}, \code{NA} when none was requested) and, when the grid
@@ -301,7 +305,7 @@ so a thread count set in the session with \code{options()} or \code{RhpcBLASctl}
 does not reach them; each configuration's task on the configs axis, and
 each fold preparation's on either axis, sets data.table's and ranger's
 threads to one itself, and BLAS's and OpenMP's through \code{RhpcBLASctl} when
-it is installed, which it puts back as it ends (see "Inner daemons"
+it is installed, and puts all four back as it ends (see "Inner daemons"
 above). On either axis the daemons load the
 \emph{installed} package, so a parallel run refuses, before anything is drawn,
 under \code{devtools::load_all()}. Every daemon connected is then asked, one

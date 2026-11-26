@@ -2652,17 +2652,17 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
-#'    the `models` slot is present (see [contract_keys()]), 16 in all:
+#'    the `models` slot is present (see [contract_keys()]), 18 in all:
 #'    `workflows`, `n_models`, `best_config`, `rank_metric`,
 #'    `predictor_schema`, `response_bound`, `cv_predictions`, `results`,
-#'    `uq`, `ad`, `selection_present`, `seed`, `seed_rule`, `control`,
-#'    `timestamp`, `runtime_secs`. [fit()] writes every one, so a fit made
-#'    before the seed was recorded is refused. Extra keys are tolerated. The
-#'    run-provenance keys `workers` and `parallelize_over` are checked as
-#'    `evaluation`'s are.
+#'    `uq`, `ad`, `selection_present`, `seed`, `seed_rule`, `workers`,
+#'    `parallelize_over`, `control`, `timestamp`, `runtime_secs`. [fit()]
+#'    writes every one, so a fit made before the seed was recorded is
+#'    refused. Extra keys are tolerated. The run-provenance keys `workers`
+#'    and `parallelize_over` are checked as `evaluation`'s are.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
-#' 4. **rank_metric**: a length-1 character.
+#' 4. **rank_metric**: a length-1 character naming one of the six metrics.
 #' 5. **predictor_schema**: a non-empty character vector (the training-axis
 #'    columns the predict() schema gate reads).
 #' 6. **response_bound** (the winsorization guardrail): a single finite

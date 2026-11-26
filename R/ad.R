@@ -143,9 +143,14 @@ compute_ad_metadata <- function(feature_matrix) {
 #' @description
 #' Computes the quartile marks and out-of-domain (OOD) cutoff for AD binning
 #' from a HELD-OUT calibration matrix — samples disjoint from those used to
-#' estimate `ad_metadata`. The OOD cutoff uses the conformal
-#' `ceil(level * (n_calib + 1))` order statistic so fresh in-distribution
-#' samples are flagged at approximately the nominal `1 - level` rate.
+#' estimate `ad_metadata`. The OOD cutoff is the conformal
+#' `k = min(ceiling(level * (n_calib + 1)), n_calib)`-th smallest calibration
+#' distance, the order statistic capped at the largest, so a fresh
+#' in-distribution sample is flagged with probability about
+#' `(n_calib + 1 - k) / (n_calib + 1)`: at most `1 - level` once `n_calib`
+#' reaches `level / (1 - level)` (99 rows at the default 0.99). Below that
+#' the cap binds, the cutoff is the largest calibration distance, and the
+#' rate is `1 / (n_calib + 1)`, above nominal: about 3% at 30 rows.
 #'
 #' @details
 #' Thresholding on the training rows' own distances is self-referential and

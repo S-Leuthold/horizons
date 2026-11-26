@@ -18,7 +18,7 @@
 #' * **RPD** (ratio of performance to deviation): the standard deviation of
 #'   the observed values divided by the RMSE of prediction. Higher is better.
 #' * **RRMSE** (relative root mean squared error): the RMSE expressed relative
-#'   to the mean of the observed values. Lower is better.
+#'   to the mean of the observed values, in percent. Lower is better.
 #' * **CCC** (Lin's concordance correlation coefficient): agreement between
 #'   observed and predicted values, combining precision and accuracy. Ranges
 #'   from -1 to 1, with 1 indicating perfect concordance.

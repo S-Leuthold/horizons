@@ -16,12 +16,15 @@
 #'   are reported but never used for selection, so they remain honest
 #'   held-out estimates. Default `"rpd"`.
 #' @param prune Logical. If TRUE, skip Bayesian optimization for configs
-#'   whose grid-search RPD falls below `prune_threshold`. When `configure()`
-#'   set `bayesian_iter = 0` there is nothing to skip, so no config is
-#'   pruned. Either way, whether each config fell below the threshold is
-#'   recorded in `evaluation$results$below_prune_threshold` (with the
-#'   threshold in `prune_threshold`), and `fit()` warns when every member it
-#'   fits did. Default TRUE.
+#'   whose grid-search RPD falls below `prune_threshold`. When there is no
+#'   Bayesian stage there is nothing to skip, so the config is not pruned:
+#'   when `configure()` set `bayesian_iter = 0`, and when the grid holds the
+#'   model's whole search space (always for plsr, whose components share one
+#'   fit, and for any small space of whole numbers). Either way, whether each
+#'   config fell below the threshold is recorded in
+#'   `evaluation$results$below_prune_threshold` (with the threshold in
+#'   `prune_threshold`), and `fit()` warns when every member it fits did.
+#'   Default TRUE.
 #' @param prune_threshold Numeric. RPD threshold for pruning. Configs with
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
@@ -71,8 +74,9 @@
 #'   this run's training data (the outcome, the sample ids, which columns hold
 #'   the `id`, `outcome` and `predictor` roles, and the outcome and predictor
 #'   values) and tuned with this run's settings
-#'   (`cv_folds`, `grid_size`, `bayesian_iter`, the tuning ranges
-#'   `configure()` recorded, `prune`, `prune_threshold` when pruning, `seed`,
+#'   (`cv_folds`, `grid_size`, `bayesian_iter`, the tuning ranges and the
+#'   weight budget `max_weights` `configure()` recorded, `prune`,
+#'   `prune_threshold` when pruning, `seed`,
 #'   `control_horizons(no_improve = )`, and `configure()`'s `sg_window`,
 #'   `pca_threshold` and `outcome_range`), this run's response trim
 #'   (`response_threshold`, `NA` when none was requested) and, when the grid
@@ -244,7 +248,7 @@
 #' does not reach them; each configuration's task on the configs axis, and
 #' each fold preparation's on either axis, sets data.table's and ranger's
 #' threads to one itself, and BLAS's and OpenMP's through `RhpcBLASctl` when
-#' it is installed, which it puts back as it ends (see "Inner daemons"
+#' it is installed, and puts all four back as it ends (see "Inner daemons"
 #' above). On either axis the daemons load the
 #' *installed* package, so a parallel run refuses, before anything is drawn,
 #' under `devtools::load_all()`. Every daemon connected is then asked, one

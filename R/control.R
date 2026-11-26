@@ -269,8 +269,9 @@ CONTROL_FIELDS <- list(
 #'   members in place of the configurations; `fit()` checkpoints nothing, so
 #'   it needs no `output_dir`.
 #' @param verbose `logical(1)`. Print the verb's progress tree. Default
-#'   `getOption("horizons.verbose", TRUE)`, so a script can quiet the four
-#'   verbs, and [average()], at once. All four verbs.
+#'   `getOption("horizons.verbose", TRUE)`, which is also the default of
+#'   every other verb's `verbose`, so a script can quiet every verb at once.
+#'   All four verbs.
 #' @param output_dir `character(1)`. A directory where [evaluate()] writes
 #'   each configuration's result as it finishes, and from which it resumes;
 #'   it keeps its fold preparations there too until the run completes. On

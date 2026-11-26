@@ -43,8 +43,9 @@ members in place of the configurations; \code{fit()} checkpoints nothing, so
 it needs no \code{output_dir}.}
 
 \item{verbose}{\code{logical(1)}. Print the verb's progress tree. Default
-\code{getOption("horizons.verbose", TRUE)}, so a script can quiet the four
-verbs, and \code{\link[=average]{average()}}, at once. All four verbs.}
+\code{getOption("horizons.verbose", TRUE)}, which is also the default of
+every other verb's \code{verbose}, so a script can quiet every verb at once.
+All four verbs.}
 
 \item{output_dir}{\code{character(1)}. A directory where \code{\link[=evaluate]{evaluate()}} writes
 each configuration's result as it finishes, and from which it resumes;

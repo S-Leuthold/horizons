@@ -13,7 +13,7 @@
 #'   preps would be treated as a wavenumber. A selector matching nothing
 #'   aborts at `prep()`.
 #' @param outcome Character. Name of the outcome variable to use for model fitting.
-#' @param role Character. Role for retained variables. Default is `"predictor"`.
+#' @param role Not used by this step since no new variables are created.
 #' @param trained Logical. Required by `recipes`; indicates if the step has been prepped.
 #' @param skip Logical. Should this step be skipped during `bake()`? Default is `FALSE`.
 #' @param seed A whole number, or `NULL`. The seed CARS's Monte Carlo samples and weighted draws are
@@ -65,9 +65,10 @@
 #' each band is its own representative), the representatives
 #' (`n_representatives`), each representative's cluster (`clusters`, a list
 #' of the bands it stands for, named by the representative), the `path` (a
-#' tibble, one row per iteration: its `representatives`, the bands their
-#' clusters hold `n_bands`, `rmsecv`, its standard error across the folds
-#' `se`, and the component count `ncomp`; iteration `i`'s bands are
+#' tibble, one row per iteration: its number `iteration`, its
+#' `representatives`, the bands their clusters hold `n_bands`, `rmsecv`, its
+#' standard error across the folds `se`, and the component count `ncomp`;
+#' iteration `i`'s bands are
 #' `unlist(cars$clusters[cars$path$representatives[[i]]])`), the iteration
 #' chosen, the bands kept, `retained_all` and `skipped`. `retained_all` is
 #' `TRUE` when the first iteration's set, every band, scored lowest: CARS's

@@ -27,7 +27,7 @@ at \code{prep()}.}
 
 \item{outcome}{Character. Name of the outcome variable to use for correlation scoring.}
 
-\item{role}{Character. Role for retained variables. Default is \code{"predictor"}.}
+\item{role}{Not used by this step since no new variables are created.}
 
 \item{trained}{Logical. Required by \code{recipes}; indicates if the step has been prepped.}
 
@@ -41,14 +41,14 @@ A \code{step_select_correlation} object that can be added to a recipe.
 \description{
 Applies sliding-window Spearman correlation to identify predictive spectral regions.
 Retains all wavenumbers that appear in windows where the mean absolute Spearman
-correlation with the outcome exceeds an adaptive threshold (mean + 1 standard deviation).
+correlation with the outcome reaches an adaptive threshold (mean + 1 standard deviation).
 Designed for use with high-resolution MIR spectra in wide format (columns = wavenumbers).
 }
 \details{
 The selection algorithm slides a 3-wavenumber window (6 cm-1 at 2 cm-1 resolution) across
 the spectrum, computes the mean absolute Spearman correlation between each window and
-the outcome, and retains all wavenumbers from windows where the score exceeds
-\verb{mean + 1 SD}. Duplicate selections are collapsed. If no window meets the
+the outcome, and retains all wavenumbers from windows where the score is at
+least \verb{mean + 1 SD}. Duplicate selections are collapsed. If no window meets the
 threshold, every band it scored is retained, the trained step records
 \code{retained_all = TRUE}, and the step warns with class
 \code{horizons_warning_substitution} (#105).

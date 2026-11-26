@@ -13,7 +13,7 @@
 #'   step preps would be treated as a wavenumber. A selector matching nothing
 #'   aborts at `prep()`.
 #' @param outcome Character. Name of the outcome variable to use for model fitting.
-#' @param role Character. Role for retained variables. Default is `"predictor"`.
+#' @param role Not used by this step since no new variables are created.
 #' @param trained Logical. Required by `recipes`; indicates if the step has been prepped.
 #' @param skip Logical. Should this step be skipped during `bake()`? Default is `FALSE`.
 #' @param seed A whole number, or `NULL`. The seed Boruta's shadow features and forests are

@@ -62,8 +62,10 @@
 #' @param prune Logical. If TRUE, record whether the best grid-search RPD
 #'   falls below `prune_threshold` (`below_prune_threshold`), and when it
 #'   does, skip Bayesian optimization and label the config `"pruned"`. With
-#'   `bayesian_iter = 0` there is nothing to skip, so the config is labelled
-#'   `"success"` and only `below_prune_threshold` carries the reading.
+#'   no Bayesian stage (`bayesian_iter = 0`, or a grid that holds the whole
+#'   space, `exhaustive_grid()`) there is nothing to skip, so the config is
+#'   labelled `"success"` and only `below_prune_threshold` carries the
+#'   reading.
 #' @param prune_threshold Numeric. RPD threshold for pruning, on the original
 #'   response scale (tuning metrics are scored there via
 #'   `tuning_metric_set()`). Only used when `prune = TRUE`. Default 1.0, as

@@ -28,7 +28,7 @@ aborts at \code{prep()}.}
 
 \item{outcome}{Character. Name of the outcome variable to use for model fitting.}
 
-\item{role}{Character. Role for retained variables. Default is \code{"predictor"}.}
+\item{role}{Not used by this step since no new variables are created.}
 
 \item{trained}{Logical. Required by \code{recipes}; indicates if the step has been prepped.}
 
@@ -90,9 +90,10 @@ whether they were clustered (\code{clustered}, \code{FALSE} with fewer than 150,
 each band is its own representative), the representatives
 (\code{n_representatives}), each representative's cluster (\code{clusters}, a list
 of the bands it stands for, named by the representative), the \code{path} (a
-tibble, one row per iteration: its \code{representatives}, the bands their
-clusters hold \code{n_bands}, \code{rmsecv}, its standard error across the folds
-\code{se}, and the component count \code{ncomp}; iteration \code{i}'s bands are
+tibble, one row per iteration: its number \code{iteration}, its
+\code{representatives}, the bands their clusters hold \code{n_bands}, \code{rmsecv}, its
+standard error across the folds \code{se}, and the component count \code{ncomp};
+iteration \code{i}'s bands are
 \code{unlist(cars$clusters[cars$path$representatives[[i]]])}), the iteration
 chosen, the bands kept, \code{retained_all} and \code{skipped}. \code{retained_all} is
 \code{TRUE} when the first iteration's set, every band, scored lowest: CARS's
