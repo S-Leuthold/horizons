@@ -389,11 +389,10 @@ describe("predict.horizons_fit() - schema gate", {
   it("still skips the axis gate when predictor_schema is NULL", {
 
     obj <- list(models = list(predictor_schema = NULL))
+    new <- tibble::tibble(sample_id = "A", nonsense = 1)
 
     ## Nothing on the training axis at all, but no schema to check it against.
-    expect_true(check_predictor_schema(obj,
-                                       tibble::tibble(sample_id = "A",
-                                                      nonsense  = 1)))
+    expect_true(check_predictor_schema(obj, new, new))
 
   })
 
@@ -468,6 +467,20 @@ describe("predict.horizons_fit() - a model trained with masked columns", {
                                      role_map  = tibble::tibble(variable = c(paste0("wn_", seq(4000, by = -2, length.out = 10)), "sample_id"),
                                                                 role     = c(rep("predictor", 10), "id"))),
                    "wn_3992")),
+                 "masks 1 column the model was trained on", fixed = TRUE, class = "horizons_error_input")
+
+  })
+
+  it("refuses it for an ensemble too, whose door is the same check", {
+
+    ens  <- ens_built("weighted", compute_uq = FALSE)
+    wn   <- ens$models$predictor_schema
+    rows <- ens_test_set()[, c("sample_id", wn)]
+    hd   <- new_horizons_data(analysis = rows,
+                              role_map = tibble::tibble(variable = c("sample_id", wn),
+                                                        role     = c("id", rep("predictor", length(wn)))))
+
+    expect_error(predict(ens, mask_axis_columns(hd, wn[10])),
                  "masks 1 column the model was trained on", fixed = TRUE, class = "horizons_error_input")
 
   })

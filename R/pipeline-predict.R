@@ -745,13 +745,14 @@ log_interval_quality <- function(collector, object, returned) {
 #' @param object A `horizons_fit` carrying `models$predictor_schema`.
 #' @param new_spectra Tibble from [resolve_new_data()].
 #' @param new_data `new_data` as `predict()` was given it, whose own mask is
-#'   read when it is a `horizons_data`.
+#'   read when it is a `horizons_data`. Required, with no default, so a
+#'   caller cannot leave out the second refusal by leaving it out.
 #' @param call The frame the error reports: `predict()`'s.
 #' @return Invisibly TRUE; aborts with class `horizons_error_input` on a
 #'   mismatch.
 #' @keywords internal
 #' @noRd
-check_predictor_schema <- function(object, new_spectra, new_data = NULL, call = rlang::caller_env()) {
+check_predictor_schema <- function(object, new_spectra, new_data, call = rlang::caller_env()) {
 
   ## fit() stored the training-axis predictor columns, which the fit validator
   ## at predict()'s door requires; check against them directly (no recipe

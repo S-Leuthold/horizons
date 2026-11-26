@@ -1839,4 +1839,16 @@ test_that("validate() reads no masked column: its near-zero-variance count and o
   expect_identical(wild$validation$checks, clean$validation$checks)
   expect_identical(wild$validation$outliers, clean$validation$outliers)
 
+  ## The masked columns held at one value in every row: zero variance, which
+  ## the near-zero-variance count would take if it read them
+  flat <- hd
+  flat$data$analysis[, masked_cols] <- 0.3
+
+  still <- quiet_validate(flat)
+  p007  <- function(v) v$validation$checks$value[v$validation$checks$check_id == "P007"]
+
+  expect_identical(p007(clean), "0")
+  expect_identical(p007(still), "0")
+  expect_identical(still$validation$checks, clean$validation$checks)
+
 })
