@@ -936,18 +936,25 @@ validate_horizons_data <- function(x,
 #' door of every verb that validates there, and [modelling_rows()] for a
 #' table that reaches it empty. An input error, since the object is
 #' well-formed and the rows went missing upstream; the remedy is the step
-#' that emptied it.
+#' that emptied it. A verb that takes two objects raises it again naming the
+#' argument that had none ([validate_select_input()]).
 #'
+#' @param arg,what [Character(1) or `NULL`.] The argument that had no rows
+#'   and what it is (`"library"`, `"the pool"`), for a verb that takes more
+#'   than one object; `NULL` says "The data".
+#' @param parent The condition this one is raised again from, or `NULL`.
 #' @param call The frame the refusal reports: the verb's.
 #' @return Does not return; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
-abort_no_rows <- function(call = rlang::caller_env()) {
+abort_no_rows <- function(arg = NULL, what = NULL, parent = NULL, call = rlang::caller_env()) {
+
+  subject <- if (is.null(arg)) "The data" else "{.arg {arg}}, {what},"
 
   abort_horizons(c(
-    "The data has no rows.",
+    paste(subject, "has no rows."),
     "i" = "Check the filter, join or source that left it empty."
-  ), kind = "input", call = call)
+  ), kind = "input", parent = parent, call = call)
 
 }
 

@@ -388,6 +388,29 @@ test_that("a cached library that no longer meets the object contract is built ag
 
 })
 
+test_that("a cached library with no rows is built again, as one that fails the contract is, not refused", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  first <- suppressMessages(resolve_source("mini", verbose = FALSE))
+  path  <- library_cache_path(entry)
+
+  lib <- qs2::qs_read(path)
+  lib$pool$data$analysis <- lib$pool$data$analysis[0, ]
+  lib$pool$data$n_rows   <- 0L
+  qs2::qs_save(lib, path)
+
+  collector <- log_open("select_training")
+  expect_no_error(rebuilt <- suppressMessages(resolve_source("mini", verbose = FALSE, collector = collector)))
+
+  expect_identical(nrow(rebuilt$pool$data$analysis), nrow(first$pool$data$analysis))
+  expect_identical(nrow(qs2::qs_read(path)$pool$data$analysis), nrow(first$pool$data$analysis))
+  expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
+
+})
+
 test_that("a cached library from another build is built again, after asking why, with a note (#154)", {
 
   entry <- make_mini_ossl(withr::local_tempdir())

@@ -182,15 +182,15 @@ without_rows <- function(obj) {
 
 }
 
-## The refusal, from the verb named; `call = FALSE` leaves the call unchecked
-expect_no_rows <- function(expr, verb, call = TRUE) {
+## The refusal, from the verb named, its first line naming `what` had no rows
+expect_no_rows <- function(expr, verb, what = "The data") {
 
   err <- expect_error(expr, class = "horizons_error_input", info = verb)
   msg <- conditionMessage(err)
 
-  expect_match(msg, "The data has no rows.", fixed = TRUE, info = verb)
+  expect_match(msg, paste(what, "has no rows."), fixed = TRUE, info = verb)
   expect_match(msg, "Check the filter, join or source that left it empty.", fixed = TRUE, info = verb)
-  if (call) expect_identical(rlang::call_name(err$call), verb, info = verb)
+  expect_identical(rlang::call_name(err$call), verb, info = verb)
 
 }
 
@@ -243,16 +243,17 @@ test_that("every verb that validates at its door refuses zero rows the same way,
   expect_no_rows(ensemble(fitted), "ensemble")
 
   ## select_training(): no targets, refused before the library resolves, and
-  ## no library rows. Its input check validates each object without passing
-  ## the verb's call on, so the call is not checked here.
+  ## no library rows, each naming the argument that had none
   targets <- make_axis_object(seq(4000, 600, by = -8), n = 6L)
 
   with_mocked_bindings(
-    expect_no_rows(select_training(without_rows(targets), "kssl", k = 5), "select_training", call = FALSE),
+    expect_no_rows(select_training(without_rows(targets), "kssl", k = 5), "select_training",
+                   what = "`x`, the targets,"),
     resolve_source = function(...) stop("the library was resolved")
   )
 
-  expect_no_rows(select_training(targets, without_rows(targets), k = 5), "select_training", call = FALSE)
+  expect_no_rows(select_training(targets, without_rows(targets), k = 5), "select_training",
+                 what = "`library`, the pool,")
 
 })
 
