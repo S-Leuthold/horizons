@@ -2057,12 +2057,13 @@ checkpoint_path <- function(checkpoint_dir, config_id) {
 #' @description
 #' The one writer for what `evaluate()` puts in its `output_dir`: the
 #' manifest, each configuration's checkpoint, and the files a run keeps in
-#' `tmp/` for its own use ([run_files_dir()]). The file is written under a
-#' name the store does not list and renamed into place, so a reader (the
-#' monitor polls while workers write) never sees half a file. A write that
-#' fails, or a rename that is refused, leaves no temporary file behind, and
-#' what base R said about it (a warning before an error, or the rename's
-#' warning) is returned rather than raised, for the verb to stop on.
+#' `tmp/` for its own use ([run_files_dir()]). The file is saved with
+#' `saveRDS()` under a `.rds.tmp` name the store does not list and renamed
+#' into place ([write_file_whole()]), so a reader (the monitor polls while
+#' workers write) never sees half a file. A write that fails, or a rename
+#' that is refused, leaves no temporary file behind, and what base R said
+#' about it (a warning before an error, or the rename's warning) is returned
+#' rather than raised, for the verb to stop on.
 #'
 #' @param value The object to save.
 #' @param path The file to write.
@@ -2072,33 +2073,7 @@ checkpoint_path <- function(checkpoint_dir, config_id) {
 #' @noRd
 write_output_file <- function(value, path) {
 
-  tmp     <- tempfile(tmpdir = dirname(path), fileext = ".rds.tmp")
-  reasons <- character(0)
-
-  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
-
-  written <- tryCatch(
-    withCallingHandlers(
-      {
-        saveRDS(value, tmp)
-        file.rename(tmp, path)
-      },
-      warning = function(w) {
-        reasons <<- c(reasons, condition_summary(w))
-        rlang::cnd_muffle(w)
-      }
-    ),
-    error = function(e) {
-      reasons <<- c(reasons, condition_summary(e))
-      FALSE
-    }
-  )
-
-  if (isTRUE(written)) return(NULL)
-
-  if (length(reasons) == 0) reasons <- "the file could not be renamed into place"
-
-  paste(unique(reasons), collapse = "; ")
+  write_file_whole(value, path, save = saveRDS, tmp_ext = ".rds.tmp")
 
 }
 

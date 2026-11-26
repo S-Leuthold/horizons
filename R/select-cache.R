@@ -170,14 +170,16 @@ cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = 
 #' @description
 #' The one writer for what library mode caches: a registered library
 #' ([resolve_registered()]) and a similarity space ([cached_space()]). The
-#' file is saved with qs2 under a temporary name in the cache directory,
-#' created if it is missing, and renamed into place, so an interrupted write
-#' never leaves a file the next draw would take for a finished one. A save or
-#' a rename that fails leaves no temporary file behind, and what base R or
-#' qs2 said about it is returned rather than raised, as `write_output_file()`
-#' returns it for `evaluate()`'s output directory: a cache that cannot be
-#' written costs later draws their time, not this one its result, so the
-#' caller reports it as a `skipped` warning and carries on.
+#' file is saved with qs2 under a `.qs2.tmp` name in the cache directory,
+#' created if it is missing, and renamed into place ([write_file_whole()]),
+#' so an interrupted write never leaves a file the next draw would take for a
+#' finished one. A save or a rename that fails leaves no temporary file
+#' behind, and what base R or qs2 said about it is returned rather than
+#' raised, as `write_output_file()` returns it for `evaluate()`'s output
+#' directory: a cache that cannot be written costs later draws their time,
+#' not this one its result, so the caller reports it as a `skipped` warning
+#' and carries on. The directory is made inside the save, so one that cannot
+#' be made is a reason returned too.
 #'
 #' @param value The object to save.
 #' @param path [Character.] The cache file.
@@ -189,34 +191,11 @@ cached_space <- function(identity, settings, wn, build, verbose = TRUE, force = 
 #' @noRd
 write_cache_file <- function(value, path, tmp_prefix) {
 
-  tmp     <- tempfile(tmp_prefix, tmpdir = dirname(path), fileext = ".qs2.tmp")
-  reasons <- character(0)
-
-  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
-
-  written <- tryCatch(
-    withCallingHandlers(
-      {
-        dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-        qs2::qs_save(value, tmp)
-        file.rename(tmp, path)
-      },
-      warning = function(w) {
-        reasons <<- c(reasons, condition_summary(w))
-        rlang::cnd_muffle(w)
-      }
-    ),
-    error = function(e) {
-      reasons <<- c(reasons, condition_summary(e))
-      FALSE
-    }
-  )
-
-  if (isTRUE(written)) return(NULL)
-
-  if (length(reasons) == 0) reasons <- "the file could not be renamed into place"
-
-  paste(unique(reasons), collapse = "; ")
+  write_file_whole(value, path, tmp_prefix = tmp_prefix, tmp_ext = ".qs2.tmp",
+                   save = function(value, file) {
+                     dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
+                     qs2::qs_save(value, file)
+                   })
 
 }
 
