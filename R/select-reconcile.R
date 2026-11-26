@@ -81,14 +81,16 @@ library_matrix <- function(pool, flagged, cols = NULL) {
 #' @description
 #' The axis as `axis_matrix()` reads it, masked columns included, without
 #' building the matrix, which for a registered library is the whole library.
+#' The one accessor for it: every reader of the axis's wavenumbers calls it.
 #'
 #' @param x [horizons_data.] The object.
 #'
-#' @return [Numeric.] One wavenumber per column of the axis, in column order.
+#' @return [Numeric.] One wavenumber per column of the axis, in column order;
+#'   `NA` for a name that is not one ([wn_values()]).
 #' @noRd
 axis_wavenumbers <- function(x) {
 
-  as.numeric(sub("^wn_", "", axis_columns(x$data$role_map)))
+  wn_values(axis_columns(x$data$role_map))
 
 }
 

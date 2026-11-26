@@ -3966,7 +3966,7 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' @noRd
 window_gaps <- function(x, preprocessing = x$config$configs$preprocessing) {
 
-  wn   <- wn_values(axis_columns(x$data$role_map))
+  wn   <- axis_wavenumbers(x)
   gaps <- if (length(wn) > 1L && !anyNA(wn)) grid_summary(wn)$gaps
 
   list(gaps = gaps, methods = intersect(WINDOW_PREPROCESSING, preprocessing))

@@ -957,7 +957,7 @@ generate_config_id <- function(model, preprocessing, transformation,
 axis_spacing_cm <- function(x) {
 
   ### The axis the window runs along, masked columns included
-  wn <- wn_values(axis_columns(x$data$role_map))
+  wn <- axis_wavenumbers(x)
 
   if (length(wn) > 1 && !anyNA(wn)) {
 

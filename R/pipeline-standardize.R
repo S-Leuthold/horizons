@@ -451,15 +451,7 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 #' @noRd
 in_water_bands <- function(wavelengths) {
 
-  in_band <- rep(FALSE, length(wavelengths))
-
-  for (band in WATER_BANDS) {
-
-    in_band <- in_band | (wavelengths >= band[1] & wavelengths <= band[2])
-
-  }
-
-  in_band
+  in_ranges(wavelengths, do.call(rbind, WATER_BANDS))
 
 }
 
