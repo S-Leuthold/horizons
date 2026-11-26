@@ -260,8 +260,10 @@ bounded_model <- function(model) {
 #' transformation where the selection reads the outcome ([fold_unit_row()]),
 #' the fold and its rows (the training part's sample ids in order, every
 #' position an entry's columns fill, and the positions of the rows the prep
-#' is trained on), the training data ([eval_data_fingerprint()]'s fields,
-#' or `NULL` for a store that dies with its call), and the seed with the
+#' is trained on), the training data ([eval_data_fingerprint()]'s fields in
+#' `evaluate()`, whichever store it opens; `NULL` in `fit()`, and where
+#' [evaluate_single_config()] lists its own folds, whose keys are read only
+#' within that call), and the seed with the
 #' rule that turns it into the prep's draws (`SEED_RULE`) and the scoring
 #' schema. Two preps with one key are one prep; an entry is read only under
 #' its own key ([read_fold_entry()]).
@@ -1438,7 +1440,7 @@ log_unusable_fold_entries <- function(collector, unusable, output_dir) {
 #' base R alone, as [evaluate_config_worker()] reads it, so a daemon on
 #' another version gets as far as saying so: a file it cannot read is said
 #' on what it returns, not raised. Then the version is checked; past it the
-#' daemon runs this version, so the rest is the helpers both workers share:
+#' daemon runs this version, so the rest is the helpers every worker shares:
 #' the payload's keys ([check_worker_payload()]), and the daemon's threads,
 #' pinned for the task and all put back as it ends, and its packages
 #' ([prepare_worker()]). The

@@ -914,8 +914,9 @@ check_abstention <- function(object, config_ids, abstain_ood, call = rlang::call
 #' @param clamp Logical; apply the deploy-time response-bound winsorization
 #'   (`models$response_bound`). `TRUE` for user-facing single-model predictions;
 #'   `FALSE` inside ensemble machinery, where member predictions are features —
-#'   they must match the raw member OOF the meta-learner trained and calibrated
-#'   on, and the guardrail is applied once at the ensemble output instead.
+#'   they must match the member OOF the meta-learner trained and calibrated
+#'   on, which the bound never touched (both are clamped to `outcome_range`),
+#'   and the guardrail is applied once at the ensemble output instead.
 #' @param abstain_ood Logical; when `TRUE`, `.pred` and interval bounds are set
 #'   to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`), and for
 #'   every sample when the AD could not be computed, while `.ad_distance` and
@@ -1040,8 +1041,8 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
       ## Deploy-time winsorization guardrail, on .pred only. Ensemble machinery
       ## passes clamp = FALSE: the guardrail applies once at the ensemble
-      ## output, keeping member features consistent with the raw member OOF the
-      ## meta-learner trained and calibrated on.
+      ## output, keeping member features consistent with the member OOF the
+      ## meta-learner trained and calibrated on, which the bound never touched.
       bounded <- apply_response_bound(point_pred, bound)
 
       out$.pred[good] <- bounded$values
@@ -1505,8 +1506,9 @@ predict_members <- function(object, members, new_spectra,
   ## a split whose test rows repeat one.
 
   ## clamp = FALSE: member predictions are meta-learner FEATURES here, and
-  ## must match the raw (unclamped) member OOF the meta-learner trained and
-  ## the UQ fold models calibrated on. The response-bound guardrail applies
+  ## must match the member OOF the meta-learner trained and the UQ fold
+  ## models calibrated on, which are clamped to outcome_range but not
+  ## bounded. The response-bound guardrail applies
   ## once, at the combined ensemble output in predict.horizons_ensemble().
   ## ad = FALSE: only .pred is kept, so a member's AD is not computed.
   blocks <- lapply(members, function(m) {

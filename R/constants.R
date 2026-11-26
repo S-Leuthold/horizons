@@ -165,7 +165,8 @@ VALID_MODELS <- names(MODEL_SPECS)
 
 # The threads each fit runs on where horizons pins them (the daemons and
 # their inner daemons, an isolated fit's process, the session while a
-# parallel run fits and as the package loads), the count
+# parallel run fits, and as the package loads when HORIZONS_THREAD_CONTROL is
+# "TRUE"), the count
 # engine_thread_options() (R/utils-models.R) gives the engines' thread
 # options there; and control_horizons(threads = )'s default for a run in
 # the session

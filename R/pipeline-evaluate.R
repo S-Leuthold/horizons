@@ -4200,9 +4200,10 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #' Stop a worker whose payload lacks a key or holds one it should not
 #'
 #' @description
-#' Called by both workers once the daemon's horizons is known to be this
-#' session's version ([evaluate_config_worker()], [fold_prep_worker()]), so
-#' the helper is there: another version's payload keys may differ, and that
+#' Called by the three workers once the daemon's horizons is known to be
+#' this session's version ([evaluate_config_worker()], [fold_prep_worker()],
+#' [fit_member_worker()]), so the helper is there: another version's payload
+#' keys may differ, and that
 #' is a version skew, said by the version check before this.
 #'
 #' @param shared The payload, read or carried.
@@ -4248,9 +4249,10 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' when it loads, so without this every lightgbm configuration failed at
 #' workflow creation on a daemon.
 #'
-#' Called by both workers once the daemon's horizons is known to be this
-#' session's version ([evaluate_config_worker()], [fold_prep_worker()]), and
-#' on a split configuration's inner daemons ([start_inner_daemons()]).
+#' Called by the three workers once the daemon's horizons is known to be
+#' this session's version ([evaluate_config_worker()], [fold_prep_worker()],
+#' [fit_member_worker()]), and on a split configuration's or member's inner
+#' daemons ([start_inner_daemons()]).
 #'
 #' @param models,selections The unit's models and feature selections
 #'   ([needed_packages()]).

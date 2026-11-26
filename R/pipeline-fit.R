@@ -1392,10 +1392,12 @@ fit <- function(x,
   ## minimum, with no floor) so it lies above the maximum for a signed outcome
   ## too; under the default range it is max * RESPONSE_BOUND_MARGIN exactly
   ## (#76). Taken over train_Fit, the rows the final models are fit on, so
-  ## neither Split F's test rows nor the calibration rows shape it (#68), plus
-  ## the rows a response trim left out of them (#77): those are
-  ## training-partition rows too, and a bound under values actually observed
-  ## there would clamp the very extremes the trim set aside.
+  ## Split F's test rows never shape it (#68), plus the rows a response trim
+  ## left out of them (#77): those are training-partition rows too, and a
+  ## bound under values actually observed there would clamp the very
+  ## extremes the trim set aside. The calibration draw takes from the trimmed
+  ## rows as well, so after a trim the calibration rows among them shape it
+  ## too; without a trim no calibration row does.
   response_bound <- compute_response_bound(
     c(train_Fit[[outcome_col]], trimmed_rows[[outcome_col]]), outcome_range
   )

@@ -30,8 +30,9 @@ is \code{NA} for a trimmed row), \code{n_calib},
 \description{
 Populates \verb{$ensemble$uq} with a CV+ conformal bundle calibrated on the
 meta-learner's honest out-of-fold residuals: a fresh 5-fold partition of
-the meta frame (drawn in its own unit from the ensemble's seed, disjoint
-from the tuning folds), per-fold refits of the finalized combiner with the fold models
+the meta frame (drawn in its own unit from the ensemble's seed, another
+random partition of the rows the tuning folds split), per-fold refits of
+the finalized combiner with the fold models
 retained, and the signed residuals CQR-style. After a response trim, the
 training rows it set aside calibrate as well (see
 \code{compute_ensemble_uq()}, #103). Consumed by

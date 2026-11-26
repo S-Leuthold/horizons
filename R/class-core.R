@@ -888,8 +888,9 @@ validate_horizons_data <- function(x,
   }
 
   ## Stored count checks -------------------------------------------------------
-  ## The contract calls these derived; the implementation stores them, and
-  ## several verbs still assign them by hand, so they are checked here.
+  ## The contract calls these derived; the implementation stores them. The
+  ## constructor and recount_data() write them from the table and the role
+  ## map, so counts that disagree were edited by hand, and are checked here.
 
   stored <- list(n_rows       = x$data$n_rows,
                  n_predictors = x$data$n_predictors,

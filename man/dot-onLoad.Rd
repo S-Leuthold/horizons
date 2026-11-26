@@ -7,6 +7,9 @@
 .onLoad(libname, pkgname)
 }
 \description{
-Minimal package initialization. Thread control is the user's responsibility.
+Registers the engines horizons fits with and records the build loaded. It
+sets no thread count unless \code{HORIZONS_THREAD_CONTROL} is \code{"TRUE"}; horizons
+pins threads only while it runs work: in the session during a parallel
+run, and on each process that fits for it (\code{\link[=pin_threads]{pin_threads()}}).
 }
 \keyword{internal}

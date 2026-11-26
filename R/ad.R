@@ -11,7 +11,9 @@
 ##
 ## The OOD threshold is calibrated on a HELD-OUT calibration set disjoint from
 ## the rows used to estimate the centroid + covariance, with the conformal
-## ceil(level * (n + 1)) order-statistic correction. Thresholding on the
+## ceil(level * (n + 1)) order-statistic correction, capped at the largest
+## calibration distance (compute_ad_thresholds(), which gives the flag rate
+## this leaves at small n). Thresholding on the
 ## training rows' own distances (distances to a centroid fit to them) is
 ## optimistically small and systematically over-flags fresh in-distribution
 ## samples as OOD; the held-out calibration removes that self-reference.

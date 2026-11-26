@@ -22,7 +22,10 @@
 #' Columns that are neither the outcome nor spectral predictors are given an
 #' explicit non-predictor role — `id`, `meta` and `response_hold` (sibling lab
 #' responses). Nothing is left to the `outcome ~ .` default, which would make
-#' a predictor of any column the role map did not name.
+#' a predictor of any column the role map did not name: every verb that builds
+#' a recipe first validates the object at its door
+#' (`validate_horizons_data()`), which refuses a column the role map does not
+#' name and a role it does not know.
 #'
 #' A final pass re-points the step selector quosures away from this function's
 #' frame, which would otherwise be serialized to every parallel worker. See
@@ -219,7 +222,9 @@ add_response_step <- function(rec, transformation) {
 #' outcome nor spectral predictors are given an explicit non-predictor role
 #' (`id`, `meta`, `response_hold`), so nothing is left to the `outcome ~ .`
 #' default, which would make a predictor of any column the role map did not
-#' name.
+#' name. That holds because the door validator ([validate_horizons_data()])
+#' refuses such a column, and a role it does not know, before any recipe is
+#' built.
 #'
 #' @param train_data Data frame. The rows the recipe is built on.
 #' @param role_map Tibble with `variable` and `role` columns.

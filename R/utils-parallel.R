@@ -6,10 +6,12 @@
 ## The rule these implement: the user owns the mirai daemons; the package owns
 ## which axis of its work they are applied to, and how the work is arranged
 ## across them. horizons never sets, resizes or resets the user's daemons. It
-## calls mirai::daemons() in one place, inside a configuration's or a
-## member's task on one of them (start_inner_daemons()): the inner daemons a
-## long configuration or member runs its folds on, set on that daemon's own
-## default profile, which no other process sees, and reset as the task ends. It never uses
+## calls mirai::daemons() in one bracket only, inside a configuration's or a
+## member's task on one of them: start_inner_daemons() sets the inner daemons
+## a long configuration or member runs its folds on, on that daemon's own
+## default profile, which no other process sees (and resets them itself when
+## they do not connect), and run_on_inner_daemons() resets them as the task
+## ends. It never uses
 ## with(daemons()), with_daemons() or local_daemons(), whose scope would send
 ## tune's own tasks to another profile. It reads the pool with mirai::info()
 ## by name, never status(), and every call on the pool names
@@ -391,8 +393,10 @@ check_parallel_backend <- function(verb, collector) {
 #' Wait until one of the tasks in flight resolves, or stop when no daemon is left
 #'
 #' @description
-#' Every wait horizons owns on the daemons goes through this one, so none
-#' blocks for ever. A task queued with no daemon connected waits for ever
+#' Every wait on a unit's tasks on the user's pool goes through this one, so
+#' none blocks for ever; the one other wait on that pool, [isolated_deaths()]'s,
+#' stops once no daemon is connected. A task queued with no daemon connected
+#' waits for ever
 #' under mirai, which relaunches no daemon that exits (under `maxtasks`,
 #' `idletime` or `walltime`) or dies. So the wait polls, reading the
 #' connected daemons at every poll, and calls `no_daemons()`, which stops
@@ -1029,8 +1033,10 @@ isolated_profile <- function() {
 #' A process mirai starts (an isolated call's, an inner daemon) reads its
 #' library paths from `R_LIBS` and its thread counts from the variables
 #' BLAS and OpenMP read as they load, not from settings made at run time in
-#' this one. So each start sets the variables it needs here, and they are put
-#' back as they were once the process has started.
+#' this one. So each start sets the variables it needs here, and the caller
+#' puts them back as they were as it exits: [run_isolated()] once its process
+#' has returned, [start_inner_daemons()] once its daemons have connected or it
+#' has given up on them.
 #'
 #' @param vars Named character: the variables and their values.
 #' @return A function of no arguments that puts every variable back as it
@@ -1062,7 +1068,7 @@ launch_env <- function(vars) {
 #' value here, as if it had run in this session:
 #'
 #' * The process starts with this session's library paths (`libraries`):
-#'   `R_LIBS` names them while it is started, and its body sets them first,
+#'   `R_LIBS` names them for the call, and its body sets them first,
 #'   so it loads what this session would (a process started by mirai sees
 #'   `R_LIBS` and the startup files, not paths set at run time), whatever
 #'   its arguments hold. Then any `options` are set.
@@ -1419,7 +1425,8 @@ isolated_deaths <- function(on_daemons) {
 #' passed over for the next in `order` that fits, and stays first in line;
 #' one wider than the daemons connected starts once nothing is in flight, so
 #' a pool that shrank cannot strand it. Each is collected as it finishes and
-#' the next submitted. Every wait goes through [await_round()], so a window
+#' the next submitted. Every wait the window makes goes through
+#' [await_round()], so a window
 #' left with no daemon stops the run rather than waiting for ever.
 #'
 #' What a task returns is read here ([task_value()]). A value is handed to

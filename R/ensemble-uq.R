@@ -2,8 +2,9 @@
 #
 # Owns both sides of ensemble UQ. The build side (fit_ensemble_uq ->
 # compute_ensemble_uq -> fit_uq_fold_models) refits the finalized meta-learner
-# on a fresh 5-fold partition of the meta frame — disjoint from the tuning
-# folds (Route B) — retaining the per-fold models and the signed out-of-fold
+# on a fresh 5-fold partition of the meta frame, another random partition of
+# the rows the tuning folds split, drawn in its own unit (Route B), retaining
+# the per-fold models and the signed out-of-fold
 # residuals in the $ensemble$uq bundle. The predict side
 # (predict_ensemble_intervals -> predict_ensemble_uq_matrix -> cv_plus_bounds)
 # aggregates fold-model predictions and calibration residuals into CV+-style
@@ -369,8 +370,9 @@ fit_uq_fold_models <- function(meta_frame, oof_row, oof_sample_id, folds, contra
 #'
 #' @description
 #' The core of ensemble UQ: draws a fresh fold partition of the meta frame in
-#' the unit `ensemble/cvplus` (disjoint-by-construction from the tuning folds —
-#' Route B), runs the per-fold calibration pass, gates on calibration size and
+#' the unit `ensemble/cvplus`, another random partition of the rows the
+#' tuning folds split (Route B), runs the per-fold calibration pass, gates
+#' on calibration size and
 #' order-statistic validity, computes leave-self-out diagnostics, and packs
 #' the bundle. It runs inside `ensemble()`'s CV+ unit: a gate that fails is a
 #' run failure with the counts and the remedy, and a fold refit that fails
@@ -471,8 +473,8 @@ compute_ensemble_uq <- function(oof,
   }
 
   ## The draws are one unit, ensemble/cvplus (with_unit_seed()): a fresh
-  ## partition, disjoint-by-construction from the tuning folds, which another
-  ## unit drew; the fold refits, each a unit of its own nested in this one;
+  ## partition of the rows the tuning folds split, which another unit drew;
+  ## the fold refits, each a unit of its own nested in this one;
   ## and the trimmed rows' folds. The partition stratifies on .truth,
   ## mirroring the meta-learner's own fold draw, and is reported from this
   ## unit as it is.
@@ -754,8 +756,9 @@ calibrate_trimmed_rows <- function(trimmed, fold_models, method, outcome_range) 
 #' @description
 #' Populates `$ensemble$uq` with a CV+ conformal bundle calibrated on the
 #' meta-learner's honest out-of-fold residuals: a fresh 5-fold partition of
-#' the meta frame (drawn in its own unit from the ensemble's seed, disjoint
-#' from the tuning folds), per-fold refits of the finalized combiner with the fold models
+#' the meta frame (drawn in its own unit from the ensemble's seed, another
+#' random partition of the rows the tuning folds split), per-fold refits of
+#' the finalized combiner with the fold models
 #' retained, and the signed residuals CQR-style. After a response trim, the
 #' training rows it set aside calibrate as well (see
 #' `compute_ensemble_uq()`, #103). Consumed by
