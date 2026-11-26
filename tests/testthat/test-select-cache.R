@@ -92,7 +92,7 @@ test_that("a draw that builds the space builds the first-use space, bit for bit"
   expect_false(out$selection$search$cache$hit)
   drawn <- qs2::qs_read(file.path(m$cache, space_files(m$cache)))$space
 
-  pm <- predictor_matrix(m$pool)
+  pm <- axis_matrix(m$pool)
   s  <- default_space_settings(grid_summary(pm$wavenumbers)$resolution)
   direct <- space_on(pm$matrix, pm$wavenumbers, snv = s$snv, derivative = s$derivative,
                      window = s$window, poly = s$poly, mask = s$mask, ncomp = s$ncomp,
@@ -138,6 +138,28 @@ test_that("a pool in memory is not cached, a library file is", {
   expect_false(first$selection$search$cache$hit)
   expect_true(second$selection$search$cache$hit)
   expect_true(any(grepl("^mine\\.space-", space_files(m$cache))))
+
+})
+
+test_that("a band masked twice, by the library and again in mask, is the space and the key of once", {
+
+  ## Five of the mini library's 51 columns, 646 to 654 cm-1
+  m    <- use_mini()
+  x    <- mini_targets(m$pool)
+  wn   <- axis_wavenumbers(m$pool)
+  pool <- mask_axis_columns(m$pool, axis_columns(m$pool$data$role_map)[wn >= 646 & wn <= 654])
+
+  path <- file.path(withr::local_tempdir(), "masked.qs2")
+  qs2::qs_save(pool, path)
+
+  once  <- suppressWarnings(select_training(x, path, k = 5L))
+  twice <- suppressWarnings(select_training(x, path, k = 5L, mask = rbind(c(646, 654))))
+
+  expect_identical(once$selection$settings$mask, rbind(c(646, 654)))
+  expect_false(once$selection$search$cache$hit)
+  expect_true(twice$selection$search$cache$hit)
+  expect_identical(twice$selection$search$cache$key, once$selection$search$cache$key)
+  expect_identical(twice$selection$settings$mask, once$selection$settings$mask)
 
 })
 

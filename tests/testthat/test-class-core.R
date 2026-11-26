@@ -912,6 +912,97 @@ test_that("validate_horizons_data accepts every role in the vocabulary", {
 })
 
 
+## ---------------------------------------------------------------------------
+## The masked role: kept on the axis, never modelled
+## ---------------------------------------------------------------------------
+
+describe("validate_horizons_data() on an axis with masked columns", {
+
+  ## Ten bands 2 cm-1 apart, the middle four masked
+  masked_cols <- c("wn_3994", "wn_3992", "wn_3990", "wn_3988")
+  obj         <- mask_axis_columns(make_eval_object(n_configs = 1), masked_cols)
+
+  ## The validator's findings on an object, none when it passes
+  findings <- function(x) {
+    err <- tryCatch(validate_horizons_data(x), horizons_error_validation = function(e) e)
+    if (inherits(err, "horizons_error_validation")) err$findings else character(0)
+  }
+
+  it("accepts the masked role, and still refuses one outside the vocabulary", {
+
+    expect_identical(validate_horizons_data(obj), obj)
+
+    typo <- obj
+    typo$data$role_map$role[typo$data$role_map$variable == "wn_3994"] <- "maskd"
+
+    expect_true(any(grepl("Unknown roles in role_map: maskd", findings(typo),
+                          fixed = TRUE)))
+
+  })
+
+  it("holds the axis to decreasing order across the two roles", {
+
+    ## A masked column moved past the end of the axis: the predictors alone
+    ## are still in order, the axis is not
+    moved <- obj
+    row   <- match("wn_3994", moved$data$role_map$variable)
+    last  <- match("wn_3982", moved$data$role_map$variable)
+    moved$data$role_map <- moved$data$role_map[append(seq_len(nrow(moved$data$role_map))[-row], row, after = last - 1L), ]
+
+    expect_identical(axis_columns(moved$data$role_map)[10], "wn_3994")
+    expect_true(any(grepl("strictly decreasing order", findings(moved),
+                          fixed = TRUE)))
+
+  })
+
+  it("refuses a value that is not finite in a masked column outside a flagged row, and admits it in a flagged one", {
+
+    holed <- obj
+    holed$data$analysis$wn_3990[3] <- NA_real_
+
+    expect_true(any(grepl("NA values in masked columns: wn_3990", findings(holed),
+                          fixed = TRUE)))
+
+    holed$data$analysis$.flag <- c(NA, NA, "standardize", rep(NA, nrow(holed$data$analysis) - 3))
+    holed$data$role_map <- dplyr::bind_rows(holed$data$role_map,
+                                            tibble::tibble(variable = ".flag", role = "meta"))
+
+    expect_identical(findings(holed), character(0))
+
+  })
+
+  it("judges a spectrum's spread over its predictors, and refuses masked columns with no predictor", {
+
+    ## Flat over the predictors, varied only in the masked band: no spread
+    flat <- obj
+    pred <- flat$data$role_map$variable[flat$data$role_map$role == "predictor"]
+    flat$data$analysis[2, pred] <- 0.5
+
+    expect_true(any(grepl("1 spectrum with no spread", findings(flat),
+                          fixed = TRUE)))
+
+    every <- mask_axis_columns(obj, pred)
+
+    expect_true(any(grepl("masks 10 spectral columns and has no predictor", findings(every),
+                          fixed = TRUE)))
+
+  })
+
+  it("counts only the predictors in n_predictors", {
+
+    expect_identical(obj$data$n_predictors, 6L)
+
+    wrong <- obj
+    wrong$data$n_predictors <- 10L
+
+    expect_true(any(grepl("Stored n_predictors (10) does not match the data (6)",
+                          findings(wrong), fixed = TRUE)))
+
+  })
+
+})
+
+
 test_that("validate_horizons_data rejects more than one outcome role", {
 
   test_analysis <- tibble::tibble(
@@ -1336,6 +1427,20 @@ test_that("print() and summary() of an object without a log show no Log section,
   expect_false(any(grepl("^Log", printed)))
   expect_true(any(grepl("^Pipeline Status", summed)))
   expect_false(any(grepl("^Log", summed)))
+
+})
+
+test_that("print() and summary() count the masked columns beside the predictors, over the axis's range", {
+
+  ## Ten bands from 4000 to 3982 cm-1, the first two masked
+  obj <- mask_axis_columns(make_eval_object(n_configs = 1), c("wn_4000", "wn_3998"))
+
+  printed <- capture.output(print(obj))
+  summed  <- capture.output(summary(obj))
+
+  expect_true(any(grepl("Predictors: 8 (4000–3982 cm⁻¹, 2 masked)", printed, fixed = TRUE)))
+  expect_true(any(grepl("Predictors: 8 (2 masked)", summed, fixed = TRUE)))
+  expect_true(any(grepl("Range: 4000–3982 cm⁻¹", summed, fixed = TRUE)))
 
 })
 

@@ -76,7 +76,12 @@ library's (ties round up), and the record carries both. Default: \code{40}.}
 
 \item{mask}{\verb{matrix or NULL.} Wavenumber ranges to drop from the
 similarity space after the derivative, one row per range, low then
-high. Default: \code{NULL}.}
+high. The bands the targets or the library mask (\code{standardize(remove_water = TRUE)}) are dropped too, whatever is given here, so \code{NULL} (the default)
+is the objects' masks and nothing more. SNV takes its mean and spread
+from the columns left. \code{settings$mask} records the ranges the space ran
+with, sorted, a range that overlaps the next merged with it. A run of masked target columns is read as the range between its
+own ends, so on a finer library grid the library columns between a
+masked target column and its unmasked neighbour stay in the space.}
 
 \item{space}{\code{character.} \code{"pca"} (unsupervised, of the pool) or
 \code{"pls"} (against one property; \code{properties} must name exactly one).
@@ -246,8 +251,11 @@ search only, so one fitted space serves every batch whatever its grid, and
 for a registered library or a library file that space is cached (see
 "The cached space"). The training set comes back on the library's own
 columns at the wavenumbers the targets share with it: a column is shared
-when the library has a predictor of the same name, and nothing is
-interpolated. Targets on a coarser canonical grid (4 or 8 cm-1 against a
+when the library has a spectral column of the same name, and nothing is
+interpolated. A shared column either side masks
+(\code{standardize(remove_water = TRUE)}) is masked in the training set, so
+the model never reads a band either side declared out, and the targets
+can always predict from it. Targets on a coarser canonical grid (4 or 8 cm-1 against a
 2 cm-1 library) share every one of their columns, so the training set
 comes back on their step. Target columns the library lacks (a wider range,
 a finer or offset step) are named in one \code{horizons_warning_coverage};
@@ -282,8 +290,10 @@ wavenumbers, or carrying a hole (a spacing more than three times its own
 median and more than 30 cm-1), is refused before anything interpolates,
 the targets' before the library resolves: a resampling spline and a
 Savitzky-Golay window both run straight across a gap and invent
-absorbance at its edges without erroring, and a deleted water band
-belongs in \code{mask}, which is applied after the derivative. \code{window} is a
+absorbance at its edges without erroring. A water band belongs in the
+spectra, masked: \code{standardize(remove_water = TRUE)} keeps the bands and
+masks them, and \code{mask} masks any range, both after the derivative.
+\code{window} is a
 width in cm-1, so
 the filter is the same physical filter on any batch; the point count it
 becomes on the library's grid is recorded in \code{settings$window_points}, and

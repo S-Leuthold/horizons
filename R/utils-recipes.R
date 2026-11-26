@@ -7,7 +7,8 @@
 #'
 #' Recipe step order:
 #' 1. Response transformation (step_log/step_sqrt with skip = TRUE)
-#' 2. Spectral preprocessing (step_transform_spectra on predictor_cols only)
+#' 2. Spectral preprocessing (step_transform_spectra on the axis's columns only,
+#'    any masked ones dropped after it)
 #' 3. Feature selection (pca/boruta/cars/correlation/none), on spectral
 #'    columns only
 #'
@@ -295,7 +296,12 @@ recipe_roles <- function(train_data, role_map) {
 #' @description
 #' Step 3 of [build_recipe()], which [hoist_spectra()] builds on too, so the
 #' spectra a fold's recipe starts from are the ones the whole recipe's step
-#' makes.
+#' makes. The step selects the whole axis ([axis_columns()]) and is told which
+#' of its columns are masked ([masked_columns()]): it transforms them with
+#' the rest and drops them, so no later step, model or reader of the baked
+#' predictors sees one. In the recipe a masked column holds the predictor
+#' role by `outcome ~ .`, as every axis column does until the step consumes
+#' it.
 #'
 #' @param rec A recipe from [recipe_roles()], or one built on it.
 #' @param role_map Tibble with `variable` and `role` columns.
@@ -318,15 +324,18 @@ add_spectral_step <- function(rec, role_map, preprocessing, sg_window) {
   ## at prep() and refers to nothing in this frame.
   ##
   ## The window is configure()'s object-level `sg_window`; each method fixes
-  ## its own polynomial order (see transform_spectra_matrix()).
+  ## its own polynomial order (see transform_spectra_matrix()). With nothing
+  ## masked the step is given no mask, as it was before masking existed.
 
-  predictor_cols <- role_map$variable[role_map$role == "predictor"]
+  axis_cols   <- axis_columns(role_map)
+  masked_cols <- masked_columns(role_map)
 
   rec |>
     step_transform_spectra(
-      !!predictor_cols,
+      !!axis_cols,
       preprocessing = tolower(as.character(preprocessing)),
-      window_size   = sg_window
+      window_size   = sg_window,
+      masked        = if (length(masked_cols) > 0) masked_cols
     )
 
 }

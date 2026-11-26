@@ -15,8 +15,10 @@
 #' @description
 #' SNV, then a Savitzky-Golay derivative, then masking of wavenumber ranges,
 #' in that order. Masking follows the derivative so the filter never
-#' straddles a gap. Every step is optional through its argument; the
-#' defaults are the chain the experiments ran.
+#' straddles a gap, and SNV takes its mean and spread from the unmasked
+#' columns ([snv_unmasked()]), as the model's transform does, so a band out
+#' of the space does not set the scale of the rest. Every step is optional
+#' through its argument; the defaults are the chain the experiments ran.
 #'
 #' @param M [Matrix.] Spectra, rows named by sample id, columns in the order
 #'   of `wn`.
@@ -70,7 +72,14 @@ transform_similarity <- function(M, wn,
   ids <- rownames(M)
   m   <- M
 
-  if (isTRUE(snv)) m <- prospectr::standardNormalVariate(m)
+  ## The masked columns of the full axis, before the derivative trims it
+  masked <- in_ranges(wn, mask)
+
+  if (isTRUE(snv)) {
+
+    m <- if (any(masked)) snv_unmasked(m, masked) else prospectr::standardNormalVariate(m)
+
+  }
 
   if (derivative > 0L) {
 
@@ -83,10 +92,9 @@ transform_similarity <- function(M, wn,
 
   if (!is.null(mask)) {
 
-    drop <- rep(FALSE, length(wn))
-    for (i in seq_len(nrow(mask))) drop <- drop | (wn >= mask[i, 1] & wn <= mask[i, 2])
-    m  <- m[, !drop, drop = FALSE]
-    wn <- wn[!drop]
+    drop <- in_ranges(wn, mask)
+    m    <- m[, !drop, drop = FALSE]
+    wn   <- wn[!drop]
 
   }
 

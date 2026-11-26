@@ -305,11 +305,13 @@ new_horizons_data <- function(analysis = NULL,
 #'    see check 3). An error at `stage = "full"`, naming the duplicates and
 #'    pointing at [average()]; not checked at `stage = "raw"`.
 #'
-#' 5. **Predictor columns**: In a row not flagged (`.flag`), the
-#'    wavelength/predictor columns (role = "predictor") must not contain
-#'    `NA` or `Inf` values, and the spectrum must have spread: one whose
-#'    every value is equal is refused, by the rule `standardize()` flags by
-#'    ([unusable_spectra()]). Checked at `stage = "full"`, and not when
+#' 5. **Spectral columns**: In a row not flagged (`.flag`), the columns of
+#'    the axis (role = "predictor", and role = "masked" for a band kept and
+#'    never modelled, [axis_columns()]) must not contain `NA` or `Inf`
+#'    values, and the spectrum must have spread over its predictors: one
+#'    whose every value is equal is refused, by the rule `standardize()`
+#'    flags by ([unusable_spectra()]). An object with masked columns has at
+#'    least one predictor. Checked at `stage = "full"`, and not when
 #'    `spectra = FALSE`: a non-finite value outside `standardize()`'s
 #'    eventual trim range is legitimately still there before the trim runs,
 #'    and `standardize()` flags a spectrum with a non-finite value left after
@@ -319,10 +321,11 @@ new_horizons_data <- function(analysis = NULL,
 #'    The first 3 problematic columns, or the first 5 flat spectra, are
 #'    named.
 #'
-#' 6. **Wavelength naming and order**: Every predictor name must be a
+#' 6. **Wavelength naming and order**: Every name on the axis, predictor or
+#'    masked, must be a
 #'    wavenumber (`wn_<number>` or a bare number, #121) and parse to a
-#'    distinct numeric value, in strictly decreasing order (e.g., 4000,
-#'    3998, 3996...). A name that does not parse (`wn_X4000`, two decimal
+#'    distinct numeric value, in strictly decreasing order across both roles
+#'    (e.g., 4000, 3998, 3996...). A name that does not parse (`wn_X4000`, two decimal
 #'    points) or a value that repeats (`600` and `600.0`) is named directly
 #'    rather than folded into a generic "must be strictly decreasing"
 #'    message. Always checked, in both stages.
@@ -346,7 +349,7 @@ new_horizons_data <- function(analysis = NULL,
 #'    the row writers read `sample_id` by name.
 #'
 #' 10. **Role vocabulary**: Every role is one of `id`, `predictor`,
-#'     `outcome`, `response`, `meta`. A typo'd role makes a column invisible
+#'     `masked`, `outcome`, `response`, `meta`. A typo'd role makes a column invisible
 #'     to every consumer, so it fails here rather than silently. A
 #'     `covariate` role is refused with its own message, which points at
 #'     `meta`: horizons does not model covariates, and `meta` carries a
@@ -620,10 +623,16 @@ validate_horizons_data <- function(x,
   }
 
   ## Wavelength column checks --------------------------------------------------
+  ## Over the axis: the predictors and any masked columns between them
+  ## (axis_columns()). A masked column is measured and never modelled, but the
+  ## transform's windows read it beside its modelled neighbours.
 
   predictor_vars <- role_map$variable[role_map$role == "predictor"]
+  axis_vars      <- axis_columns(role_map)
+  masked_vars    <- masked_columns(role_map)
 
   # Guard against role_map columns missing from analysis -----------------------
+  # A masked column missing is reported with the other non-predictors below.
 
   missing_predictors <- setdiff(predictor_vars, names(analysis))
 
@@ -635,8 +644,21 @@ validate_horizons_data <- function(x,
 
   }
 
+  axis_vars   <- intersect(axis_vars, names(analysis))
+  masked_vars <- intersect(masked_vars, names(analysis))
+
+  # Masked columns need a predictor beside them -------------------------------
+
+  if (length(masked_vars) > 0 && length(predictor_vars) == 0) {
+
+    errors <- c(errors, cli::format_inline(
+      "{.field role_map} masks {length(masked_vars)} spectral column{?s} and has no predictor: at least one column of the axis must be modelled"
+    ))
+
+  }
+
   ### Flagged rows are left out of the non-finite check below.
-  predictor_cols <- analysis[!flagged, predictor_vars, drop = FALSE]
+  axis_cols <- analysis[!flagged, axis_vars, drop = FALSE]
 
   # Check for NA, Inf and no spread — full stage only ------------------------
   # A non-finite value outside standardize()'s trim range is legitimately
@@ -644,31 +666,39 @@ validate_horizons_data <- function(x,
   # row with a non-finite value that survives trimming and resampling, or
   # with no spread. average() runs before it in the documented order and
   # passes spectra = FALSE; every other full-stage caller enforces this.
+  # Each finding names the columns by their role, predictor or masked.
 
   if (stage != "raw" && isTRUE(spectra)) {
 
-    na_check <- sapply(predictor_cols, function(col) any(is.na(col)))
+    for (role_cols in list(list(cols = predictor_vars, what = "predictor"),
+                           list(cols = masked_vars,    what = "masked"))) {
 
-    if (any(na_check)) {
+      if (length(role_cols$cols) == 0) next
 
-      na_cols  <- names(na_check)[na_check]
-      col_list <- paste(na_cols[1:min(3, length(na_cols))], collapse = ", ")
-      errors   <- c(errors, cli::format_inline("NA values in predictor columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
+      na_check <- sapply(axis_cols[role_cols$cols], function(col) any(is.na(col)))
 
-    }
+      if (any(na_check)) {
 
-    inf_check <- sapply(predictor_cols, function(col) any(is.infinite(col)))
+        na_cols  <- names(na_check)[na_check]
+        col_list <- paste(na_cols[1:min(3, length(na_cols))], collapse = ", ")
+        errors   <- c(errors, cli::format_inline("NA values in {role_cols$what} columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
 
-    if (any(inf_check)) {
+      }
 
-      inf_cols <- names(inf_check)[inf_check]
-      col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
-      errors   <- c(errors, cli::format_inline("Infinite values in predictor columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
+      inf_check <- sapply(axis_cols[role_cols$cols], function(col) any(is.infinite(col)))
+
+      if (any(inf_check)) {
+
+        inf_cols <- names(inf_check)[inf_check]
+        col_list <- paste(inf_cols[1:min(3, length(inf_cols))], collapse = ", ")
+        errors   <- c(errors, cli::format_inline("Infinite values in {role_cols$what} columns: {col_list}; trim them off with {.fn standardize}, or fix the source spectra"))
+
+      }
 
     }
 
     ### The rule standardize() flags by; the non-finite rows are named above
-    flat <- unusable_spectra(predictor_cols) %in% "no spread"
+    flat <- unusable_spectra(axis_cols, masked = axis_vars %in% masked_vars) %in% "no spread"
 
     if (any(flat)) {
 
@@ -683,19 +713,21 @@ validate_horizons_data <- function(x,
   }
 
   # Check wavelength naming and order ---------------------------------------
-  # Every predictor is a wavenumber, named wn_<number> or a bare number (#121):
-  # the spectral steps and the grid comparisons read the axis from the names,
-  # so a name that does not parse would leave its band's place unchecked.
+  # Every column of the axis is a wavenumber, named wn_<number> or a bare
+  # number (#121): the spectral steps and the grid comparisons read the axis
+  # from the names, so a name that does not parse would leave its band's
+  # place unchecked. The order holds across the two roles, so a masked band
+  # sits between its neighbours.
 
-  if (length(predictor_vars) > 0) {
+  if (length(axis_vars) > 0) {
 
-    wn_num <- wn_values(predictor_vars)
+    wn_num <- wn_values(axis_vars)
 
     ## A name that does not parse is named directly, rather than reaching
     ## `diff()` as NA or disappearing into a generic message. The first 5 are
     ## named: an axis of 1,700 such names is unreadable in full.
 
-    unparseable <- predictor_vars[is.na(wn_num)]
+    unparseable <- axis_vars[is.na(wn_num)]
 
     if (length(unparseable) > 0) {
 
@@ -718,7 +750,7 @@ validate_horizons_data <- function(x,
       ## the pair (not just the later occurrence duplicated() flags) rather
       ## than reporting the generic order failure.
 
-      dup_wn <- predictor_vars[wn_num %in% wn_num[duplicated(wn_num)]]
+      dup_wn <- axis_vars[wn_num %in% wn_num[duplicated(wn_num)]]
 
       if (length(dup_wn) > 0) {
 
@@ -803,7 +835,9 @@ validate_horizons_data <- function(x,
 
   ## Role vocabulary checks ----------------------------------------------------
 
-  valid_roles   <- c("id", "predictor", "outcome", "response", "meta")
+  ## `masked` is a spectral column kept on the axis and never modelled
+  ## (axis_columns()), which standardize(remove_water = TRUE) writes.
+  valid_roles   <- c("id", "predictor", "masked", "outcome", "response", "meta")
 
   ## horizons does not model covariates. A column given that role is refused
   ## by name, pointing at the role that carries it, rather than reported as
@@ -3467,9 +3501,13 @@ print.horizons_data <- function(x, ...) {
     # Predictors with wavenumber range
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
 
-      predictor_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+      ## The range is the axis's, masked bands included, and the masked
+      ## columns are counted beside the predictors
+      predictor_vars <- axis_columns(x$data$role_map)
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
+      n_masked       <- length(masked_columns(x$data$role_map))
+      masked_str     <- if (n_masked > 0) paste0(", ", n_masked, " masked") else ""
 
       has_more <- has_outcome || has_responses
       branch   <- if (has_more) "\u251C\u2500" else "\u2514\u2500"
@@ -3477,12 +3515,13 @@ print.horizons_data <- function(x, ...) {
       if (length(wn_values) > 0) {
 
         wn_range  <- range(wn_values)
-        range_str <- paste0(" (", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9)")
+        range_str <- paste0(" (", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9", masked_str, ")")
         cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, range_str, "\n"))
 
       } else {
 
-        cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors, "\n"))
+        cat(paste0("   ", branch, " Predictors: ", x$data$n_predictors,
+                   if (n_masked > 0) paste0(" (", n_masked, " masked)"), "\n"))
 
       }
     }
@@ -3742,11 +3781,15 @@ summary.horizons_data <- function(object, ...) {
 
     if (!is.null(x$data$n_predictors) && x$data$n_predictors > 0) {
 
-      predictor_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+      ## The range and step are the axis's, masked bands included, and the
+      ## masked columns are counted beside the predictors
+      predictor_vars <- axis_columns(x$data$role_map)
       wn_candidates  <- predictor_vars[grepl("^(wn_)?[0-9.]+$", predictor_vars)]
       wn_values      <- as.numeric(gsub("^wn_", "", wn_candidates))
+      n_masked       <- length(masked_columns(x$data$role_map))
 
-      cat(paste0("   \u251C\u2500 Predictors: ", x$data$n_predictors, "\n"))
+      cat(paste0("   \u251C\u2500 Predictors: ", x$data$n_predictors,
+                 if (n_masked > 0) paste0(" (", n_masked, " masked)"), "\n"))
 
       if (length(wn_values) > 1) {
 

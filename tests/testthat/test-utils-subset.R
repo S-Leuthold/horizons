@@ -715,3 +715,60 @@ test_that("the log survives a re-configure's reset, a slot reset and a row chang
   expect_identical(subset_rows(obj, obj$data$analysis$sample_id[1:10])$log, obj$log)
 
 })
+
+
+## =============================================================================
+## axis_columns(), masked_columns(), mask_ranges() — the axis and its mask
+## =============================================================================
+
+test_that("axis_columns() is the predictors and the masked columns between them, in role-map order", {
+
+  role_map <- tibble::tibble(
+    variable = c("sample_id", "wn_4000", "wn_3998", "wn_3996", "wn_3994", "SOC", "batch"),
+    role     = c("id", "predictor", "masked", "masked", "predictor", "outcome", "meta")
+  )
+
+  expect_identical(axis_columns(role_map), c("wn_4000", "wn_3998", "wn_3996", "wn_3994"))
+  expect_identical(masked_columns(role_map), c("wn_3998", "wn_3996"))
+
+  ## No mask: the axis is the predictors, and nothing is masked
+  role_map$role[role_map$role == "masked"] <- "predictor"
+
+  expect_identical(axis_columns(role_map), role_map$variable[role_map$role == "predictor"])
+  expect_identical(masked_columns(role_map), character(0))
+
+})
+
+test_that("mask_ranges() turns each run of masked columns into its range, low then high", {
+
+  wn     <- seq(4000, 3980, by = -2)
+  masked <- wn %in% c(3996, 3994, 3992, 3984)
+
+  expect_identical(mask_ranges(wn, masked), rbind(c(3984, 3984), c(3992, 3996)))
+  expect_null(mask_ranges(wn, rep(FALSE, length(wn))))
+
+  ## The ranges select the same columns back on the same grid
+  expect_identical(in_ranges(wn, mask_ranges(wn, masked)), masked)
+  expect_identical(in_ranges(wn, NULL), rep(FALSE, length(wn)))
+
+})
+
+test_that("sort_axis_decreasing() sorts the axis across both roles, each column keeping its role", {
+
+  obj <- mask_axis_columns(make_eval_object(n_wn = 6, n_configs = 1), c("wn_3996", "wn_3994"))
+
+  ## Put the axis in increasing order, in the table and the role map alike
+  axis <- axis_columns(obj$data$role_map)
+  rows <- match(axis, obj$data$role_map$variable)
+  obj$data$role_map[rows, ] <- obj$data$role_map[rev(rows), ]
+  obj$data$analysis <- obj$data$analysis[, c(rev(axis), "sample_id", "SOC")]
+
+  sorted <- sort_axis_decreasing(obj)
+
+  expect_true(sorted$sorted)
+  expect_identical(axis_columns(sorted$x$data$role_map), axis)
+  expect_identical(masked_columns(sorted$x$data$role_map), c("wn_3996", "wn_3994"))
+  expect_identical(names(sorted$x$data$analysis)[seq_along(axis)], axis)
+  expect_identical(validate_horizons_data(sorted$x), sorted$x)
+
+})

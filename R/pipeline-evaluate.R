@@ -490,7 +490,8 @@
 #'   grid holds a Savitzky-Golay method (`"sg"`, `"deriv1"`, `"deriv2"`,
 #'   `"snv_deriv1"`, `"snv_deriv2"`) and the wavenumber axis has a gap in it
 #'   (a spacing over three times the median and over 30 cm-1, such as a band
-#'   deleted upstream or by `standardize(remove_water = TRUE)`), since the
+#'   deleted upstream; `standardize(remove_water = TRUE)` masks its bands
+#'   and leaves no gap), since the
 #'   window would run across the gap as if its two sides were neighbours
 #'   (`"raw"` and `"snv"` run), and, with class
 #'   `horizons_error_input`, when an observed outcome lies outside
@@ -716,9 +717,10 @@ evaluate <- function(x,
   if (axis$axis != "sequential") {
     reports <- check_parallel_workers("evaluate", needed_packages(configs$model, configs$feature_selection), collector,
                                       results = results_so_far(list()))
+    ### The table a daemon holds: the whole axis, masked columns included
     short_memory <- check_daemon_memory(reports, configs$model, control$isolate,
                                         n_rows       = nrow(analysis),
-                                        n_predictors = sum(role_map$role == "predictor"),
+                                        n_predictors = length(axis_columns(role_map)),
                                         collector    = collector, verb = "evaluate")
   }
 
@@ -1449,7 +1451,7 @@ evaluate <- function(x,
     ## daemons connected now (inner_daemon_plan())
     pending_costs <- config_costs(pending_configs, n_train)
     plan          <- inner_daemon_plan(pending_costs, configs$model, cv_folds, control, reports,
-                                       n_rows = nrow(analysis), n_predictors = sum(role_map$role == "predictor"),
+                                       n_rows = nrow(analysis), n_predictors = length(axis_columns(role_map)),
                                        n_train = n_train, kept = config_kept(pending_configs, role_map, fold_stage),
                                        collector = collector, verb = "evaluate", unit = "configuration")
     planned       <- plan$planned
@@ -2852,8 +2854,13 @@ abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
 #' spectra (#64 moved the grid for the same samples) or a rescaled outcome
 #' under the same name resumed stale results silently (#42). `data_fields`
 #' records them by name: the outcome, the sample ids, the role-map rows whose
-#' roles shape a row (`id`, `outcome`, `predictor`), and the outcome and
-#' predictor values in id order. They are compared field by field, like the
+#' roles shape a row (`id`, `outcome`, `predictor`), and the outcome and the
+#' axis's values ([axis_columns()]: the predictors and any masked columns,
+#' whose values reach the model through the windows beside them) in id
+#' order. The masked set is the axis less the predictors, so a column whose
+#' role flips between the two moves `roles`. On an object with nothing
+#' masked both fields are what they were before the role existed, so its
+#' checkpoints resume. They are compared field by field, like the
 #' tuning settings, so a refusal can say what changed, and a row with no
 #' value for a field this run records is re-evaluated rather than refused.
 #' Each value field hashes column by column, so the cost is one pass over
@@ -2864,7 +2871,8 @@ abort_checkpoint_settings_mismatch <- function(diffs, output_dir, source,
 #' @param train_data Training rows (the analysis half of the split).
 #' @param role_map The object's role map; the `"id"` role names the identifier
 #'   column (falling back to `sample_id`), the `"outcome"` role the response,
-#'   and the `"predictor"` role the value columns hashed.
+#'   and the axis (the `"predictor"` and any masked columns) the value
+#'   columns hashed.
 #' @return List with `data_hash` (character, `NA` when no identifier column is
 #'   available), `data_n_rows` (integer) and `data_fields` (named list of
 #'   character: `outcome`, `ids`, `roles`, `outcome_values`, `predictors`;
@@ -2927,7 +2935,10 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
   ## outcome on the predictors, and the id names the rows; a sibling
   ## `response` becomes `response_hold` and `meta` stays `meta`, neither
   ## reaching the model. So add_response() of another property, or a new meta
-  ## column, between two runs does not refuse a resume.
+  ## column, between two runs does not refuse a resume. The masked columns,
+  ## whose values the windows beside them read, are the axis less the
+  ## predictors: `predictors` hashes the axis by name, so a change of mask
+  ## moves this field through the predictor rows.
   roles <- if (has_roles) {
     shaping <- role_map$role %in% c("id", "outcome", "predictor")
     data.frame(variable = as.character(role_map$variable[shaping]),
@@ -2941,7 +2952,7 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
     ids            = digest::digest(ids[by_id], algo = "xxhash64"),
     roles          = digest::digest(roles, algo = "xxhash64"),
     outcome_values = hash_columns(train_data, role_cols("outcome"), by_id),
-    predictors     = hash_columns(train_data, role_cols("predictor"), by_id)
+    predictors     = hash_columns(train_data, if (has_roles) axis_columns(role_map) else character(0), by_id)
   )
 
   list(
@@ -3885,8 +3896,12 @@ render_response_trim <- function(trim) {
 #' @noRd
 evaluation_recipe <- function(x, call = rlang::caller_env()) {
 
+  ## The window runs along the whole axis, masked columns included
+  ## (axis_columns()), and the columns it leaves less the masked ones are
+  ## what the model reads
   recipe_cfg <- recipe_settings(x)
-  n_spectral <- sum(x$data$role_map$role == "predictor")
+  axis       <- axis_columns(x$data$role_map)
+  n_spectral <- length(axis)
   window_cm  <- recipe_cfg$sg_window * axis_spacing_cm(x)
 
   if (recipe_cfg$sg_window >= n_spectral) {
@@ -3899,6 +3914,20 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
       "The Savitzky-Golay window is at least as wide as the spectrum.",
       "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points{width}; the object has {n_spectral} spectral column{?s}.",
       "i" = "The window must be narrower than the spectrum. Re-run {.fn configure} with a smaller {.arg sg_window}, or keep more of the spectrum."
+    ), kind = "input", call = call)
+
+  }
+
+  half_window <- (recipe_cfg$sg_window - 1) / 2
+  trimmed     <- axis[seq.int(1 + half_window, n_spectral - half_window)]
+  n_modelled  <- sum(!trimmed %in% masked_columns(x$data$role_map))
+
+  if (n_modelled == 0) {
+
+    abort_horizons(c(
+      "Every spectral column the Savitzky-Golay window leaves is masked, so no configuration would have a predictor.",
+      "x" = "{.arg sg_window} is {recipe_cfg$sg_window} grid points; it trims {half_window} column{?s} from each end of the {n_spectral} on the axis, and the {length(trimmed)} left are all masked.",
+      "i" = "Keep more of the spectrum outside the masked bands, or re-run {.fn configure} with a smaller {.arg sg_window}."
     ), kind = "input", call = call)
 
   }
@@ -3921,7 +3950,9 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' @description
 #' The Savitzky-Golay methods ([WINDOW_PREPROCESSING]) convolve adjacent
 #' columns whatever their spacing, so on an axis with a gap in it the columns
-#' beside the gap hold a window that treats its two sides as neighbours.
+#' beside the gap hold a window that treats its two sides as neighbours. The
+#' axis is the whole of it ([axis_columns()]): a masked band is no gap, since
+#' its columns are there for the window to read.
 #' A gap is `grid_summary()`'s, the rule `select_training()` refuses one by
 #' (`check_select_axis()`): a spacing over three times the median and over
 #' 30 cm-1. An axis whose names do not parse as wavenumbers has no gap here;
@@ -3938,9 +3969,7 @@ evaluation_recipe <- function(x, call = rlang::caller_env()) {
 #' @noRd
 window_gaps <- function(x, preprocessing = x$config$configs$preprocessing) {
 
-  role_map <- x$data$role_map
-  wn       <- wn_values(role_map$variable[role_map$role == "predictor"])
-
+  wn   <- axis_wavenumbers(x)
   gaps <- if (length(wn) > 1L && !anyNA(wn)) grid_summary(wn)$gaps
 
   list(gaps = gaps, methods = intersect(WINDOW_PREPROCESSING, preprocessing))
@@ -3983,7 +4012,7 @@ check_window_gaps <- function(x, preprocessing = x$config$configs$preprocessing,
     "The wavenumber axis has {n_gaps} gap{?s}, and {.val {methods}} {cli::qty(length(methods))}run{?s/} a window along it.",
     "x" = "{shown}.",
     "i" = "A Savitzky-Golay window would run across each gap as if its two sides were neighbours, so the {n_beside} columns beside it would hold features that are not in the spectra.",
-    "i" = "If an earlier {.code standardize(remove_water = TRUE)} deleted these bands, re-run the pipeline from {.fn spectra} with {.code remove_water = FALSE}.",
+    "i" = "If an earlier {.code standardize(remove_water = TRUE)} deleted these bands, re-run the pipeline from {.fn spectra}: it now keeps the bands and masks them.",
     "i" = "Otherwise configure {.val raw} or {.val snv}, or trim the spectra to one side of each gap ({.fn standardize}'s {.arg trim})."
   ), kind = "input", call = call)
 

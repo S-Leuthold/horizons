@@ -139,6 +139,29 @@ delete_axis_columns <- function(obj, cols) {
 
 
 ## ---------------------------------------------------------------------------
+## An axis with masked columns, made by hand
+## ---------------------------------------------------------------------------
+
+#' `obj` with the predictor columns `cols` given the masked role, its
+#' predictor count kept true: what standardize(remove_water = TRUE) makes of
+#' the water bands, on an object small enough to test with. The columns stay
+#' in the table and on the axis. Every name in `cols` must be a predictor.
+mask_axis_columns <- function(obj, cols) {
+
+  role_map <- obj$data$role_map
+  stopifnot(all(cols %in% role_map$variable[role_map$role == "predictor"]))
+
+  role_map$role[role_map$variable %in% cols] <- "masked"
+
+  obj$data$role_map     <- role_map
+  obj$data$n_predictors <- sum(role_map$role == "predictor")
+
+  obj
+
+}
+
+
+## ---------------------------------------------------------------------------
 ## Fit Test Object: a minimal horizons_eval object ready for fit()
 ## ---------------------------------------------------------------------------
 

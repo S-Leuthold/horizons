@@ -932,7 +932,8 @@ generate_config_id <- function(model, preprocessing, transformation,
 #' Spacing of an object's wavenumber axis, in cm-1
 #'
 #' @description
-#' The median absolute spacing of the predictor columns' wavenumbers, read
+#' The median absolute spacing of the axis's wavenumbers (the predictors and
+#' any masked columns, [axis_columns()]), read
 #' from their names (`wn_<wavenumber>`, or a bare number). That is the axis
 #' the recipe's Savitzky-Golay window slides along, so it is what converts the
 #' window from grid points to cm-1. The grid step `standardize()` recorded is
@@ -955,9 +956,8 @@ generate_config_id <- function(model, preprocessing, transformation,
 
 axis_spacing_cm <- function(x) {
 
-  role_map   <- x$data$role_map
-  predictors <- role_map$variable[role_map$role == "predictor"]
-  wn         <- wn_values(predictors)
+  ### The axis the window runs along, masked columns included
+  wn <- axis_wavenumbers(x)
 
   if (length(wn) > 1 && !anyNA(wn)) {
 

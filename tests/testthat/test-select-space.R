@@ -42,7 +42,7 @@ reference_space <- function(M, wn, threshold = 0.99, cap = 100L) {
 test_that("transform_similarity() default chain matches SNV then SG(1, 2, 11)", {
 
   fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   out <- transform_similarity(pm$matrix, pm$wavenumbers)
   ref <- reference_space(pm$matrix, pm$wavenumbers)
@@ -59,7 +59,7 @@ test_that("transform_similarity() default chain matches SNV then SG(1, 2, 11)", 
 test_that("transform_similarity(derivative = 0) skips the filter and keeps the width", {
 
   fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   out <- transform_similarity(pm$matrix, pm$wavenumbers, derivative = 0L)
 
@@ -72,7 +72,7 @@ test_that("transform_similarity(derivative = 0) skips the filter and keeps the w
 test_that("transform_similarity(snv = FALSE, derivative = 0) is the identity", {
 
   fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   out <- transform_similarity(pm$matrix, pm$wavenumbers, snv = FALSE, derivative = 0L)
 
@@ -84,7 +84,7 @@ test_that("transform_similarity(snv = FALSE, derivative = 0) is the identity", {
 test_that("transform_similarity() honours window, poly and the second derivative", {
 
   fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   out <- transform_similarity(pm$matrix, pm$wavenumbers, derivative = 2L, window = 21L, poly = 3L)
 
@@ -99,7 +99,7 @@ test_that("transform_similarity() honours window, poly and the second derivative
 test_that("transform_similarity() masks ranges after the derivative", {
 
   fx   <- select_fixture(n_pool = 30)
-  pm   <- predictor_matrix(fx$pool)
+  pm   <- axis_matrix(fx$pool)
   mask <- rbind(c(1580, 1720), c(3100, 3700))
 
   out <- transform_similarity(pm$matrix, pm$wavenumbers, mask = mask)
@@ -113,6 +113,37 @@ test_that("transform_similarity() masks ranges after the derivative", {
 
 })
 
+test_that("transform_similarity() takes SNV's statistics from the columns the mask leaves, as the model's transform does", {
+
+  fx   <- select_fixture(n_pool = 30)
+  pm   <- axis_matrix(fx$pool)
+  mask <- rbind(c(3100, 3700))
+  wn   <- pm$wavenumbers
+
+  out <- transform_similarity(pm$matrix, wn, mask = mask)
+
+  ## The chain with SNV over the unmasked columns, by hand
+  in_band <- wn >= 3100 & wn <= 3700
+  ref     <- prospectr::savitzkyGolay(snv_unmasked(pm$matrix, in_band), m = 1, p = 2, w = 11)
+  kept    <- !in_band[6:(length(wn) - 5)]
+
+  expect_identical(unname(out$matrix), unname(ref[, kept]))
+
+  ## So a band's values, more than the filter's half window inside it, reach
+  ## nothing in the space
+  poisoned <- pm$matrix
+  poisoned[, wn >= 3124 & wn <= 3676] <- 1e6
+
+  expect_identical(transform_similarity(poisoned, wn, mask = mask)$matrix, out$matrix)
+
+  ## With no mask, SNV is prospectr's over every column, as before
+  expect_identical(transform_similarity(pm$matrix, wn)$matrix,
+                   transform_similarity(pm$matrix, wn, mask = NULL)$matrix)
+  expect_false(isTRUE(all.equal(transform_similarity(poisoned, wn)$matrix,
+                                transform_similarity(pm$matrix, wn)$matrix)))
+
+})
+
 
 test_that("transform_similarity() trips an internal check on a row that goes non-finite, naming it", {
 
@@ -120,7 +151,7 @@ test_that("transform_similarity() trips an internal check on a row that goes non
   ## non-finite value in no other, so only a bug reaches this; NaN would
   ## otherwise spread through the projection silently
   fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
   pm$matrix["P004", 3] <- Inf   # propagates through SNV and the filter
 
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers),
@@ -132,7 +163,7 @@ test_that("transform_similarity() trips an internal check on a row that goes non
 test_that("transform_similarity() aborts when the mask leaves too few columns", {
 
   fx <- select_fixture(n_pool = 30)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   ## Everything masked
   expect_error(transform_similarity(pm$matrix, pm$wavenumbers, mask = rbind(c(0, 5000))),
@@ -152,7 +183,7 @@ test_that("transform_similarity() aborts when the mask leaves too few columns", 
 test_that("build_similarity_space() default reproduces the experiment's PCA space", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   sp  <- space_on(pm$matrix, pm$wavenumbers, sdev_floor = 0)
   ref <- reference_space(pm$matrix, pm$wavenumbers)
@@ -181,7 +212,7 @@ test_that("build_similarity_space() default reproduces the experiment's PCA spac
 test_that("build_similarity_space(ncomp = integer) retains exactly that many", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   sp <- space_on(pm$matrix, pm$wavenumbers, ncomp = 5L, sdev_floor = 0)
 
@@ -195,7 +226,7 @@ test_that("build_similarity_space(ncomp = integer) retains exactly that many", {
 test_that("build_similarity_space(ncomp = proportion) retains fewer at a lower proportion", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   hi <- space_on(pm$matrix, pm$wavenumbers, ncomp = 0.99, sdev_floor = 0)
   lo <- space_on(pm$matrix, pm$wavenumbers, ncomp = 0.50, sdev_floor = 0)
@@ -209,7 +240,7 @@ test_that("build_similarity_space(ncomp = proportion) retains fewer at a lower p
 test_that("build_similarity_space() caps proportional ncomp at max_comp", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   sp <- space_on(pm$matrix, pm$wavenumbers, ncomp = 0.999999, max_comp = 3L,
                  sdev_floor = 0)
@@ -222,7 +253,7 @@ test_that("build_similarity_space() caps proportional ncomp at max_comp", {
 test_that("each spectral lever changes the space", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   base <- space_on(pm$matrix, pm$wavenumbers, ncomp = 4L, sdev_floor = 0)
 
@@ -273,7 +304,7 @@ test_that("build_similarity_space() accepts a coarse but gap-free pool", {
 test_that("build_similarity_space() refuses a mask that leaves too little to decompose, naming no cap", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   ## A mask over everything leaves no column. Most of the space masked is
   ## allowed, and the verb's tree says how much the mask took.
@@ -308,7 +339,7 @@ test_that("build_similarity_space() trips an internal check on a matrix below th
   ## holds the floor too, so a caller that drops it fails loudly rather than
   ## decomposing too few columns.
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   one <- transform_similarity(pm$matrix, pm$wavenumbers, mask = rbind(c(1006, 5000), c(0, 1002)))
   expect_identical(ncol(one$matrix), 1L)
@@ -329,7 +360,7 @@ test_that("build_similarity_space() records the settings its transform used", {
   ## Projection repeats the transform from the recorded settings, so they
   ## are the transform's own, not spelled again by the caller.
   fx   <- select_fixture(n_pool = 60)
-  pm   <- predictor_matrix(fx$pool)
+  pm   <- axis_matrix(fx$pool)
   mask <- rbind(c(1580, 1720))
 
   tr <- transform_similarity(pm$matrix, pm$wavenumbers, snv = FALSE, derivative = 2L,
@@ -454,7 +485,7 @@ test_that("a pool with no spread is refused, whether ncomp is a count or a propo
 test_that("the default floor trims the fixture's variance-chosen set", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   none <- space_on(pm$matrix, pm$wavenumbers, sdev_floor = 0)
   dflt <- space_on(pm$matrix, pm$wavenumbers)
@@ -493,7 +524,7 @@ test_that("build_similarity_space(space = 'pls') trips an internal check on a y 
   ## The verb passes the pool's own column, so only a bug can misalign it,
   ## and recycling would fit against the wrong rows silently
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   expect_error(space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
                         y = fx$pool$data$analysis$clay[-1]),
@@ -506,7 +537,7 @@ test_that("build_similarity_space(space = 'pls') trips an internal check on a y 
 test_that("build_similarity_space(space = 'pls') fits on measured rows and scores every row", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
   y  <- fx$pool$data$analysis$oc   # half NA
 
   sp <- space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 4L, y = y)
@@ -533,7 +564,7 @@ test_that("build_similarity_space(space = 'pls') fits on measured rows and score
 test_that("the PLS branch records the decay but is not floored by it", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
   y  <- fx$pool$data$analysis$clay
 
   none <- space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 6L,
@@ -563,7 +594,7 @@ test_that("the PLS branch records the decay but is not floored by it", {
 test_that("project_similarity() of the pool onto its own space returns the stored scores", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   sp <- space_on(pm$matrix, pm$wavenumbers)
   pr <- project_similarity(sp, pm$matrix, pm$wavenumbers)
@@ -577,7 +608,7 @@ test_that("project_similarity() of the pool onto its own space returns the store
 test_that("project_similarity() works for the PLS space too", {
 
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
+  pm <- axis_matrix(fx$pool)
 
   sp <- space_on(pm$matrix, pm$wavenumbers, space = "pls", ncomp = 3L,
                  y = fx$pool$data$analysis$clay)
@@ -592,7 +623,7 @@ test_that("project_similarity() places the exact twin on its pool row", {
 
   fx <- select_fixture(n_pool = 60)
   rc <- pool_on_targets(fx)
-  tm <- predictor_matrix(fx$targets)
+  tm <- axis_matrix(fx$targets)
 
   sp <- space_on(rc$matrix, rc$wavenumbers)
   st <- project_similarity(sp, tm$matrix, tm$wavenumbers)
@@ -607,8 +638,8 @@ test_that("project_similarity() trips an internal check on a wavenumber mismatch
   ## search_axis() puts the targets on the space's grid; off it, the
   ## projection would score columns against the wrong loadings
   fx <- select_fixture(n_pool = 60)
-  pm <- predictor_matrix(fx$pool)
-  tm <- predictor_matrix(fx$targets)   # the targets' 8 cm-1 grid, not the space's 4
+  pm <- axis_matrix(fx$pool)
+  tm <- axis_matrix(fx$targets)   # the targets' 8 cm-1 grid, not the space's 4
 
   sp <- space_on(pm$matrix, pm$wavenumbers)
 

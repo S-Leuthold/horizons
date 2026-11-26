@@ -159,13 +159,13 @@ test_that("standardize() refuses a trim that misses the data, naming both ranges
 })
 
 
-test_that("standardize() refuses water-band removal that would leave nothing, and resampling one column, saying what to change", {
+test_that("standardize() refuses water-band masking that would leave nothing to model, and resampling one column, saying what to change", {
 
   ## An axis wholly inside the 3100-3700 band
   hd <- create_test_spectra(n_wavelengths = 50, wn_min = 3200, wn_max = 3600)
 
   err <- expect_error(standardize(hd, resample = NULL, trim = NULL, remove_water = TRUE),
-                      "Water band removal would delete all wavelength data", fixed = TRUE,
+                      "Masking the water bands would leave nothing to model", fixed = TRUE,
                       class = "horizons_error_input")
   expect_match(conditionMessage(err), "Use `remove_water = FALSE`, or a wider `trim`", fixed = TRUE)
   expect_match(gsub("\\s+", " ", conditionMessage(err)), "(1580 to 1720 and 3100 to 3700 cm-1)", fixed = TRUE)
@@ -214,10 +214,11 @@ test_that("standardize() refuses a non-predictor column named like a predictor i
   expect_match(msg, "Taken: wn_602.", fixed = TRUE)
   expect_identical(rlang::call_name(err$call), "standardize")
 
-  ## A name inside the water bands is free once they are removed
+  ## A name inside the water bands is taken too: the masked bands are
+  ## written with the rest of the axis
   expect_error(standardize(with_meta(hd, "wn_1650"), verbose = FALSE), "Taken: wn_1650.", fixed = TRUE)
   expect_error(standardize(with_meta(hd, "wn_1650"), remove_water = TRUE, verbose = FALSE),
-               "resampled", fixed = TRUE)
+               "Taken: wn_1650.", fixed = TRUE)
 
   ## Without resampling the axis keeps its own wavenumbers, written as
   ## wn_<wavenumber> whatever the predictors were named: bare numbers here
@@ -882,15 +883,20 @@ test_that("trim = NULL keeps each source's extent, and two sources share names w
 ## =============================================================================
 ## Gaps in the Input Axis
 ## =============================================================================
-## A band deleted upstream, or by an earlier standardize(remove_water = TRUE),
-## is a hole the spline must never fill.
+## A band deleted upstream, or by standardize(remove_water = TRUE) before it
+## masked the bands, is a hole the spline must never fill.
 
-#' A KSSL-shaped library already standardized with its water bands removed
+in_water_band <- function(wn) (wn >= 1580 & wn <= 1720) | (wn >= 3100 & wn <= 3700)
+
+#' A KSSL-shaped library on the 2 cm-1 grid with its water bands deleted by
+#' hand, as an earlier standardize() or another tool left it
 #' @noRd
 water_removed_library <- function() {
 
-  kssl <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum)
-  no_output(standardize(kssl, resample = 2, remove_water = TRUE))
+  kssl <- no_output(standardize(make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum), resample = 2))
+  wn   <- as.numeric(sub("^wn_", "", predictor_names(kssl)))
+
+  delete_axis_columns(kssl, predictor_names(kssl)[in_water_band(wn)])
 
 }
 
@@ -911,7 +917,6 @@ with_warnings <- function(expr) {
 
 }
 
-in_water_band <- function(wn) (wn >= 1580 & wn <= 1720) | (wn >= 3100 & wn <= 3700)
 
 
 test_that("an axis with the water bands cut upstream is not spline-filled, and stays as it was", {
@@ -941,7 +946,7 @@ test_that("an axis with the water bands cut upstream is not spline-filled, and s
 })
 
 
-test_that("force = TRUE on an object standardized with remove_water = TRUE leaves the bands empty", {
+test_that("force = TRUE on an axis with the water bands deleted leaves the bands empty", {
 
   cut <- water_removed_library()
 
@@ -1353,20 +1358,21 @@ test_that("a spectrum short of the grid is flagged for that, with the range it c
 
 })
 
-test_that("a value missing only inside a water band it removes flags nothing, unless the hull needs it", {
+test_that("a value missing only inside a water band it masks flags the spectrum, whose windows read it", {
 
   hd <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 2)
   hd$data$analysis$wn_1650[2] <- NA_real_
 
-  ## The values returned are all finite
-  expect_no_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000), remove_water = TRUE)))
-  expect_false(".flag" %in% names(out$data$analysis))
-  expect_false(anyNA(predictor_block(out)))
-
-  ## The hull is fitted across the band, before it is removed
-  w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000),
-                                                   remove_water = TRUE, baseline = TRUE)),
+  ## The band is returned, masked, and the spectral transform reads it
+  w <- expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000), remove_water = TRUE)),
                       class = "horizons_warning_flagged")
+  expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
+  expect_true("wn_1650" %in% masked_columns(out$data$role_map))
+
+  ## And with the hull, which is fitted across the band, the same
+  expect_warning(out <- no_output(standardize(hd, resample = 2, trim = c(600, 4000),
+                                              remove_water = TRUE, baseline = TRUE)),
+                 class = "horizons_warning_flagged")
   expect_identical(out$data$analysis$.flag, c(NA, "standardize"))
 
 })
@@ -1406,6 +1412,20 @@ test_that("unusable_spectra() gives one rule over a matrix or a data frame, and 
   ## One value has no spread to judge; no columns, nothing to judge
   expect_identical(unusable_spectra(M[, 1, drop = FALSE]), c(NA, NA, NA, "non-finite"))
   expect_identical(unusable_spectra(M[, 0, drop = FALSE]), rep(NA_character_, 4))
+
+})
+
+test_that("unusable_spectra() on an axis with a mask reads every column for a missing value and the unmasked ones for spread", {
+
+  ## Column 2 masked. Row 2 varies only there, row 3 is missing only there
+  M      <- rbind(c(1, 2, 3, 4), c(5, 9, 5, 5), c(1, NA, 3, 4), c(1, 2, 2, 2))
+  masked <- c(FALSE, TRUE, FALSE, FALSE)
+
+  expect_identical(unusable_spectra(M, masked), c(NA, "no spread", "non-finite", NA))
+  expect_identical(unusable_spectra(as.data.frame(M), masked), unusable_spectra(M, masked))
+
+  ## Nothing masked is the rule without a mask
+  expect_identical(unusable_spectra(M, rep(FALSE, 4)), unusable_spectra(M))
 
 })
 
@@ -1751,7 +1771,7 @@ test_that("apply_baseline_correction() returns one spectrum as a 1 x p matrix na
 ## Water Band Removal Tests
 ## =============================================================================
 
-test_that("remove_water_bands() removes water absorption regions", {
+test_that("remove_water = TRUE takes the water absorption regions out of the predictors", {
 
   ## Create data spanning water bands ------------------------------------------
 
@@ -1884,7 +1904,7 @@ test_that("standardize() refuses an evaluated object it would change, and return
 ## Combined Operations Tests
 ## =============================================================================
 
-test_that("standardize() with every operation on trims, drops the water bands, resamples, and records its arguments", {
+test_that("standardize() with every operation on trims, masks the water bands, resamples, and records its arguments", {
 
   ## Create data with wide range and coarse resolution -------------------------
 
@@ -1959,5 +1979,109 @@ test_that("standardize() preserves non-predictor columns", {
 
   expect_true("batch" %in% names(hd_std$data$analysis))
   expect_equal(hd_std$data$analysis$batch, rep("A", nrow(hd_std$data$analysis)))
+
+})
+
+
+## =============================================================================
+## Water bands are masked, not deleted
+## =============================================================================
+
+describe("standardize(remove_water = TRUE) masks the water bands", {
+
+  kssl <- make_axis_spectra(rev(KSSL_WN), f = smooth_spectrum, n = 3)
+
+  masked_out <- no_output(standardize(kssl, resample = 2, remove_water = TRUE))
+  plain_out  <- no_output(standardize(kssl, resample = 2))
+
+  it("keeps every column of the axis, the 372 in the bands masked, and the same values", {
+
+    wn <- as.numeric(sub("^wn_", "", axis_columns(masked_out$data$role_map)))
+
+    expect_identical(axis_columns(masked_out$data$role_map), axis_columns(plain_out$data$role_map))
+    expect_identical(length(masked_columns(masked_out$data$role_map)), 372L)
+    expect_identical(masked_columns(masked_out$data$role_map),
+                     axis_columns(masked_out$data$role_map)[in_water_band(wn)])
+    expect_identical(masked_out$data$n_predictors, 1701L - 372L)
+    expect_identical(masked_out$data$analysis, plain_out$data$analysis)
+
+  })
+
+  it("records the axis as it records it without the mask, and says how many it masked", {
+
+    expect_identical(masked_out$data$standardization, plain_out$data$standardization)
+    expect_identical(masked_out$data$standardization$wavelength_range, c(600, 4000))
+    expect_match(record_message(masked_out), "1701 wavenumbers kept (372 of them masked)", fixed = TRUE)
+
+  })
+
+  it("masks them again, or returns them to the predictors, as a forced re-run's remove_water says", {
+
+    again <- no_output(suppressWarnings(standardize(masked_out, resample = 2, remove_water = TRUE, force = TRUE)))
+    back  <- no_output(suppressWarnings(standardize(masked_out, resample = 2, remove_water = FALSE, force = TRUE)))
+
+    expect_identical(masked_columns(again$data$role_map), masked_columns(masked_out$data$role_map))
+    expect_identical(masked_columns(back$data$role_map), character(0))
+    expect_identical(back$data$role_map, plain_out$data$role_map)
+    expect_identical(back$data$analysis, plain_out$data$analysis)
+
+  })
+
+  it("does the same on a forced re-run with resample and trim off", {
+
+    again <- no_output(suppressWarnings(standardize(masked_out, resample = NULL, trim = NULL,
+                                                    remove_water = TRUE, force = TRUE)))
+    back  <- no_output(suppressWarnings(standardize(masked_out, resample = NULL, trim = NULL,
+                                                    remove_water = FALSE, force = TRUE)))
+
+    expect_identical(masked_columns(again$data$role_map), masked_columns(masked_out$data$role_map))
+    expect_identical(masked_columns(back$data$role_map), character(0))
+    expect_identical(back$data$role_map, plain_out$data$role_map)
+    expect_identical(back$data$n_predictors, 1701L)
+    expect_identical(back$data$analysis, plain_out$data$analysis)
+    expect_match(record_message(back), "nothing applied, 1701 wavenumbers kept.", fixed = TRUE)
+
+  })
+
+  it("leaves no gap for the window methods, and gives them the full-axis transform beside each band", {
+
+    obj <- masked_out
+    obj$data$analysis$SOC <- seq_len(nrow(obj$data$analysis))
+    obj$data$role_map     <- dplyr::bind_rows(obj$data$role_map, tibble::tibble(variable = "SOC", role = "outcome"))
+
+    expect_null(window_gaps(obj, "deriv1")$gaps)
+
+    config <- tibble::tibble(transformation = "none", preprocessing = "deriv1", feature_selection = "none")
+    rm     <- obj$data$role_map
+    axis   <- axis_columns(rm)
+
+    hoisted <- hoist_spectra(obj$data$analysis, config, rm)
+    X       <- as.matrix(obj$data$analysis[, axis])
+    full    <- prospectr::savitzkyGolay(X, m = 1, p = 1, w = 9)
+
+    expect_identical(unname(as.matrix(hoisted[, grep("^spec", names(hoisted))])),
+                     unname(full[, !(axis %in% masked_columns(rm))[5:(length(axis) - 4)]]))
+    expect_identical(sum(grepl("^spec", names(hoisted))), 1321L)
+
+  })
+
+  it("keeps the columns at an axis end the edge trim used to take from a band, for every method", {
+
+    ## A trim ending at 3500 ends inside the 3100 to 3700 band: the window's
+    ## edge trim takes 4 masked columns there, not 4 real ones
+    edge <- no_output(standardize(kssl, resample = 2, trim = c(600, 3500), remove_water = TRUE))
+    edge$data$analysis$SOC <- seq_len(nrow(edge$data$analysis))
+    edge$data$role_map     <- dplyr::bind_rows(edge$data$role_map, tibble::tibble(variable = "SOC", role = "outcome"))
+
+    for (method in VALID_PREPROCESSING) {
+
+      config  <- tibble::tibble(transformation = "none", preprocessing = method, feature_selection = "none")
+      hoisted <- hoist_spectra(edge$data$analysis, config, edge$data$role_map)
+
+      expect_identical(grep("^spec", names(hoisted), value = TRUE), recipes::names0(1175, "spec"), label = method)
+
+    }
+
+  })
 
 })

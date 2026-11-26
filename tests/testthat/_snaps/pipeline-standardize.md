@@ -21,8 +21,8 @@
       │  ├─ Trimming: 600-4000 cm⁻¹ (1701 → 1701)
       │  ├─ Resampling: 2 → 4 cm⁻¹ onto 600-4000 (1701 → 851)
       │  ├─ Baseline correction (convex hull)
-      │  ├─ Water bands: 187 removed (851 → 664)
-      │  └─ 3 samples × 664 predictors
+      │  ├─ Water bands: 187 of 851 masked, kept and dropped after the spectral transform
+      │  └─ 3 samples × 664 predictors, 187 masked
       │
     Code
       x <- standardize(offgrid, resample = 4, trim = c(600, 4000), verbose = TRUE)

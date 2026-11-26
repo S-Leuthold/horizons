@@ -1817,3 +1817,38 @@ describe("validate() and the structural validator", {
   })
 
 })
+
+
+## ===========================================================================
+## Masked columns are never read
+## ===========================================================================
+
+test_that("validate() reads no masked column: its near-zero-variance count and outlier ids are the same with the masked values poisoned", {
+
+  ## Ten of the 50 bands masked; every other row's masked values replaced
+  masked_cols <- as.character(630:621)
+  hd          <- mask_axis_columns(make_configured_hd(), masked_cols)
+
+  poisoned <- hd
+  rows     <- seq(1, nrow(poisoned$data$analysis), by = 2)
+  poisoned$data$analysis[rows, masked_cols] <- 1e6
+
+  clean <- quiet_validate(hd)
+  wild  <- quiet_validate(poisoned)
+
+  expect_identical(wild$validation$checks, clean$validation$checks)
+  expect_identical(wild$validation$outliers, clean$validation$outliers)
+
+  ## The masked columns held at one value in every row: zero variance, which
+  ## the near-zero-variance count would take if it read them
+  flat <- hd
+  flat$data$analysis[, masked_cols] <- 0.3
+
+  still <- quiet_validate(flat)
+  p007  <- function(v) v$validation$checks$value[v$validation$checks$check_id == "P007"]
+
+  expect_identical(p007(clean), "0")
+  expect_identical(p007(still), "0")
+  expect_identical(still$validation$checks, clean$validation$checks)
+
+})

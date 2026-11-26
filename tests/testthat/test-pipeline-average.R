@@ -2265,3 +2265,38 @@ test_that("average() refuses a column with no role_map entry instead of silently
   )
 
 })
+
+
+## ---------------------------------------------------------------------------
+## Masked columns: averaged with the rest of the axis, never read by QC
+## ---------------------------------------------------------------------------
+
+test_that("average() averages masked columns with the axis, and its quality check never reads them", {
+
+  ## Ten bands, three masked. One replicate of S1 wild in the masked band
+  ## only: QC, which correlates over the predictors, must not see it
+  masked_cols <- c("wn_850", "wn_800", "wn_750")
+  hd          <- mask_axis_columns(make_test_hd_average(n_samples = 3, n_reps = 3), masked_cols)
+
+  wild <- hd
+  wild$data$analysis[1, masked_cols] <- 1e6
+
+  clean_out <- average(hd,   quality_check = TRUE, verbose = FALSE)
+  wild_out  <- average(wild, quality_check = TRUE, verbose = FALSE)
+
+  ## The masked columns survive, in their place on the axis and with their role
+  expect_identical(axis_columns(wild_out$data$role_map), axis_columns(hd$data$role_map))
+  expect_identical(masked_columns(wild_out$data$role_map), masked_cols)
+
+  ## Averaged as every band is: over the replicates kept
+  s1 <- wild$data$analysis[wild$data$analysis$sample_id == "S1", masked_cols]
+  expect_equal(unlist(wild_out$data$analysis[1, masked_cols], use.names = FALSE),
+               unname(vapply(s1, mean, numeric(1))))
+
+  ## No verdict moves, and the predictors average the same
+  pred <- hd$data$role_map$variable[hd$data$role_map$role == "predictor"]
+
+  expect_identical(wild_out$log$detail, clean_out$log$detail)
+  expect_identical(wild_out$data$analysis[, pred], clean_out$data$analysis[, pred])
+
+})

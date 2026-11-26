@@ -9,6 +9,7 @@ step_transform_spectra(
   ...,
   preprocessing,
   window_size = 9,
+  masked = NULL,
   role = "predictor",
   trained = FALSE,
   skip = FALSE,
@@ -27,6 +28,11 @@ when the step is added.}
 grid points; it also sets the edge trimmed for \code{"raw"} and \code{"snv"}.
 Default 9. Checked here, so a direct caller cannot build the step with a
 window some method cannot run.}
+
+\item{masked}{Character or \code{NULL}. The names of the selected columns that
+are masked: transformed with the rest of the axis, so a window beside
+them reads real neighbours, and then dropped. \code{NULL} (the default)
+masks nothing.}
 
 \item{role}{Character. Role for output columns. Default "predictor".}
 
@@ -66,8 +72,20 @@ column with the \code{id} role when the recipe has one and by position
 otherwise, in one \code{horizons_warning_flagged}, which carries the field
 \code{step}.
 
+\strong{Masked columns.} The method runs over every selected column, masked
+ones included, so a Savitzky-Golay window beside a masked band reads the
+real values there rather than jumping the band. SNV's mean and spread are
+taken over the unmasked columns alone and applied to every column. The
+masked columns are then dropped: the output holds the unmasked columns
+the window's edge trim leaves, named \code{spec1}, \code{spec2}, ... in axis order,
+so nothing after the step sees a masked column. A missing value in a
+masked column makes the spectrum unusable, since a window reads it; its
+spread is judged over the unmasked columns. With nothing masked the step
+is what it was before the argument existed.
+
 When you \code{tidy()} this step, a tibble is returned with columns \code{terms},
-\code{preprocessing}, \code{window_size} and \code{id}: before \code{prep()}, \code{terms} holds
-the selectors; after, the columns the step transforms.
+\code{preprocessing}, \code{window_size}, \code{masked} and \code{id}: before \code{prep()},
+\code{terms} holds the selectors and \code{masked} is \code{NA}; after, the columns the
+step transforms, and whether each is masked.
 }
 \keyword{internal}

@@ -1929,7 +1929,7 @@ describe("evaluate() - no window method across a gap in the axis", {
     expect_match(msg, "The wavenumber axis has 1 gap, and \"deriv1\" and \"snv_deriv2\" run a window along it.", fixed = TRUE)
     expect_match(msg, "3924 to 3956 cm", fixed = TRUE)
     expect_match(msg, "the 8 columns beside it", fixed = TRUE)
-    expect_match(msg, "remove_water = FALSE", fixed = TRUE)
+    expect_match(msg, "it now keeps the bands and masks them", fixed = TRUE)
     expect_identical(out$ran, 0L)
 
   })
@@ -1970,6 +1970,52 @@ describe("evaluate() - no window method across a gap in the axis", {
 
     expect_s3_class(out$error, "horizons_error_all_configs_failed")
     expect_identical(out$ran, 3L)
+
+  })
+
+  it("runs every window method on an axis whose band is masked rather than deleted", {
+
+    ## The 15 bands deleted above, kept and masked: the window reads them
+    masked <- mask_axis_columns(make_eval_object(n_wn = 40, n_configs = 3),
+                                paste0("wn_", seq(3954, 3926, by = -2)))
+    out    <- runs(masked, c("deriv1", "snv_deriv2", "sg"))
+
+    expect_s3_class(out$error, "horizons_error_all_configs_failed")
+    expect_identical(out$ran, 3L)
+
+  })
+
+  it("scores raw and snv on a masked band as on the band deleted, and runs the window methods only on the masked one", {
+
+    ## Sixty bands, the 15 from 3922 to 3894 a band more than the window's
+    ## half from either end of the axis, which the edge trim treats alike
+    band    <- paste0("wn_", seq(3922, 3894, by = -2))
+    obj     <- make_eval_object(n = 60, n_wn = 60, n_configs = 2)
+    obj$config$configs$preprocessing <- c("raw", "snv")
+
+    masked  <- suppressWarnings(evaluate(mask_axis_columns(obj, band), prune = FALSE, seed = 5L))
+    deleted <- suppressWarnings(evaluate(delete_axis_columns(obj, band), prune = FALSE, seed = 5L))
+
+    scores <- c("config_id", "status", "rmse", "rsq", "rpd", "cv_rmse", "cv_rpd")
+    expect_identical(masked$evaluation$results[, scores], deleted$evaluation$results[, scores])
+
+    expect_identical(runs(mask_axis_columns(obj, band), c("deriv1", "snv_deriv2"))$ran, 2L)
+    expect_s3_class(runs(delete_axis_columns(obj, band), c("deriv1", "snv_deriv2"))$error, "horizons_error_input")
+
+  })
+
+  it("refuses a mask that leaves the window nothing to model, before any configuration runs", {
+
+    ## The window of 9 keeps bands 5 to 36 of 40; all of them masked
+    keeps  <- paste0("wn_", seq(4000, by = -2, length.out = 40))[5:36]
+    out    <- runs(mask_axis_columns(make_eval_object(n_wn = 40, n_configs = 3), keeps),
+                   c("raw", "raw", "raw"))
+    msg    <- gsub("\\s+", " ", conditionMessage(out$error))
+
+    expect_s3_class(out$error, "horizons_error_input")
+    expect_match(msg, "Every spectral column the Savitzky-Golay window leaves is masked", fixed = TRUE)
+    expect_match(msg, "it trims 4 columns from each end of the 40 on the axis", fixed = TRUE)
+    expect_identical(out$ran, 0L)
 
   })
 
@@ -2373,6 +2419,40 @@ describe("eval_data_fingerprint()", {
 
     expect_identical(eval_data_fingerprint(wider, roles_wider)$data_fields,
                      eval_data_fingerprint(df_xy, roles_xy)$data_fields)
+
+  })
+
+  it("is unchanged for an object with nothing masked: the hashes are the ones from before the masked role", {
+
+    ## Pinned at the commit before the masked role, so checkpoints written
+    ## then still resume
+    fp <- eval_data_fingerprint(df_xy, roles_xy)
+
+    expect_identical(fp$data_hash, "fff9c38278348879f5cec36963a9ac37")
+    expect_identical(fp$data_fields, list(outcome        = "y",
+                                          ids            = "44d916ee3f07c5bb",
+                                          roles          = "8cc0a7cea12a3bce",
+                                          outcome_values = "b6f20ea623194e83",
+                                          predictors     = "753447db92c5cbbb"))
+
+  })
+
+  it("reads a masked column's values and role, which reach the model through the windows beside it", {
+
+    masked_xy <- roles_xy
+    masked_xy$role[masked_xy$variable == "wn_2"] <- "masked"
+
+    base <- eval_data_fingerprint(df_xy, masked_xy)$data_fields
+
+    ## A column whose role flips from predictor to masked
+    flipped <- compare_record(base, eval_data_fingerprint(df_xy, roles_xy)$data_fields)
+    expect_identical(flipped$differ, "roles")
+
+    ## A masked column's values
+    moved      <- df_xy
+    moved$wn_2 <- moved$wn_2 + 1
+    changed    <- compare_record(eval_data_fingerprint(moved, masked_xy)$data_fields, base)
+    expect_identical(changed$differ, "predictors")
 
   })
 

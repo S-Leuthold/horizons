@@ -72,8 +72,11 @@
 #' for a registered library or a library file that space is cached (see
 #' "The cached space"). The training set comes back on the library's own
 #' columns at the wavenumbers the targets share with it: a column is shared
-#' when the library has a predictor of the same name, and nothing is
-#' interpolated. Targets on a coarser canonical grid (4 or 8 cm-1 against a
+#' when the library has a spectral column of the same name, and nothing is
+#' interpolated. A shared column either side masks
+#' (`standardize(remove_water = TRUE)`) is masked in the training set, so
+#' the model never reads a band either side declared out, and the targets
+#' can always predict from it. Targets on a coarser canonical grid (4 or 8 cm-1 against a
 #' 2 cm-1 library) share every one of their columns, so the training set
 #' comes back on their step. Target columns the library lacks (a wider range,
 #' a finer or offset step) are named in one `horizons_warning_coverage`;
@@ -108,8 +111,10 @@
 #' median and more than 30 cm-1), is refused before anything interpolates,
 #' the targets' before the library resolves: a resampling spline and a
 #' Savitzky-Golay window both run straight across a gap and invent
-#' absorbance at its edges without erroring, and a deleted water band
-#' belongs in `mask`, which is applied after the derivative. `window` is a
+#' absorbance at its edges without erroring. A water band belongs in the
+#' spectra, masked: `standardize(remove_water = TRUE)` keeps the bands and
+#' masks them, and `mask` masks any range, both after the derivative.
+#' `window` is a
 #' width in cm-1, so
 #' the filter is the same physical filter on any batch; the point count it
 #' becomes on the library's grid is recorded in `settings$window_points`, and
@@ -276,7 +281,13 @@
 #' @param poly `integer.` Savitzky-Golay polynomial order. Default: `2`.
 #' @param mask `matrix or NULL.` Wavenumber ranges to drop from the
 #'   similarity space after the derivative, one row per range, low then
-#'   high. Default: `NULL`.
+#'   high. The bands the targets or the library mask (`standardize(remove_water
+#'   = TRUE)`) are dropped too, whatever is given here, so `NULL` (the default)
+#'   is the objects' masks and nothing more. SNV takes its mean and spread
+#'   from the columns left. `settings$mask` records the ranges the space ran
+#'   with, sorted, a range that overlaps the next merged with it. A run of masked target columns is read as the range between its
+#'   own ends, so on a finer library grid the library columns between a
+#'   masked target column and its unmasked neighbour stay in the space.
 #' @param space `character.` `"pca"` (unsupervised, of the pool) or
 #'   `"pls"` (against one property; `properties` must name exactly one).
 #'   Default: `"pca"`.
@@ -676,7 +687,7 @@ select_training <- function(x, library,
 
   ## The targets' axis needs nothing from the library, so it is checked now:
   ## two columns or more, and no gap (check_select_axis()).
-  check_select_axis(predictor_wavenumbers(x), "x", "the targets")
+  check_select_axis(axis_wavenumbers(x), "x", "the targets")
 
   ## A target an earlier step flagged gets no training set (decision 5), so
   ## targets that are all flagged leave nothing to draw for.
@@ -707,7 +718,7 @@ select_training <- function(x, library,
 
   }
 
-  target_vars   <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+  target_vars   <- axis_columns(x$data$role_map)
   restandardize <- !is.null(x$data$standardization)
 
   ## A registered library's columns and baseline are known from the
@@ -733,7 +744,7 @@ select_training <- function(x, library,
                                     wavelength_range = reg_range),
                                x$data$standardization,
                                pool_step     = reg_grid$wn_step,
-                               target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
+                               target_step   = grid_summary(axis_wavenumbers(x))$resolution,
                                library_form  = "registered",
                                restandardize = restandardize)
 
@@ -952,7 +963,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   ## The library's axis, by the targets' rule ---------------------------------
 
-  check_select_axis(predictor_wavenumbers(pool), "library", "the pool")
+  check_select_axis(axis_wavenumbers(pool), "library", "the pool")
 
   ## The columns the training set will have (#236) ---------------------------
 
@@ -961,7 +972,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## columns the library lacks are reported, since predict() uses only the
   ## columns the model was trained on.
 
-  pool_vars <- pool$data$role_map$variable[pool$data$role_map$role == "predictor"]
+  pool_vars <- axis_columns(pool$data$role_map)
   cols      <- check_shared_columns(target_vars, pool_vars, restandardize = restandardize,
                                     library_form         = resolved$record$form,
                                     library_standardized = !is.null(pool$data$standardization),
@@ -971,14 +982,14 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## different ranges, would train on one preprocessing and predict another.
 
   check_same_standardization(pool$data$standardization, x$data$standardization,
-                             pool_step     = grid_summary(predictor_wavenumbers(pool))$resolution,
-                             target_step   = grid_summary(predictor_wavenumbers(x))$resolution,
+                             pool_step     = grid_summary(axis_wavenumbers(pool))$resolution,
+                             target_step   = grid_summary(axis_wavenumbers(x))$resolution,
                              library_form  = resolved$record$form,
                              restandardize = restandardize)
 
   if (length(cols$target_only)) {
 
-    lib_wn  <- predictor_wavenumbers(pool)
+    lib_wn  <- axis_wavenumbers(pool)
     only_wn <- as.numeric(sub("^wn_", "", cols$target_only))
     outside <- sum(only_wn < min(lib_wn) - GRID_TOL | only_wn > max(lib_wn) + GRID_TOL)
     between <- length(only_wn) - outside
@@ -1012,7 +1023,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## The library's matrix is built only where the space is built (Step 2):
   ## on KSSL it is a gigabyte, and a cached space never reads it.
 
-  tm <- predictor_matrix(x)
+  tm <- axis_matrix(x)
 
   ## Rows an earlier step flagged leave the space and the draw first, as
   ## every verb that computes over predictors leaves them (decision 5): they
@@ -1042,7 +1053,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
 
   }
 
-  sa <- search_axis(predictor_wavenumbers(pool), tm$matrix, tm$wavenumbers)
+  sa <- search_axis(axis_wavenumbers(pool), tm$matrix, tm$wavenumbers)
 
   ## Targets short of the library's range are searched on the overlap, in a
   ## space built fresh and not cached. The warning's ids are the library
@@ -1226,10 +1237,14 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## Units, before SNV erases the evidence ----------------------------------
 
   ## Read from the pool's own columns, a column at a time: the library's
-  ## values are never copied whole for two numbers.
+  ## values are never copied whole for two numbers. The median and spread are
+  ## statistics, so they read the same search columns on both sides: those
+  ## neither side masks (space_mask() of the two objects alone).
 
-  units <- check_photometric_units(pool$data$analysis[pool_vars[sa$pool_cols]], sa$matrix,
-                                   pool_rows = if (any(pool_flagged)) !pool_flagged)
+  unmasked <- !in_ranges(sa$wavenumbers, space_mask(NULL, x, pool))
+  units    <- check_photometric_units(pool$data$analysis[pool_vars[sa$pool_cols][unmasked]],
+                                      sa$matrix[, unmasked, drop = FALSE],
+                                      pool_rows = if (any(pool_flagged)) !pool_flagged)
 
   if (units$mismatch) {
 
@@ -1276,6 +1291,12 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
     ), kind = "input")
 
   }
+
+  ## The ranges the space leaves out: the argument's, then the targets' and
+  ## the library's own masked bands (space_mask()), one concept, so a band
+  ## either side masks is out of the space as it is out of the model. The
+  ## record keeps the ranges the space ran with.
+  mask <- space_mask(mask, x, pool)
 
   space_settings <- list(snv = snv, derivative = as.integer(derivative),
                          ## With no derivative the filter never runs and its
@@ -1655,7 +1676,27 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   role_map <- dplyr::bind_rows(drawn$data$role_map[!drawn$data$role_map$variable %in% dropped, ],
                                tibble::tibble(variable = names(meta), role = "meta"))
 
+  ## A column masked on either side is masked in the training set: the
+  ## library's keep their role, and a shared column the targets mask takes
+  ## it, so the model never reads a band either side declared out, and the
+  ## targets, whose modelled columns cover the model's, predict from it
+  from_library <- intersect(masked_columns(role_map), cols$shared)
+  from_targets <- setdiff(intersect(masked_columns(x$data$role_map), cols$shared), from_library)
+
+  role_map$role[role_map$variable %in% from_targets] <- "masked"
+
   out <- set_analysis(drawn, analysis, role_map)
+
+  if (verbose && length(from_library) + length(from_targets) > 0) {
+
+    sides <- c(if (length(from_library)) paste0(length(from_library), " from the library"),
+               if (length(from_targets)) paste0(length(from_targets), " from the targets"))
+
+    cat(paste0("\u2502  \u251C\u2500 Masked: ", length(from_library) + length(from_targets),
+               " of the training set's ", length(cols$shared), " spectral columns (",
+               paste(sides, collapse = ", "), "), kept and never modelled\n"))
+
+  }
 
   ## The library's standardization record, its axis fields describing the
   ## columns returned when they are only some of the library's (#90).
@@ -2302,8 +2343,8 @@ check_pool_unpromoted <- function(pool) {
 #' on it, and it counts as not corrected. Hull correction applied twice gives
 #' the same spectra, so the remedy also works on spectra corrected outside
 #' horizons. The steps, `resample` and `remove_water` are not compared: a
-#' coarser grid shares the library's columns (#236), and a removed band is
-#' refused as a gap.
+#' coarser grid shares the library's columns (#236), and a band either side
+#' masks is masked in the space and in the training set.
 #'
 #' @param pool_record,target_record [List or NULL.] Each side's
 #'   `data$standardization`.
@@ -2427,9 +2468,10 @@ check_same_standardization <- function(pool_record, target_record, pool_step, ta
 #' `median_iqr()`, so a library's spectra are never copied whole.
 #'
 #' @param pool_m [Matrix or data frame.] Pool spectra on the search grid,
-#'   raw: a matrix, or the pool's spectral columns as a data frame.
-#' @param target_m [Matrix or data frame.] Target spectra on the same grid,
-#'   raw.
+#'   raw: a matrix, or the pool's spectral columns as a data frame. The
+#'   columns neither side masks, as `select_training()` passes them.
+#' @param target_m [Matrix or data frame.] Target spectra on the same grid
+#'   and columns, raw.
 #' @param ratio [Numeric.] Fold difference that counts as a mismatch.
 #'   Default: `2`.
 #' @param pool_rows [Logical or NULL.] The pool rows to count; `NULL` counts

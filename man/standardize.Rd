@@ -29,10 +29,9 @@ to interpolate the grid points at the bounds and then dropped, before
 baseline correction. Without resampling, columns outside the range are
 dropped. Use \code{NULL} to skip trimming.}
 
-\item{remove_water}{\code{logical.} Remove water absorption bands
-(1580-1720, 3100-3700 cm⁻¹)? Default \code{FALSE}. The gaps they leave rule
-out the Savitzky-Golay methods in \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} (see
-Details).}
+\item{remove_water}{\code{logical.} Mask the water absorption bands
+(1580-1720, 3100-3700 cm⁻¹), so they are kept and never modelled?
+Default \code{FALSE}. See Details.}
 
 \item{baseline}{\code{logical.} Apply convex hull baseline correction?
 Default \code{FALSE}.}
@@ -50,14 +49,16 @@ were standardized. \code{baseline} says whether they carry a convex-hull
 correction, from this call or, under \code{force = TRUE}, an earlier one,
 and \code{baseline_range} is the range that hull was fitted over (\code{NULL}
 without one), which \code{\link[=select_training]{select_training()}} compares between a library and
-its targets. \code{wavelength_range} is the range of the axis returned, and
+its targets. \code{wavelength_range} is the range of the axis returned,
+masked bands included, and
 \code{grid} the grid it sits on (\code{min}, \code{max}, \code{step}, \code{n}; \code{NULL} without
 resampling). A training set \code{select_training()} returns carries its
 library's record, with the axis fields describing the columns it
 returns (see \code{\link[=select_training]{select_training()}}).
 The call is recorded as a note on the object's \code{log}, after any
 warnings: the arguments as given, whether the axis was re-interpolated,
-already on the grid or left as it was, the wavenumbers kept, and under
+already on the grid or left as it was, the wavenumbers kept and how
+many of them are masked, and under
 \code{force = TRUE} a hull an earlier call fitted that is kept. A call that
 returns early because the spectra are already standardized records only
 its warning.
@@ -74,7 +75,7 @@ Standardization operations (handled here):
 \itemize{
 \item Resampling to consistent resolution
 \item Trimming to wavenumber range
-\item Water band removal
+\item Water band masking
 \item Baseline correction
 }
 
@@ -125,8 +126,8 @@ a file whose own axis skips one point is flagged when it is bound with a
 file that has a point there, though not when it is read alone.
 Nor is a hole in the input filled:
 where the data's own axis has a gap (a spacing over three times the median
-and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
-\code{remove_water = TRUE}), the grid points inside it are dropped with a
+and over 30 cm⁻¹, such as a band deleted upstream), the grid points inside
+it are dropped with a
 warning naming the gaps, and each side is interpolated on its own. Data
 already on the grid, to within 1e-6 cm⁻¹ and apart from any such gaps, is
 not re-interpolated, and the console says so. Columns stored in increasing
@@ -135,15 +136,26 @@ operation off still sorts them, and is still validated before the object
 is marked standardized, but changes nothing else.
 
 The operations run in this order: sort, trim, resampling, baseline
-correction, water-band removal. With resampling, the baseline is fitted on
+correction, water-band masking. With resampling, the baseline is fitted on
 the canonical grid, so every source's convex hull is pinned at the same
 ends, the grid's; the points kept beyond the trim bounds for interpolation
 are gone by then and never reach it. Without resampling, it is fitted on
-the trimmed native axis. Water bands are deleted last so that
-\code{standardize()}'s own interpolation never spans them. The axis they leave
-has a gap at each band, and a Savitzky-Golay window would run across it,
-so \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} refuse the window methods (\code{"sg"} and the
-derivatives) on it; \code{"raw"} and \code{"snv"} run.
+the trimmed native axis.
+
+\strong{Water bands} (\code{remove_water = TRUE}, 1580 to 1720 and 3100 to 3700
+cm⁻¹) are masked, not deleted: their columns stay in the object, on the
+axis, with the role \code{masked}. The spectral preprocessing a configuration
+runs reads them, so a Savitzky-Golay window beside a band reads its real
+values rather than jumping the band, SNV takes its mean and spread from
+the unmasked bands, and the masked columns are dropped after it. Nothing
+else reads them: no model, feature selection, \code{validate()} check,
+applicability domain, or \code{\link[=select_training]{select_training()}}'s similarity space or units
+check. They
+count in no \code{n_predictors}, and \code{\link[=predict]{predict()}} needs them in \code{new_data}. A
+re-run with \code{force = TRUE} masks them or not as its own \code{remove_water}
+says. Data from an earlier version, whose bands were deleted, has a gap at
+each band, on which \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} refuse the window methods:
+re-run it from \code{\link[=spectra]{spectra()}}.
 
 \strong{Unusable spectra:} a spectrum \code{standardize()} cannot use, one with a
 value that is not finite among those it returns, or one with no spread
@@ -153,13 +165,14 @@ is flagged), and one \code{horizons_warning_flagged} counts and names them,
 by reason. With resampling, a spectrum whose own points end before the
 grid does (as the scans of a narrower file bound with wider ones do) is
 flagged for that, and the warning gives the range such spectra cover,
-inside which a \code{trim} keeps them. A value missing only inside a water
-band the call removes flags nothing, unless the hull is fitted across it.
+inside which a \code{trim} keeps them. A value missing inside a masked water
+band is not finite among those returned, so it flags the spectrum; its
+spread is judged over the unmasked bands.
 \code{\link[=evaluate]{evaluate()}}, \code{\link[=fit]{fit()}}, \code{\link[=predict]{predict()}} and \code{\link[=select_training]{select_training()}} leave flagged
 spectra out. The convex hull is fitted to the spectra not flagged, and a
 flagged spectrum keeps its values as they stood when it was flagged, so
 with \code{baseline = TRUE} a spectrum with a value missing anywhere the hull
-is fitted is flagged, a water band it then removes included. The rule
+is fitted is flagged, before the hull. The rule
 holds with every operation off too. A row an earlier step flagged
 keeps its flag.
 
@@ -185,7 +198,7 @@ because the data does not reach them or they fall in a gap are one
 hd <- spectra("path/to/data.csv") |>
   standardize(resample = 2, trim = c(600, 4000))
 
-# Full standardization with water band removal
+# Full standardization with the water bands masked
 hd <- spectra("path/to/data.csv") |>
   standardize(resample = 2, trim = c(600, 4000),
               remove_water = TRUE, baseline = TRUE)

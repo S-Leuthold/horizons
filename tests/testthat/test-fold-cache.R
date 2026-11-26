@@ -435,6 +435,27 @@ describe("fold_prep_inputs()", {
 
   })
 
+  it("keys apart two objects that differ only in their mask, which changes every prep", {
+
+    case     <- prep_fold_case("none")
+    masked   <- case$role_map
+    masked$role[masked$variable %in% c("wn_3940", "wn_3936", "wn_3932")] <- "masked"
+
+    key_for <- function(role_map) {
+      fold_prep_key("evaluate", case$config, "Fold1", case$train$sample_id, 1:40,
+                    data = eval_data_fingerprint(case$train, role_map)$data_fields,
+                    seed = 8L, sg_window = DEFAULT_SG_WINDOW, pca_threshold = DEFAULT_PCA_THRESHOLD)
+    }
+
+    expect_false(identical(fold_entry_file(key_for(masked)), fold_entry_file(key_for(case$role_map))))
+
+    ## And the hoisted rows a masked object's folds start from leave its
+    ## masked columns out
+    inputs <- fold_prep_inputs(case$config, case$train, masked, DEFAULT_SG_WINDOW)
+    expect_identical(sum(grepl("^spec", names(inputs$data))), 30L - 8L - 3L)
+
+  })
+
 })
 
 describe("config_fold_units()", {

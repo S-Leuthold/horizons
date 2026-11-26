@@ -77,7 +77,8 @@ which are back-transformed first. Aborts, before any config runs, when
 grid holds a Savitzky-Golay method (\code{"sg"}, \code{"deriv1"}, \code{"deriv2"},
 \code{"snv_deriv1"}, \code{"snv_deriv2"}) and the wavenumber axis has a gap in it
 (a spacing over three times the median and over 30 cm-1, such as a band
-deleted upstream or by \code{standardize(remove_water = TRUE)}), since the
+deleted upstream; \code{standardize(remove_water = TRUE)} masks its bands
+and leaves no gap), since the
 window would run across the gap as if its two sides were neighbours
 (\code{"raw"} and \code{"snv"} run), and, with class
 \code{horizons_error_input}, when an observed outcome lies outside

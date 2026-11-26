@@ -440,7 +440,7 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 
 
 ## =============================================================================
-## Helper: remove_water_bands()
+## Helper: mask_water_bands()
 ## =============================================================================
 
 #' Which wavenumbers lie in a water band
@@ -451,40 +451,27 @@ trim_spectra <- function(spectra_matrix, wavelengths, range, margin = FALSE) {
 #' @noRd
 in_water_bands <- function(wavelengths) {
 
-  in_band <- rep(FALSE, length(wavelengths))
-
-  for (band in WATER_BANDS) {
-
-    in_band <- in_band | (wavelengths >= band[1] & wavelengths <= band[2])
-
-  }
-
-  in_band
+  in_ranges(wavelengths, do.call(rbind, WATER_BANDS))
 
 }
 
-#' Refuse an axis whose predictor names another column already has
+#' Refuse an axis whose names another column already has
 #'
 #' @description
-#' `standardize()` names the predictors of the axis it writes `wn_<wavenumber>`
-#' (Step 7, the rebuild), beside the columns that are not predictors. A
-#' column of those named like a new predictor would leave the rebuilt table
-#' two columns of one name, which the rebuild cannot hold. Checked once the
-#' axis is known and before any spectrum is changed, as an input error naming
-#' the columns.
+#' `standardize()` names every column of the axis it writes `wn_<wavenumber>`
+#' (Step 7, the rebuild), the masked water bands included, beside the columns
+#' that are not on the axis. A column of those named like a new axis column
+#' would leave the rebuilt table two columns of one name, which the rebuild
+#' cannot hold. Checked once the axis is known and before any spectrum is
+#' changed, as an input error naming the columns.
 #'
-#' @param axis `numeric.` The wavenumbers of the axis the call writes, before
-#'   any water bands are removed.
-#' @param remove_water `logical(1).` Whether the call removes the water bands,
-#'   whose columns it then does not write.
+#' @param axis `numeric.` The wavenumbers of the axis the call writes.
 #' @param non_predictor_vars `character.` The analysis columns that are not
-#'   predictors.
+#'   on the axis.
 #' @param call The frame the refusal reports: `standardize()`'s.
 #' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
 #' @noRd
-check_axis_names <- function(axis, remove_water, non_predictor_vars, call = rlang::caller_env()) {
-
-  if (remove_water) axis <- axis[!in_water_bands(axis)]
+check_axis_names <- function(axis, non_predictor_vars, call = rlang::caller_env()) {
 
   taken <- intersect(paste0("wn_", axis), non_predictor_vars)
 
@@ -498,67 +485,39 @@ check_axis_names <- function(axis, remove_water, non_predictor_vars, call = rlan
 
 }
 
-#' Remove water absorption bands from spectra
+#' Mask the water absorption bands of an axis
 #'
 #' @description
-#' Removes wavelength columns that fall within water absorption regions.
-#' No interpolation is performed — columns are simply dropped.
+#' The columns inside a water band (`WATER_BANDS`) stay in the spectra and
+#' take the `masked` role: the spectral transform reads them, so a window
+#' beside a band reads real neighbours, and drops them after it, so nothing
+#' models them.
 #'
-#' @param spectra_matrix `matrix.` Numeric matrix with samples as rows,
-#'   wavelengths as columns.
-#' @param wavelengths `numeric.` Current wavenumber positions (column names).
+#' @param wavelengths `numeric.` The axis's wavenumbers.
 #' @param call The frame a refusal reports: `standardize()`'s.
 #'
-#' @return `list.` With elements:
-#'   - `matrix`: Spectral matrix with water bands removed
-#'   - `wavelengths`: Retained wavenumber positions
-#'   - `n_before`: Number of wavelengths before removal
-#'   - `n_after`: Number of wavelengths after removal
-#'   - `n_removed`: Number of wavelengths removed
+#' @return `logical`, one per wavenumber: the masked columns. Aborts with
+#'   class `horizons_error_input` when every column is in a band, which
+#'   would leave nothing to model.
 #'
 #' @noRd
-remove_water_bands <- function(spectra_matrix, wavelengths, call = rlang::caller_env()) {
+mask_water_bands <- function(wavelengths, call = rlang::caller_env()) {
 
-  ## ---------------------------------------------------------------------------
-  ## Step 1: Identify columns in water band regions
-  ## ---------------------------------------------------------------------------
+  masked <- in_water_bands(wavelengths)
 
-  in_water_band <- in_water_bands(wavelengths)
-
-  ## ---------------------------------------------------------------------------
-  ## Step 2: Keep only non-water columns
-  ## ---------------------------------------------------------------------------
-
-  keep_idx <- which(!in_water_band)
-
-  ## Validate result --------------------------------------------------------------
-
-  if (length(keep_idx) == 0) {
+  if (all(masked)) {
 
     water_text <- paste(vapply(WATER_BANDS, paste, character(1), collapse = " to "), collapse = " and ")
 
     abort_horizons(c(
-      "Water band removal would delete all wavelength data.",
+      "Masking the water bands would leave nothing to model.",
       "i" = "The axis left by the trim and the resampling lies wholly inside the water bands ({water_text} cm-1).",
       "i" = "Use {.code remove_water = FALSE}, or a wider {.arg trim}."
     ), kind = "input", call = call)
 
   }
 
-  filtered_matrix <- spectra_matrix[, keep_idx, drop = FALSE]
-  filtered_wav    <- wavelengths[keep_idx]
-
-  ## ---------------------------------------------------------------------------
-  ## Step 3: Return results
-  ## ---------------------------------------------------------------------------
-
-  list(
-    matrix      = filtered_matrix,
-    wavelengths = filtered_wav,
-    n_before    = length(wavelengths),
-    n_after     = length(filtered_wav),
-    n_removed   = sum(in_water_band)
-  )
+  masked
 
 }
 
@@ -664,13 +623,20 @@ apply_baseline_correction <- function(spectra_matrix, wavelengths, call = rlang:
 #' so the validator applies it to a library's table at its door without
 #' copying it into a matrix.
 #'
+#' On an axis with masked columns ([axis_columns()]) the first test reads
+#' every column, since the transform's windows read a masked value beside a
+#' modelled one, and the second reads the unmasked columns alone, the ones
+#' SNV normalizes by.
+#'
 #' @param M Numeric matrix or data frame, one spectrum per row.
+#' @param masked Logical, one per column of `M`: the masked columns, or
+#'   `NULL` (the default) for none.
 #' @return Character, one per row: `NA` for a usable spectrum,
 #'   `"non-finite"` or `"no spread"`; `NA` for every row when there are no
 #'   columns.
 #' @keywords internal
 #' @noRd
-unusable_spectra <- function(M) {
+unusable_spectra <- function(M, masked = NULL) {
 
   n      <- NROW(M)
   p      <- NCOL(M)
@@ -678,8 +644,11 @@ unusable_spectra <- function(M) {
 
   if (p == 0) return(reason)
 
+  ### The columns the spread is judged over
+  judged <- if (is.null(masked)) rep(TRUE, p) else !masked
+
   column <- if (is.data.frame(M)) function(j) M[[j]] else function(j) M[, j]
-  first  <- column(1)
+  first  <- if (any(judged)) column(which(judged)[1])
 
   non_finite <- rep(FALSE, n)
   flat       <- rep(TRUE, n)
@@ -688,13 +657,13 @@ unusable_spectra <- function(M) {
 
     v          <- column(j)
     non_finite <- non_finite | !is.finite(v)
-    flat       <- flat & v == first
+    if (judged[j]) flat <- flat & v == first
 
   }
 
   ### A missing value leaves flat NA, which the non-finite reason covers
-  reason[non_finite]                             <- "non-finite"
-  reason[!non_finite & flat %in% TRUE & p >= 2]  <- "no spread"
+  reason[non_finite]                                     <- "non-finite"
+  reason[!non_finite & flat %in% TRUE & sum(judged) >= 2] <- "no spread"
 
   reason
 
@@ -776,7 +745,7 @@ own_points <- function(M, wavelengths) {
 #' Keeps every row: a spectrum that cannot be used is marked in `.flag`
 #' (`"standardize"`), the column the modelling verbs read through
 #' [flagged_rows()], created only when a row is flagged, and placed ahead
-#' of the predictors. A row an earlier step flagged keeps its flag; the
+#' of the axis ([axis_columns()]). A row an earlier step flagged keeps its flag; the
 #' caller leaves it out of `reason`. One `flagged` warning counts the rows
 #' by reason and names the first of them.
 #'
@@ -798,11 +767,11 @@ flag_unusable <- function(analysis, role_map, reason, collector, short_range = N
 
   if (!any(flag)) return(list(analysis = analysis, role_map = role_map))
 
-  ## The column, ahead of the predictors, when no step has flagged a row yet --
+  ## The column, ahead of the axis, when no step has flagged a row yet --------
 
   if (!".flag" %in% names(analysis)) {
 
-    preds <- role_map$variable[role_map$role == "predictor"]
+    preds <- axis_columns(role_map)
     at    <- match(TRUE, names(analysis) %in% preds, nomatch = ncol(analysis) + 1L)
     at_rm <- match(TRUE, role_map$variable %in% preds, nomatch = nrow(role_map) + 1L)
 
@@ -887,11 +856,12 @@ prior_hull_range <- function(record) {
 #'   resampling asked) or `"off"` (every operation off).
 #' @param n_wavelengths Integer(1). The wavenumbers the call returns.
 #' @param kept_hull Logical(1). Whether a hull an earlier call fitted is kept.
+#' @param n_masked Integer(1). How many of them are masked. Default 0.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
 standardize_note <- function(collector, resample, trim, remove_water, baseline,
-                             axis, n_wavelengths, kept_hull) {
+                             axis, n_wavelengths, kept_hull, n_masked = 0L) {
 
   ### As the user would type them: a whole number given as an integer reads
   ### as the same number, without deparse()'s L suffix
@@ -912,11 +882,12 @@ standardize_note <- function(collector, resample, trim, remove_water, baseline,
     off       = "nothing applied"
   )
 
-  hull <- if (kept_hull) ", and the convex hull an earlier call fitted is kept" else ""
+  hull   <- if (kept_hull) ", and the convex hull an earlier call fitted is kept" else ""
+  masked <- if (n_masked > 0) paste0(" (", n_masked, " of them masked)") else ""
 
   log_note(collector,
            paste0("Standardized with {.code {settings}}: ", outcome,
-                  ", {n_wavelengths} wavenumber{?s} kept", hull, "."))
+                  ", {n_wavelengths} wavenumber{?s} kept", masked, hull, "."))
 
 }
 
@@ -933,11 +904,12 @@ standardize_note <- function(collector, resample, trim, remove_water, baseline,
 #'   before/after counts and parameters.
 #' @param n_samples `integer.` Number of samples in the data.
 #' @param final_n_wavelengths `integer.` Final number of wavelengths.
+#' @param n_masked `integer.` How many of them are masked. Default 0.
 #'
 #' @return NULL (called for side effects).
 #'
 #' @noRd
-report_standardize_summary <- function(operations, n_samples, final_n_wavelengths) {
+report_standardize_summary <- function(operations, n_samples, final_n_wavelengths, n_masked = 0L) {
 
   cat(paste0("\u251C\u2500 ", cli::style_bold("Standardizing"), "...\n"))
 
@@ -976,8 +948,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 
     } else if (op_name == "remove_water") {
 
-      msg <- paste0("Water bands: ", op$n_removed, " removed (",
-                    op$n_before, " \u2192 ", op$n_after, ")")
+      msg <- paste0("Water bands: ", op$n_masked, " of ", op$n_axis,
+                    " masked, kept and dropped after the spectral transform")
 
     } else if (op_name == "baseline") {
 
@@ -990,7 +962,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
   }
 
   cat(paste0("\u2502  \u2514\u2500 ", n_samples, " samples \u00D7 ",
-             final_n_wavelengths, " predictors\n"))
+             final_n_wavelengths - n_masked, " predictors",
+             if (n_masked > 0) paste0(", ", n_masked, " masked"), "\n"))
   cat("\u2502\n")
 
 }
@@ -1013,7 +986,7 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' Standardization operations (handled here):
 #' - Resampling to consistent resolution
 #' - Trimming to wavenumber range
-#' - Water band removal
+#' - Water band masking
 #' - Baseline correction
 #'
 #' Spectral transforms (NOT handled here):
@@ -1061,8 +1034,8 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' file that has a point there, though not when it is read alone.
 #' Nor is a hole in the input filled:
 #' where the data's own axis has a gap (a spacing over three times the median
-#' and over 30 cm⁻¹, such as a band deleted upstream or by an earlier
-#' `remove_water = TRUE`), the grid points inside it are dropped with a
+#' and over 30 cm⁻¹, such as a band deleted upstream), the grid points inside
+#' it are dropped with a
 #' warning naming the gaps, and each side is interpolated on its own. Data
 #' already on the grid, to within 1e-6 cm⁻¹ and apart from any such gaps, is
 #' not re-interpolated, and the console says so. Columns stored in increasing
@@ -1071,15 +1044,26 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' is marked standardized, but changes nothing else.
 #'
 #' The operations run in this order: sort, trim, resampling, baseline
-#' correction, water-band removal. With resampling, the baseline is fitted on
+#' correction, water-band masking. With resampling, the baseline is fitted on
 #' the canonical grid, so every source's convex hull is pinned at the same
 #' ends, the grid's; the points kept beyond the trim bounds for interpolation
 #' are gone by then and never reach it. Without resampling, it is fitted on
-#' the trimmed native axis. Water bands are deleted last so that
-#' `standardize()`'s own interpolation never spans them. The axis they leave
-#' has a gap at each band, and a Savitzky-Golay window would run across it,
-#' so [evaluate()] and [fit()] refuse the window methods (`"sg"` and the
-#' derivatives) on it; `"raw"` and `"snv"` run.
+#' the trimmed native axis.
+#'
+#' **Water bands** (`remove_water = TRUE`, 1580 to 1720 and 3100 to 3700
+#' cm⁻¹) are masked, not deleted: their columns stay in the object, on the
+#' axis, with the role `masked`. The spectral preprocessing a configuration
+#' runs reads them, so a Savitzky-Golay window beside a band reads its real
+#' values rather than jumping the band, SNV takes its mean and spread from
+#' the unmasked bands, and the masked columns are dropped after it. Nothing
+#' else reads them: no model, feature selection, `validate()` check,
+#' applicability domain, or [select_training()]'s similarity space or units
+#' check. They
+#' count in no `n_predictors`, and [predict()] needs them in `new_data`. A
+#' re-run with `force = TRUE` masks them or not as its own `remove_water`
+#' says. Data from an earlier version, whose bands were deleted, has a gap at
+#' each band, on which [evaluate()] and [fit()] refuse the window methods:
+#' re-run it from [spectra()].
 #'
 #' **Unusable spectra:** a spectrum `standardize()` cannot use, one with a
 #' value that is not finite among those it returns, or one with no spread
@@ -1089,13 +1073,14 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' by reason. With resampling, a spectrum whose own points end before the
 #' grid does (as the scans of a narrower file bound with wider ones do) is
 #' flagged for that, and the warning gives the range such spectra cover,
-#' inside which a `trim` keeps them. A value missing only inside a water
-#' band the call removes flags nothing, unless the hull is fitted across it.
+#' inside which a `trim` keeps them. A value missing inside a masked water
+#' band is not finite among those returned, so it flags the spectrum; its
+#' spread is judged over the unmasked bands.
 #' [evaluate()], [fit()], [predict()] and [select_training()] leave flagged
 #' spectra out. The convex hull is fitted to the spectra not flagged, and a
 #' flagged spectrum keeps its values as they stood when it was flagged, so
 #' with `baseline = TRUE` a spectrum with a value missing anywhere the hull
-#' is fitted is flagged, a water band it then removes included. The rule
+#' is fitted is flagged, before the hull. The rule
 #' holds with every operation off too. A row an earlier step flagged
 #' keeps its flag.
 #'
@@ -1126,10 +1111,9 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   to interpolate the grid points at the bounds and then dropped, before
 #'   baseline correction. Without resampling, columns outside the range are
 #'   dropped. Use `NULL` to skip trimming.
-#' @param remove_water `logical.` Remove water absorption bands
-#'   (1580-1720, 3100-3700 cm⁻¹)? Default `FALSE`. The gaps they leave rule
-#'   out the Savitzky-Golay methods in [evaluate()] and [fit()] (see
-#'   Details).
+#' @param remove_water `logical.` Mask the water absorption bands
+#'   (1580-1720, 3100-3700 cm⁻¹), so they are kept and never modelled?
+#'   Default `FALSE`. See Details.
 #' @param baseline `logical.` Apply convex hull baseline correction?
 #'   Default `FALSE`.
 #' @param force `logical.` Re-standardize even if already standardized?
@@ -1143,14 +1127,16 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #'   correction, from this call or, under `force = TRUE`, an earlier one,
 #'   and `baseline_range` is the range that hull was fitted over (`NULL`
 #'   without one), which [select_training()] compares between a library and
-#'   its targets. `wavelength_range` is the range of the axis returned, and
+#'   its targets. `wavelength_range` is the range of the axis returned,
+#'   masked bands included, and
 #'   `grid` the grid it sits on (`min`, `max`, `step`, `n`; `NULL` without
 #'   resampling). A training set `select_training()` returns carries its
 #'   library's record, with the axis fields describing the columns it
 #'   returns (see [select_training()]).
 #'   The call is recorded as a note on the object's `log`, after any
 #'   warnings: the arguments as given, whether the axis was re-interpolated,
-#'   already on the grid or left as it was, the wavenumbers kept, and under
+#'   already on the grid or left as it was, the wavenumbers kept and how
+#'   many of them are masked, and under
 #'   `force = TRUE` a hull an earlier call fitted that is kept. A call that
 #'   returns early because the spectra are already standardized records only
 #'   its warning.
@@ -1161,7 +1147,7 @@ report_standardize_summary <- function(operations, n_samples, final_n_wavelength
 #' hd <- spectra("path/to/data.csv") |>
 #'   standardize(resample = 2, trim = c(600, 4000))
 #'
-#' # Full standardization with water band removal
+#' # Full standardization with the water bands masked
 #' hd <- spectra("path/to/data.csv") |>
 #'   standardize(resample = 2, trim = c(600, 4000),
 #'               remove_water = TRUE, baseline = TRUE)
@@ -1289,15 +1275,15 @@ standardize <- function(x,
 
   if (sorted$sorted) {
 
-    operations$sort <- list(n = sum(x$data$role_map$role == "predictor"))
+    operations$sort <- list(n = length(axis_columns(x$data$role_map)))
 
   }
 
   ## ---------------------------------------------------------------------------
   ## Step 1c: Early exit if no operations requested
   ## ---------------------------------------------------------------------------
-  ## Nothing but the column order changes here: no values, no names. The
-  ## object is validated (stage = "raw") before it is marked, so a
+  ## Nothing but the column order and the roles change here: no values, no
+  ## names. The object is validated (stage = "raw") before it is marked, so a
   ## structurally invalid one stops here rather than travelling on as
   ## standardized — though at this stage a duplicate or NA sample_id passes,
   ## and predictor NA is not checked at all (#24).
@@ -1306,9 +1292,22 @@ standardize <- function(x,
 
     x <- validate_horizons_data(x, stage = "raw")
 
+    ## This call masks nothing, so the bands an earlier call masked are ----
+    ## predictors again, as the full path's Step 8 makes them
+
+    unmasked <- x$data$role_map
+    back     <- unmasked$variable %in% masked_columns(unmasked)
+
+    if (any(back)) {
+
+      unmasked$role[back] <- "predictor"
+      x <- set_analysis(x, x$data$analysis, unmasked)
+
+    }
+
     ## A spectrum it cannot use is flagged here too, on the axis as it is ----
 
-    axis_vars <- x$data$role_map$variable[x$data$role_map$role == "predictor"]
+    axis_vars <- axis_columns(x$data$role_map)
     reason    <- unusable_spectra(x$data$analysis[, axis_vars, drop = FALSE])
     reason[flagged_rows(x$data$analysis)] <- NA_character_
 
@@ -1382,9 +1381,12 @@ standardize <- function(x,
   analysis <- x$data$analysis
   role_map <- x$data$role_map
 
-  ## Get predictor columns (wavelengths) ---------------------------------------
+  ## Get the axis's columns (wavelengths) --------------------------------------
+  ## The whole axis: on a re-run, the bands an earlier remove_water = TRUE
+  ## masked are spectra like the rest, and this call's arguments decide
+  ## whether they are masked again.
 
-  predictor_vars <- role_map$variable[role_map$role == "predictor"]
+  predictor_vars <- axis_columns(role_map)
   spectra_matrix <- as.matrix(analysis[, predictor_vars, drop = FALSE])
 
   ## A row an earlier step flagged stays flagged and is not counted again;
@@ -1443,9 +1445,9 @@ standardize <- function(x,
   ## checked once Step 4 has decided it. Either way, before any spectrum is
   ## changed.
 
-  non_predictor_vars <- role_map$variable[role_map$role != "predictor"]
+  non_predictor_vars <- setdiff(role_map$variable, predictor_vars)
 
-  if (is.null(resample)) check_axis_names(wavelengths, remove_water, non_predictor_vars)
+  if (is.null(resample)) check_axis_names(wavelengths, non_predictor_vars)
 
   ## ---------------------------------------------------------------------------
   ## Step 4: Resample onto the canonical grid (if requested)
@@ -1553,7 +1555,7 @@ standardize <- function(x,
 
     }
 
-    check_axis_names(grid, remove_water, non_predictor_vars)
+    check_axis_names(grid, non_predictor_vars)
 
     ## Already on the grid: keep the values, do not re-interpolate ------------
 
@@ -1621,26 +1623,24 @@ standardize <- function(x,
   ## On the canonical grid when resampling, so every source's convex hull is
   ## pinned at the same ends, the grid's, and the margin points beyond the
   ## trim bounds (already dropped) never reach it. Without resampling, on the
-  ## trimmed native axis. Before water removal: the hull needs a continuous
-  ## range.
+  ## trimmed native axis. The hull is fitted over the whole axis, water bands
+  ## included.
 
   ## Why a spectrum cannot be used. With resampling, a value missing inside a
   ## spectrum's own range is lost data, whose remedy is the source, and a
   ## grid point beyond its own points at an end is a reason of its own, whose
-  ## remedy is the trim. M's columns are on `at`; `removed`, when given,
-  ## says which lost points lie in columns the call removes before it
-  ## returns, which then judge nothing.
+  ## remedy is the trim. M's columns are on `at`; `masked`, when given,
+  ## says which of them the call masks: a value missing there is judged as
+  ## anywhere else, since the transform's windows read it, and no spread is
+  ## judged over them (unusable_spectra()).
 
-  judge <- function(M, at, removed = NULL) {
+  judge <- function(M, at, masked = NULL) {
 
-    r <- unusable_spectra(M)
+    r <- unusable_spectra(M, masked = masked)
 
     if (!is.null(own)) {
 
-      lost    <- vapply(own$lost, function(w) {
-        if (!is.null(removed)) w <- w[!removed(w)]
-        length(w) > 0
-      }, logical(1))
+      lost    <- vapply(own$lost, function(w) length(w) > 0, logical(1))
       r[lost] <- "non-finite"
 
       ### Short only where its own points end: every value it lacks on the
@@ -1688,21 +1688,21 @@ standardize <- function(x,
   }
 
   ## ---------------------------------------------------------------------------
-  ## Step 6: Remove water bands (if requested)
+  ## Step 6: Mask water bands (if requested)
   ## ---------------------------------------------------------------------------
-  ## Water bands last — resampling would fill gaps if done before
+  ## The columns stay, with the masked role (Step 8): the spectral transform
+  ## reads them, so a window beside a band reads real neighbours, and drops
+  ## them after it. Deleted, they left a gap a window ran across. Every
+  ## other call's columns are predictors, the bands an earlier call masked
+  ## included.
+
+  masked <- if (remove_water) mask_water_bands(wavelengths, call = call) else rep(FALSE, length(wavelengths))
 
   if (remove_water) {
 
-    result <- remove_water_bands(spectra_matrix, wavelengths, call = call)
-
-    spectra_matrix <- result$matrix
-    wavelengths    <- result$wavelengths
-
     operations$remove_water <- list(
-      n_before  = result$n_before,
-      n_after   = result$n_after,
-      n_removed = result$n_removed
+      n_axis   = length(wavelengths),
+      n_masked = sum(masked)
     )
 
   }
@@ -1713,8 +1713,7 @@ standardize <- function(x,
   ## Kept and flagged, never dropped: rows are removed only where modelling
   ## happens.
 
-  after       <- judge(spectra_matrix, wavelengths,
-                       removed = if (remove_water) in_water_bands)
+  after       <- judge(spectra_matrix, wavelengths, masked = masked)
   now         <- !prior & is.na(reason) & !is.na(after)
   reason[now] <- after[now]
 
@@ -1744,8 +1743,8 @@ standardize <- function(x,
 
   new_role_map <- tibble::tibble(
     variable = c(non_predictor_vars, new_predictor_names),
-    role     = c(role_map$role[role_map$role != "predictor"],
-                 rep("predictor", length(new_predictor_names)))
+    role     = c(role_map$role[match(non_predictor_vars, role_map$variable)],
+                 ifelse(masked, "masked", "predictor"))
   )
 
   ## ---------------------------------------------------------------------------
@@ -1801,7 +1800,8 @@ standardize <- function(x,
   standardize_note(collector, resample, trim, remove_water, baseline,
                    axis          = axis_outcome,
                    n_wavelengths = length(new_predictor_names),
-                   kept_hull     = !baseline && isTRUE(earlier$baseline))
+                   kept_hull     = !baseline && isTRUE(earlier$baseline),
+                   n_masked      = sum(masked))
 
   x$log <- log_close(collector, x$log)
 
@@ -1817,7 +1817,8 @@ standardize <- function(x,
     report_standardize_summary(
       operations          = operations,
       n_samples           = nrow(new_analysis),
-      final_n_wavelengths = length(new_predictor_names)
+      final_n_wavelengths = length(new_predictor_names),
+      n_masked            = sum(masked)
     )
 
   }

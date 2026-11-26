@@ -93,9 +93,14 @@ fitted model. When uncertainty quantification was computed during \code{fit()}
 \strong{Axis alignment (v1 limitation).} The fitted workflow's recipe applies the
 per-config preprocessing (SNV, derivatives, feature selection) but not the
 object-level operations performed by \code{standardize()} (resampling to a common
-wavenumber grid, range trimming, water-band removal). \code{new_data} must
+wavenumber grid, range trimming, water-band masking). \code{new_data} must
 therefore arrive on the same wavenumber axis the model was trained on.
 \code{predict()} validates the predictor schema and errors if it does not match.
+A model trained on data standardized with \code{remove_water = TRUE} also reads
+the masked water bands, through its transform's windows beside them, so
+\code{new_data} must carry those columns too; and new data that masks a band
+the model was trained on is refused, since the model would read a band the
+data says is not to be modelled.
 
 Applicability-domain columns (\code{.ad_distance}, \code{.ad_flag}) are emitted per
 config when the object carries an AD bundle (\code{fit(compute_ad = TRUE)}). The

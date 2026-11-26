@@ -147,6 +147,33 @@ describe("hoist_spectra()", {
 
   })
 
+  it("is the step's bake on an axis with masked columns too, which it leaves out", {
+
+    withr::local_seed(1)
+    d           <- transform_data()
+    d$sample_id <- sprintf("S%02d", seq_len(nrow(d)))
+    role_map <- tibble::tibble(
+      variable = c(grep("^wn_", names(d), value = TRUE), "SOC", "sample_id"),
+      role     = c(rep("predictor", 12), rep("masked", 6), rep("predictor", 12), "outcome", "id")
+    )
+
+    for (method in VALID_PREPROCESSING) {
+
+      config <- tibble::tibble(transformation = "none", preprocessing = method,
+                               feature_selection = "none")
+
+      whole   <- recipes::bake(recipes::prep(build_recipe(config, d, role_map)), new_data = NULL)
+      hoisted <- hoist_spectra(d, config, role_map)
+
+      ## 30 columns less 8 trimmed and the 6 masked
+      expect_identical(hoisted, whole, label = method)
+      expect_identical(sum(grepl("^spec", names(hoisted))), 16L, label = method)
+      expect_false(any(grepl("^wn_", names(hoisted))), label = method)
+
+    }
+
+  })
+
   it("leaves the caller's stream as it was", {
 
     withr::local_seed(2)
