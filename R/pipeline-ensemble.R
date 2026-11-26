@@ -62,8 +62,10 @@
 #' @param method Character. Meta-learner to use: `"penalized"` (default),
 #'   `"weighted"`, or `"xgb"`.
 #' @param optimize Logical. Tune the meta-learner's hyperparameters by CV on
-#'   the out-of-fold matrix (`TRUE`), or use fixed defaults (`FALSE`).
-#'   Default `TRUE`.
+#'   the out-of-fold matrix (`TRUE`), or use fixed defaults (`FALSE`). The
+#'   `"weighted"` meta-learner has none to tune: `TRUE` weights each member
+#'   by its inverse out-of-fold RMSE, `FALSE` weights them equally. Default
+#'   `TRUE`.
 #' @param seed `NULL` or a whole number: the run's seed. The meta-learner
 #'   (its CV folds, tuning and out-of-fold predictions) and the CV+
 #'   intervals (their calibration folds and each fold's refit) are seeded
@@ -257,9 +259,16 @@ ensemble <- function(x,
     cat("\u2502\n")
     cat(paste0("\u2502  Method: ", method, "\n"))
     cat(paste0("\u2502  Members: ", length(members), "\n"))
+    ### The weighted meta-learner is tuned by nothing: optimize chooses its
+    ### weights
     cat(paste0(
-      "\u2502  Tuning: ",
-      if (optimize) "CV on out-of-fold matrix" else "fixed defaults", "\n"
+      if (method == "weighted") "\u2502  Weights: " else "\u2502  Tuning: ",
+      if (method == "weighted") {
+        if (optimize) "inverse out-of-fold RMSE" else "equal"
+      } else {
+        if (optimize) "CV on out-of-fold matrix" else "fixed defaults"
+      },
+      "\n"
     ))
     if (par_by_user && debug) {
       cat("\u2502  Parallel: off, since debug runs in this session\n")

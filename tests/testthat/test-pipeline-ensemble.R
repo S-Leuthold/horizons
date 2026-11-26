@@ -2052,6 +2052,40 @@ describe("print() and summary() of an ensemble - its own intervals", {
 })
 
 
+describe("ensemble() - the header it prints", {
+
+  ## The header is printed before the meta-learner runs, so each engine is
+  ## stopped there
+  header <- function(method, optimize) {
+    stop_engine <- function(...) stop("stopped after the header")
+    local_mocked_bindings(fit_ensemble_penalized = stop_engine,
+                          fit_ensemble_weighted  = stop_engine,
+                          fit_ensemble_xgb       = stop_engine)
+    out <- utils::capture.output(
+      expect_error(suppressWarnings(ensemble(ens_fitted(), method = method, optimize = optimize,
+                                             compute_uq = FALSE,
+                                             control = control_horizons(verbose = TRUE))),
+                   class = "horizons_error_ensemble_failed")
+    )
+    out[grepl("^\u2502  (Tuning|Weights): ", out)]
+  }
+
+  it("says how a weighted ensemble's weights are set, which no CV tunes", {
+
+    expect_identical(header("weighted", TRUE),  "\u2502  Weights: inverse out-of-fold RMSE")
+    expect_identical(header("weighted", FALSE), "\u2502  Weights: equal")
+
+  })
+
+  it("says the other methods tune by CV on the out-of-fold matrix, or take fixed defaults", {
+
+    expect_identical(header("penalized", TRUE), "\u2502  Tuning: CV on out-of-fold matrix")
+    expect_identical(header("xgb", FALSE),      "\u2502  Tuning: fixed defaults")
+
+  })
+
+})
+
 describe("ensemble() - the summary it prints", {
 
   ## render_ensemble_summary() is what ensemble(verbose = TRUE) ends with. It

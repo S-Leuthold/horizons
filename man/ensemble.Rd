@@ -20,8 +20,10 @@ ensemble(
 \code{"weighted"}, or \code{"xgb"}.}
 
 \item{optimize}{Logical. Tune the meta-learner's hyperparameters by CV on
-the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}).
-Default \code{TRUE}.}
+the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}). The
+\code{"weighted"} meta-learner has none to tune: \code{TRUE} weights each member
+by its inverse out-of-fold RMSE, \code{FALSE} weights them equally. Default
+\code{TRUE}.}
 
 \item{seed}{\code{NULL} or a whole number: the run's seed. The meta-learner
 (its CV folds, tuning and out-of-fold predictions) and the CV+
