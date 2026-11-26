@@ -510,7 +510,7 @@ print.step_transform_spectra <- function(x, width = max(20, options()$width - 30
 #'
 #' With `masked`, the method still runs over every column, so a window beside
 #' a masked band reads its real values; SNV's mean and spread come from the
-#' unmasked columns ([snv_unmasked()]); and the masked columns are dropped
+#' unmasked columns (`snv_unmasked()`); and the masked columns are dropped
 #' from the result, after the edge trim. With nothing masked the result is
 #' the one without the argument, to the bit.
 #'

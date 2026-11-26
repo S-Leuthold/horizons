@@ -41,7 +41,7 @@ Savitzky-Golay methods lose the same edge inside \code{prospectr::savitzkyGolay(
 
 With \code{masked}, the method still runs over every column, so a window beside
 a masked band reads its real values; SNV's mean and spread come from the
-unmasked columns (\code{\link[=snv_unmasked]{snv_unmasked()}}); and the masked columns are dropped
+unmasked columns (\code{snv_unmasked()}); and the masked columns are dropped
 from the result, after the edge trim. With nothing masked the result is
 the one without the argument, to the bit.
 }
