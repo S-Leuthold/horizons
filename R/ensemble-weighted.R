@@ -101,11 +101,9 @@ fit_ensemble_weighted <- function(object,
   ## Each member predicts the held-out Split-F test set (shared helper).
   member_pred <- unit_step("test_predict", predict_members_on_test(object, members, call = call))
 
-  ## The rows every member could use, as predict() combines them: a row a
-  ## member could not use is NA for it, so the ensemble and every member are
-  ## scored on the rest.
-  bad    <- unique(unlist(attr(member_pred, "flagged")))
-  usable <- unit_step("combine", member_pred[!member_pred$sample_id %in% bad, , drop = FALSE])
+  ## The rows every member could use, as predict() combines them; the members
+  ## are scored on the same rows
+  usable <- unit_step("combine", usable_member_rows(member_pred))
 
   ## Combine per-member test_F predictions by the weights, sample-aligned.
   ensemble_pred <- unit_step("combine", usable |>

@@ -676,11 +676,9 @@ ensemble_trimmed_rows <- function(x, members, call = rlang::caller_env()) {
     call   = call
   )
 
-  ## A row any member could not use is left out, as predict() leaves it out:
-  ## an xgb meta-model would read the member's NA as missing and give the
-  ## row a residual from a combination predict() never serves
-  bad         <- unique(unlist(attr(member_pred, "flagged")))
-  member_pred <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+  ## A row any member could not use is left out, as predict() leaves it out,
+  ## so no row gets a residual from a combination predict() never serves
+  member_pred <- usable_member_rows(member_pred)
 
   if (nrow(member_pred) == 0) return(NULL)
 
@@ -896,8 +894,7 @@ ensemble_test_coverage <- function(x, call = rlang::caller_env()) {
   member_pred <- unit_step("test_predict", predict_members_on_test(x, uq$members, call = call))
 
   ## The rows every member could use, as predict() combines them
-  bad    <- unique(unlist(attr(member_pred, "flagged")))
-  usable <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+  usable <- usable_member_rows(member_pred)
 
   intervals <- predict_ensemble_intervals(uq, usable, outcome_range_setting(x))
 

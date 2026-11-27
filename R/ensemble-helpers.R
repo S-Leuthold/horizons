@@ -646,11 +646,9 @@ fit_tuned_meta_learner <- function(object,
 
   member_pred <- unit_step("test_predict", predict_members_on_test(object, members, call = call))
 
-  ## The rows every member could use, as predict() combines them: a row a
-  ## member could not use is NA for it, which an xgb meta-model would read as
-  ## missing and score. The members are scored on the same rows.
-  bad    <- unique(unlist(attr(member_pred, "flagged")))
-  usable <- unit_step("combine", member_pred[!member_pred$sample_id %in% bad, , drop = FALSE])
+  ## The rows every member could use, as predict() combines them; the members
+  ## are scored on the same rows
+  usable <- unit_step("combine", usable_member_rows(member_pred))
 
   ## Wide member-prediction matrix with the SAME column names the meta-model
   ## trained on; truth rides through the pivot (constant per sample).
@@ -1012,11 +1010,8 @@ predict.horizons_ensemble <- function(object,
   flagged     <- attr(member_pred, "flagged")
   member_pred <- drop_block_reports(member_pred)
 
-  ## A row any member could not use (flagged on arrival, or non-finite after
-  ## its recipe) is not predicted by the ensemble: an xgb meta-model would
-  ## read the member's NA as missing and return a number.
-  bad    <- unique(unlist(flagged))
-  usable <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+  ## A row any member could not use is not predicted by the ensemble
+  usable <- usable_member_rows(member_pred, flagged)
 
   ## -------------------------------------------------------------------------
   ## Step 4: Combine member predictions by the meta-learner (per method)

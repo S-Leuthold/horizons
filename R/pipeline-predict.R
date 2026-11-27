@@ -1540,6 +1540,28 @@ predict_members <- function(object, members, new_spectra,
 
 }
 
+#' The member predictions an ensemble combines: the rows every member could use
+#'
+#' A row any member could not use (flagged on arrival, or non-finite after its
+#' recipe) is `NA` for that member. An ensemble neither combines nor scores
+#' it: an xgb meta-model would read the member's `NA` as missing and return a
+#' number. So `predict()` on an ensemble, `ensemble()`'s test predictions and
+#' metrics in both engines, and the CV+ intervals' calibration on trimmed rows
+#' and measured test coverage all keep the same rows.
+#'
+#' @param member_pred From [predict_members()] or `predict_members_on_test()`.
+#' @param flagged The rows each member could not use, as [predict_members()]
+#'   returns them; by default `member_pred`'s `"flagged"` attribute. Pass it
+#'   when that attribute has been dropped.
+#' @return `member_pred` without the rows any member could not use.
+#' @keywords internal
+#' @noRd
+usable_member_rows <- function(member_pred, flagged = attr(member_pred, "flagged")) {
+
+  member_pred[!member_pred$sample_id %in% unlist(flagged), , drop = FALSE]
+
+}
+
 ## ---------------------------------------------------------------------------
 ## predict_intervals() — conformal prediction intervals for one config
 ## ---------------------------------------------------------------------------
