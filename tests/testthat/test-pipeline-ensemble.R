@@ -886,6 +886,12 @@ describe("ensemble() - the meta-learner as one unit", {
 
     expect_length(run$warnings, 1L)
 
+    ## The row is left out of the ensemble's test predictions, not NA in them
+    msg <- gsub("\\s+", " ", conditionMessage(run$warnings[[1]]))
+    expect_match(msg, "1 sample could not be predicted, so it is left out of the ensemble's test predictions and metrics.",
+                 fixed = TRUE)
+    expect_false(test_id %in% run$value$ensemble$predictions$sample_id)
+
     flagged <- run$value$log[run$value$log$topic %in% "flagged", , drop = FALSE]
 
     expect_identical(nrow(flagged), 1L)
@@ -1211,6 +1217,8 @@ describe("predict.horizons_ensemble() - flagged rows and the combination", {
 
       expect_length(w, 1L)
       expect_identical(w[[1]]$log$ids[[1]], bad$sample_id[2])
+      expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])),
+                   "1 sample could not be predicted, so its row is", fixed = TRUE)
 
       expect_equal(nrow(p), nrow(bad))
       expect_true(is.na(p$.pred[2]) && is.na(p$.pred_lower[2]))

@@ -1366,8 +1366,9 @@ log_prediction_reports <- function(collector, records, flagged, winsorized) {
 #' Collect one warning for the rows that could not be predicted
 #'
 #' A row flagged on arrival, or non-finite after a configuration's recipe, is
-#' returned as `NA` (conditions.md: rows are removed only where modelling
-#' happens). One `flagged` warning names them once, whatever the number of
+#' returned as `NA` by `predict()` (conditions.md: rows are removed only where
+#' modelling happens), and left out of `ensemble()`'s test predictions and
+#' metrics. One `flagged` warning names them once, whatever the number of
 #' configurations: `ids` the samples, and the configurations whose recipe
 #' left them non-finite when more than one was predicted.
 #'
@@ -1375,10 +1376,14 @@ log_prediction_reports <- function(collector, records, flagged, winsorized) {
 #' @param reports Named list, one per configuration (or member): `NULL`, or
 #'   a list with `arrived` and `recipe`, the sample ids flagged on arrival and
 #'   after the recipe.
+#' @param consequence Character(1). What became of the rows, the cli clause
+#'   that ends the warning's first line, pluralised on their count:
+#'   `predict()`'s by default; `ensemble()` passes its own.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_flagged <- function(collector, reports) {
+log_flagged <- function(collector, reports,
+                        consequence = "so {?its row is/their rows are} {.code NA}") {
 
   reports <- Filter(Negate(is.null), reports)
 
@@ -1400,7 +1405,7 @@ log_flagged <- function(collector, reports) {
   }
 
   log_warning(collector, "flagged", c(
-    "{n} sample{?s} could not be predicted, so {?its row is/their rows are} {.code NA}.",
+    paste0("{n} sample{?s} could not be predicted, ", consequence, "."),
     "i" = if (n_arrived > 0) "{n_arrived} {?was/were} flagged on arrival ({.field .flag}): {shown_ids(arrived)}.",
     "i" = if (n_recipe > 0) "{n_recipe} {?was/were} not finite after the recipe{of}: {shown_ids(recipe)}."
   ), ids = ids, n = n)

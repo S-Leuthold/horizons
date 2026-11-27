@@ -433,7 +433,8 @@ ensemble <- function(x,
   x$ensemble["warnings"] <- list(render_warning_log(warning_log))
 
   log_unit_records(collector, records)
-  log_flagged(collector, flagged)
+  log_flagged(collector, flagged,
+              consequence = "so {?it is/they are} left out of the ensemble's test predictions and metrics")
 
   ## What the run reported goes on the object's log before it is certified
   x$log <- log_close(collector, x$log)
