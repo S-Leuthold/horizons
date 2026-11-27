@@ -128,10 +128,10 @@ CV+ intervals not computed, and their measured test coverage not
 computed. horizons' own warnings are written to the
 log and raised once at the end. Among them, as in \code{\link[=evaluate]{evaluate()}} and
 \code{\link[=fit]{fit()}}: the meta-learner's cross-validation folds or the CV+ calibration
-folds drawn unstratified (\code{horizons_warning_substitution}), and the
-meta-learner's smallest fold under ten rows to assess
-(\code{horizons_warning_quality}); a draw rsample stratified on fewer bins than
-asked is a note on the log.
+folds drawn unstratified (\code{horizons_warning_substitution}), and, when the
+meta-learner is tuned (\code{optimize = TRUE}) and so its choice rests on them,
+its smallest fold under ten rows to assess (\code{horizons_warning_quality}); a
+draw rsample stratified on fewer bins than asked is a note on the log.
 }
 \examples{
 \dontrun{

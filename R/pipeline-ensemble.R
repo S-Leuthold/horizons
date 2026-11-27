@@ -61,10 +61,10 @@
 #' computed. horizons' own warnings are written to the
 #' log and raised once at the end. Among them, as in [evaluate()] and
 #' [fit()]: the meta-learner's cross-validation folds or the CV+ calibration
-#' folds drawn unstratified (`horizons_warning_substitution`), and the
-#' meta-learner's smallest fold under ten rows to assess
-#' (`horizons_warning_quality`); a draw rsample stratified on fewer bins than
-#' asked is a note on the log.
+#' folds drawn unstratified (`horizons_warning_substitution`), and, when the
+#' meta-learner is tuned (`optimize = TRUE`) and so its choice rests on them,
+#' its smallest fold under ten rows to assess (`horizons_warning_quality`); a
+#' draw rsample stratified on fewer bins than asked is a note on the log.
 #'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),

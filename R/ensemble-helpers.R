@@ -493,9 +493,13 @@ fit_tuned_meta_learner <- function(object,
   n_folds <- nrow(folds)
 
   ## A small assessment fold is weak, not wrong, as in evaluate() and fit():
-  ## it runs, with one quality warning. ensemble()'s door refused a matrix
-  ## without more rows than folds.
-  report_small_folds_in_unit(folds, "meta-learner cross-validation")
+  ## it runs, with one quality warning where a result rests on the folds, the
+  ## tuning's choice. Untuned, they feed only the out-of-fold diagnostics.
+  ## ensemble()'s door refused a matrix without more rows than folds.
+  if (optimize) {
+    report_small_folds_in_unit(folds, "meta-learner cross-validation",
+                               consequence = "so the meta-learner's tuning choice rests on few rows")
+  }
 
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
   ## As evaluate() tunes: tune's console notes muffled and read from the

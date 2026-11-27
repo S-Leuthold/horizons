@@ -3575,19 +3575,23 @@ check_fold_rows <- function(n_train, cv_folds, n_modelled = NULL, n_test = NULL,
 #'
 #' @param folds The `rset` the folds are.
 #' @param what Character(1). The folds, as the message names them.
+#' @param consequence Character(1). What rests on the folds, the clause that
+#'   ends the message's first line: the cross-validated metrics `evaluate()`
+#'   and `fit()` report by default; `ensemble()` passes its own.
 #' @return List with `smallest` (the smallest fold's assessment rows),
 #'   `message` (a cli message, or `NULL` when no fold is small) and `envir`
 #'   (where it is interpolated).
 #' @keywords internal
 #' @noRd
-small_folds_report <- function(folds, what = "cross-validation") {
+small_folds_report <- function(folds, what = "cross-validation",
+                               consequence = "so the cross-validated metrics rest on few rows") {
 
   n_rows   <- nrow(folds$splits[[1]]$data)
   n_folds  <- nrow(folds)
   smallest <- min(vapply(folds$splits, function(s) n_rows - length(s$in_id), integer(1)))
 
   message <- if (smallest < SMALL_FOLD_ROWS) c(
-    "The smallest {what} fold has {smallest} row{?s} to assess, so the cross-validated metrics rest on few rows.",
+    paste0("The smallest {what} fold has {smallest} row{?s} to assess, ", consequence, "."),
     "i" = "{n_rows} training rows in {n_folds} folds; a metric undefined on a fold is NA."
   )
 
@@ -3623,9 +3627,9 @@ log_small_folds <- function(collector, folds) {
 #' @return The smallest fold's assessment rows, invisibly.
 #' @keywords internal
 #' @noRd
-report_small_folds_in_unit <- function(folds, what) {
+report_small_folds_in_unit <- function(folds, what, consequence) {
 
-  report <- small_folds_report(folds, what)
+  report <- small_folds_report(folds, what, consequence)
 
   if (!is.null(report$message)) warn_in_unit("quality", report$message, .envir = report$envir)
 
