@@ -95,34 +95,6 @@ test_that("standardize() validates resample parameter", {
 })
 
 
-test_that("standardize() validates trim parameter", {
-
-  hd <- create_test_spectra()
-
-  expect_error(
-    standardize(hd, trim = 600),
-    class = "horizons_error_input"
-  )
-
-  expect_error(
-    standardize(hd, trim = c("600", "4000")),
-    class = "horizons_error_input"
-  )
-
-  expect_error(
-    standardize(hd, trim = c(4000, 600)),
-    class = "horizons_error_input"
-  )
-
-  ## A bound that is not finite is refused at the door, not inside seq()
-  for (bad in list(c(600, Inf), c(NA, 4000))) {
-    expect_error(standardize(hd, trim = bad), "`trim` must be two finite wavenumbers",
-                 fixed = TRUE, class = "horizons_error_input")
-  }
-
-})
-
-
 test_that("standardize()'s trim and average()'s qc_range are refused by one rule, in one wording", {
 
   hd <- create_test_spectra()

@@ -2079,12 +2079,6 @@ test_that("average()'s quality control reads the bands qc_range names, its defau
   off <- average(nir, quality_check = FALSE, verbose = FALSE)
   expect_identical(nrow(log_rows_added(nir, off)), 1L)
 
-  ## Refused at the door: not two numbers, not finite, not low then high
-  for (bad in list("600", c(600, 2000, 4000), c(600, NA), c(4000, 600), c(600, 600))) {
-    expect_error(average(hd, qc_range = bad, verbose = FALSE), "qc_range",
-                 class = "horizons_error_input", info = paste(bad, collapse = " "))
-  }
-
 })
 
 test_that("average()'s quality check needs three bands in its range: the default falls back to every band, a range given with fewer is refused", {

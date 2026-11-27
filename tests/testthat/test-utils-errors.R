@@ -329,6 +329,9 @@ describe("check_wn_range()", {
     expect_match(conditionMessage(err), "`qc_range` must be numeric(2) or `NULL`, not a string.", fixed = TRUE)
     expect_identical(rlang::call_name(err$call), "verb")
 
+    err <- expect_error(verb(c(600, 2000, 4000)), class = "horizons_error_input")
+    expect_match(conditionMessage(err), "`qc_range` must be numeric(2) or `NULL`, not a double vector.", fixed = TRUE)
+
     for (bad in list(c(600, Inf), c(NA, 4000), c(4000, 600), c(600, 600))) {
 
       err <- expect_error(verb(bad), class = "horizons_error_input", info = deparse(bad))
