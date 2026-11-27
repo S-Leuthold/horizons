@@ -1690,6 +1690,66 @@ describe("ensemble() weighted - test-set combine", {
 
 })
 
+describe("ensemble() - a test row a member could not use", {
+
+  ## The members' test predictions as predict_members_on_test() returns them
+  ## when one member's recipe leaves one test row non-finite (that member's
+  ## .pred NA, the row in its report), or with that row gone for every
+  ## member; `hole` records the row.
+  with_members_on_test <- function(edit, env = parent.frame()) {
+    real <- predict_members_on_test
+    hole <- new.env()
+    testthat::local_mocked_bindings(predict_members_on_test = function(object, members, ...) {
+      out     <- real(object, members, ...)
+      hole$id <- out$sample_id[out$config_id == members[1]][1]
+      edit(out, members[1], hole$id)
+    }, .env = env)
+    hole
+  }
+
+  unusable_for_one <- function(out, member, id) {
+    out$.pred[out$config_id == member & out$sample_id == id] <- NA_real_
+    flagged           <- attr(out, "flagged")
+    flagged[[member]] <- list(arrived = character(0), recipe = id)
+    attr(out, "flagged") <- flagged
+    out
+  }
+
+  gone_for_all <- function(out, member, id) {
+    kept <- out[out$sample_id != id, , drop = FALSE]
+    attr(kept, "unit_records") <- attr(out, "unit_records")
+    attr(kept, "flagged")      <- attr(out, "flagged")
+    kept
+  }
+
+  build <- function(method, edit) {
+    hole <- with_members_on_test(edit)
+    ens  <- suppressWarnings(ensemble(ens_fitted(), method = method, optimize = FALSE,
+                                      compute_uq = FALSE, seed = 11L))
+    list(ens = ens$ensemble, id = hole$id)
+  }
+
+  it("scores the ensemble and its members on the rows every member predicted, as predict() combines them", {
+
+    for (method in c("xgb", "weighted")) {
+
+      one <- build(method, unusable_for_one)
+      all <- build(method, gone_for_all)
+
+      expect_identical(one$id, all$id)
+      expect_false(one$id %in% one$ens$predictions$sample_id, label = method)
+      expect_true(all(is.finite(one$ens$predictions$.pred)), label = method)
+
+      for (part in c("predictions", "metrics", "member_metrics", "improvement")) {
+        expect_identical(one$ens[[part]], all$ens[[part]], label = paste(method, part))
+      }
+
+    }
+
+  })
+
+})
+
 
 ## =========================================================================
 ## predict.horizons_ensemble() — response bound guardrail at the OUTPUT

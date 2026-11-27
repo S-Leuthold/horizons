@@ -23,8 +23,9 @@
 #' The weights come from the out-of-fold matrix, but the reported `test_F`
 #' predictions come from each member predicting the held-out set fresh (via
 #' `predict_one_config()`, which predicts once and back-transforms once) and
-#' then being combined. This keeps the evaluation honest: weights are learned
-#' on OOF data, performance is measured on data no member saw.
+#' then being combined, over the test rows every member could use. This keeps
+#' the evaluation honest: weights are learned on OOF data, performance is
+#' measured on data no member saw.
 #'
 #' @param object A `horizons_fit` object.
 #' @param members Character vector of member `config_id`s (from
@@ -100,8 +101,14 @@ fit_ensemble_weighted <- function(object,
   ## Each member predicts the held-out Split-F test set (shared helper).
   member_pred <- unit_step("test_predict", predict_members_on_test(object, members, call = call))
 
+  ## The rows every member could use, as predict() combines them: a row a
+  ## member could not use is NA for it, so the ensemble and every member are
+  ## scored on the rest.
+  bad    <- unique(unlist(attr(member_pred, "flagged")))
+  usable <- unit_step("combine", member_pred[!member_pred$sample_id %in% bad, , drop = FALSE])
+
   ## Combine per-member test_F predictions by the weights, sample-aligned.
-  ensemble_pred <- unit_step("combine", member_pred |>
+  ensemble_pred <- unit_step("combine", usable |>
     dplyr::left_join(weights, by = c("config_id" = "member")) |>
     dplyr::group_by(.data$sample_id) |>
     dplyr::summarise(
@@ -121,7 +128,7 @@ fit_ensemble_weighted <- function(object,
     model         = weights,
     weights       = weights,
     ensemble_pred = ensemble_pred,
-    member_pred   = member_pred,
+    member_pred   = usable,
     rank_metric   = rank_metric,
     runtime_secs  = as.numeric(difftime(Sys.time(), started, units = "secs")),
     oof_pred      = oof_pred,

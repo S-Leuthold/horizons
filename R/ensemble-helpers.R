@@ -389,7 +389,7 @@ meta_learner_spec <- function(method, optimize) {
 #' OOF matrix — `test_F` never enters the tuning path, so the reported
 #' performance is honest), refit the winner on the full matrix, then have the
 #' members predict `test_F` and combine those predictions *through* the fitted
-#' meta-model. The engine supplies the model spec, the tuning grid, and a
+#' meta-model, over the test rows every member could use. The engine supplies the model spec, the tuning grid, and a
 #' closure that extracts member weights from the fitted model. Candidates are
 #' scored on their combination clamped to the outcome's range, as the served
 #' combination is ([tuning_metric_set()] with `transformation = "none"`).
@@ -641,9 +641,15 @@ fit_tuned_meta_learner <- function(object,
 
   member_pred <- unit_step("test_predict", predict_members_on_test(object, members, call = call))
 
+  ## The rows every member could use, as predict() combines them: a row a
+  ## member could not use is NA for it, which an xgb meta-model would read as
+  ## missing and score. The members are scored on the same rows.
+  bad    <- unique(unlist(attr(member_pred, "flagged")))
+  usable <- unit_step("combine", member_pred[!member_pred$sample_id %in% bad, , drop = FALSE])
+
   ## Wide member-prediction matrix with the SAME column names the meta-model
   ## trained on; truth rides through the pivot (constant per sample).
-  test_wide <- member_pred |>
+  test_wide <- usable |>
     dplyr::select("sample_id", "truth", "config_id", ".pred") |>
     tidyr::pivot_wider(names_from   = "config_id",
                        values_from  = ".pred",
@@ -675,7 +681,7 @@ fit_tuned_meta_learner <- function(object,
     model         = meta_fit,
     weights       = weights,
     ensemble_pred = ensemble_pred,
-    member_pred   = member_pred,
+    member_pred   = usable,
     rank_metric   = rank_metric,
     runtime_secs  = as.numeric(difftime(Sys.time(), started, units = "secs")),
     oof_pred      = oof_pred,
