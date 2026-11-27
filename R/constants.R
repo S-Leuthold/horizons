@@ -736,11 +736,16 @@ SCORING_SCHEMA <- 11L
 # schema.
 EVAL_MANIFEST_SCHEMA <- 6L
 
-# evaluate()'s smallest cross-validation assessment fold, in rows, below which
-# it warns (quality) that the cross-validated metrics rest on few rows. A
-# warning only, so no override: small samples run. Judgement, not a published
-# standard; an RMSE over fewer than ten rows is a weak estimate.
+# The smallest cross-validation assessment fold, in rows, below which
+# evaluate(), fit() and ensemble()'s meta-learner warn (quality) that the
+# cross-validated metrics rest on few rows. A warning only, so no override:
+# small samples run. Judgement, not a published standard; an RMSE over fewer
+# than ten rows is a weak estimate.
 SMALL_FOLD_ROWS <- 10L
+
+# The folds the penalized and xgb meta-learners draw on the out-of-fold
+# matrix, which ensemble()'s door holds to the fold rule (check_fold_rows())
+META_CV_FOLDS <- 5L
 
 # The circuit breaker's default (control_horizons(breaker = )): this many of
 # the first configurations to finish failing with the same cause stop

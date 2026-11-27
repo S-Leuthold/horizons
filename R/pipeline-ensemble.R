@@ -36,7 +36,10 @@
 #' `horizons_error_input` before fitting anything when an observed outcome
 #' lies outside it (#76). Its other refusals (an `x` that is not a fit, an
 #' unknown `method`, an `optimize`, `seed` or `compute_uq` of the wrong type,
-#' a fit with fewer than two members) carry the same class.
+#' a fit with fewer than two members, and, for the `"penalized"` and `"xgb"`
+#' meta-learners, an out-of-fold matrix with no more rows than their five
+#' cross-validation folds, the rule [evaluate()] and [fit()] hold their
+#' training rows to) carry the same class.
 #'
 #' After the outcome-range check and before it fits anything, `ensemble()`
 #' checks that `x` still holds what a fitted object promises (its data,
@@ -58,8 +61,10 @@
 #' computed. horizons' own warnings are written to the
 #' log and raised once at the end. Among them, as in [evaluate()] and
 #' [fit()]: the meta-learner's cross-validation folds or the CV+ calibration
-#' folds drawn unstratified (`horizons_warning_substitution`); a draw rsample
-#' stratified on fewer bins than asked is a note on the log.
+#' folds drawn unstratified (`horizons_warning_substitution`), and the
+#' meta-learner's smallest fold under ten rows to assess
+#' (`horizons_warning_quality`); a draw rsample stratified on fewer bins than
+#' asked is a note on the log.
 #'
 #' @param x A `horizons_fit` object (output of [fit()]).
 #' @param method Character. Meta-learner to use: `"penalized"` (default),
@@ -215,6 +220,23 @@ ensemble <- function(x,
       "{.fn ensemble} needs at least 2 fitted members; {.arg x} has {length(members)}.",
       "i" = "Fit with {.arg n_best} of at least 2, as {.code fit(x, n_best = 5)} does by default, on an evaluation with two or more configurations that succeed."
     ), kind = "input")
+
+  }
+
+  ## The penalized and xgb meta-learners draw their folds on the members'
+  ## out-of-fold matrix, one row per out-of-fold row (the validator held every
+  ## member to the same rows), so it is held to the fold rule evaluate() and
+  ## fit() refuse by, before anything is built. The weighted one draws none.
+
+  if (method != "weighted") {
+
+    cv     <- x$models$cv_predictions
+    n_meta <- length(unique(cv$.row[cv$config_id %in% members]))
+
+    check_fold_rows(n_meta, META_CV_FOLDS,
+                    what    = "The meta-learner's out-of-fold matrix",
+                    context = "Its rows are the members' out-of-fold predictions, one for each row {.fn fit} fit them on.",
+                    remedy  = "Fit on more rows, or use {.code method = \"weighted\"}, which draws no folds.")
 
   }
 

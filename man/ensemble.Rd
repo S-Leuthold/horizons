@@ -103,7 +103,10 @@ every scored and served prediction is, and \code{ensemble()} aborts with class
 \code{horizons_error_input} before fitting anything when an observed outcome
 lies outside it (#76). Its other refusals (an \code{x} that is not a fit, an
 unknown \code{method}, an \code{optimize}, \code{seed} or \code{compute_uq} of the wrong type,
-a fit with fewer than two members) carry the same class.
+a fit with fewer than two members, and, for the \code{"penalized"} and \code{"xgb"}
+meta-learners, an out-of-fold matrix with no more rows than their five
+cross-validation folds, the rule \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} hold their
+training rows to) carry the same class.
 
 After the outcome-range check and before it fits anything, \code{ensemble()}
 checks that \code{x} still holds what a fitted object promises (its data,
@@ -125,8 +128,10 @@ CV+ intervals not computed, and their measured test coverage not
 computed. horizons' own warnings are written to the
 log and raised once at the end. Among them, as in \code{\link[=evaluate]{evaluate()}} and
 \code{\link[=fit]{fit()}}: the meta-learner's cross-validation folds or the CV+ calibration
-folds drawn unstratified (\code{horizons_warning_substitution}); a draw rsample
-stratified on fewer bins than asked is a note on the log.
+folds drawn unstratified (\code{horizons_warning_substitution}), and the
+meta-learner's smallest fold under ten rows to assess
+(\code{horizons_warning_quality}); a draw rsample stratified on fewer bins than
+asked is a note on the log.
 }
 \examples{
 \dontrun{

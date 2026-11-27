@@ -483,14 +483,19 @@ fit_tuned_meta_learner <- function(object,
 
   drawn <- draw_stratified(
     outcome      = meta_frame$.truth,
-    stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
+    stratified   = function() rsample::vfold_cv(meta_frame, v = META_CV_FOLDS, strata = ".truth",
                                                 breaks = STRATA_BREAKS, pool = STRATA_POOL),
-    unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
+    unstratified = function() rsample::vfold_cv(meta_frame, v = META_CV_FOLDS)
   )
   report_strata_in_unit(drawn, "meta-learner's cross-validation folds")
 
   folds   <- drawn$draw
   n_folds <- nrow(folds)
+
+  ## A small assessment fold is weak, not wrong, as in evaluate() and fit():
+  ## it runs, with one quality warning. ensemble()'s door refused a matrix
+  ## without more rows than folds.
+  report_small_folds_in_unit(folds, "meta-learner cross-validation")
 
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
   ## As evaluate() tunes: tune's console notes muffled and read from the

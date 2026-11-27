@@ -516,7 +516,7 @@ describe("ensemble() - a member's warning on the test rows", {
 
 describe("ensemble() - its stratified draws", {
 
-  it("records a draw rsample stratified on fewer bins as a note from each unit, in its words, and raises nothing", {
+  it("records a draw rsample stratified on fewer bins as a note from each unit, in its words, and raises no warning for it", {
 
     ## The stored fit's meta frame has 40 to 79 rows, so rsample stratifies
     ## both draws on two bins rather than four
@@ -524,7 +524,9 @@ describe("ensemble() - its stratified draws", {
 
     got <- collect_warnings(ensemble(fitted, method = "penalized", optimize = FALSE))
 
-    expect_length(got$warnings, 0L)
+    ## The one warning is the meta-learner's small folds' (43 rows in five)
+    expect_identical(vapply(got$warnings, function(w) class(w)[1], character(1)), "horizons_warning_quality")
+    expect_match(conditionMessage(got$warnings[[1]]), "smallest meta-learner cross-validation fold", fixed = TRUE)
 
     log   <- got$value$log[got$value$log$verb == "ensemble", ]
     notes <- log[log$type == "note" & grepl("stratified draw", log$message, fixed = TRUE), ]
@@ -1690,6 +1692,58 @@ describe("ensemble() weighted - test-set combine", {
 
 })
 
+describe("ensemble() - the meta-learner's folds, under the fold rule evaluate() and fit() share", {
+
+  ## The fit with its members' out-of-fold rows cut to the first `n`
+  with_meta_rows <- function(n) {
+    fitted <- ens_fitted()
+    cv     <- fitted$models$cv_predictions
+    keep   <- sort(unique(cv$.row))[seq_len(n)]
+    fitted$models$cv_predictions <- cv[cv$.row %in% keep, , drop = FALSE]
+    fitted
+  }
+
+  it("refuses at the door a meta frame without more rows than the folds, for the methods that draw them", {
+
+    four <- with_meta_rows(4L)
+
+    for (method in c("penalized", "xgb")) {
+
+      err <- expect_error(suppressWarnings(ensemble(four, method = method, optimize = FALSE, compute_uq = FALSE)),
+                          class = "horizons_error_input", info = method)
+      msg <- gsub("\\s+", " ", conditionMessage(err))
+      expect_match(msg, "The meta-learner's out-of-fold matrix has 4 rows, but 5-fold cross-validation needs more training rows than folds.",
+                   fixed = TRUE, info = method)
+      expect_match(msg, "method = \"weighted\"", fixed = TRUE, info = method)
+      expect_identical(rlang::call_name(err$call), "ensemble", info = method)
+
+    }
+
+    ## The weighted meta-learner draws no folds
+    expect_no_error(suppressWarnings(ensemble(four, method = "weighted", compute_uq = FALSE)))
+
+  })
+
+  it("warns quality once when the smallest meta-learner fold is small, as evaluate() and fit() warn of theirs", {
+
+    ## The stored fit's 43 out-of-fold rows in five folds
+    run <- collect_warnings(ensemble(ens_fitted(), method = "penalized", optimize = FALSE, compute_uq = FALSE),
+                            class = "horizons_warning_quality")
+
+    expect_length(run$warnings, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(run$warnings[[1]]))
+    expect_match(msg, "The smallest meta-learner cross-validation fold has", fixed = TRUE)
+    expect_match(msg, "43 training rows in 5 folds", fixed = TRUE)
+
+    ## The weighted meta-learner draws none, so it has nothing to warn of
+    weighted <- collect_warnings(ensemble(ens_fitted(), method = "weighted", compute_uq = FALSE),
+                                 class = "horizons_warning_quality")
+    expect_length(weighted$warnings, 0L)
+
+  })
+
+})
+
 describe("ensemble() - a test row a member could not use", {
 
   ## The members' test predictions as predict_members_on_test() returns them
@@ -1865,9 +1919,10 @@ describe("ensemble() - allow_par", {
     expect_s3_class(w, "horizons_warning_substitution")
     expect_match(conditionMessage(w), "ensemble\\(\\).*0 mirai daemons are connected")
     expect_true(inherits(ens, "horizons_ensemble"))
-    ## The warning rows: the log also holds the meta-learner's folds' note
+    ## The substitution's row: the log also holds the meta-learner's folds'
+    ## note and their small-fold quality warning
     added <- log_rows_added(fitted, ens)
-    added <- added[added$type == "warning", ]
+    added <- added[added$type == "warning" & added$topic == "substitution", ]
     expect_identical(added$verb, "ensemble")
     expect_identical(added$topic, "substitution")
     expect_identical(w$log, added)

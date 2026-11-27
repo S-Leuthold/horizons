@@ -3511,33 +3511,81 @@ training_part_rows <- function(analysis, outcome_col, seed, cv_folds) {
 
 #' Refuse a training part without more rows than cross-validation folds
 #'
+#' @description
+#' The fold rule ([is_foldable()]) at every door that draws folds:
+#' `evaluate()`'s and `fit()`'s on the training part, where the message says
+#' where the other rows went, and `ensemble()`'s on the meta-learner's
+#' out-of-fold matrix, which says what its rows are (`context`).
+#'
 #' @param n_train Integer. Rows of the training part, after the split and
 #'   any response trim.
 #' @param cv_folds Integer. `config$tuning$cv_folds`.
 #' @param n_modelled,n_test,n_trimmed,n_calib Integer. The modelled rows,
 #'   and those the split held out for the test set, the trim left out or
-#'   `fit()` set aside for calibration, for the message.
+#'   `fit()` set aside for calibration, for the message. Read only when
+#'   `context` is `NULL`.
+#' @param what Character(1). What has the rows, a cli string.
+#' @param context,remedy Character(1) or `NULL`. The message's context and
+#'   remedy, cli strings; `NULL` for the training part's.
 #' @param call The frame the refusal reports: the verb's.
 #' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
-check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0L,
-                            n_calib = 0L, call = rlang::caller_env()) {
+check_fold_rows <- function(n_train, cv_folds, n_modelled = NULL, n_test = NULL, n_trimmed = 0L,
+                            n_calib = 0L, what = "The training part", context = NULL,
+                            remedy = NULL, call = rlang::caller_env()) {
 
   if (is_foldable(n_train, cv_folds)) return(invisible(NULL))
 
-  held <- c(paste0("the test set holds ", n_test),
-            if (n_calib > 0) paste0("the calibration set ", n_calib),
-            if (n_trimmed > 0) paste0("the response trim left out ", n_trimmed))
-  elsewhere <- if (length(held) == 1) held else {
-    paste0(paste(utils::head(held, -1), collapse = ", "), " and ", utils::tail(held, 1))
+  if (is.null(context)) {
+
+    held <- c(paste0("the test set holds ", n_test),
+              if (n_calib > 0) paste0("the calibration set ", n_calib),
+              if (n_trimmed > 0) paste0("the response trim left out ", n_trimmed))
+    elsewhere <- if (length(held) == 1) held else {
+      paste0(paste(utils::head(held, -1), collapse = ", "), " and ", utils::tail(held, 1))
+    }
+
+    context <- "{n_modelled} row{?s} {?has/have} an observed outcome; {elsewhere}."
+
   }
 
   abort_horizons(c(
-    "The training part has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds.",
-    "i" = "{n_modelled} row{?s} {?has/have} an observed outcome; {elsewhere}.",
-    "i" = "Add rows, or {.fn configure} fewer {.arg cv_folds}."
+    paste(what, "has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds."),
+    "i" = context,
+    "i" = remedy %||% "Add rows, or {.fn configure} fewer {.arg cv_folds}."
   ), kind = "input", call = call)
+
+}
+
+#' The warning a small assessment fold calls for
+#'
+#' @description
+#' The one rule for folds too small to score well: the smallest assessment
+#' fold under `SMALL_FOLD_ROWS` rows is a `quality` warning, raised once.
+#' [log_small_folds()] adds it to a verb's collector, and
+#' [report_small_folds_in_unit()] raises it from inside a unit, as
+#' [strata_report()]'s are.
+#'
+#' @param folds The `rset` the folds are.
+#' @param what Character(1). The folds, as the message names them.
+#' @return List with `smallest` (the smallest fold's assessment rows),
+#'   `message` (a cli message, or `NULL` when no fold is small) and `envir`
+#'   (where it is interpolated).
+#' @keywords internal
+#' @noRd
+small_folds_report <- function(folds, what = "cross-validation") {
+
+  n_rows   <- nrow(folds$splits[[1]]$data)
+  n_folds  <- nrow(folds)
+  smallest <- min(vapply(folds$splits, function(s) n_rows - length(s$in_id), integer(1)))
+
+  message <- if (smallest < SMALL_FOLD_ROWS) c(
+    "The smallest {what} fold has {smallest} row{?s} to assess, so the cross-validated metrics rest on few rows.",
+    "i" = "{n_rows} training rows in {n_folds} folds; a metric undefined on a fold is NA."
+  )
+
+  list(smallest = smallest, message = message, envir = environment())
 
 }
 
@@ -3550,19 +3598,32 @@ check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0
 #' @noRd
 log_small_folds <- function(collector, folds) {
 
-  n_rows   <- nrow(folds$splits[[1]]$data)
-  smallest <- min(vapply(folds$splits, function(s) n_rows - length(s$in_id), integer(1)))
+  report <- small_folds_report(folds)
 
-  if (smallest < SMALL_FOLD_ROWS) {
+  if (!is.null(report$message)) log_warning(collector, "quality", report$message, .envir = report$envir)
 
-    log_warning(collector, "quality", c(
-      "The smallest cross-validation fold has {smallest} row{?s} to assess, so the cross-validated metrics rest on few rows.",
-      "i" = "{n_rows} training rows in {nrow(folds)} folds; a metric undefined on a fold is NA."
-    ))
+  invisible(report$smallest)
 
-  }
+}
 
-  invisible(smallest)
+#' Warn once when the smallest assessment fold is small, from inside a unit
+#'
+#' @description
+#' As [log_small_folds()], for folds drawn inside a unit, which cannot reach
+#' the verb's collector: the warning is raised with [warn_in_unit()], and the
+#' verb lifts it onto its log.
+#'
+#' @inheritParams small_folds_report
+#' @return The smallest fold's assessment rows, invisibly.
+#' @keywords internal
+#' @noRd
+report_small_folds_in_unit <- function(folds, what) {
+
+  report <- small_folds_report(folds, what)
+
+  if (!is.null(report$message)) warn_in_unit("quality", report$message, .envir = report$envir)
+
+  invisible(report$smallest)
 
 }
 
