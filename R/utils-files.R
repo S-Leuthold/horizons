@@ -5,12 +5,13 @@
 #' Write a file whole or not at all
 #'
 #' @description
-#' The one mechanism behind every file horizons writes for itself:
+#' The one mechanism behind every R object horizons saves for itself:
 #' [write_output_file()] for `evaluate()`'s `output_dir`, with `saveRDS()`,
-#' and [write_cache_file()] for library mode's cache, with qs2. The value is
-#' saved under a temporary name beside the target, since a rename across
-#' filesystems is not atomic, and renamed into place, so a reader never sees
-#' half a file.
+#' and [write_cache_file()] for library mode's cache, with qs2. Library
+#' mode's downloads and their decompression write their files directly. The
+#' value is saved under a temporary name beside the target, since a rename
+#' across filesystems is not atomic, and renamed into place, so a reader never
+#' sees half a file.
 #'
 #' A save or a rename that fails leaves no temporary file behind, and what
 #' was said about it is returned rather than raised, for the caller to report
@@ -35,7 +36,8 @@
 #'   its own files.
 #' @return `NULL` when the file was written; otherwise Character(1), why it
 #'   could not be: each distinct warning and error raised during the save and
-#'   the rename, joined by `"; "`.
+#'   the rename, joined by `"; "`, or `"the file could not be renamed into
+#'   place"` when the rename failed and nothing was said.
 #' @keywords internal
 #' @noRd
 write_file_whole <- function(value, path, save, tmp_prefix = "file", tmp_ext = ".tmp") {

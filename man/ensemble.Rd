@@ -93,10 +93,12 @@ between members.
 
 All three train on the members' out-of-fold predictions and are evaluated on
 the held-out Split-F test set, so the reported ensemble metrics are directly
-comparable to the single-model metrics from \code{fit()}. A test row a member
-could not use (not finite after its recipe) is left out of the ensemble's
-test predictions and of its and its members' test metrics, as \code{predict()}
-leaves such a row out of what it combines.
+comparable to its members' test metrics (\code{member_metrics}), which are scored
+on the same rows. A test row a member could not use (not finite after its
+recipe) is left out of the ensemble's test predictions and of its and its
+members' test metrics, as \code{predict()} leaves such a row out of what it
+combines, while \code{fit()}'s test metrics for the members that could use it
+still count it.
 
 Combined predictions are clamped to \code{configure()}'s \code{outcome_range}, as
 every scored and served prediction is, and \code{ensemble()} aborts with class

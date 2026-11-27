@@ -805,7 +805,10 @@ validate_horizons_data <- function(x,
 
   ## Rows with no role ---------------------------------------------------------
   ## A role map edited by hand can hold an NA role; the checks below read the
-  ## roles with %in%, as axis_columns() does, so it is this one finding.
+  ## roles with %in%, as axis_columns() does, so none of them fails on it. On
+  ## an object a verb built, which stores its counts, a predictor or response
+  ## column given an NA role no longer counts as one, so the stored counts
+  ## check below is a second finding.
 
   na_role_vars <- role_map$variable[is.na(role_map$role)]
 

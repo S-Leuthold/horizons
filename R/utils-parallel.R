@@ -2019,10 +2019,11 @@ pin_threads <- function() {
 #' @description
 #' The one runtime pin of BLAS and OpenMP, for every process that fits: the
 #' session before dispatch ([pin_threads()]), and each daemon set up
-#' for a unit ([prepare_worker()]): a configs-axis configuration's daemon and
-#' a fold preparation's while its task runs, and a split configuration's
-#' inner daemons ([start_inner_daemons()]), so a configuration computes alike
-#' wherever its folds and its final fit run. `RhpcBLASctl` makes the call and is a
+#' for a unit ([prepare_worker()]): a configs-axis configuration's daemon, a
+#' fold preparation's and a members-axis member's while its task runs, and a
+#' split configuration's or member's inner daemons ([start_inner_daemons()]),
+#' so a configuration computes alike wherever its folds and its final fit
+#' run. `RhpcBLASctl` makes the call and is a
 #' Suggests; without it nothing is pinned here, and a process keeps the
 #' threads it started with ([blas_pinnable()]).
 #'
