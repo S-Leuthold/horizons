@@ -713,6 +713,10 @@ test_that("the cache key carries the space algorithm's version and tells masks a
   expect_false(identical(key(rbind(c(620, 640))), k1))
   expect_identical(key(rbind(c(620L, 640L))), key(rbind(c(620, 640))))
 
+  ## The same key whatever the session's serialization version, so a cached
+  ## space is found under any setting
+  expect_identical(withr::with_options(list(serializeVersion = 3L), space_cache_key("lib", s, 600:700)), k1)
+
   local_mocked_bindings(SELECT_SPACE_CACHE_VERSION = SELECT_SPACE_CACHE_VERSION + 1L)
   expect_false(identical(space_cache_key("lib", s, 600:700), k1))
 

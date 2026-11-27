@@ -73,16 +73,40 @@ ensure_rng_stream <- function() {
 }
 
 
+#' Hash an R object, under one serialization whatever the session sets
+#'
+#' @description
+#' The one hash of an R object horizons takes: [digest::digest()] with the
+#' object serialized under version 2. digest serializes under
+#' `options(serializeVersion = )` when a session sets it, which would give
+#' every hash another value there: other unit seeds and configuration ids, a
+#' resume that reads its own checkpoints as another run's data, and fold
+#' and space caches that miss. Version 2 is digest's default, so these are
+#' the hashes the package has always taken. A file's bytes are hashed with
+#' `digest(file = )`, which serializes nothing.
+#'
+#' @param x The object.
+#' @param algo [Character(1).] digest's algorithm. Default `"md5"`, digest's
+#'   own.
+#' @return Character(1), the hex digest.
+#' @keywords internal
+#' @noRd
+hash_object <- function(x, algo = "md5") {
+
+  digest::digest(x, algo = algo, serializeVersion = 2L)
+
+}
+
+
 #' A unit's seed, from the run's seed and the unit's name
 #'
 #' @description
-#' The first seven hex digits of [digest::digest()] of `"<root>/<name>"`, as
-#' an integer in `[0, 2^28)`: digest's defaults, as `generate_config_id()`
-#' calls it, so the package has one hashing rule, with the key serialized
-#' under version 2 whatever `options(serializeVersion = )` says, which would
-#' otherwise give a session that set it other seeds from the same root.
-#' Version 2 is the option's default, so these are the seeds the rule has
-#' always given. The root is taken as an
+#' The first seven hex digits of [hash_object()] of `"<root>/<name>"`, as
+#' an integer in `[0, 2^28)`: the package's one hashing rule, so the key is
+#' serialized under version 2 whatever `options(serializeVersion = )` says,
+#' which would otherwise give a session that set it other seeds from the
+#' same root. Version 2 is the option's default, so these are the seeds the
+#' rule has always given. The root is taken as an
 #' integer, so `307` and `307L` give the same seed. A pure function of its
 #' arguments: any unit can be re-run alone by recomputing its seed.
 #'
@@ -105,7 +129,7 @@ unit_seed <- function(seed, name) {
 
   key <- paste(c(as.integer(seed), name), collapse = "/")
 
-  strtoi(substr(digest::digest(key, serializeVersion = 2L), 1L, 7L), base = 16L)
+  strtoi(substr(hash_object(key), 1L, 7L), base = 16L)
 
 }
 

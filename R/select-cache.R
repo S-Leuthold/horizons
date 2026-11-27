@@ -67,7 +67,7 @@ space_cache_identity <- function(record) {
 #' @noRd
 space_cache_key <- function(identity, settings, wn) {
 
-  digest::digest(list(
+  hash_object(list(
     version    = SELECT_SPACE_CACHE_VERSION,
     max_comp   = SELECT_PCA_MAX_COMP,
     identity   = as.character(identity),

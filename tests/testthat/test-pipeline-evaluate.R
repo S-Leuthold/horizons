@@ -2324,6 +2324,18 @@ describe("eval_data_fingerprint()", {
 
   })
 
+  it("gives the fingerprint it always has whatever the session's serialization version", {
+
+    ## digest() serializes under options(serializeVersion = ), which would
+    ## make a resume read its own checkpoints as another run's data
+    rm <- tibble::tibble(variable = c("sample_id", "wn_1", "y"), role = c("id", "predictor", "outcome"))
+    df <- tibble::tibble(sample_id = c("c", "a", "b"), wn_1 = c(1, 2, 3), y = c(7, 8, 9))
+
+    expect_identical(withr::with_options(list(serializeVersion = 3L), eval_data_fingerprint(df, rm)),
+                     eval_data_fingerprint(df, rm))
+
+  })
+
   it("returns NA when no identifier column is available", {
 
     fp <- eval_data_fingerprint(tibble::tibble(x = 1:3), NULL)

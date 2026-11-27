@@ -2016,6 +2016,22 @@ test_that("the record carries the targets' source, size and id hash", {
 })
 
 
+test_that("the id hashes are the same whatever the session's serialization version", {
+
+  ## In this session, where the option is set, rather than a process of its
+  ## own, which does not carry it
+  fx <- select_fixture(n_pool = 60)
+
+  out <- withr::with_options(list(serializeVersion = 3L),
+                             quiet_select(fx, k = 5, control = control_horizons(isolate = FALSE)))
+
+  expect_identical(out$selection$targets$id_hash,
+                   digest::digest(sort(fx$targets$data$analysis$sample_id, method = "radix"), serializeVersion = 2L))
+  expect_identical(out$selection$pool$id_hash,
+                   digest::digest(sort(fx$pool$data$analysis$sample_id, method = "radix"), serializeVersion = 2L))
+
+})
+
 test_that("the id hashes take radix order under a collation that orders case otherwise", {
 
   fx  <- select_fixture(n_pool = 60)

@@ -2894,7 +2894,7 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
   ## records. Its presence marks a fingerprinted row; its value is not
   ## compared, since sort() follows the session's collation and the fields
   ## below carry the same ids in a fixed order.
-  data_hash <- digest::digest(list(
+  data_hash <- hash_object(list(
     ids     = sort(ids),
     outcome = outcome_col
   ))
@@ -2928,8 +2928,8 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
 
   data_fields <- list(
     outcome        = paste(outcome_col, collapse = ", "),
-    ids            = digest::digest(ids[by_id], algo = "xxhash64"),
-    roles          = digest::digest(roles, algo = "xxhash64"),
+    ids            = hash_object(ids[by_id], algo = "xxhash64"),
+    roles          = hash_object(roles, algo = "xxhash64"),
     outcome_values = hash_columns(train_data, role_cols("outcome"), by_id),
     predictors     = hash_columns(train_data, if (has_roles) axis_columns(role_map) else character(0), by_id)
   )
@@ -2958,10 +2958,10 @@ hash_columns <- function(data, cols, ord) {
   cols <- intersect(cols, names(data))
 
   per_column <- vapply(cols, function(cl) {
-    digest::digest(data[[cl]][ord], algo = "xxhash64")
+    hash_object(data[[cl]][ord], algo = "xxhash64")
   }, character(1))
 
-  digest::digest(per_column, algo = "xxhash64")
+  hash_object(per_column, algo = "xxhash64")
 
 }
 

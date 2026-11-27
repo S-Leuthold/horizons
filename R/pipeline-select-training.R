@@ -1733,7 +1733,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## than carried through the check.
 
   pool_record    <- list(n_rows = nrow(pool$data$analysis),
-                         id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix")))
+                         id_hash = hash_object(sort(pool$data$analysis$sample_id, method = "radix")))
   library_record <- resolved$record
   released       <- 8 * nrow(pool$data$analysis) * length(pool_vars)
 
@@ -1770,7 +1770,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
     pool             = pool_record,
     targets          = list(source  = targets_source(x$log),
                             n_rows  = nrow(x$data$analysis),
-                            id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),
+                            id_hash = hash_object(sort(x$data$analysis$sample_id, method = "radix"))),
     library          = library_record,
     depth            = list(requested = depth, recorded = depth_recorded, applied = depth_applied,
                             max_cm = if (depth_applied) SELECT_TOPSOIL_MAX_CM else NULL,

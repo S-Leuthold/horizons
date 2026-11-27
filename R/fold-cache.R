@@ -292,7 +292,7 @@ fold_prep_key <- function(verb, unit_row, fold, ids, in_id, data, seed, sg_windo
     pca_threshold     = pca_threshold,
     transformation    = tolower(unit_row$transformation),
     fold              = fold,
-    rows              = digest::digest(list(as.character(ids), as.integer(in_id)), algo = "xxhash64"),
+    rows              = hash_object(list(as.character(ids), as.integer(in_id)), algo = "xxhash64"),
     data              = data,
     seed              = seed,
     seed_rule         = SEED_RULE,
@@ -304,9 +304,9 @@ fold_prep_key <- function(verb, unit_row, fold, ids, in_id, data, seed, sg_windo
 #' The file a fold prep's entry is kept in
 #'
 #' @description
-#' `fold-<hash>.rds`, the hash digest's of the entry's key under its
-#' defaults, the package's one hashing rule ([unit_seed()]): a name no other
-#' prep draws, and the same in every process of a run.
+#' `fold-<hash>.rds`, the hash of the entry's key by the package's one
+#' hashing rule ([hash_object()]): a name no other prep draws, and the same
+#' in every process of a run.
 #'
 #' @param key A record from [fold_prep_key()].
 #' @return Character(1).
@@ -314,7 +314,7 @@ fold_prep_key <- function(verb, unit_row, fold, ids, in_id, data, seed, sg_windo
 #' @noRd
 fold_entry_file <- function(key) {
 
-  paste0("fold-", digest::digest(key), ".rds")
+  paste0("fold-", hash_object(key), ".rds")
 
 }
 

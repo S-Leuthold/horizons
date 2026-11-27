@@ -107,6 +107,27 @@ describe("ensure_rng_stream()", {
 
 })
 
+describe("hash_object()", {
+
+  it("is digest's hash of the object, under serialization version 2 whatever the session sets", {
+
+    x <- list(a = 1:3, b = "z")
+
+    expect_identical(hash_object(x), digest::digest(x, serializeVersion = 2L))
+    expect_identical(hash_object(x, algo = "xxhash64"), digest::digest(x, algo = "xxhash64", serializeVersion = 2L))
+
+    ## Version 2 is digest's default, so the hash is the one horizons has
+    ## always taken
+    expect_identical(hash_object(x), digest::digest(x))
+
+    expect_identical(withr::with_options(list(serializeVersion = 3L), hash_object(x)), hash_object(x))
+    expect_identical(withr::with_options(list(serializeVersion = 3L), hash_object(x, algo = "xxhash64")),
+                     hash_object(x, algo = "xxhash64"))
+
+  })
+
+})
+
 describe("unit_seed()", {
 
   it("is a pure function of the root and the name", {
