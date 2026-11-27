@@ -243,13 +243,14 @@ describe("ensemble() - its control", {
 
   it("hands min_calib_rows to fit_ensemble_uq()", {
 
-    seen <- NULL
+    fitted <- ens_fitted()
+    seen   <- NULL
     local_mocked_bindings(fit_ensemble_uq = function(x, ..., min_calib_rows) {
       seen <<- min_calib_rows
       x
     })
 
-    suppressWarnings(ensemble(ens_fitted(), method = "weighted", optimize = FALSE,
+    suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE,
                               control = control_horizons(min_calib_rows = 40L)))
     expect_identical(seen, 40L)
 
@@ -1789,9 +1790,10 @@ describe("ensemble() - a test row a member could not use", {
   }
 
   build <- function(method, edit) {
-    hole <- with_members_on_test(edit)
-    ens  <- suppressWarnings(ensemble(ens_fitted(), method = method, optimize = FALSE,
-                                      compute_uq = FALSE, seed = 11L))
+    fitted <- ens_fitted()
+    hole   <- with_members_on_test(edit)
+    ens    <- suppressWarnings(ensemble(fitted, method = method, optimize = FALSE,
+                                        compute_uq = FALSE, seed = 11L))
     list(ens = ens$ensemble, id = hole$id)
   }
 
@@ -2184,12 +2186,13 @@ describe("ensemble() - the header it prints", {
   ## The header is printed before the meta-learner runs, so each engine is
   ## stopped there
   header <- function(method, optimize) {
+    fitted      <- ens_fitted()
     stop_engine <- function(...) stop("stopped after the header")
     local_mocked_bindings(fit_ensemble_penalized = stop_engine,
                           fit_ensemble_weighted  = stop_engine,
                           fit_ensemble_xgb       = stop_engine)
     out <- utils::capture.output(
-      expect_error(suppressWarnings(ensemble(ens_fitted(), method = method, optimize = optimize,
+      expect_error(suppressWarnings(ensemble(fitted, method = method, optimize = optimize,
                                              compute_uq = FALSE,
                                              control = control_horizons(verbose = TRUE))),
                    class = "horizons_error_ensemble_failed")
