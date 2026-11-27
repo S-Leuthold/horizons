@@ -262,7 +262,9 @@
 #' the configurations need; a daemon on another version of horizons is
 #' refused (`horizons_error_dependency`), and so is one that lacks a package
 #' (`horizons_error_missing_package`, naming each and how many daemons lack
-#' it). A daemon set with `maxtasks` spends one task on the check. With
+#' it). A daemon set with `maxtasks` spends one task on the check, and, on
+#' the resamples axis, two more for each Bayesian search of a model whose
+#' fits are isolated, one before the search and one after. With
 #' `control_horizons(debug = TRUE)`, `evaluate()` runs in this session
 #' whatever `allow_par` says.
 #'

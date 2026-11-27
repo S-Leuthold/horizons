@@ -459,9 +459,10 @@ abort_no_daemons <- function(results, n_left = NULL, output_dir = NULL, verb = "
     },
     "i" = "A daemon exits after {.arg maxtasks} tasks, or past {.arg idletime} or {.arg walltime}, and mirai does not start it again. Set daemons without those limits, or launch more with {.code mirai::launch_local()}.",
     ### The verbs that check every daemon at the door spend a task on each,
-    ### and one more after each Bayesian search of an isolated model whose
-    ### folds ran on the daemons (isolated_deaths())
-    "i" = if (verb %in% c("evaluate", "fit")) "{.fn {verb}} spends one task on each daemon checking it before the run, and, on the resamples axis, one more after each Bayesian search of a model whose fits are isolated.",
+    ### and two more for each Bayesian search of an isolated model
+    ### whose folds ran on the daemons: isolated_deaths() before the search,
+    ### to clear the record, and after it, to read it
+    "i" = if (verb %in% c("evaluate", "fit")) "{.fn {verb}} spends one task on each daemon checking it before the run, and, on the resamples axis, two more for each Bayesian search of a model whose fits are isolated, one before the search and one after.",
     resume_hint(results, output_dir)
   ), kind = "run", class = c("horizons_error_no_daemons", "horizons_error_systemic"),
   results = results, call = call)

@@ -1400,8 +1400,8 @@ describe("abort_no_daemons()", {
       err <- expect_error(abort_no_daemons(NULL, verb = verb), class = "horizons_error_no_daemons")
       msg <- gsub("\\s+", " ", conditionMessage(err))
       expect_match(msg, paste0("`", verb, "()` spends one task on each daemon checking it before the run, ",
-                               "and, on the resamples axis, one more after each Bayesian search of a model ",
-                               "whose fits are isolated."),
+                               "and, on the resamples axis, two more for each Bayesian search of a model ",
+                               "whose fits are isolated, one before the search and one after."),
                    fixed = TRUE, info = verb)
 
     }

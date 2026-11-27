@@ -319,7 +319,9 @@ task each, which horizons it loads and whether it can load the packages
 the configurations need; a daemon on another version of horizons is
 refused (\code{horizons_error_dependency}), and so is one that lacks a package
 (\code{horizons_error_missing_package}, naming each and how many daemons lack
-it). A daemon set with \code{maxtasks} spends one task on the check. With
+it). A daemon set with \code{maxtasks} spends one task on the check, and, on
+the resamples axis, two more for each Bayesian search of a model whose
+fits are isolated, one before the search and one after. With
 \code{control_horizons(debug = TRUE)}, \code{evaluate()} runs in this session
 whatever \code{allow_par} says.
 
