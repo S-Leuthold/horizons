@@ -104,6 +104,12 @@ Bayesian optimization), evaluated on the test set, and ranked by the
 specified metric. The best configuration is stored for downstream use by
 \code{fit()}.
 }
+\details{
+The train/test split and the folds are drawn at random over rows,
+stratified on the outcome, so related samples (replicates under distinct
+ids, cores of one field) can fall on both sides; grouped validation is
+planned.
+}
 \section{The Bayesian search's stopping rule}{
 
 Each configuration's Bayesian search stops once \code{no_improve} iterations in

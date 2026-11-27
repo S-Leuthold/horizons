@@ -7,6 +7,12 @@
 #' specified metric. The best configuration is stored for downstream use by
 #' `fit()`.
 #'
+#' @details
+#' The train/test split and the folds are drawn at random over rows,
+#' stratified on the outcome, so related samples (replicates under distinct
+#' ids, cores of one field) can fall on both sides; grouped validation is
+#' planned.
+#'
 #' @param x A `horizons_data` object with `config$configs` populated by
 #'   `configure()`.
 #' @param metric Character. Metric for ranking configurations. One of
