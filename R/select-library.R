@@ -758,8 +758,10 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
   names(lab) <- c("sample_id", pm$property)
 
   ## Join on id: spectra with a lab row and a site row -----------------------
+  ## In radix order, which no locale changes, so a library's rows are in the
+  ## same order wherever it is built, as the record's id hashes sort
 
-  ids <- sort(Reduce(intersect, list(mir_ids, lab$sample_id, site$sample_id)))
+  ids <- sort(Reduce(intersect, list(mir_ids, lab$sample_id, site$sample_id)), method = "radix")
 
   ## The registry's filters select the rows the release it pins holds; an
   ## empty join would otherwise build a library of no rows.

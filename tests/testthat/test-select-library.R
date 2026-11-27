@@ -514,6 +514,38 @@ test_that("a join that keeps no row trips an internal check rather than building
 
 })
 
+test_that("the library's rows are in radix order of their ids, so a build is the same in every locale", {
+
+  ## Every other id upper case, in all three tables, which a collation that
+  ## folds case orders apart from radix
+  upper_every_other <- function(x) ifelse(seq_along(x) %% 2 == 0, toupper(x), x)
+  ids <- NULL
+
+  dir   <- withr::local_tempdir()
+  entry <- make_mini_ossl(dir)
+  raw   <- c(mir  = file.path(dir, "mir.csv.gz"),
+             lab  = file.path(dir, "lab.csv.gz"),
+             site = file.path(dir, "site.csv.gz"))
+
+  for (path in raw) {
+    tab <- utils::read.csv(gzfile(path), check.names = FALSE)
+    tab$id.layer_uuid_txt <- upper_every_other(tab$id.layer_uuid_txt)
+    ids <- tab$id.layer_uuid_txt
+    data.table::fwrite(tab, path)
+  }
+
+  suppressWarnings(withr::local_collate("en_US.UTF-8"))
+  skip_if(identical(sort(ids), sort(ids, method = "radix")),
+          "no locale here that collates case apart from radix order")
+
+  pool <- build_ossl_library(raw, entry, verbose = FALSE)
+  kept <- pool$data$analysis$sample_id
+
+  expect_gt(length(kept), 1L)
+  expect_identical(kept, sort(kept, method = "radix"))
+
+})
+
 test_that("a chunk of the MIR table read back out of order trips an internal check", {
 
   ## Spectra paired with the wrong lab rows would be silent, so the chunked
