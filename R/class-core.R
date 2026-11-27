@@ -858,10 +858,9 @@ validate_horizons_data <- function(x,
 
   if (length(covariate_vars) > 0) {
 
-    n_cov    <- length(covariate_vars)
-    col_list <- paste(covariate_vars, collapse = ", ")
-    errors   <- c(errors, cli::format_inline(
-      "{cli::qty(n_cov)}Column{?s} with the {.field covariate} role, which horizons does not model: {col_list}. Give {cli::qty(n_cov)}{?it/them} the {.field meta} role, which carries a column without modelling it."
+    n_cov  <- length(covariate_vars)
+    errors <- c(errors, cli::format_inline(
+      "{cli::qty(n_cov)}Column{?s} with the {.field covariate} role, which horizons does not model: {shown_ids(covariate_vars)}. Give {cli::qty(n_cov)}{?it/them} the {.field meta} role, which carries a column without modelling it."
     ))
 
   }
@@ -882,8 +881,8 @@ validate_horizons_data <- function(x,
 
   if (n_outcome_roles > 1) {
 
-    outcome_list <- paste(role_map$variable[role_map$role %in% "outcome"], collapse = ", ")
-    errors       <- c(errors, cli::format_inline("Multiple {.field outcome} roles in {.field role_map} (at most one allowed): {outcome_list}"))
+    outcome_vars <- role_map$variable[role_map$role %in% "outcome"]
+    errors       <- c(errors, cli::format_inline("Multiple {.field outcome} roles in {.field role_map} (at most one allowed): {shown_ids(outcome_vars)}"))
 
   }
 

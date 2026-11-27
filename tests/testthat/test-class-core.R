@@ -884,7 +884,7 @@ test_that("validate_horizons_data rejects a role outside the vocabulary, pointin
 
   expect_s3_class(err, "horizons_error_validation")
   expect_match(conditionMessage(err),
-               "Column with the covariate role, which horizons does not model: clay. Give it the meta role",
+               "Column with the covariate role, which horizons does not model: \"clay\". Give it the meta role",
                fixed = TRUE)
   expect_no_match(conditionMessage(err), "Unknown roles", fixed = TRUE)
 
@@ -1021,7 +1021,7 @@ test_that("validate_horizons_data rejects more than one outcome role", {
   obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
 
   expect_error(suppressMessages(validate_horizons_data(obj)),
-               "Multiple outcome roles in role_map (at most one allowed): clay, oc",
+               "Multiple outcome roles in role_map (at most one allowed): \"clay\", \"oc\"",
                fixed = TRUE,
                class = "horizons_error_validation")
 
