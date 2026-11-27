@@ -314,7 +314,6 @@ HIGHER_BETTER_METRICS <- c("rpd", "rsq", "ccc")
 # Default tuning parameters
 DEFAULT_GRID_SIZE <- 10
 DEFAULT_BAYES_ITER <- 15
-DEFAULT_CV_FOLDS <- 5
 
 # The Bayesian iterations without improvement after which a search stops
 # (control_horizons(no_improve = )), in evaluate() and fit()'s re-tune alike.
@@ -334,7 +333,6 @@ BAYES_NO_IMPROVE_DEFAULT <- 10L
 # change to it, or to search_budget(), changes how rows are scored, and bumps
 # SCORING_SCHEMA.
 BAYES_POINTS_PER_PARAM <- 10L
-DEFAULT_CORE_BUFFER <- 2  # Keep 2 cores free for system
 
 # Recipe settings configure() records and build_recipe() applies to every
 # config (#62): the Savitzky-Golay window in grid points, and the share of
