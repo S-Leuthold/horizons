@@ -272,9 +272,12 @@ daemons that load another version of horizons
 (\code{horizons_error_dependency}), since the daemons prepare the members'
 folds and tune's tasks fit the members' engines, horizons' own PLS engine
 among them, or cannot load a package the members need, their engines' or
-their feature selections' (\code{horizons_error_missing_package}). A feature
-selection that fails while a fold is prepared fails every member that
-reads that preparation, with the step's own class and words.
+their feature selections' (\code{horizons_error_missing_package}). A daemon set
+with \code{maxtasks} spends one task on the check, and, on the resamples axis,
+two more for each Bayesian search of a model whose fits are isolated, one
+before the search and one after. A feature selection that fails while a
+fold is prepared fails every member that reads that preparation, with the
+step's own class and words.
 }
 
 \section{Cold start from one configuration}{

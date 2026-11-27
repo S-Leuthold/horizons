@@ -67,7 +67,7 @@ features do not have one row per row of \code{calib_data}.
 Trains a quantile random forest on OOF residuals from the point model,
 then computes conformal nonconformity scores on the held-out calibration
 data. Returns everything needed for \code{predict()} to produce prediction
-intervals at any coverage level.
+intervals at the calibration level, \code{level_default}.
 }
 \details{
 This function is the \strong{capture layer} — it runs silently and returns a

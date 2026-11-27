@@ -152,7 +152,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
   it("prints and summarises the record as unevaluated, and nothing else", {
 
-    only_line <- "   └─ Configs evaluated: none (fit() started cold from 1)"
+    only_line <- "   └─ Configs evaluated: none (fit() started cold from 1 configuration)"
 
     ## No success count, results, rank metric or runtime to contradict it
     expect_identical(evaluation_section(utils::capture.output(print(cold))), only_line)
@@ -414,7 +414,7 @@ describe("fit() - cold start from one configuration (#45)", {
 
     err <- expect_error(fit(gone), class = "horizons_error_validation")
 
-    expect_true(any(grepl(paste0("missing from analysis: ", outcome), err$findings, fixed = TRUE)))
+    expect_true(any(grepl(paste0("missing from analysis: \"", outcome, "\""), err$findings, fixed = TRUE)))
 
   })
 

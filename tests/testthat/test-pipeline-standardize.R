@@ -95,29 +95,20 @@ test_that("standardize() validates resample parameter", {
 })
 
 
-test_that("standardize() validates trim parameter", {
+test_that("standardize()'s trim and average()'s qc_range are refused by one rule, in one wording", {
 
   hd <- create_test_spectra()
 
-  expect_error(
-    standardize(hd, trim = 600),
-    class = "horizons_error_input"
-  )
+  for (bad in list(600, c("600", "4000"), c(600, Inf), c(4000, 600), c(600, 600))) {
 
-  expect_error(
-    standardize(hd, trim = c("600", "4000")),
-    class = "horizons_error_input"
-  )
+    trim_err <- expect_error(standardize(hd, trim = bad), class = "horizons_error_input")
+    qc_err   <- expect_error(average(hd, qc_range = bad, verbose = FALSE), class = "horizons_error_input")
 
-  expect_error(
-    standardize(hd, trim = c(4000, 600)),
-    class = "horizons_error_input"
-  )
+    expect_identical(sub("`qc_range`", "`trim`", conditionMessage(qc_err), fixed = TRUE),
+                     conditionMessage(trim_err), label = deparse(bad))
+    expect_identical(rlang::call_name(trim_err$call), "standardize")
+    expect_identical(rlang::call_name(qc_err$call), "average")
 
-  ## A bound that is not finite is refused at the door, not inside seq()
-  for (bad in list(c(600, Inf), c(NA, 4000))) {
-    expect_error(standardize(hd, trim = bad), "`trim` must be two finite wavenumbers",
-                 fixed = TRUE, class = "horizons_error_input")
   }
 
 })
@@ -942,6 +933,25 @@ test_that("an axis with the water bands cut upstream is not spline-filled, and s
   expect_identical(as.matrix(out$data$analysis[, predictor_names(out)]), cut_values)
   expect_match(record_message(out), "already on the", fixed = TRUE)
   expect_false(any(in_water_band(as.numeric(sub("^wn_", "", predictor_names(out))))))
+
+})
+
+
+test_that("the coverage warning names the first five gaps and counts the rest, as the refusals name gaps", {
+
+  ## Seven 32 cm-1 holes, as select_training()'s axis check is tested on
+  wn     <- seq(4000, 600, by = -2)
+  starts <- seq(3980, by = -50, length.out = 7)
+  seven  <- wn[!wn %in% unlist(lapply(starts, function(s) seq(s, s - 28, by = -2)))]
+
+  res <- with_warnings(no_output(standardize(make_axis_spectra(seven), resample = 2)))
+
+  gap_warnings <- Filter(function(w) inherits(w, "horizons_warning_coverage"), res$warnings)
+  expect_length(gap_warnings, 1L)
+  msg <- gsub("\\s+", " ", conditionMessage(gap_warnings[[1]]))
+  expect_match(msg, paste0("7 gaps in it: 3650 to 3682, 3700 to 3732, 3750 to 3782, 3800 to 3832, ",
+                           "3850 to 3882 cm-1 and 2 more."), fixed = TRUE)
+  expect_no_match(msg, "3900 to 3932", fixed = TRUE)
 
 })
 

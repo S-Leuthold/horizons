@@ -24,8 +24,11 @@ build_ensemble_contract(
 \item{model}{The fitted meta-learner object (engine-specific).}
 
 \item{weights}{Tibble with one row per member: \code{member} (config_id) and
-\code{coef} (the normalized contribution — stacks coefficient, inverse-RMSE
-weight, or xgb importance, depending on method).}
+\code{coef}, the member's weight as its method gives it: for \code{penalized} the
+glmnet coefficient at the chosen penalty (signed and not normalized, the
+intercept left out), for \code{weighted} the inverse-RMSE or equal weight
+(summing to 1), and for \code{xgb} xgboost's Gain importance (0 for a member
+no tree splits on).}
 
 \item{ensemble_pred}{Tibble of ensemble \code{test_F} predictions: \code{sample_id},
 \code{.pred}, \code{truth} (original scale).}

@@ -22,5 +22,9 @@ finite-sample correction.
 \details{
 Formula: \code{q_prob = min(1, ceiling((1 - alpha) * (n + 1)) / n)} where
 \code{alpha = 1 - level}. Then \code{c_alpha = quantile(scores, probs = q_prob, type = 7)}. The ceiling ensures conservative coverage for finite samples.
+At \code{q_prob = k / n}, type 7 interpolates between the k-th and (k + 1)-th
+smallest scores, \code{1 - k / n} of the way to the next, so \code{c_alpha} is the
+k-th smallest score split conformal prescribes, or slightly above it:
+the interval is never narrower than the order statistic's.
 }
 \keyword{internal}

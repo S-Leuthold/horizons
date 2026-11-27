@@ -188,9 +188,10 @@ grid_summary <- function(wn, gap_ratio = 3, gap_width = 30) {
 #' The first gaps of an axis, and how many more
 #'
 #' @description
-#' How a condition names an axis's gaps, so every door that refuses one says
-#' it the same way: each gap low to high, in increasing order, the unit once,
-#' the first five and a count of the rest, as `shown_ids()` names ids.
+#' How a condition names an axis's gaps, so every refusal of a gapped axis
+#' and `standardize()`'s coverage warning say them the same way: each gap low
+#' to high, in increasing order, the unit once, the first five and a count of
+#' the rest, as `shown_ids()` names ids.
 #'
 #' @param gaps [Matrix.] `grid_summary()`'s `gaps`: columns `low` and
 #'   `high`, one row a gap.

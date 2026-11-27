@@ -177,9 +177,12 @@
 #' (`horizons_error_dependency`), since the daemons prepare the members'
 #' folds and tune's tasks fit the members' engines, horizons' own PLS engine
 #' among them, or cannot load a package the members need, their engines' or
-#' their feature selections' (`horizons_error_missing_package`). A feature
-#' selection that fails while a fold is prepared fails every member that
-#' reads that preparation, with the step's own class and words.
+#' their feature selections' (`horizons_error_missing_package`). A daemon set
+#' with `maxtasks` spends one task on the check, and, on the resamples axis,
+#' two more for each Bayesian search of a model whose fits are isolated, one
+#' before the search and one after. A feature selection that fails while a
+#' fold is prepared fails every member that reads that preparation, with the
+#' step's own class and words.
 #'
 #' @section Cold start from one configuration:
 #' With one configuration there is nothing for `evaluate()` to choose, so a
@@ -539,7 +542,7 @@ fit <- function(x,
 
     if (allow_par) {
 
-      unpin_threads <- pin_parent_threads()
+      unpin_threads <- pin_threads()
       on.exit(unpin_threads(), add = TRUE)
 
     }
@@ -1392,10 +1395,12 @@ fit <- function(x,
   ## minimum, with no floor) so it lies above the maximum for a signed outcome
   ## too; under the default range it is max * RESPONSE_BOUND_MARGIN exactly
   ## (#76). Taken over train_Fit, the rows the final models are fit on, so
-  ## neither Split F's test rows nor the calibration rows shape it (#68), plus
-  ## the rows a response trim left out of them (#77): those are
-  ## training-partition rows too, and a bound under values actually observed
-  ## there would clamp the very extremes the trim set aside.
+  ## Split F's test rows never shape it (#68), plus the rows a response trim
+  ## left out of them (#77): those are training-partition rows too, and a
+  ## bound under values actually observed there would clamp the very
+  ## extremes the trim set aside. The calibration draw takes from the trimmed
+  ## rows as well, so after a trim the calibration rows among them shape it
+  ## too; without a trim no calibration row does.
   response_bound <- compute_response_bound(
     c(train_Fit[[outcome_col]], trimmed_rows[[outcome_col]]), outcome_range
   )

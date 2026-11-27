@@ -75,7 +75,7 @@ hyperparameters by CV on that matrix (the tuning resamples come only from the
 OOF matrix — \code{test_F} never enters the tuning path, so the reported
 performance is honest), refit the winner on the full matrix, then have the
 members predict \code{test_F} and combine those predictions \emph{through} the fitted
-meta-model. The engine supplies the model spec, the tuning grid, and a
+meta-model, over the test rows every member could use. The engine supplies the model spec, the tuning grid, and a
 closure that extracts member weights from the fitted model. Candidates are
 scored on their combination clamped to the outcome's range, as the served
 combination is (\code{\link[=tuning_metric_set]{tuning_metric_set()}} with \code{transformation = "none"}).

@@ -388,6 +388,29 @@ test_that("a cached library that no longer meets the object contract is built ag
 
 })
 
+test_that("a cached library with no rows is built again, as one that fails the contract is, not refused", {
+
+  entry <- make_mini_ossl(withr::local_tempdir())
+  local_mini_registry(entry)
+  withr::local_options(horizons.library_download = TRUE)
+
+  first <- suppressMessages(resolve_source("mini", verbose = FALSE))
+  path  <- library_cache_path(entry)
+
+  lib <- qs2::qs_read(path)
+  lib$pool$data$analysis <- lib$pool$data$analysis[0, ]
+  lib$pool$data$n_rows   <- 0L
+  qs2::qs_save(lib, path)
+
+  collector <- log_open("select_training")
+  expect_no_error(rebuilt <- suppressMessages(resolve_source("mini", verbose = FALSE, collector = collector)))
+
+  expect_identical(nrow(rebuilt$pool$data$analysis), nrow(first$pool$data$analysis))
+  expect_identical(nrow(qs2::qs_read(path)$pool$data$analysis), nrow(first$pool$data$analysis))
+  expect_match(log_rows(collector)$message, "was built by an earlier version of horizons, so it was rebuilt", fixed = TRUE)
+
+})
+
 test_that("a cached library from another build is built again, after asking why, with a note (#154)", {
 
   entry <- make_mini_ossl(withr::local_tempdir())
@@ -488,6 +511,38 @@ test_that("a join that keeps no row trips an internal check rather than building
   expect_error(build_ossl_library(rel$raw, rel$entry, verbose = FALSE),
                "No rows survive the filters and the join", fixed = TRUE,
                class = "horizons_error_internal")
+
+})
+
+test_that("the library's rows are in radix order of their ids, so a build is the same in every locale", {
+
+  ## Every other id upper case, in all three tables, which a collation that
+  ## folds case orders apart from radix
+  upper_every_other <- function(x) ifelse(seq_along(x) %% 2 == 0, toupper(x), x)
+  ids <- NULL
+
+  dir   <- withr::local_tempdir()
+  entry <- make_mini_ossl(dir)
+  raw   <- c(mir  = file.path(dir, "mir.csv.gz"),
+             lab  = file.path(dir, "lab.csv.gz"),
+             site = file.path(dir, "site.csv.gz"))
+
+  for (path in raw) {
+    tab <- utils::read.csv(gzfile(path), check.names = FALSE)
+    tab$id.layer_uuid_txt <- upper_every_other(tab$id.layer_uuid_txt)
+    ids <- tab$id.layer_uuid_txt
+    data.table::fwrite(tab, path)
+  }
+
+  suppressWarnings(withr::local_collate("en_US.UTF-8"))
+  skip_if(identical(sort(ids), sort(ids, method = "radix")),
+          "no locale here that collates case apart from radix order")
+
+  pool <- build_ossl_library(raw, entry, verbose = FALSE)
+  kept <- pool$data$analysis$sample_id
+
+  expect_gt(length(kept), 1L)
+  expect_identical(kept, sort(kept, method = "radix"))
 
 })
 

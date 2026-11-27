@@ -73,8 +73,10 @@ iterations without improvement after which the search stops
 \item{prune}{Logical. If TRUE, record whether the best grid-search RPD
 falls below \code{prune_threshold} (\code{below_prune_threshold}), and when it
 does, skip Bayesian optimization and label the config \code{"pruned"}. With
-\code{bayesian_iter = 0} there is nothing to skip, so the config is labelled
-\code{"success"} and only \code{below_prune_threshold} carries the reading.}
+no Bayesian stage (\code{bayesian_iter = 0}, or a grid that holds the whole
+space, \code{exhaustive_grid()}) there is nothing to skip, so the config is
+labelled \code{"success"} and only \code{below_prune_threshold} carries the
+reading.}
 
 \item{prune_threshold}{Numeric. RPD threshold for pruning, on the original
 response scale (tuning metrics are scored there via

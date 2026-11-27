@@ -86,6 +86,7 @@ Collate:
     'class-core.R'
     'metrics.R'
     'utils-errors.R'
+    'utils-files.R'
     'utils-log.R'
     'utils-tune.R'
     'control.R'

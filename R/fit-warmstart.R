@@ -1,12 +1,17 @@
-#' Warm-Start Grid Construction and Bayesian Optimization for fit()
+#' Warm-Start Grid Construction and the Bayesian Searches
 #'
 #' @description
-#' Two functions that handle the re-tuning phase of `fit()`:
+#' The re-tuning phase of `fit()`, and the search `evaluate()` shares with it:
 #'
 #' 1. `build_warmstart_grid()` — constructs an exploration grid centered on
 #'    evaluate()'s best hyperparameters.
 #' 2. `tune_warmstart_bayes()` — orchestrates grid search → Bayesian
 #'    optimization using the warm-start grid as initial points.
+#' 3. `bayes_search()` and the rules around it — the Bayesian search both
+#'    verbs run, its budget (`search_budget()`, `raised_budgets()`), the
+#'    space gridded whole (`exhaustive_grid()`), the ranges it searches
+#'    (`apply_tune_ranges()`, `update_parameter()`) and its tree line
+#'    (`early_stop_line()`).
 #'
 #' @keywords internal
 

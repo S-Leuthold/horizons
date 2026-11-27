@@ -311,3 +311,37 @@ describe("check_arg()", {
   })
 
 })
+
+describe("check_wn_range()", {
+
+  it("passes NULL and two finite wavenumbers, the lower first", {
+
+    expect_no_error(check_wn_range(NULL))
+    expect_no_error(check_wn_range(c(600, 4000)))
+
+  })
+
+  it("refuses anything else as an input error naming the user's argument and call", {
+
+    verb <- function(qc_range) check_wn_range(qc_range)
+
+    err <- expect_error(verb("600"), class = "horizons_error_input")
+    expect_match(conditionMessage(err), "`qc_range` must be numeric(2) or `NULL`, not a string.", fixed = TRUE)
+    expect_identical(rlang::call_name(err$call), "verb")
+
+    err <- expect_error(verb(c(600, 2000, 4000)), class = "horizons_error_input")
+    expect_match(conditionMessage(err), "`qc_range` must be numeric(2) or `NULL`, not a double vector.", fixed = TRUE)
+
+    for (bad in list(c(600, Inf), c(NA, 4000), c(4000, 600), c(600, 600))) {
+
+      err <- expect_error(verb(bad), class = "horizons_error_input", info = deparse(bad))
+      expect_match(conditionMessage(err), "`qc_range` must be two finite wavenumbers, the lower first.",
+                   fixed = TRUE, info = deparse(bad))
+      expect_match(conditionMessage(err), paste0("Got ", bad[1], " and ", bad[2], "."),
+                   fixed = TRUE, info = deparse(bad))
+
+    }
+
+  })
+
+})

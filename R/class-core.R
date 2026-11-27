@@ -627,7 +627,7 @@ validate_horizons_data <- function(x,
   ## (axis_columns()). A masked column is measured and never modelled, but the
   ## transform's windows read it beside its modelled neighbours.
 
-  predictor_vars <- role_map$variable[role_map$role == "predictor"]
+  predictor_vars <- role_map$variable[role_map$role %in% "predictor"]
   axis_vars      <- axis_columns(role_map)
   masked_vars    <- masked_columns(role_map)
 
@@ -754,8 +754,7 @@ validate_horizons_data <- function(x,
 
       if (length(dup_wn) > 0) {
 
-        dup_list <- paste(dup_wn, collapse = ", ")
-        errors   <- c(errors, cli::format_inline("Duplicate wavenumber columns: {dup_list}"))
+        errors <- c(errors, cli::format_inline("Duplicate wavenumber columns: {shown_ids(dup_wn)}"))
 
       } else if (!all(diff(wn_num) < 0)) {
 
@@ -774,19 +773,17 @@ validate_horizons_data <- function(x,
 
   if (length(missing_from_role_map) > 0) {
 
-    col_list <- paste(missing_from_role_map, collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Columns missing from {.field role_map}: {col_list}"))
+    errors <- c(errors, cli::format_inline("Columns missing from {.field role_map}: {shown_ids(missing_from_role_map)}"))
 
   }
 
   # Columns in role_map but not in analysis (non-predictors already handled above)
-  non_predictor_vars     <- role_map$variable[role_map$role != "predictor"]
+  non_predictor_vars     <- role_map$variable[!role_map$role %in% "predictor"]
   missing_from_analysis  <- setdiff(non_predictor_vars, names(analysis))
 
   if (length(missing_from_analysis) > 0) {
 
-    col_list <- paste(missing_from_analysis, collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Non-predictor columns in {.field role_map} missing from {.field analysis}: {col_list}"))
+    errors <- c(errors, cli::format_inline("Non-predictor columns in {.field role_map} missing from {.field analysis}: {shown_ids(missing_from_analysis)}"))
 
   }
 
@@ -800,14 +797,32 @@ validate_horizons_data <- function(x,
 
   if (length(dup_role_map_vars) > 0) {
 
-    col_list <- paste(dup_role_map_vars, collapse = ", ")
-    errors   <- c(errors, cli::format_inline("Column{?s} with more than one {.field role_map} row: {col_list}"))
+    errors <- c(errors, cli::format_inline(
+      "{cli::qty(length(dup_role_map_vars))}Column{?s} with more than one {.field role_map} row: {shown_ids(dup_role_map_vars)}"
+    ))
+
+  }
+
+  ## Rows with no role ---------------------------------------------------------
+  ## A role map edited by hand can hold an NA role; the checks below read the
+  ## roles with %in%, as axis_columns() does, so none of them fails on it. On
+  ## an object a verb built, which stores its counts, a predictor or response
+  ## column given an NA role no longer counts as one, so the stored counts
+  ## check below is a second finding.
+
+  na_role_vars <- role_map$variable[is.na(role_map$role)]
+
+  if (length(na_role_vars) > 0) {
+
+    errors <- c(errors, cli::format_inline(
+      "{cli::qty(length(na_role_vars))}Column{?s} with an {.code NA} role in {.field role_map}: {shown_ids(na_role_vars)}"
+    ))
 
   }
 
   ## id role checks ------------------------------------------------------------
 
-  n_id_roles <- sum(role_map$role == "id")
+  n_id_roles <- sum(role_map$role %in% "id")
 
   if (n_id_roles == 0) {
 
@@ -823,7 +838,7 @@ validate_horizons_data <- function(x,
     ## validator, the row writers and the joins read it by name. Requiring
     ## the role to sit on sample_id is what makes the two the same column.
 
-    id_var <- role_map$variable[role_map$role == "id"]
+    id_var <- role_map$variable[role_map$role %in% "id"]
 
     if (!isTRUE(id_var == "sample_id")) {
 
@@ -846,15 +861,14 @@ validate_horizons_data <- function(x,
 
   if (length(covariate_vars) > 0) {
 
-    n_cov    <- length(covariate_vars)
-    col_list <- paste(covariate_vars, collapse = ", ")
-    errors   <- c(errors, cli::format_inline(
-      "{cli::qty(n_cov)}Column{?s} with the {.field covariate} role, which horizons does not model: {col_list}. Give {cli::qty(n_cov)}{?it/them} the {.field meta} role, which carries a column without modelling it."
+    n_cov  <- length(covariate_vars)
+    errors <- c(errors, cli::format_inline(
+      "{cli::qty(n_cov)}Column{?s} with the {.field covariate} role, which horizons does not model: {shown_ids(covariate_vars)}. Give {cli::qty(n_cov)}{?it/them} the {.field meta} role, which carries a column without modelling it."
     ))
 
   }
 
-  unknown_roles <- setdiff(unique(role_map$role), c(valid_roles, "covariate"))
+  unknown_roles <- setdiff(unique(role_map$role[!is.na(role_map$role)]), c(valid_roles, "covariate"))
 
   if (length(unknown_roles) > 0) {
 
@@ -866,18 +880,19 @@ validate_horizons_data <- function(x,
 
   ## Outcome cardinality checks ------------------------------------------------
 
-  n_outcome_roles <- sum(role_map$role == "outcome")
+  n_outcome_roles <- sum(role_map$role %in% "outcome")
 
   if (n_outcome_roles > 1) {
 
-    outcome_list <- paste(role_map$variable[role_map$role == "outcome"], collapse = ", ")
-    errors       <- c(errors, cli::format_inline("Multiple {.field outcome} roles in {.field role_map} (at most one allowed): {outcome_list}"))
+    outcome_vars <- role_map$variable[role_map$role %in% "outcome"]
+    errors       <- c(errors, cli::format_inline("Multiple {.field outcome} roles in {.field role_map} (at most one allowed): {shown_ids(outcome_vars)}"))
 
   }
 
   ## Stored count checks -------------------------------------------------------
-  ## The contract calls these derived; the implementation stores them, and
-  ## several verbs still assign them by hand, so they are checked here.
+  ## The contract calls these derived; the implementation stores them. The
+  ## constructor and recount_data() write them from the table and the role
+  ## map, so counts that disagree were edited by hand, and are checked here.
 
   stored <- list(n_rows       = x$data$n_rows,
                  n_predictors = x$data$n_predictors,
@@ -936,18 +951,25 @@ validate_horizons_data <- function(x,
 #' door of every verb that validates there, and [modelling_rows()] for a
 #' table that reaches it empty. An input error, since the object is
 #' well-formed and the rows went missing upstream; the remedy is the step
-#' that emptied it.
+#' that emptied it. A verb that takes two objects raises it again naming the
+#' argument that had none ([validate_select_input()]).
 #'
+#' @param arg,what [Character(1) or `NULL`.] The argument that had no rows
+#'   and what it is (`"library"`, `"the pool"`), for a verb that takes more
+#'   than one object; `NULL` says "The data".
+#' @param parent The condition this one is raised again from, or `NULL`.
 #' @param call The frame the refusal reports: the verb's.
 #' @return Does not return; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
-abort_no_rows <- function(call = rlang::caller_env()) {
+abort_no_rows <- function(arg = NULL, what = NULL, parent = NULL, call = rlang::caller_env()) {
+
+  subject <- if (is.null(arg)) "The data" else "{.arg {arg}}, {what},"
 
   abort_horizons(c(
-    "The data has no rows.",
+    paste(subject, "has no rows."),
     "i" = "Check the filter, join or source that left it empty."
-  ), kind = "input", call = call)
+  ), kind = "input", parent = parent, call = call)
 
 }
 
@@ -1054,40 +1076,52 @@ config_findings <- function(x) {
 
   ## The grid ------------------------------------------------------------------
 
-  ### Every later verb looks a configuration up by its id
-  dup_ids <- unique(configs$config_id[duplicated(configs$config_id)])
+  if (!is.data.frame(configs)) {
 
-  if (length(dup_ids) > 0) {
-
+    ### Its columns are read below; worded as the eval validator words a
+    ### missing grid
     findings <- c(findings, cli::format_inline(
-      "{.field config$configs} has {cli::qty(length(dup_ids))}{?a /}duplicate {.field config_id}{cli::qty(length(dup_ids))}{?s} {.val {dup_ids}}"
+      "{.field config$configs} must be the configuration grid {.fn configure} wrote (a data frame)"
     ))
 
-  }
+  } else {
 
-  vocabularies <- list(model             = VALID_MODELS,
-                       transformation    = VALID_TRANSFORMATIONS,
-                       preprocessing     = VALID_PREPROCESSING,
-                       feature_selection = VALID_FEATURE_SELECTION)
+    ### Every later verb looks a configuration up by its id
+    dup_ids <- unique(configs$config_id[duplicated(configs$config_id)])
 
-  for (column in names(vocabularies)) {
-
-    if (!column %in% names(configs)) {
+    if (length(dup_ids) > 0) {
 
       findings <- c(findings, cli::format_inline(
-        "{.field config$configs} has no {.field {column}} column"
+        "{.field config$configs} has {cli::qty(length(dup_ids))}{?a /}duplicate {.field config_id}{cli::qty(length(dup_ids))}{?s} {.val {dup_ids}}"
       ))
-      next
 
     }
 
-    unknown <- setdiff(unique(as.character(configs[[column]])), vocabularies[[column]])
+    vocabularies <- list(model             = VALID_MODELS,
+                         transformation    = VALID_TRANSFORMATIONS,
+                         preprocessing     = VALID_PREPROCESSING,
+                         feature_selection = VALID_FEATURE_SELECTION)
 
-    if (length(unknown) > 0) {
+    for (column in names(vocabularies)) {
 
-      findings <- c(findings, cli::format_inline(
-        "{.field config$configs} has {cli::qty(length(unknown))}{?an /}unknown {.field {column}} {cli::qty(length(unknown))}value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
-      ))
+      if (!column %in% names(configs)) {
+
+        findings <- c(findings, cli::format_inline(
+          "{.field config$configs} has no {.field {column}} column"
+        ))
+        next
+
+      }
+
+      unknown <- setdiff(unique(as.character(configs[[column]])), vocabularies[[column]])
+
+      if (length(unknown) > 0) {
+
+        findings <- c(findings, cli::format_inline(
+          "{.field config$configs} has {cli::qty(length(unknown))}{?an /}unknown {.field {column}} {cli::qty(length(unknown))}value{?s} {.val {unknown}} (known: {.val {vocabularies[[column]]}})"
+        ))
+
+      }
 
     }
 
@@ -1108,63 +1142,75 @@ config_findings <- function(x) {
 
   }
 
-  ### configure()'s minimums: folds to split, a grid to start from, and
-  ### either search may be off
-  tuning_minimums <- c(cv_folds = 2, grid_size = 1, bayesian_iter = 0,
-                       final_bayesian_iter = 0)
-  tuning          <- x$config$tuning
-  tuning_ok       <- TRUE
+  tuning <- x$config$tuning
 
-  for (field in names(tuning_minimums)) {
+  if (!is.list(tuning)) {
 
-    value   <- tuning[[field]]
-    minimum <- tuning_minimums[[field]]
+    ### Its settings are read by name below
+    findings <- c(findings, cli::format_inline(
+      "{.field config$tuning} must be the list of tuning settings {.fn configure} wrote, not {.obj_type_friendly {tuning}}"
+    ))
 
-    if (!(is.numeric(value) && length(value) == 1 && is.finite(value) &&
-          value >= minimum && value == round(value))) {
+  } else {
 
-      tuning_ok <- FALSE
-      findings  <- c(findings, cli::format_inline(
-        "{.field config$tuning${field}} must be a whole number of at least {minimum}, not {.code {deparse1(value)}}"
+    ### configure()'s minimums: folds to split, a grid to start from, and
+    ### either search may be off
+    tuning_minimums <- c(cv_folds = 2, grid_size = 1, bayesian_iter = 0,
+                         final_bayesian_iter = 0)
+    tuning_ok       <- TRUE
+
+    for (field in names(tuning_minimums)) {
+
+      value   <- tuning[[field]]
+      minimum <- tuning_minimums[[field]]
+
+      if (!(is.numeric(value) && length(value) == 1 && is.finite(value) &&
+            value >= minimum && value == round(value))) {
+
+        tuning_ok <- FALSE
+        findings  <- c(findings, cli::format_inline(
+          "{.field config$tuning${field}} must be a whole number of at least {minimum}, not {.code {deparse1(value)}}"
+        ))
+
+      }
+
+    }
+
+    ### And configure()'s rule on the three together: evaluate()'s Bayesian
+    ### search and fit()'s on a cold start (bayesian_iter), and fit()'s re-tune
+    ### of a member whose parameters from evaluate() are unusable
+    ### (final_bayesian_iter), start from the grid, and tune_bayes() needs two
+    ### of its points (#209)
+    if (tuning_ok && tuning$grid_size < 2 &&
+        (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
+
+      findings <- c(findings, cli::format_inline(
+        "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
       ))
 
     }
 
-  }
+    ### The weight budget (configure(max_weights = )): a whole number of at
+    ### least 1, or Inf for none (is_valid_max_weights(), configure()'s rule)
+    max_weights <- tuning$max_weights
 
-  ### And configure()'s rule on the three together: evaluate()'s Bayesian
-  ### search and fit()'s on a cold start (bayesian_iter), and fit()'s re-tune
-  ### of a member whose parameters from evaluate() are unusable
-  ### (final_bayesian_iter), start from the grid, and tune_bayes() needs two
-  ### of its points (#209)
-  if (tuning_ok && tuning$grid_size < 2 &&
-      (tuning$bayesian_iter > 0 || tuning$final_bayesian_iter > 0)) {
+    if (!is_valid_max_weights(max_weights)) {
 
-    findings <- c(findings, cli::format_inline(
-      "{.field config$tuning$grid_size} must be at least 2 while {.field bayesian_iter} or {.field final_bayesian_iter} is above 0, not {.code {deparse1(tuning$grid_size)}}"
-    ))
+      findings <- c(findings, cli::format_inline(
+        "{.field config$tuning$max_weights} must be a whole number of at least 1, or {.code Inf}, not {.code {deparse1(max_weights)}}"
+      ))
 
-  }
+    }
 
-  ### The weight budget (configure(max_weights = )): a whole number of at
-  ### least 1, or Inf for none (is_valid_max_weights(), configure()'s rule)
-  max_weights <- tuning$max_weights
-
-  if (!is_valid_max_weights(max_weights)) {
-
-    findings <- c(findings, cli::format_inline(
-      "{.field config$tuning$max_weights} must be a whole number of at least 1, or {.code Inf}, not {.code {deparse1(max_weights)}}"
-    ))
+    ### The ranges the models are searched over, which configure() writes:
+    ### their shape (tune_range_findings()). Their types need the models'
+    ### engines, which evaluate() and fit() check at their doors before typing
+    ### them (check_range_types()), so validating an object loads no engine
+    range_findings <- tune_range_findings(tuning$ranges, arg = "config$tuning$ranges",
+                                          check_names = FALSE)
+    findings       <- c(findings, sub("\\.$", "", range_findings))
 
   }
-
-  ### The ranges the models are searched over, which configure() writes:
-  ### their shape (tune_range_findings()). Their types need the models'
-  ### engines, which evaluate() and fit() check at their doors before typing
-  ### them (check_range_types()), so validating an object loads no engine
-  range_findings <- tune_range_findings(tuning$ranges, arg = "config$tuning$ranges",
-                                        check_names = FALSE)
-  findings       <- c(findings, sub("\\.$", "", range_findings))
 
   recipe        <- x$config$recipe
   sg_window     <- if (is.list(recipe)) recipe$sg_window
@@ -2609,17 +2655,17 @@ validate_horizons_eval <- function(x, call = rlang::caller_env()) {
 #' Accumulated checks (reported together, in one condition):
 #'
 #' 1. **Slot completeness**: every key [new_horizons_data()] declares for
-#'    the `models` slot is present (see [contract_keys()]), 16 in all:
+#'    the `models` slot is present (see [contract_keys()]), 18 in all:
 #'    `workflows`, `n_models`, `best_config`, `rank_metric`,
 #'    `predictor_schema`, `response_bound`, `cv_predictions`, `results`,
-#'    `uq`, `ad`, `selection_present`, `seed`, `seed_rule`, `control`,
-#'    `timestamp`, `runtime_secs`. [fit()] writes every one, so a fit made
-#'    before the seed was recorded is refused. Extra keys are tolerated. The
-#'    run-provenance keys `workers` and `parallelize_over` are checked as
-#'    `evaluation`'s are.
+#'    `uq`, `ad`, `selection_present`, `seed`, `seed_rule`, `workers`,
+#'    `parallelize_over`, `control`, `timestamp`, `runtime_secs`. [fit()]
+#'    writes every one, so a fit made before the seed was recorded is
+#'    refused. Extra keys are tolerated. The run-provenance keys `workers`
+#'    and `parallelize_over` are checked as `evaluation`'s are.
 #' 2. **workflows**: a non-empty named list; `n_models` equals its length.
 #' 3. **best_config**: a length-1 character that is one of the workflow keys.
-#' 4. **rank_metric**: a length-1 character.
+#' 4. **rank_metric**: a length-1 character naming one of the six metrics.
 #' 5. **predictor_schema**: a non-empty character vector (the training-axis
 #'    columns the predict() schema gate reads).
 #' 6. **response_bound** (the winsorization guardrail): a single finite
@@ -3044,7 +3090,7 @@ validate_horizons_fit <- function(x, call = rlang::caller_env()) {
 
       ### Named by the covariance's form, since each form needs other fields
       bad_form <- vapply(ad[bad_shape], function(b) {
-        if (rlang::is_string(b$form) && b$form %in% c("full", "low_rank")) b$form else "none"
+        if (is.list(b) && rlang::is_string(b$form) && b$form %in% c("full", "low_rank")) b$form else "none"
       }, character(1))
 
       needs <- c(
@@ -3577,8 +3623,9 @@ print.horizons_data <- function(x, ...) {
   if (has_eval && isFALSE(x$evaluation$screened)) {
 
     cat(cli::style_bold("Evaluation\n"))
+    n_cold <- nrow(x$evaluation$results)
     cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
-               nrow(x$evaluation$results), ")\n"))
+               n_cold, " configuration", if (n_cold != 1) "s", ")\n"))
     cat("\n")
 
   } else if (has_eval) {
@@ -3793,12 +3840,15 @@ summary.horizons_data <- function(object, ...) {
 
       if (length(wn_values) > 1) {
 
-        wn_values <- sort(wn_values, decreasing = TRUE)
-        wn_range  <- range(wn_values)
-        wn_step   <- abs(diff(wn_values[1:2]))
+        wn_range <- range(wn_values)
 
-        cat(paste0("   \u2502     \u251C\u2500 Range: ", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9\n"))
-        cat(paste0("   \u2502     \u2514\u2500 Step: ", wn_step, " cm\u207B\u00B9\n"))
+        ### The axis's spacing as every other reader takes it, the median
+        ### step, so a drifted first step does not stand for the axis
+        wn_step <- axis_spacing_cm(x)
+
+        cat(paste0("   \u2502     ", if (is.na(wn_step)) "\u2514" else "\u251C",
+                   "\u2500 Range: ", wn_range[2], "\u2013", wn_range[1], " cm\u207B\u00B9\n"))
+        if (!is.na(wn_step)) cat(paste0("   \u2502     \u2514\u2500 Step: ", wn_step, " cm\u207B\u00B9\n"))
 
       }
     }
@@ -3956,8 +4006,9 @@ summary.horizons_data <- function(object, ...) {
   if (has_eval && isFALSE(x$evaluation$screened)) {
 
     cat(cli::style_bold("Evaluation\n"))
+    n_cold <- nrow(x$evaluation$results)
     cat(paste0("   \u2514\u2500 Configs evaluated: none (fit() started cold from ",
-               nrow(x$evaluation$results), ")\n"))
+               n_cold, " configuration", if (n_cold != 1) "s", ")\n"))
     cat("\n")
 
   } else if (has_eval) {

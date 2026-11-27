@@ -52,7 +52,10 @@ read_built <- function(path) {
 #' Package startup configuration
 #'
 #' @description
-#' Minimal package initialization. Thread control is the user's responsibility.
+#' Registers the engines horizons fits with and records the build loaded. It
+#' sets no thread count unless `HORIZONS_THREAD_CONTROL` is `"TRUE"`; horizons
+#' pins threads only while it runs work: in the session during a parallel
+#' run, and on each process that fits for it ([pin_threads()]).
 #'
 #' @keywords internal
 .onLoad <- function(libname, pkgname) {
@@ -64,8 +67,8 @@ read_built <- function(path) {
   ## These register parsnip engines the pipeline selects by string
   ## (`set_engine("glmnet")`, `cubist_rules()` via rules). They are never
   ## called through `::`, so they must be loaded here for the engines to
-  ## resolve at fit time. Soft-loaded: a missing extension means
-  ## that engine is unavailable, not a package load failure.
+  ## resolve at fit time. Both are Imports, so they are installed with
+  ## horizons; nothing is imported from them, so they are loaded here.
   ##
   ## Written out literally rather than looped. R CMD check's "unused Imports"
   ## test is static and only recognises a *literal* string argument, so the
@@ -88,16 +91,16 @@ read_built <- function(path) {
   loaded_build$built <- read_built(getNamespaceInfo(pkgname, "path"))
 
   ## ---------------------------------------------------------------------------
-  ## Trust the user - no automatic thread control
+  ## No thread settings as the package loads, unless asked
   ## ---------------------------------------------------------------------------
 
-  # The user is responsible for setting their own parallel configuration
-  # We don't enforce any thread limits or parallel settings
+  # Loading sets no thread count: the session's threads are the user's
+  # until a run pins them, and puts them back as it ends.
 
   # Optional: Check if user explicitly wants thread control help.
   # The environment variables are effective here because .onLoad runs
   # before any engine loads OpenBLAS. During a parallel run the mechanism
-  # that matters is pin_parent_threads() (R/utils-parallel.R), which
+  # that matters is pin_threads() (R/utils-parallel.R), which
   # evaluate() and fit() call before dispatch and which works at runtime
   # via RhpcBLASctl.
   if (Sys.getenv("HORIZONS_THREAD_CONTROL", "FALSE") == "TRUE") {

@@ -20,8 +20,10 @@ ensemble(
 \code{"weighted"}, or \code{"xgb"}.}
 
 \item{optimize}{Logical. Tune the meta-learner's hyperparameters by CV on
-the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}).
-Default \code{TRUE}.}
+the out-of-fold matrix (\code{TRUE}), or use fixed defaults (\code{FALSE}). The
+\code{"weighted"} meta-learner has none to tune: \code{TRUE} weights each member
+by its inverse out-of-fold RMSE, \code{FALSE} weights them equally. Default
+\code{TRUE}.}
 
 \item{seed}{\code{NULL} or a whole number: the run's seed. The meta-learner
 (its CV folds, tuning and out-of-fold predictions) and the CV+
@@ -91,14 +93,22 @@ between members.
 
 All three train on the members' out-of-fold predictions and are evaluated on
 the held-out Split-F test set, so the reported ensemble metrics are directly
-comparable to the single-model metrics from \code{fit()}.
+comparable to its members' test metrics (\code{member_metrics}), which are scored
+on the same rows. A test row a member could not use (not finite after its
+recipe) is left out of the ensemble's test predictions and of its and its
+members' test metrics, as \code{predict()} leaves such a row out of what it
+combines, while \code{fit()}'s test metrics for the members that could use it
+still count it.
 
 Combined predictions are clamped to \code{configure()}'s \code{outcome_range}, as
 every scored and served prediction is, and \code{ensemble()} aborts with class
 \code{horizons_error_input} before fitting anything when an observed outcome
 lies outside it (#76). Its other refusals (an \code{x} that is not a fit, an
 unknown \code{method}, an \code{optimize}, \code{seed} or \code{compute_uq} of the wrong type,
-a fit with fewer than two members) carry the same class.
+a fit with fewer than two members, and, for the \code{"penalized"} and \code{"xgb"}
+meta-learners, an out-of-fold matrix with no more rows than their five
+cross-validation folds, the rule \code{\link[=evaluate]{evaluate()}} and \code{\link[=fit]{fit()}} hold their
+training rows to) carry the same class.
 
 After the outcome-range check and before it fits anything, \code{ensemble()}
 checks that \code{x} still holds what a fitted object promises (its data,
@@ -120,8 +130,10 @@ CV+ intervals not computed, and their measured test coverage not
 computed. horizons' own warnings are written to the
 log and raised once at the end. Among them, as in \code{\link[=evaluate]{evaluate()}} and
 \code{\link[=fit]{fit()}}: the meta-learner's cross-validation folds or the CV+ calibration
-folds drawn unstratified (\code{horizons_warning_substitution}); a draw rsample
-stratified on fewer bins than asked is a note on the log.
+folds drawn unstratified (\code{horizons_warning_substitution}), and, when the
+meta-learner is tuned (\code{optimize = TRUE}) and so its choice rests on them,
+its smallest fold under ten rows to assess (\code{horizons_warning_quality}); a
+draw rsample stratified on fewer bins than asked is a note on the log.
 }
 \examples{
 \dontrun{

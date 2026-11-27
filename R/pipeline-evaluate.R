@@ -7,6 +7,12 @@
 #' specified metric. The best configuration is stored for downstream use by
 #' `fit()`.
 #'
+#' @details
+#' The train/test split and the folds are drawn at random over rows,
+#' stratified on the outcome, so related samples (replicates under distinct
+#' ids, cores of one field) can fall on both sides; grouped validation is
+#' planned.
+#'
 #' @param x A `horizons_data` object with `config$configs` populated by
 #'   `configure()`.
 #' @param metric Character. Metric for ranking configurations. One of
@@ -16,12 +22,15 @@
 #'   are reported but never used for selection, so they remain honest
 #'   held-out estimates. Default `"rpd"`.
 #' @param prune Logical. If TRUE, skip Bayesian optimization for configs
-#'   whose grid-search RPD falls below `prune_threshold`. When `configure()`
-#'   set `bayesian_iter = 0` there is nothing to skip, so no config is
-#'   pruned. Either way, whether each config fell below the threshold is
-#'   recorded in `evaluation$results$below_prune_threshold` (with the
-#'   threshold in `prune_threshold`), and `fit()` warns when every member it
-#'   fits did. Default TRUE.
+#'   whose grid-search RPD falls below `prune_threshold`. When there is no
+#'   Bayesian stage there is nothing to skip, so the config is not pruned:
+#'   when `configure()` set `bayesian_iter = 0`, and when the grid holds the
+#'   model's whole search space (always for plsr, whose components share one
+#'   fit, and for any small space of whole numbers). Either way, whether each
+#'   config fell below the threshold is recorded in
+#'   `evaluation$results$below_prune_threshold` (with the threshold in
+#'   `prune_threshold`), and `fit()` warns when every member it fits did.
+#'   Default TRUE.
 #' @param prune_threshold Numeric. RPD threshold for pruning. Configs with
 #'   grid-search RPD below this value skip Bayesian optimization but still
 #'   receive test-set metrics from grid-search best. Default 1.0 (the
@@ -71,8 +80,9 @@
 #'   this run's training data (the outcome, the sample ids, which columns hold
 #'   the `id`, `outcome` and `predictor` roles, and the outcome and predictor
 #'   values) and tuned with this run's settings
-#'   (`cv_folds`, `grid_size`, `bayesian_iter`, the tuning ranges
-#'   `configure()` recorded, `prune`, `prune_threshold` when pruning, `seed`,
+#'   (`cv_folds`, `grid_size`, `bayesian_iter`, the tuning ranges and the
+#'   weight budget `max_weights` `configure()` recorded, `prune`,
+#'   `prune_threshold` when pruning, `seed`,
 #'   `control_horizons(no_improve = )`, and `configure()`'s `sg_window`,
 #'   `pca_threshold` and `outcome_range`), this run's response trim
 #'   (`response_threshold`, `NA` when none was requested) and, when the grid
@@ -244,7 +254,7 @@
 #' does not reach them; each configuration's task on the configs axis, and
 #' each fold preparation's on either axis, sets data.table's and ranger's
 #' threads to one itself, and BLAS's and OpenMP's through `RhpcBLASctl` when
-#' it is installed, which it puts back as it ends (see "Inner daemons"
+#' it is installed, and puts all four back as it ends (see "Inner daemons"
 #' above). On either axis the daemons load the
 #' *installed* package, so a parallel run refuses, before anything is drawn,
 #' under `devtools::load_all()`. Every daemon connected is then asked, one
@@ -252,7 +262,9 @@
 #' the configurations need; a daemon on another version of horizons is
 #' refused (`horizons_error_dependency`), and so is one that lacks a package
 #' (`horizons_error_missing_package`, naming each and how many daemons lack
-#' it). A daemon set with `maxtasks` spends one task on the check. With
+#' it). A daemon set with `maxtasks` spends one task on the check, and, on
+#' the resamples axis, two more for each Bayesian search of a model whose
+#' fits are isolated, one before the search and one after. With
 #' `control_horizons(debug = TRUE)`, `evaluate()` runs in this session
 #' whatever `allow_par` says.
 #'
@@ -737,7 +749,7 @@ evaluate <- function(x,
 
   if (axis$axis != "sequential") {
 
-    unpin_threads <- pin_parent_threads()
+    unpin_threads <- pin_threads()
     on.exit(unpin_threads(), add = TRUE)
 
   } else {
@@ -2057,12 +2069,13 @@ checkpoint_path <- function(checkpoint_dir, config_id) {
 #' @description
 #' The one writer for what `evaluate()` puts in its `output_dir`: the
 #' manifest, each configuration's checkpoint, and the files a run keeps in
-#' `tmp/` for its own use ([run_files_dir()]). The file is written under a
-#' name the store does not list and renamed into place, so a reader (the
-#' monitor polls while workers write) never sees half a file. A write that
-#' fails, or a rename that is refused, leaves no temporary file behind, and
-#' what base R said about it (a warning before an error, or the rename's
-#' warning) is returned rather than raised, for the verb to stop on.
+#' `tmp/` for its own use ([run_files_dir()]). The file is saved with
+#' `saveRDS()` under a `.rds.tmp` name the store does not list and renamed
+#' into place ([write_file_whole()]), so a reader (the monitor polls while
+#' workers write) never sees half a file. A write that fails, or a rename
+#' that is refused, leaves no temporary file behind, and what base R said
+#' about it (a warning before an error, or the rename's warning) is returned
+#' rather than raised, for the verb to stop on.
 #'
 #' @param value The object to save.
 #' @param path The file to write.
@@ -2072,33 +2085,7 @@ checkpoint_path <- function(checkpoint_dir, config_id) {
 #' @noRd
 write_output_file <- function(value, path) {
 
-  tmp     <- tempfile(tmpdir = dirname(path), fileext = ".rds.tmp")
-  reasons <- character(0)
-
-  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
-
-  written <- tryCatch(
-    withCallingHandlers(
-      {
-        saveRDS(value, tmp)
-        file.rename(tmp, path)
-      },
-      warning = function(w) {
-        reasons <<- c(reasons, condition_summary(w))
-        rlang::cnd_muffle(w)
-      }
-    ),
-    error = function(e) {
-      reasons <<- c(reasons, condition_summary(e))
-      FALSE
-    }
-  )
-
-  if (isTRUE(written)) return(NULL)
-
-  if (length(reasons) == 0) reasons <- "the file could not be renamed into place"
-
-  paste(unique(reasons), collapse = "; ")
+  write_file_whole(value, path, save = saveRDS, tmp_ext = ".rds.tmp")
 
 }
 
@@ -2915,7 +2902,7 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
   ## records. Its presence marks a fingerprinted row; its value is not
   ## compared, since sort() follows the session's collation and the fields
   ## below carry the same ids in a fixed order.
-  data_hash <- digest::digest(list(
+  data_hash <- hash_object(list(
     ids     = sort(ids),
     outcome = outcome_col
   ))
@@ -2949,8 +2936,8 @@ eval_data_fingerprint <- function(train_data, role_map = NULL) {
 
   data_fields <- list(
     outcome        = paste(outcome_col, collapse = ", "),
-    ids            = digest::digest(ids[by_id], algo = "xxhash64"),
-    roles          = digest::digest(roles, algo = "xxhash64"),
+    ids            = hash_object(ids[by_id], algo = "xxhash64"),
+    roles          = hash_object(roles, algo = "xxhash64"),
     outcome_values = hash_columns(train_data, role_cols("outcome"), by_id),
     predictors     = hash_columns(train_data, if (has_roles) axis_columns(role_map) else character(0), by_id)
   )
@@ -2979,10 +2966,10 @@ hash_columns <- function(data, cols, ord) {
   cols <- intersect(cols, names(data))
 
   per_column <- vapply(cols, function(cl) {
-    digest::digest(data[[cl]][ord], algo = "xxhash64")
+    hash_object(data[[cl]][ord], algo = "xxhash64")
   }, character(1))
 
-  digest::digest(per_column, algo = "xxhash64")
+  hash_object(per_column, algo = "xxhash64")
 
 }
 
@@ -3532,33 +3519,85 @@ training_part_rows <- function(analysis, outcome_col, seed, cv_folds) {
 
 #' Refuse a training part without more rows than cross-validation folds
 #'
+#' @description
+#' The fold rule ([is_foldable()]) at every door that draws folds:
+#' `evaluate()`'s and `fit()`'s on the training part, where the message says
+#' where the other rows went, and `ensemble()`'s on the meta-learner's
+#' out-of-fold matrix, which says what its rows are (`context`).
+#'
 #' @param n_train Integer. Rows of the training part, after the split and
 #'   any response trim.
 #' @param cv_folds Integer. `config$tuning$cv_folds`.
 #' @param n_modelled,n_test,n_trimmed,n_calib Integer. The modelled rows,
 #'   and those the split held out for the test set, the trim left out or
-#'   `fit()` set aside for calibration, for the message.
+#'   `fit()` set aside for calibration, for the message. Read only when
+#'   `context` is `NULL`.
+#' @param what Character(1). What has the rows, a cli string.
+#' @param context,remedy Character(1) or `NULL`. The message's context and
+#'   remedy, cli strings; `NULL` for the training part's.
 #' @param call The frame the refusal reports: the verb's.
 #' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
-check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0L,
-                            n_calib = 0L, call = rlang::caller_env()) {
+check_fold_rows <- function(n_train, cv_folds, n_modelled = NULL, n_test = NULL, n_trimmed = 0L,
+                            n_calib = 0L, what = "The training part", context = NULL,
+                            remedy = NULL, call = rlang::caller_env()) {
 
   if (is_foldable(n_train, cv_folds)) return(invisible(NULL))
 
-  held <- c(paste0("the test set holds ", n_test),
-            if (n_calib > 0) paste0("the calibration set ", n_calib),
-            if (n_trimmed > 0) paste0("the response trim left out ", n_trimmed))
-  elsewhere <- if (length(held) == 1) held else {
-    paste0(paste(utils::head(held, -1), collapse = ", "), " and ", utils::tail(held, 1))
+  if (is.null(context)) {
+
+    held <- c(paste0("the test set holds ", n_test),
+              if (n_calib > 0) paste0("the calibration set ", n_calib),
+              if (n_trimmed > 0) paste0("the response trim left out ", n_trimmed))
+    elsewhere <- if (length(held) == 1) held else {
+      paste0(paste(utils::head(held, -1), collapse = ", "), " and ", utils::tail(held, 1))
+    }
+
+    context <- "{n_modelled} row{?s} {?has/have} an observed outcome; {elsewhere}."
+
   }
 
   abort_horizons(c(
-    "The training part has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds.",
-    "i" = "{n_modelled} row{?s} {?has/have} an observed outcome; {elsewhere}.",
-    "i" = "Add rows, or {.fn configure} fewer {.arg cv_folds}."
+    paste(what, "has {n_train} row{?s}, but {cv_folds}-fold cross-validation needs more training rows than folds."),
+    "i" = context,
+    "i" = remedy %||% "Add rows, or {.fn configure} fewer {.arg cv_folds}."
   ), kind = "input", call = call)
+
+}
+
+#' The warning a small assessment fold calls for
+#'
+#' @description
+#' The one rule for folds too small to score well: the smallest assessment
+#' fold under `SMALL_FOLD_ROWS` rows is a `quality` warning, raised once.
+#' [log_small_folds()] adds it to a verb's collector, and
+#' [report_small_folds_in_unit()] raises it from inside a unit, as
+#' [strata_report()]'s are.
+#'
+#' @param folds The `rset` the folds are.
+#' @param what Character(1). The folds, as the message names them.
+#' @param consequence Character(1). What rests on the folds, the clause that
+#'   ends the message's first line: the cross-validated metrics `evaluate()`
+#'   and `fit()` report by default; `ensemble()` passes its own.
+#' @return List with `smallest` (the smallest fold's assessment rows),
+#'   `message` (a cli message, or `NULL` when no fold is small) and `envir`
+#'   (where it is interpolated).
+#' @keywords internal
+#' @noRd
+small_folds_report <- function(folds, what = "cross-validation",
+                               consequence = "so the cross-validated metrics rest on few rows") {
+
+  n_rows   <- nrow(folds$splits[[1]]$data)
+  n_folds  <- nrow(folds)
+  smallest <- min(vapply(folds$splits, function(s) n_rows - length(s$in_id), integer(1)))
+
+  message <- if (smallest < SMALL_FOLD_ROWS) c(
+    paste0("The smallest {what} fold has {smallest} row{?s} to assess, ", consequence, "."),
+    "i" = "{n_rows} training rows in {n_folds} folds; a metric undefined on a fold is NA."
+  )
+
+  list(smallest = smallest, message = message, envir = environment())
 
 }
 
@@ -3571,19 +3610,32 @@ check_fold_rows <- function(n_train, cv_folds, n_modelled, n_test, n_trimmed = 0
 #' @noRd
 log_small_folds <- function(collector, folds) {
 
-  n_rows   <- nrow(folds$splits[[1]]$data)
-  smallest <- min(vapply(folds$splits, function(s) n_rows - length(s$in_id), integer(1)))
+  report <- small_folds_report(folds)
 
-  if (smallest < SMALL_FOLD_ROWS) {
+  if (!is.null(report$message)) log_warning(collector, "quality", report$message, .envir = report$envir)
 
-    log_warning(collector, "quality", c(
-      "The smallest cross-validation fold has {smallest} row{?s} to assess, so the cross-validated metrics rest on few rows.",
-      "i" = "{n_rows} training rows in {nrow(folds)} folds; a metric undefined on a fold is NA."
-    ))
+  invisible(report$smallest)
 
-  }
+}
 
-  invisible(smallest)
+#' Warn once when the smallest assessment fold is small, from inside a unit
+#'
+#' @description
+#' As [log_small_folds()], for folds drawn inside a unit, which cannot reach
+#' the verb's collector: the warning is raised with [warn_in_unit()], and the
+#' verb lifts it onto its log.
+#'
+#' @inheritParams small_folds_report
+#' @return The smallest fold's assessment rows, invisibly.
+#' @keywords internal
+#' @noRd
+report_small_folds_in_unit <- function(folds, what, consequence) {
+
+  report <- small_folds_report(folds, what, consequence)
+
+  if (!is.null(report$message)) warn_in_unit("quality", report$message, .envir = report$envir)
+
+  invisible(report$smallest)
 
 }
 
@@ -4221,9 +4273,10 @@ abort_worker_version <- function(worker, parent, call = rlang::caller_env()) {
 #' Stop a worker whose payload lacks a key or holds one it should not
 #'
 #' @description
-#' Called by both workers once the daemon's horizons is known to be this
-#' session's version ([evaluate_config_worker()], [fold_prep_worker()]), so
-#' the helper is there: another version's payload keys may differ, and that
+#' Called by the three workers once the daemon's horizons is known to be
+#' this session's version ([evaluate_config_worker()], [fold_prep_worker()],
+#' [fit_member_worker()]), so the helper is there: another version's payload
+#' keys may differ, and that
 #' is a version skew, said by the version check before this.
 #'
 #' @param shared The payload, read or carried.
@@ -4251,7 +4304,7 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #'
 #' @description
 #' Every process that fits runs one thread. The daemon's threads are pinned
-#' by the one pin the session's are ([pin_parent_threads()]): BLAS and
+#' by the one pin the session's are ([pin_threads()]): BLAS and
 #' OpenMP at run time through RhpcBLASctl, since OpenBLAS reads its thread
 #' count when it loads and setting OPENBLAS_NUM_THREADS on a daemon, after
 #' the library is loaded, changed nothing when measured (2026-09-15);
@@ -4269,20 +4322,21 @@ check_worker_payload <- function(shared, keys, call = rlang::caller_env()) {
 #' when it loads, so without this every lightgbm configuration failed at
 #' workflow creation on a daemon.
 #'
-#' Called by both workers once the daemon's horizons is known to be this
-#' session's version ([evaluate_config_worker()], [fold_prep_worker()]), and
-#' on a split configuration's inner daemons ([start_inner_daemons()]).
+#' Called by the three workers once the daemon's horizons is known to be
+#' this session's version ([evaluate_config_worker()], [fold_prep_worker()],
+#' [fit_member_worker()]), and on a split configuration's or member's inner
+#' daemons ([start_inner_daemons()]).
 #'
 #' @param models,selections The unit's models and feature selections
 #'   ([needed_packages()]).
 #' @return A function of no arguments that puts BLAS's, OpenMP's and
 #'   data.table's threads and the engines' thread options back as they were
-#'   ([pin_parent_threads()]), invisibly.
+#'   ([pin_threads()]), invisibly.
 #' @keywords internal
 #' @noRd
 prepare_worker <- function(models, selections) {
 
-  unpin <- pin_parent_threads()
+  unpin <- pin_threads()
 
   for (pkg in names(needed_packages(models, selections))) requireNamespace(pkg, quietly = TRUE)
 

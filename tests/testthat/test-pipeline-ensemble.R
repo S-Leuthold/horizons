@@ -243,13 +243,14 @@ describe("ensemble() - its control", {
 
   it("hands min_calib_rows to fit_ensemble_uq()", {
 
-    seen <- NULL
+    fitted <- ens_fitted()
+    seen   <- NULL
     local_mocked_bindings(fit_ensemble_uq = function(x, ..., min_calib_rows) {
       seen <<- min_calib_rows
       x
     })
 
-    suppressWarnings(ensemble(ens_fitted(), method = "weighted", optimize = FALSE,
+    suppressWarnings(ensemble(fitted, method = "weighted", optimize = FALSE,
                               control = control_horizons(min_calib_rows = 40L)))
     expect_identical(seen, 40L)
 
@@ -516,7 +517,7 @@ describe("ensemble() - a member's warning on the test rows", {
 
 describe("ensemble() - its stratified draws", {
 
-  it("records a draw rsample stratified on fewer bins as a note from each unit, in its words, and raises nothing", {
+  it("records a draw rsample stratified on fewer bins as a note from each unit, in its words, and raises no warning for it", {
 
     ## The stored fit's meta frame has 40 to 79 rows, so rsample stratifies
     ## both draws on two bins rather than four
@@ -524,7 +525,7 @@ describe("ensemble() - its stratified draws", {
 
     got <- collect_warnings(ensemble(fitted, method = "penalized", optimize = FALSE))
 
-    expect_length(got$warnings, 0L)
+    expect_length(Filter(function(w) inherits(w, "horizons_warning_substitution"), got$warnings), 0L)
 
     log   <- got$value$log[got$value$log$verb == "ensemble", ]
     notes <- log[log$type == "note" & grepl("stratified draw", log$message, fixed = TRUE), ]
@@ -884,6 +885,12 @@ describe("ensemble() - the meta-learner as one unit", {
 
     expect_length(run$warnings, 1L)
 
+    ## The row is left out of the ensemble's test predictions, not NA in them
+    msg <- gsub("\\s+", " ", conditionMessage(run$warnings[[1]]))
+    expect_match(msg, "1 sample could not be predicted, so it is left out of the ensemble's test predictions and metrics.",
+                 fixed = TRUE)
+    expect_false(test_id %in% run$value$ensemble$predictions$sample_id)
+
     flagged <- run$value$log[run$value$log$topic %in% "flagged", , drop = FALSE]
 
     expect_identical(nrow(flagged), 1L)
@@ -1209,6 +1216,8 @@ describe("predict.horizons_ensemble() - flagged rows and the combination", {
 
       expect_length(w, 1L)
       expect_identical(w[[1]]$log$ids[[1]], bad$sample_id[2])
+      expect_match(gsub("\\s+", " ", conditionMessage(w[[1]])),
+                   "1 sample could not be predicted, so its row is", fixed = TRUE)
 
       expect_equal(nrow(p), nrow(bad))
       expect_true(is.na(p$.pred[2]) && is.na(p$.pred_lower[2]))
@@ -1690,6 +1699,125 @@ describe("ensemble() weighted - test-set combine", {
 
 })
 
+describe("ensemble() - the meta-learner's folds, under the fold rule evaluate() and fit() share", {
+
+  ## The fit with its members' out-of-fold rows cut to the first `n`
+  with_meta_rows <- function(n) {
+    fitted <- ens_fitted()
+    cv     <- fitted$models$cv_predictions
+    keep   <- sort(unique(cv$.row))[seq_len(n)]
+    fitted$models$cv_predictions <- cv[cv$.row %in% keep, , drop = FALSE]
+    fitted
+  }
+
+  it("refuses at the door a meta frame without more rows than the folds, for the methods that draw them", {
+
+    four <- with_meta_rows(4L)
+
+    for (method in c("penalized", "xgb")) {
+
+      err <- expect_error(suppressWarnings(ensemble(four, method = method, optimize = FALSE, compute_uq = FALSE)),
+                          class = "horizons_error_input", info = method)
+      msg <- gsub("\\s+", " ", conditionMessage(err))
+      expect_match(msg, "The meta-learner's out-of-fold matrix has 4 rows, but 5-fold cross-validation needs more training rows than folds.",
+                   fixed = TRUE, info = method)
+      expect_match(msg, "method = \"weighted\"", fixed = TRUE, info = method)
+      expect_identical(rlang::call_name(err$call), "ensemble", info = method)
+
+    }
+
+    ## The weighted meta-learner draws no folds
+    expect_no_error(suppressWarnings(ensemble(four, method = "weighted", compute_uq = FALSE)))
+
+  })
+
+  it("warns quality once when a tuned meta-learner's smallest fold is small, as evaluate() and fit() warn of theirs, and not when nothing is tuned on them", {
+
+    ## The stored fit's 43 out-of-fold rows in five folds
+    run <- collect_warnings(ensemble(ens_fitted(), method = "penalized", optimize = TRUE, compute_uq = FALSE),
+                            class = "horizons_warning_quality")
+
+    expect_length(run$warnings, 1L)
+    msg <- gsub("\\s+", " ", conditionMessage(run$warnings[[1]]))
+    expect_match(msg, "The smallest meta-learner cross-validation fold has", fixed = TRUE)
+    expect_match(msg, "so the meta-learner's tuning choice rests on few rows.", fixed = TRUE)
+    expect_match(msg, "43 training rows in 5 folds", fixed = TRUE)
+
+    ## Untuned, the folds feed only the out-of-fold diagnostics
+    untuned <- collect_warnings(ensemble(ens_fitted(), method = "penalized", optimize = FALSE, compute_uq = FALSE),
+                                class = "horizons_warning_quality")
+    expect_length(untuned$warnings, 0L)
+
+    ## The weighted meta-learner draws none, so it has nothing to warn of
+    weighted <- collect_warnings(ensemble(ens_fitted(), method = "weighted", compute_uq = FALSE),
+                                 class = "horizons_warning_quality")
+    expect_length(weighted$warnings, 0L)
+
+  })
+
+})
+
+describe("ensemble() - a test row a member could not use", {
+
+  ## The members' test predictions as predict_members_on_test() returns them
+  ## when one member's recipe leaves one test row non-finite (that member's
+  ## .pred NA, the row in its report), or with that row gone for every
+  ## member; `hole` records the row.
+  with_members_on_test <- function(edit, env = parent.frame()) {
+    real <- predict_members_on_test
+    hole <- new.env()
+    testthat::local_mocked_bindings(predict_members_on_test = function(object, members, ...) {
+      out     <- real(object, members, ...)
+      hole$id <- out$sample_id[out$config_id == members[1]][1]
+      edit(out, members[1], hole$id)
+    }, .env = env)
+    hole
+  }
+
+  unusable_for_one <- function(out, member, id) {
+    out$.pred[out$config_id == member & out$sample_id == id] <- NA_real_
+    flagged           <- attr(out, "flagged")
+    flagged[[member]] <- list(arrived = character(0), recipe = id)
+    attr(out, "flagged") <- flagged
+    out
+  }
+
+  gone_for_all <- function(out, member, id) {
+    kept <- out[out$sample_id != id, , drop = FALSE]
+    attr(kept, "unit_records") <- attr(out, "unit_records")
+    attr(kept, "flagged")      <- attr(out, "flagged")
+    kept
+  }
+
+  build <- function(method, edit) {
+    fitted <- ens_fitted()
+    hole   <- with_members_on_test(edit)
+    ens    <- suppressWarnings(ensemble(fitted, method = method, optimize = FALSE,
+                                        compute_uq = FALSE, seed = 11L))
+    list(ens = ens$ensemble, id = hole$id)
+  }
+
+  it("scores the ensemble and its members on the rows every member predicted, as predict() combines them", {
+
+    for (method in c("xgb", "weighted")) {
+
+      one <- build(method, unusable_for_one)
+      all <- build(method, gone_for_all)
+
+      expect_identical(one$id, all$id)
+      expect_false(one$id %in% one$ens$predictions$sample_id, label = method)
+      expect_true(all(is.finite(one$ens$predictions$.pred)), label = method)
+
+      for (part in c("predictions", "metrics", "member_metrics", "improvement")) {
+        expect_identical(one$ens[[part]], all$ens[[part]], label = paste(method, part))
+      }
+
+    }
+
+  })
+
+})
+
 
 ## =========================================================================
 ## predict.horizons_ensemble() — response bound guardrail at the OUTPUT
@@ -1805,9 +1933,10 @@ describe("ensemble() - allow_par", {
     expect_s3_class(w, "horizons_warning_substitution")
     expect_match(conditionMessage(w), "ensemble\\(\\).*0 mirai daemons are connected")
     expect_true(inherits(ens, "horizons_ensemble"))
-    ## The warning rows: the log also holds the meta-learner's folds' note
+    ## The substitution's row: the log also holds the meta-learner's folds'
+    ## note and their small-fold quality warning
     added <- log_rows_added(fitted, ens)
-    added <- added[added$type == "warning", ]
+    added <- added[added$type == "warning" & added$topic == "substitution", ]
     expect_identical(added$verb, "ensemble")
     expect_identical(added$topic, "substitution")
     expect_identical(w$log, added)
@@ -1825,7 +1954,7 @@ describe("ensemble() - allow_par", {
     local_mocked_bindings(
       check_parallel_backend = function(...) TRUE,
       connected_daemons      = function() 2L,
-      pin_parent_threads     = function() {
+      pin_threads     = function() {
         calls <<- c(calls, "pin")
         function() calls <<- c(calls, "restore")
       },
@@ -2051,6 +2180,41 @@ describe("print() and summary() of an ensemble - its own intervals", {
 
 })
 
+
+describe("ensemble() - the header it prints", {
+
+  ## The header is printed before the meta-learner runs, so each engine is
+  ## stopped there
+  header <- function(method, optimize) {
+    fitted      <- ens_fitted()
+    stop_engine <- function(...) stop("stopped after the header")
+    local_mocked_bindings(fit_ensemble_penalized = stop_engine,
+                          fit_ensemble_weighted  = stop_engine,
+                          fit_ensemble_xgb       = stop_engine)
+    out <- utils::capture.output(
+      expect_error(suppressWarnings(ensemble(fitted, method = method, optimize = optimize,
+                                             compute_uq = FALSE,
+                                             control = control_horizons(verbose = TRUE))),
+                   class = "horizons_error_ensemble_failed")
+    )
+    out[grepl("^\u2502  (Tuning|Weights): ", out)]
+  }
+
+  it("says how a weighted ensemble's weights are set, which no CV tunes", {
+
+    expect_identical(header("weighted", TRUE),  "\u2502  Weights: inverse out-of-fold RMSE")
+    expect_identical(header("weighted", FALSE), "\u2502  Weights: equal")
+
+  })
+
+  it("says the other methods tune by CV on the out-of-fold matrix, or take fixed defaults", {
+
+    expect_identical(header("penalized", TRUE), "\u2502  Tuning: CV on out-of-fold matrix")
+    expect_identical(header("xgb", FALSE),      "\u2502  Tuning: fixed defaults")
+
+  })
+
+})
 
 describe("ensemble() - the summary it prints", {
 

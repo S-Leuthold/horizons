@@ -187,7 +187,7 @@ describe("step_select_correlation() refuses input it cannot use", {
 
     ## Act & Assert: the missing columns named, through recipes' check (#109)
     err <- expect_error(recipes::bake(prepped, new_data = d),
-                        "`new_data` lacks columns `step_select_correlation()` selected.",
+                        "`new_data` lacks columns `step_select_correlation()` needs.",
                         fixed = TRUE, class = "horizons_error_input")
     expect_match(rlang::cnd_message(err), selected[1], fixed = TRUE)
 

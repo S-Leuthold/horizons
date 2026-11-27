@@ -449,6 +449,13 @@ describe("fold_prep_inputs()", {
 
     expect_false(identical(fold_entry_file(key_for(masked)), fold_entry_file(key_for(case$role_map))))
 
+    ## A key and its file are the same whatever the session's serialization
+    ## version, so a run's fold store is found again under any setting
+    v3_key <- withr::with_options(list(serializeVersion = 3L), key_for(case$role_map))
+    expect_identical(v3_key, key_for(case$role_map))
+    expect_identical(withr::with_options(list(serializeVersion = 3L), fold_entry_file(v3_key)),
+                     fold_entry_file(key_for(case$role_map)))
+
     ## And the hoisted rows a masked object's folds start from leave its
     ## masked columns out
     inputs <- fold_prep_inputs(case$config, case$train, masked, DEFAULT_SG_WINDOW)

@@ -4,8 +4,9 @@
 
 #' The fewest calibration scores a split-conformal interval needs
 #'
-#' The correction takes the `ceiling(level * (n + 1))`-th smallest score,
-#' which exists only when that index is at most `n`, that is when
+#' The correction is the `ceiling(level * (n + 1))`-th smallest score, or
+#' just above it ([compute_c_alpha()] interpolates towards the next), which
+#' exists only when that index is at most `n`, that is when
 #' `n >= level / (1 - level)`: 9 scores at 0.90. Below it the conformal
 #' interval is unbounded, and `compute_c_alpha()`'s clamp to the largest score
 #' would serve an interval that covers less than `level`.
@@ -61,6 +62,10 @@ uq_min_node_size <- function(n) {
 #' Formula: `q_prob = min(1, ceiling((1 - alpha) * (n + 1)) / n)` where
 #' `alpha = 1 - level`. Then `c_alpha = quantile(scores, probs = q_prob,
 #' type = 7)`. The ceiling ensures conservative coverage for finite samples.
+#' At `q_prob = k / n`, type 7 interpolates between the k-th and (k + 1)-th
+#' smallest scores, `1 - k / n` of the way to the next, so `c_alpha` is the
+#' k-th smallest score split conformal prescribes, or slightly above it:
+#' the interval is never narrower than the order statistic's.
 #'
 #' @keywords internal
 compute_c_alpha <- function(scores, level) {
@@ -132,7 +137,7 @@ fit_quantile_forest <- function(features, residuals, seed = NULL) {
 #' Trains a quantile random forest on OOF residuals from the point model,
 #' then computes conformal nonconformity scores on the held-out calibration
 #' data. Returns everything needed for `predict()` to produce prediction
-#' intervals at any coverage level.
+#' intervals at the calibration level, `level_default`.
 #'
 #' This function is the **capture layer** — it runs silently and returns a
 #' structured list. Messaging is the caller's responsibility.

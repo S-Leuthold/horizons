@@ -100,7 +100,7 @@ describe("step_select_cars() refuses input it cannot use", {
     ## Act & Assert: horizons' class, and recipes' check, which names the
     ## missing columns, as the parent (#109)
     err <- expect_error(recipes::bake(prepped, new_data = d),
-                        "`new_data` lacks columns `step_select_cars()` selected.",
+                        "`new_data` lacks columns `step_select_cars()` needs.",
                         fixed = TRUE, class = "horizons_error_input")
     expect_match(rlang::cnd_message(err), selected[1], fixed = TRUE)
     expect_match(rlang::cnd_message(err), "missing from `new_data`", fixed = TRUE)

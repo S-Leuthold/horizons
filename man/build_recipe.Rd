@@ -67,7 +67,10 @@ recipe each fold is prepped with in \code{\link[=evaluate_single_config]{evaluat
 Columns that are neither the outcome nor spectral predictors are given an
 explicit non-predictor role — \code{id}, \code{meta} and \code{response_hold} (sibling lab
 responses). Nothing is left to the \code{outcome ~ .} default, which would make
-a predictor of any column the role map did not name.
+a predictor of any column the role map did not name: every verb that builds
+a recipe first validates the object at its door
+(\code{validate_horizons_data()}), which refuses a column the role map does not
+name and a role it does not know.
 
 A final pass re-points the step selector quosures away from this function's
 frame, which would otherwise be serialized to every parallel worker. See

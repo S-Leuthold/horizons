@@ -28,7 +28,7 @@ aborts at \code{prep()}.}
 
 \item{outcome}{Character. Name of the outcome variable to use for model fitting.}
 
-\item{role}{Character. Role for retained variables. Default is \code{"predictor"}.}
+\item{role}{Not used by this step since no new variables are created.}
 
 \item{trained}{Logical. Required by \code{recipes}; indicates if the step has been prepped.}
 

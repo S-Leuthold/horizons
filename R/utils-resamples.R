@@ -64,9 +64,11 @@
 #' @param calib `NULL`, or `fit()`'s calibration split: an `rsplit` over
 #'   [calibration_pool()]'s rows.
 #'
-#' @return A list with `train_idx`, `n_rows`, `fold_idx`, `fold_ids`,
-#'   `fold_class`, `split_args`, and `calib` (`NULL`, or the calibration
-#'   split's `in_id`, `n_rows` and `split_class`). Carries no data.
+#' @return A list with `train_idx`, `n_rows`, `split_class` (the split's
+#'   class), `fold_idx`, `fold_ids`, `fold_class`, `fold_split_class` (a
+#'   fold's split class), `split_args`, and `calib` (`NULL`, or the
+#'   calibration split's `in_id`, `n_rows` and `split_class`). Carries no
+#'   data.
 #' @keywords internal
 #' @noRd
 

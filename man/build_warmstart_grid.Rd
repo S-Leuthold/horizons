@@ -2,7 +2,7 @@
 % Please edit documentation in R/fit-warmstart.R
 \name{build_warmstart_grid}
 \alias{build_warmstart_grid}
-\title{Warm-Start Grid Construction and Bayesian Optimization for fit()}
+\title{Warm-Start Grid Construction and the Bayesian Searches}
 \usage{
 build_warmstart_grid(best_params, param_set, max_points)
 }
@@ -20,12 +20,17 @@ mtry upper bound set).}
 A tibble of hyperparameter combinations.
 }
 \description{
-Two functions that handle the re-tuning phase of \code{fit()}:
+The re-tuning phase of \code{fit()}, and the search \code{evaluate()} shares with it:
 \enumerate{
 \item \code{build_warmstart_grid()} — constructs an exploration grid centered on
 evaluate()'s best hyperparameters.
 \item \code{tune_warmstart_bayes()} — orchestrates grid search → Bayesian
 optimization using the warm-start grid as initial points.
+\item \code{bayes_search()} and the rules around it — the Bayesian search both
+verbs run, its budget (\code{search_budget()}, \code{raised_budgets()}), the
+space gridded whole (\code{exhaustive_grid()}), the ranges it searches
+(\code{apply_tune_ranges()}, \code{update_parameter()}) and its tree line
+(\code{early_stop_line()}).
 }
 }
 \keyword{Build}

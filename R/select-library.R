@@ -366,12 +366,14 @@ resolve_registered <- function(entry, ask = interactive(), verbose = TRUE,
 
     ## A library cached by an earlier version of horizons was built by an
     ## earlier recipe (another build number, or none, from before #154), or
-    ## lacks a field the object contract now requires. The cache file is
-    ## named by the library's name and version only, so it is rebuilt here.
+    ## lacks a field the object contract now requires, or kept no rows. The
+    ## cache file is named by the library's name and version only, so it is
+    ## rebuilt here.
 
     meets_contract <- rlang::try_fetch(
       { validate_horizons_data(lib$pool); TRUE },
-      horizons_error_validation = function(e) FALSE
+      horizons_error_validation = function(e) FALSE,
+      horizons_error_input      = function(e) FALSE
     )
 
     if (identical(lib$record$build, entry$build) && meets_contract) {
@@ -756,8 +758,10 @@ build_ossl_library <- function(raw, entry, verbose = TRUE) {
   names(lab) <- c("sample_id", pm$property)
 
   ## Join on id: spectra with a lab row and a site row -----------------------
+  ## In radix order, which no locale changes, so a library's rows are in the
+  ## same order wherever it is built, as the record's id hashes sort
 
-  ids <- sort(Reduce(intersect, list(mir_ids, lab$sample_id, site$sample_id)))
+  ids <- sort(Reduce(intersect, list(mir_ids, lab$sample_id, site$sample_id)), method = "radix")
 
   ## The registry's filters select the rows the release it pins holds; an
   ## empty join would otherwise build a library of no rows.

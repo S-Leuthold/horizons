@@ -2324,6 +2324,18 @@ describe("eval_data_fingerprint()", {
 
   })
 
+  it("gives the fingerprint it always has whatever the session's serialization version", {
+
+    ## digest() serializes under options(serializeVersion = ), which would
+    ## make a resume read its own checkpoints as another run's data
+    rm <- tibble::tibble(variable = c("sample_id", "wn_1", "y"), role = c("id", "predictor", "outcome"))
+    df <- tibble::tibble(sample_id = c("c", "a", "b"), wn_1 = c(1, 2, 3), y = c(7, 8, 9))
+
+    expect_identical(withr::with_options(list(serializeVersion = 3L), eval_data_fingerprint(df, rm)),
+                     eval_data_fingerprint(df, rm))
+
+  })
+
   it("returns NA when no identifier column is available", {
 
     fp <- eval_data_fingerprint(tibble::tibble(x = 1:3), NULL)
@@ -4096,7 +4108,7 @@ describe("evaluate() - threads on a run in this session (#114)", {
 
     ## Raised first, so a run that pinned either to one would show it:
     ## threads is the engines' own count, and BLAS and OpenMP are pinned
-    ## only where a parallel run fits (pin_parent_threads(), prepare_worker())
+    ## only where a parallel run fits (pin_threads(), prepare_worker())
     old_omp  <- RhpcBLASctl::omp_get_max_threads()
     old_blas <- RhpcBLASctl::blas_get_num_procs()
     withr::defer({

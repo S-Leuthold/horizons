@@ -851,7 +851,7 @@ test_that("cluster_targets(clusters = ) forces the count before merging", {
 })
 
 
-test_that("cluster_targets() merges clusters under the floor into the nearest", {
+test_that("cluster_targets() moves each target of a cluster under the floor to its own nearest remaining centroid", {
 
   s   <- fixture_scores(n_pool = 100)
   out <- cluster_targets(s$St, clusters = 3L, cluster_min = 3L, seed = 1L)

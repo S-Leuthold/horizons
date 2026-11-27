@@ -908,7 +908,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
     resolve_registered(registry_entry, verbose = isTRUE(verbose), collector = collector,
                        debug = control$debug, consent = consent, call = call)
   }
-  pool     <- validate_select_input(resolved$pool, arg = "library", what = "the pool")
+  pool     <- validate_select_input(resolved$pool, arg = "library", what = "the pool", call = call)
   errors   <- check_pool_unpromoted(pool)
 
   ## The library's rows an earlier step flagged are left out of the space
@@ -1733,7 +1733,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
   ## than carried through the check.
 
   pool_record    <- list(n_rows = nrow(pool$data$analysis),
-                         id_hash = digest::digest(sort(pool$data$analysis$sample_id, method = "radix")))
+                         id_hash = hash_object(sort(pool$data$analysis$sample_id, method = "radix")))
   library_record <- resolved$record
   released       <- 8 * nrow(pool$data$analysis) * length(pool_vars)
 
@@ -1770,7 +1770,7 @@ draw_training_set <- function(x, library, registry_entry, k, scope, properties, 
     pool             = pool_record,
     targets          = list(source  = targets_source(x$log),
                             n_rows  = nrow(x$data$analysis),
-                            id_hash = digest::digest(sort(x$data$analysis$sample_id, method = "radix"))),
+                            id_hash = hash_object(sort(x$data$analysis$sample_id, method = "radix"))),
     library          = library_record,
     depth            = list(requested = depth, recorded = depth_recorded, applied = depth_applied,
                             max_cm = if (depth_applied) SELECT_TOPSOIL_MAX_CM else NULL,
@@ -2227,7 +2227,10 @@ pls_property_finding <- function(space, properties) {
 #' @description
 #' Runs `validate_horizons_data()` at the full stage and, when it fails,
 #' re-raises its error naming the argument: the verb takes two objects, and
-#' the validator's report does not say which one it was handed.
+#' the validator's report does not say which one it was handed. A table with
+#' no rows is the same refusal as at every verb's door ([abort_no_rows()]),
+#' naming the argument; any other input refusal the validator raises passes
+#' through as it was raised, reporting the verb's call.
 #'
 #' @param obj [horizons_data.] The targets or the pool.
 #' @param arg [Character.] The argument name, `"x"` or `"library"`.
@@ -2236,18 +2239,26 @@ pls_property_finding <- function(space, properties) {
 #'
 #' @return [horizons_data.] `obj`, unchanged. Aborts with class
 #'   `horizons_error_validation`, the validator's error as its parent and its
-#'   `findings` carried.
+#'   `findings` carried; or, for a table with no rows, with class
+#'   `horizons_error_input`, the validator's refusal as its parent.
 #' @noRd
 validate_select_input <- function(obj, arg, what, call = rlang::caller_env()) {
 
   rlang::try_fetch(
-    validate_horizons_data(obj),
+    validate_horizons_data(obj, call = call),
     horizons_error_validation = function(e) {
 
       abort_horizons(c(
         "{.arg {arg}}, {what}, failed validation.",
         "i" = "Average replicate scans with {.fn average}; rebuild an object edited by hand or saved by an older version of horizons with the verbs that wrote it."
       ), kind = "validation", parent = e, findings = e$findings, call = call)
+
+    },
+    horizons_error_input = function(e) {
+
+      if (!identical(nrow(obj$data$analysis), 0L)) return(rlang::zap())
+
+      abort_no_rows(arg = arg, what = what, parent = e, call = call)
 
     }
   )

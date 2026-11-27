@@ -1391,6 +1391,29 @@ describe("resume_hint()", {
 
 })
 
+describe("abort_no_daemons()", {
+
+  it("says what evaluate() and fit() spend a daemon's tasks on: the door's check and each isolated search", {
+
+    for (verb in c("evaluate", "fit")) {
+
+      err <- expect_error(abort_no_daemons(NULL, verb = verb), class = "horizons_error_no_daemons")
+      msg <- gsub("\\s+", " ", conditionMessage(err))
+      expect_match(msg, paste0("`", verb, "()` spends one task on each daemon checking it before the run, ",
+                               "and, on the resamples axis, two more for each Bayesian search of a model ",
+                               "whose fits are isolated, one before the search and one after."),
+                   fixed = TRUE, info = verb)
+
+    }
+
+    ## ensemble() checks no daemon at its door
+    err <- expect_error(abort_no_daemons(NULL, verb = "ensemble"), class = "horizons_error_no_daemons")
+    expect_no_match(conditionMessage(err), "spends one task", fixed = TRUE)
+
+  })
+
+})
+
 ## =========================================================================
 ## Thread pinning
 ## =========================================================================
@@ -1409,7 +1432,7 @@ without_rhpcblasctl <- function(env = parent.frame()) {
 
 }
 
-describe("pin_parent_threads()", {
+describe("pin_threads()", {
 
   it("pins each engine thread option the model table declares, and restores them", {
 
@@ -1417,7 +1440,7 @@ describe("pin_parent_threads()", {
     local_model_specs(list(xgboost = list(threads = list(option = "horizons.test.threads"))))
     withr::local_options(ranger.num.threads = 7L, horizons.test.threads = NULL)
 
-    unpin <- pin_parent_threads()
+    unpin <- pin_threads()
 
     expect_identical(getOption("ranger.num.threads"), 1L)
     expect_identical(getOption("horizons.test.threads"), 1L)
@@ -1461,7 +1484,7 @@ describe("pin_parent_threads()", {
     raised <- counts() == 2
     skip_if_not(any(raised), "no thread count here can be raised")
 
-    unpin <- pin_parent_threads()
+    unpin <- pin_threads()
     expect_equal(counts()[raised], c(blas = 1, omp = 1, dt = 1)[raised])
 
     unpin()
@@ -1474,7 +1497,7 @@ describe("pin_parent_threads()", {
     withr::local_envvar(OPENBLAS_NUM_THREADS = NA, OMP_NUM_THREADS = NA)
     without_rhpcblasctl()
 
-    expect_no_message(unpin <- pin_parent_threads())
+    expect_no_message(unpin <- pin_threads())
     unpin()
 
   })
@@ -1500,7 +1523,7 @@ describe("pin_parent_threads()", {
 
     without_rhpcblasctl()
 
-    suppressMessages(unpin <- pin_parent_threads())
+    suppressMessages(unpin <- pin_threads())
     expect_identical(data.table::getDTthreads(), 1L)
 
     unpin()

@@ -87,6 +87,34 @@ describe("predict_members_on_test() - the rows it scores", {
 })
 
 
+describe("usable_member_rows() - the rows an ensemble combines", {
+
+  it("leaves out every row any member could not use, for every member, from the attribute or as passed", {
+
+    ## Member a could not use s2 on arrival, member b s3 after its recipe
+    pred <- tibble::tibble(config_id = rep(c("a", "b"), each = 3L),
+                           sample_id = rep(c("s1", "s2", "s3"), 2L),
+                           .pred     = c(1, NA, 3, 4, 5, NA))
+    flagged <- list(a = list(arrived = "s2", recipe = character(0)),
+                    b = list(arrived = character(0), recipe = "s3"))
+    attr(pred, "flagged") <- flagged
+
+    kept <- pred[pred$sample_id == "s1", , drop = FALSE]
+
+    expect_identical(drop_block_reports(usable_member_rows(pred)), drop_block_reports(kept))
+
+    ## predict() reads the reports off before it combines, so it passes them
+    expect_identical(usable_member_rows(drop_block_reports(pred), flagged), drop_block_reports(kept))
+
+    ## A set every member could use is kept whole
+    expect_identical(usable_member_rows(drop_block_reports(pred), list(a = NULL, b = NULL)),
+                     drop_block_reports(pred))
+
+  })
+
+})
+
+
 describe("fit_tuned_meta_learner() - refusals", {
 
   it("is never handed a rank metric the tuning did not collect: ensemble() refuses it at the door", {

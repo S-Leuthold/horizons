@@ -182,15 +182,15 @@ without_rows <- function(obj) {
 
 }
 
-## The refusal, from the verb named; `call = FALSE` leaves the call unchecked
-expect_no_rows <- function(expr, verb, call = TRUE) {
+## The refusal, from the verb named, its first line naming `what` had no rows
+expect_no_rows <- function(expr, verb, what = "The data") {
 
   err <- expect_error(expr, class = "horizons_error_input", info = verb)
   msg <- conditionMessage(err)
 
-  expect_match(msg, "The data has no rows.", fixed = TRUE, info = verb)
+  expect_match(msg, paste(what, "has no rows."), fixed = TRUE, info = verb)
   expect_match(msg, "Check the filter, join or source that left it empty.", fixed = TRUE, info = verb)
-  if (call) expect_identical(rlang::call_name(err$call), verb, info = verb)
+  expect_identical(rlang::call_name(err$call), verb, info = verb)
 
 }
 
@@ -243,16 +243,17 @@ test_that("every verb that validates at its door refuses zero rows the same way,
   expect_no_rows(ensemble(fitted), "ensemble")
 
   ## select_training(): no targets, refused before the library resolves, and
-  ## no library rows. Its input check validates each object without passing
-  ## the verb's call on, so the call is not checked here.
+  ## no library rows, each naming the argument that had none
   targets <- make_axis_object(seq(4000, 600, by = -8), n = 6L)
 
   with_mocked_bindings(
-    expect_no_rows(select_training(without_rows(targets), "kssl", k = 5), "select_training", call = FALSE),
+    expect_no_rows(select_training(without_rows(targets), "kssl", k = 5), "select_training",
+                   what = "`x`, the targets,"),
     resolve_source = function(...) stop("the library was resolved")
   )
 
-  expect_no_rows(select_training(targets, without_rows(targets), k = 5), "select_training", call = FALSE)
+  expect_no_rows(select_training(targets, without_rows(targets), k = 5), "select_training",
+                 what = "`library`, the pool,")
 
 })
 
@@ -598,7 +599,7 @@ test_that("validate_horizons_data names duplicate wavenumber columns rather than
   ## duplicated() flags — "600" alone would also match as a substring of
   ## "600.0", so check the exact paired listing rather than each in
   ## isolation.
-  expect_match(conditionMessage(err), "600, 600.0", fixed = TRUE)
+  expect_match(conditionMessage(err), "\"600\", \"600.0\"", fixed = TRUE)
 
 })
 
@@ -796,7 +797,7 @@ test_that("a non-predictor role_map row with no analysis column is refused, nami
   ## Act & Assert
   expect_error(
     validate_horizons_data(obj),
-    "Non-predictor columns in role_map missing from analysis: clay, plot",
+    "Non-predictor columns in role_map missing from analysis: \"clay\", \"plot\"",
     fixed = TRUE,
     class = "horizons_error_validation"
   )
@@ -883,7 +884,7 @@ test_that("validate_horizons_data rejects a role outside the vocabulary, pointin
 
   expect_s3_class(err, "horizons_error_validation")
   expect_match(conditionMessage(err),
-               "Column with the covariate role, which horizons does not model: clay. Give it the meta role",
+               "Column with the covariate role, which horizons does not model: \"clay\". Give it the meta role",
                fixed = TRUE)
   expect_no_match(conditionMessage(err), "Unknown roles", fixed = TRUE)
 
@@ -1020,7 +1021,7 @@ test_that("validate_horizons_data rejects more than one outcome role", {
   obj <- new_horizons_data(analysis = test_analysis, role_map = test_role_map)
 
   expect_error(suppressMessages(validate_horizons_data(obj)),
-               "Multiple outcome roles in role_map (at most one allowed): clay, oc",
+               "Multiple outcome roles in role_map (at most one allowed): \"clay\", \"oc\"",
                fixed = TRUE,
                class = "horizons_error_validation")
 
@@ -1441,6 +1442,17 @@ test_that("print() and summary() count the masked columns beside the predictors,
   expect_true(any(grepl("Predictors: 8 (4000–3982 cm⁻¹, 2 masked)", printed, fixed = TRUE)))
   expect_true(any(grepl("Predictors: 8 (2 masked)", summed, fixed = TRUE)))
   expect_true(any(grepl("Range: 4000–3982 cm⁻¹", summed, fixed = TRUE)))
+
+})
+
+test_that("summary() gives the axis's spacing, the median step, not the step between its first two columns", {
+
+  ## A 4 cm-1 step at the top of the axis, then 2 cm-1 down to 3900
+  obj <- make_axis_object(c(4000, seq(3996, 3900, by = -2)), n = 6L)
+  out <- capture.output(summary(obj))
+
+  expect_true(any(grepl("Step: 2 cm⁻¹", out, fixed = TRUE)))
+  expect_false(any(grepl("Step: 4 cm⁻¹", out, fixed = TRUE)))
 
 })
 
@@ -2825,7 +2837,7 @@ test_that("a refusal shows five findings, counts the rest, and keeps every one v
   withr::local_options(cli.num_colors = 256)
   err <- expect_error(validate_horizons_data(obj), class = "horizons_error_validation")
   expect_false(any(grepl("\033[", err$findings, fixed = TRUE)))
-  expect_true(any(grepl("Columns missing from role_map: {x}", err$findings, fixed = TRUE)))
+  expect_true(any(grepl("Columns missing from role_map: \"{x}\"", err$findings, fixed = TRUE)))
 
 })
 
@@ -3733,6 +3745,66 @@ describe("config_findings() at every verb's door", {
     obj$config$configs$model[1] <- "bogus"
 
     expect_identical(validate_horizons_data(obj, config = FALSE), obj)
+
+  })
+
+})
+
+describe("the validators on an object edited by hand into the wrong shape", {
+
+  ## Each is refused as a finding naming the field, never an error from
+  ## inside the validator
+
+  it("report a configuration grid that is not a data frame", {
+
+    obj <- configured_object()
+    obj$config$configs <- c("rf", "plsr")
+
+    expect_identical(finding_of(validate_horizons_data(obj)),
+                     "config$configs must be the configuration grid `configure()` wrote (a data frame)")
+
+  })
+
+  it("report tuning settings that are not a list", {
+
+    obj <- configured_object()
+    obj$config$tuning <- c(cv_folds = 5, grid_size = 10)
+
+    expect_identical(finding_of(validate_horizons_data(obj)),
+                     "config$tuning must be the list of tuning settings `configure()` wrote, not a double vector")
+
+  })
+
+  it("report a role map row with no role, naming its column", {
+
+    obj <- configured_object()
+    obj$data$role_map$role[obj$data$role_map$variable == "3998"] <- NA
+
+    expect_identical(finding_of(validate_horizons_data(obj)),
+                     "Column with an `NA` role in role_map: \"3998\"")
+
+  })
+
+  it("report an AD bundle that is not a list as one naming no covariance form", {
+
+    obj <- make_valid_fit()
+    obj$models$ad$cfg_a <- 1
+
+    err <- expect_error(suppressMessages(validate_horizons_fit(obj)), class = "horizons_error_validation")
+    expect_identical(err$findings,
+                     "ad bundle \"cfg_a\" does not name its covariance's form, \"full\" or \"low_rank\"")
+
+  })
+
+  it("name the first five of a long list of columns and count the rest", {
+
+    obj   <- configured_object()
+    extra <- paste0("extra_", 1:30)
+    obj$data$analysis[extra] <- 0
+
+    expect_identical(finding_of(validate_horizons_data(obj)),
+                     paste0("Columns missing from role_map: \"extra_1\", \"extra_2\", \"extra_3\", ",
+                            "\"extra_4\", \"extra_5\" and 25 more"))
 
   })
 

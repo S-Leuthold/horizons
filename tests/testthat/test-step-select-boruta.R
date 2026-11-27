@@ -527,7 +527,7 @@ describe("step_select_boruta() refuses input it cannot use", {
 
     ## Act & Assert: the missing columns named, through recipes' check (#109)
     err <- expect_error(recipes::bake(prepped, new_data = d),
-                        "`new_data` lacks columns `step_select_boruta()` selected.",
+                        "`new_data` lacks columns `step_select_boruta()` needs.",
                         fixed = TRUE, class = "horizons_error_input")
     expect_match(rlang::cnd_message(err), prepped$steps[[2]]$selected_vars[1], fixed = TRUE)
 

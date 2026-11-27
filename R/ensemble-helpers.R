@@ -227,12 +227,14 @@ predict_members_on_test <- function(object, members, call = rlang::caller_env())
   ## fan out each member's predictions. The fit validator at ensemble()'s door
   ## refuses a split whose rows do not carry unique sample_ids.
   ##
-  ## The members predict through the same helper predict() uses, unclamped:
-  ## these predictions feed the ensemble's own test_F scoring (metrics,
-  ## member_metrics, improvement) and the meta-combine, so ranking and
-  ## comparison must see raw model behavior — a blow-up member must score
-  ## terribly, not be laundered by the deploy guardrail. A member that cannot
-  ## predict the test rows stops the build with the same error.
+  ## The members predict through the same helper predict() uses, without the
+  ## response bound (still clamped to outcome_range, as their out-of-fold
+  ## predictions were): these predictions feed the ensemble's own test_F
+  ## scoring (metrics, member_metrics, improvement) and the meta-combine, so
+  ## ranking and comparison must see each member as it predicts — a blow-up
+  ## member must score terribly, not be laundered by the deploy guardrail. A
+  ## member that cannot predict the test rows stops the build with the same
+  ## error.
   member_pred <- predict_members(
     object, members, test_data,
     header = "The ensemble could not be built: {n_failed} of its {n_total} member{?s} could not predict the test rows.",
@@ -387,7 +389,7 @@ meta_learner_spec <- function(method, optimize) {
 #' OOF matrix — `test_F` never enters the tuning path, so the reported
 #' performance is honest), refit the winner on the full matrix, then have the
 #' members predict `test_F` and combine those predictions *through* the fitted
-#' meta-model. The engine supplies the model spec, the tuning grid, and a
+#' meta-model, over the test rows every member could use. The engine supplies the model spec, the tuning grid, and a
 #' closure that extracts member weights from the fitted model. Candidates are
 #' scored on their combination clamped to the outcome's range, as the served
 #' combination is ([tuning_metric_set()] with `transformation = "none"`).
@@ -481,14 +483,23 @@ fit_tuned_meta_learner <- function(object,
 
   drawn <- draw_stratified(
     outcome      = meta_frame$.truth,
-    stratified   = function() rsample::vfold_cv(meta_frame, v = 5, strata = ".truth",
+    stratified   = function() rsample::vfold_cv(meta_frame, v = META_CV_FOLDS, strata = ".truth",
                                                 breaks = STRATA_BREAKS, pool = STRATA_POOL),
-    unstratified = function() rsample::vfold_cv(meta_frame, v = 5)
+    unstratified = function() rsample::vfold_cv(meta_frame, v = META_CV_FOLDS)
   )
   report_strata_in_unit(drawn, "meta-learner's cross-validation folds")
 
   folds   <- drawn$draw
   n_folds <- nrow(folds)
+
+  ## A small assessment fold is weak, not wrong, as in evaluate() and fit():
+  ## it runs, with one quality warning where a result rests on the folds, the
+  ## tuning's choice. Untuned, they feed only the out-of-fold diagnostics.
+  ## ensemble()'s door refused a matrix without more rows than folds.
+  if (optimize) {
+    report_small_folds_in_unit(folds, "meta-learner cross-validation",
+                               consequence = "so the meta-learner's tuning choice rests on few rows")
+  }
 
   ## Tune (CV on the OOF matrix only) then refit, or refit the fixed spec ----
   ## As evaluate() tunes: tune's console notes muffled and read from the
@@ -569,8 +580,9 @@ fit_tuned_meta_learner <- function(object,
   ## prediction per training row. This replaces the earlier in-sample
   ## combination (meta_fit predicting its own training frame), which was 26x
   ## overconfident and invalid for conformal calibration (FIT_REVIEW_FINDINGS
-  ## I1). collect_predictions' .row indexes into meta_frame (1..n); we map it
-  ## back to the object's true .row ids and reorder to oof$row.
+  ## I1). collect_predictions' .row indexes into meta_frame (1..n), whose rows
+  ## are oof's in oof$row order (build_oof_matrix() sorts them by .row), so
+  ## ordering by it puts the predictions in oof$row order.
   ##
   ## CALIBRATION CAVEAT (why ensemble UQ does NOT use these residuals): the
   ## OOF predictions are out-of-fold w.r.t. the meta-model COEFFICIENTS, but in
@@ -611,9 +623,9 @@ fit_tuned_meta_learner <- function(object,
 
     }
 
-    ## Map fold-held-out predictions onto the object's true .row, in oof$row
-    ## order. collect_predictions$.row is the meta_frame position; oof$row[pos]
-    ## recovers the real id, and a position-keyed lookup reorders to oof$row.
+    ## Put the fold-held-out predictions in oof$row order. collect_predictions'
+    ## .row is the meta_frame position, and meta_frame holds oof's rows in
+    ## oof$row order, so ordering by position is that order.
     oof_collected$.pred[order(oof_collected$.row)]
 
   })
@@ -638,9 +650,13 @@ fit_tuned_meta_learner <- function(object,
 
   member_pred <- unit_step("test_predict", predict_members_on_test(object, members, call = call))
 
+  ## The rows every member could use, as predict() combines them; the members
+  ## are scored on the same rows
+  usable <- unit_step("combine", usable_member_rows(member_pred))
+
   ## Wide member-prediction matrix with the SAME column names the meta-model
   ## trained on; truth rides through the pivot (constant per sample).
-  test_wide <- member_pred |>
+  test_wide <- usable |>
     dplyr::select("sample_id", "truth", "config_id", ".pred") |>
     tidyr::pivot_wider(names_from   = "config_id",
                        values_from  = ".pred",
@@ -672,7 +688,7 @@ fit_tuned_meta_learner <- function(object,
     model         = meta_fit,
     weights       = weights,
     ensemble_pred = ensemble_pred,
-    member_pred   = member_pred,
+    member_pred   = usable,
     rank_metric   = rank_metric,
     runtime_secs  = as.numeric(difftime(Sys.time(), started, units = "secs")),
     oof_pred      = oof_pred,
@@ -707,8 +723,11 @@ fit_tuned_meta_learner <- function(object,
 #'   `"weighted"`, `"xgb"`).
 #' @param model The fitted meta-learner object (engine-specific).
 #' @param weights Tibble with one row per member: `member` (config_id) and
-#'   `coef` (the normalized contribution — stacks coefficient, inverse-RMSE
-#'   weight, or xgb importance, depending on method).
+#'   `coef`, the member's weight as its method gives it: for `penalized` the
+#'   glmnet coefficient at the chosen penalty (signed and not normalized, the
+#'   intercept left out), for `weighted` the inverse-RMSE or equal weight
+#'   (summing to 1), and for `xgb` xgboost's Gain importance (0 for a member
+#'   no tree splits on).
 #' @param ensemble_pred Tibble of ensemble `test_F` predictions: `sample_id`,
 #'   `.pred`, `truth` (original scale).
 #' @param member_pred Tibble of per-member `test_F` predictions: `config_id`,
@@ -995,11 +1014,8 @@ predict.horizons_ensemble <- function(object,
   flagged     <- attr(member_pred, "flagged")
   member_pred <- drop_block_reports(member_pred)
 
-  ## A row any member could not use (flagged on arrival, or non-finite after
-  ## its recipe) is not predicted by the ensemble: an xgb meta-model would
-  ## read the member's NA as missing and return a number.
-  bad    <- unique(unlist(flagged))
-  usable <- member_pred[!member_pred$sample_id %in% bad, , drop = FALSE]
+  ## A row any member could not use is not predicted by the ensemble
+  usable <- usable_member_rows(member_pred, flagged)
 
   ## -------------------------------------------------------------------------
   ## Step 4: Combine member predictions by the meta-learner (per method)
@@ -1056,14 +1072,15 @@ predict.horizons_ensemble <- function(object,
     point <- combined$value
 
     ## Deploy-time response-bound guardrail, applied ONCE at the combined
-    ## output. Members predict unclamped above (their predictions are
-    ## meta-learner features and must match the raw member OOF the
-    ## meta-learner trained and the UQ fold models calibrated on); the
-    ## physically-impossible-blow-up protection lands here, on the value a
-    ## user actually receives. The 257 g/kg escape this guards against was an
-    ## ensemble output. Interval bounds are deliberately not clamped
-    ## (uncertainty must not be truncated), so a clamped point can sit below
-    ## an unclamped upper bound — coherent, and documented.
+    ## output. Members predict above without it (clamped to outcome_range
+    ## only: their predictions are meta-learner features and must match the
+    ## member OOF the meta-learner trained and the UQ fold models calibrated
+    ## on, which the bound never touched); the physically-impossible-blow-up
+    ## protection lands here, on the value a user actually receives. The 257
+    ## g/kg escape this guards against was an ensemble output. Interval bounds
+    ## are deliberately not bounded (uncertainty must not be truncated), so a
+    ## point the bound clamped can sit below an upper bound it left alone —
+    ## coherent, and documented.
     bound      <- object$models$response_bound
     bounded    <- apply_response_bound(point$.pred, bound)
     winsorized <- winsorized_report(point$sample_id, point$.pred, bounded, bound)

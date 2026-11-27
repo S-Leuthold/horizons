@@ -743,14 +743,16 @@ spare_neighbourhoods <- function(St, Sp, free, held, k, metric, sdev, chunk_size
 #'
 #' @description
 #' k-means on the target scores, the count chosen by mean silhouette over
-#' 2 to `k_max` unless `clusters` fixes it, then clusters smaller than
-#' `cluster_min` folded into the nearest remaining centroid. Lifted from
-#' the coherent-batch experiment.
+#' 2 to `k_max` unless `clusters` fixes it, then each target of a cluster
+#' smaller than `cluster_min` moved to its own nearest remaining centroid.
+#' Lifted from the coherent-batch experiment.
 #'
 #' @details
-#' The clustering is Euclidean on the unscaled scores, while the draw is
-#' whitened Mahalanobis by default, so the two see the space differently on
-#' purpose. k-means partitions by variance, and the leading components are
+#' The clustering is Euclidean on the unscaled scores, as the draw is at its
+#' default (`metric = "euclidean"`); under `metric = "mahalanobis"` the draw
+#' whitens the scores and the clustering still does not, so the two see the
+#' space differently on purpose. k-means partitions by variance, and the
+#' leading components are
 #' where the chemical variance is; whitening would hand the trailing
 #' components the same say in the partition as PC1, and those are the least
 #' stable part of the decomposition. The grouping is a statement about which
@@ -834,7 +836,8 @@ cluster_targets <- function(St,
 
   }
 
-  ## Fold clusters under the floor into the nearest remaining centroid -------
+  ## Move each target of a cluster under the floor to its own nearest
+  ## remaining centroid ------------------------------------------------------
 
   a <- cluster_of
 

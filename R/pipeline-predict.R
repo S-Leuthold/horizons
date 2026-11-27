@@ -914,8 +914,9 @@ check_abstention <- function(object, config_ids, abstain_ood, call = rlang::call
 #' @param clamp Logical; apply the deploy-time response-bound winsorization
 #'   (`models$response_bound`). `TRUE` for user-facing single-model predictions;
 #'   `FALSE` inside ensemble machinery, where member predictions are features —
-#'   they must match the raw member OOF the meta-learner trained and calibrated
-#'   on, and the guardrail is applied once at the ensemble output instead.
+#'   they must match the member OOF the meta-learner trained and calibrated
+#'   on, which the bound never touched (both are clamped to `outcome_range`),
+#'   and the guardrail is applied once at the ensemble output instead.
 #' @param abstain_ood Logical; when `TRUE`, `.pred` and interval bounds are set
 #'   to `NA` for samples flagged out-of-domain (`.ad_flag == "OOD"`), and for
 #'   every sample when the AD could not be computed, while `.ad_distance` and
@@ -1040,8 +1041,8 @@ predict_one_config <- function(object, config_id, new_spectra, interval,
 
       ## Deploy-time winsorization guardrail, on .pred only. Ensemble machinery
       ## passes clamp = FALSE: the guardrail applies once at the ensemble
-      ## output, keeping member features consistent with the raw member OOF the
-      ## meta-learner trained and calibrated on.
+      ## output, keeping member features consistent with the member OOF the
+      ## meta-learner trained and calibrated on, which the bound never touched.
       bounded <- apply_response_bound(point_pred, bound)
 
       out$.pred[good] <- bounded$values
@@ -1365,8 +1366,9 @@ log_prediction_reports <- function(collector, records, flagged, winsorized) {
 #' Collect one warning for the rows that could not be predicted
 #'
 #' A row flagged on arrival, or non-finite after a configuration's recipe, is
-#' returned as `NA` (conditions.md: rows are removed only where modelling
-#' happens). One `flagged` warning names them once, whatever the number of
+#' returned as `NA` by `predict()` (conditions.md: rows are removed only where
+#' modelling happens), and left out of `ensemble()`'s test predictions and
+#' metrics. One `flagged` warning names them once, whatever the number of
 #' configurations: `ids` the samples, and the configurations whose recipe
 #' left them non-finite when more than one was predicted.
 #'
@@ -1374,10 +1376,14 @@ log_prediction_reports <- function(collector, records, flagged, winsorized) {
 #' @param reports Named list, one per configuration (or member): `NULL`, or
 #'   a list with `arrived` and `recipe`, the sample ids flagged on arrival and
 #'   after the recipe.
+#' @param consequence Character(1). What became of the rows, the cli clause
+#'   that ends the warning's first line, pluralised on their count:
+#'   `predict()`'s by default; `ensemble()` passes its own.
 #' @return `collector`, invisibly.
 #' @keywords internal
 #' @noRd
-log_flagged <- function(collector, reports) {
+log_flagged <- function(collector, reports,
+                        consequence = "so {?its row is/their rows are} {.code NA}") {
 
   reports <- Filter(Negate(is.null), reports)
 
@@ -1399,7 +1405,7 @@ log_flagged <- function(collector, reports) {
   }
 
   log_warning(collector, "flagged", c(
-    "{n} sample{?s} could not be predicted, so {?its row is/their rows are} {.code NA}.",
+    paste0("{n} sample{?s} could not be predicted, ", consequence, "."),
     "i" = if (n_arrived > 0) "{n_arrived} {?was/were} flagged on arrival ({.field .flag}): {shown_ids(arrived)}.",
     "i" = if (n_recipe > 0) "{n_recipe} {?was/were} not finite after the recipe{of}: {shown_ids(recipe)}."
   ), ids = ids, n = n)
@@ -1505,8 +1511,9 @@ predict_members <- function(object, members, new_spectra,
   ## a split whose test rows repeat one.
 
   ## clamp = FALSE: member predictions are meta-learner FEATURES here, and
-  ## must match the raw (unclamped) member OOF the meta-learner trained and
-  ## the UQ fold models calibrated on. The response-bound guardrail applies
+  ## must match the member OOF the meta-learner trained and the UQ fold
+  ## models calibrated on, which are clamped to outcome_range but not
+  ## bounded. The response-bound guardrail applies
   ## once, at the combined ensemble output in predict.horizons_ensemble().
   ## ad = FALSE: only .pred is kept, so a member's AD is not computed.
   blocks <- lapply(members, function(m) {
@@ -1535,6 +1542,28 @@ predict_members <- function(object, members, new_spectra,
   attr(out, "flagged")      <- stats::setNames(lapply(blocks, attr, "flagged"), members)
 
   out
+
+}
+
+#' The member predictions an ensemble combines: the rows every member could use
+#'
+#' A row any member could not use (flagged on arrival, or non-finite after its
+#' recipe) is `NA` for that member. An ensemble neither combines nor scores
+#' it: an xgb meta-model would read the member's `NA` as missing and return a
+#' number. So `predict()` on an ensemble, `ensemble()`'s test predictions and
+#' metrics in both engines, and the CV+ intervals' calibration on trimmed rows
+#' and measured test coverage all keep the same rows.
+#'
+#' @param member_pred From [predict_members()] or `predict_members_on_test()`.
+#' @param flagged The rows each member could not use, as [predict_members()]
+#'   returns them; by default `member_pred`'s `"flagged"` attribute. Pass it
+#'   when that attribute has been dropped.
+#' @return `member_pred` without the rows any member could not use.
+#' @keywords internal
+#' @noRd
+usable_member_rows <- function(member_pred, flagged = attr(member_pred, "flagged")) {
+
+  member_pred[!member_pred$sample_id %in% unlist(flagged), , drop = FALSE]
 
 }
 

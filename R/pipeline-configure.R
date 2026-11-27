@@ -920,10 +920,10 @@ generate_config_id <- function(model, preprocessing, transformation,
     feature_selection = feature_selection
   )
 
-  ## Serialized under version 2 whatever options(serializeVersion = ) says,
-  ## as unit_seed() hashes its key, so a session that set it names every
-  ## configuration as any other does
-  hash <- substr(digest::digest(hash_input, serializeVersion = 2L), 1, 6)
+  ## Serialized under version 2 whatever options(serializeVersion = ) says
+  ## (hash_object()), so a session that set it names every configuration as
+  ## any other does
+  hash <- substr(hash_object(hash_input), 1, 6)
   paste(base, hash, sep = "_")
 
 }

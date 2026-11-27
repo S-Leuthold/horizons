@@ -22,7 +22,10 @@
 #' Columns that are neither the outcome nor spectral predictors are given an
 #' explicit non-predictor role — `id`, `meta` and `response_hold` (sibling lab
 #' responses). Nothing is left to the `outcome ~ .` default, which would make
-#' a predictor of any column the role map did not name.
+#' a predictor of any column the role map did not name: every verb that builds
+#' a recipe first validates the object at its door
+#' (`validate_horizons_data()`), which refuses a column the role map does not
+#' name and a role it does not know.
 #'
 #' A final pass re-points the step selector quosures away from this function's
 #' frame, which would otherwise be serialized to every parallel worker. See
@@ -219,7 +222,9 @@ add_response_step <- function(rec, transformation) {
 #' outcome nor spectral predictors are given an explicit non-predictor role
 #' (`id`, `meta`, `response_hold`), so nothing is left to the `outcome ~ .`
 #' default, which would make a predictor of any column the role map did not
-#' name.
+#' name. That holds because the door validator ([validate_horizons_data()])
+#' refuses such a column, and a role it does not know, before any recipe is
+#' built.
 #'
 #' @param train_data Data frame. The rows the recipe is built on.
 #' @param role_map Tibble with `variable` and `role` columns.
@@ -618,30 +623,35 @@ check_step_outcome <- function(outcome, training, call = rlang::caller_env()) {
 
 }
 
-#' Refuse New Data That Lacks a Column a Selection Step Selected
+#' Refuse New Data That Lacks a Column a Step Needs
 #'
 #' @description
-#' Shared by the `bake()` methods of the three selection steps. The columns
-#' are checked by [recipes::check_new_data()], as every recipes step checks
-#' them, and its error, which names the missing columns, is raised again
-#' with horizons' input class and kept as the parent.
+#' Shared by the `bake()` methods of horizons' steps: the three selection
+#' steps check the columns they selected, and [step_transform_spectra()] the
+#' columns it transforms. The columns are checked by
+#' [recipes::check_new_data()], as every recipes step checks them, and its
+#' error, which names the missing columns, is raised again with horizons'
+#' input class and kept as the parent.
 #'
 #' @param object The trained step.
 #' @param new_data The data `bake()` was given.
+#' @param columns [Character.] The columns `bake()` reads. Default: the
+#'   selection steps' `selected_vars`.
 #' @param call The frame the refusal reports: the step's `bake()`.
 #'
 #' @return `NULL`, invisibly; aborts with class `horizons_error_input`.
 #' @keywords internal
 #' @noRd
-check_step_new_data <- function(object, new_data, call = rlang::caller_env()) {
+check_step_new_data <- function(object, new_data, columns = object$selected_vars,
+                                call = rlang::caller_env()) {
 
   step <- class(object)[1]
 
   rlang::try_fetch(
-    recipes::check_new_data(object$selected_vars, object, new_data),
+    recipes::check_new_data(columns, object, new_data),
     error = function(e) {
       abort_horizons(c(
-        "{.arg new_data} lacks columns {.fn {step}} selected.",
+        "{.arg new_data} lacks columns {.fn {step}} needs.",
         "i" = "{.arg new_data} must carry the columns the steps before this one produce."
       ), kind = "input", parent = e, call = call)
     }
